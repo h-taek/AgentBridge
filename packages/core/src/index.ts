@@ -35,3 +35,6 @@ export * from './hookInstaller';
 // refine
 export * from './refineHeadless';
 export * from './refineDispatcher';
+
+// compaction
+export * from './compactionScheduler';
