@@ -61,7 +61,49 @@
 - `pnpm exec tsc -p packages/core` 컴파일 통과 (dist 산출물 정상 생성)
 - `@types/node` devDep 등록
 
-## 🟡 Phase 5 — 앱 실제 이관 (남은 작업)
+## ✅ Phase 5 — 진행 상황
+
+### 5.1 익스텐션 (03_AgentBridge_Extension → apps/extension/)
+- 원본 소스 전체를 apps/extension/으로 복사
+- 모든 중복 모듈을 thin facade로 교체 (호출처 변경 0)
+- src/core/coreInstances.ts에서 모든 코어 인스턴스를 한 곳에서 셋업
+- activate(context) 첫 줄에서 initializeCore(context) 호출
+- **`pnpm exec tsc -p apps/extension` 풀빌드 PASS, out/extension.js 생성 확인**
+- 사용자 검증 대기: F5 실행 → chat 동작 / hook 설치 / 모델 전환 확인
+
+### 5.2 데스크탑 (02_AgentBridge_App → apps/desktop/) — 부분 진행
+- 원본 소스 전체를 apps/desktop/으로 복사 + @agentbridge/core dep 등록
+- shared/{ir, turns} → 코어 re-export (CliKind는 shared/ipc에 그대로)
+- main/modules/irModule/{prompt, parse} → 코어 facade
+- main/modules/cliAdapter/codexSessionWatcher → 코어 re-export
+- **`npm run typecheck` (node + web) PASS**
+- 사용자 검증 대기: `pnpm dev`로 Electron 윈도우 동작 / IR refine 동작 확인
+
+### 5.3 데스크탑 — 남은 cutover (per-module 인터페이스 매핑 필요)
+데스크탑 측이 익스텐션과 다르게 진화한 API들. 각각 어떻게 매핑할지 결정 후 모듈 단위로 진행:
+
+| 모듈 | desktop API | core API | 차이 |
+|---|---|---|---|
+| `modules/turnsStore.ts` | `archiveCompactedTurns`, `readRecentTurns` 등 | `stage/commit/abortArchive` 2-phase | 2-phase commit 도입 또는 core에 1-step API 추가 |
+| `modules/workspaceStore.ts` | `ensureWorkspaceDirs`, `getWorkspacePaths`, `createWorkspace`, `listWorkspaces` 등 | `createWorkspaceStore` 팩토리(`getOrCreate`, `getWorkspacePath`) | 데스크탑 전용 워크스페이스 메타(title, lastActive 등)는 core가 모름 — 어댑터 레이어 필요 |
+| `modules/envProbe.ts` | `probeEnvOnce`(캐시), `getCliPath`, `getShellPath` | `createEnvProbe`(probe/getShellEnv) | 데스크탑은 캐시·CLI별 path 분리 — wrapper로 매핑 가능 |
+| `modules/ptyDisplayFilter.ts` | `registerDisplayFilter(sessionId)`, `filterDisplayData` 등 — sessionId별 인스턴스 레지스트리 | `PtyDisplayFilter` 클래스 | 데스크탑이 레지스트리 wrapper 유지하면서 내부에서 코어 인스턴스 사용 |
+| `modules/hookInstaller.ts` | desktop 자체 구현 | `createHookInstaller` | helperPath/globalStoragePath 주입 매핑 필요 |
+| `modules/compactionScheduler.ts` | desktop 자체 + cliQuotaTracker 통합 | `createCompactionScheduler` | quotaTracker는 desktop-only — 콜백 hook 추가 검토 |
+| `modules/refineDispatcher.ts` | desktop 자체 + quota 측정 통합 | `runRefine` 함수형 | quotaTracker 통합 분리 필요 |
+| `modules/cliAdapter/{claude,codex,agy}Adapter.ts` | desktop 시그니처 다름 | `createCliAdapters` factory set | 시그니처 맞추기 |
+| `modules/cliAdapter/agyResume.ts` | desktop에 추가 함수 다수 (`snapshotAgyImplicit`, `deleteAgy*` 등) | core는 subset | core에 추가 export 또는 desktop wrapper 유지 |
+| `modules/cliAdapter/refineHeadless.ts` | desktop 자체 | `runRefineSpawn` | 매핑 가능 |
+| `modules/turnRecorder/{index, sliceAssistant}` | desktop 자체 | core (DI 형태) | turnRecorder 생성자 시그니처 변경 |
+| `main/ipc/attachHandlers.ts` `shellQuoteIfNeeded` | inline 함수, POSIX escape 잘못됨 | `quoteArg` (정확) | import 교체 (정정 효과 포함) |
+
+권장 진행 방식: 위 표를 위→아래로 한 줄씩 진행. 각 줄마다:
+1. desktop wrapper 작성 (코어를 import하면서 desktop API 시그니처 유지)
+2. `npm run typecheck` PASS
+3. `pnpm dev`로 동작 확인
+4. 커밋
+
+## 🟡 원래의 Phase 5 — 앱 실제 이관 (남은 작업)
 
 ### 왜 여기서 멈췄나
 양쪽 앱이 실제 동작하는지 검증하려면:
