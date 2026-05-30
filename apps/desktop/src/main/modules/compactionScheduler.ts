@@ -9,9 +9,17 @@ import {
   saveWorkspaceIRAtomic,
   updateWorkspaceMeta
 } from './workspaceStore'
-import { archiveCompactedTurns, readAllTurns, rewriteTurns, sumBytes } from './turnsStore'
+import {
+  abortArchive,
+  commitArchive,
+  readAllTurns,
+  rewriteTurns,
+  stageCompactedTurns,
+  sumBytes
+} from './turnsStore'
 import { assembleIR, buildCompactionPrompt, parseRefineOutput } from './irModule'
 import { RefineOffError, runRefine } from './refineDispatcher'
+import { loadSettings } from './settings'
 import { broadcastIrUpdated } from './irBroadcast'
 
 // CompactionScheduler — M3 O 청크. architecture §15.4.
@@ -214,11 +222,14 @@ async function runCompaction(
 
   // archive에는 *직전 IR*(currentIR)을 push — 새 IR은 current로만 들어가 archive list와
   // 중복을 만들지 않게. 첫 compaction(currentIR=null)은 push skip.
+  // 2-phase: stage(.tmp) → turns rewrite 성공 → commit(maxArchiveSnapshots prune).
+  // rewrite 실패 시 abort로 .tmp 정리해 archive와 turns.jsonl 양쪽 중복 방지.
+  let staged: Awaited<ReturnType<typeof stageCompactedTurns>> | null = null
   if (currentIR) {
     try {
-      await archiveCompactedTurns(workspaceId, oldest, currentIR)
+      staged = await stageCompactedTurns(workspaceId, oldest, currentIR)
     } catch (err) {
-      log.warn('Compaction archive 실패 (계속 진행)', {
+      log.warn('Compaction archive stage 실패 (rewrite 진행)', {
         workspaceId,
         err: String(err)
       })
@@ -232,7 +243,20 @@ async function runCompaction(
       workspaceId,
       err: String(err)
     })
+    if (staged) await abortArchive(staged).catch(() => {})
     return
+  }
+
+  if (staged) {
+    try {
+      const settings = await loadSettings()
+      await commitArchive(staged, { maxArchiveSnapshots: settings.maxArchiveSnapshots })
+    } catch (err) {
+      log.warn('Compaction archive commit 실패 (계속 진행)', {
+        workspaceId,
+        err: String(err)
+      })
+    }
   }
 
   log.info('Compaction 완료', {
@@ -399,11 +423,13 @@ export async function runManualCompaction(args: {
 
   if (processCount > 0) {
     // archive에는 *직전 IR*(currentIR)을 push — current와 중복 회피. 첫 정제는 skip.
+    // 2-phase: stage → rewrite 성공 → commit(prune).
+    let staged: Awaited<ReturnType<typeof stageCompactedTurns>> | null = null
     if (currentIR) {
       try {
-        await archiveCompactedTurns(args.workspaceId, oldest, currentIR)
+        staged = await stageCompactedTurns(args.workspaceId, oldest, currentIR)
       } catch (err) {
-        log.warn('runManualCompaction archive 실패 (계속 진행)', {
+        log.warn('runManualCompaction archive stage 실패 (rewrite 진행)', {
           workspaceId: args.workspaceId,
           err: String(err)
         })
@@ -411,11 +437,16 @@ export async function runManualCompaction(args: {
     }
     try {
       await rewriteTurns(args.workspaceId, remaining)
+      if (staged) {
+        const settings = await loadSettings()
+        await commitArchive(staged, { maxArchiveSnapshots: settings.maxArchiveSnapshots })
+      }
     } catch (err) {
       log.warn('runManualCompaction turns rewrite 실패 — IR은 갱신됨', {
         workspaceId: args.workspaceId,
         err: String(err)
       })
+      if (staged) await abortArchive(staged).catch(() => {})
     }
   }
 

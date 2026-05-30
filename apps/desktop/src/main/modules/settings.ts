@@ -42,7 +42,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   theme: 'dark',
   language: 'ko',
   defaultBasePath: '',
-  turnsAssistantDetail: 'compact'
+  turnsAssistantDetail: 'compact',
+  maxArchiveSnapshots: 15
 }
 
 function getSettingsFilePath(): string {
@@ -67,7 +68,10 @@ export async function loadSettings(): Promise<AppSettings> {
       defaultBasePath: typeof parsed.defaultBasePath === 'string' ? parsed.defaultBasePath : '',
       turnsAssistantDetail:
         validateTurnsAssistantDetail(parsed.turnsAssistantDetail) ??
-        DEFAULT_SETTINGS.turnsAssistantDetail
+        DEFAULT_SETTINGS.turnsAssistantDetail,
+      maxArchiveSnapshots:
+        validateMaxArchiveSnapshots(parsed.maxArchiveSnapshots) ??
+        DEFAULT_SETTINGS.maxArchiveSnapshots
     }
     cache = merged
     return merged
@@ -95,7 +99,9 @@ export async function saveSettings(patch: Partial<AppSettings>): Promise<AppSett
     defaultBasePath:
       typeof patch.defaultBasePath === 'string' ? patch.defaultBasePath : current.defaultBasePath,
     turnsAssistantDetail:
-      validateTurnsAssistantDetail(patch.turnsAssistantDetail) ?? current.turnsAssistantDetail
+      validateTurnsAssistantDetail(patch.turnsAssistantDetail) ?? current.turnsAssistantDetail,
+    maxArchiveSnapshots:
+      validateMaxArchiveSnapshots(patch.maxArchiveSnapshots) ?? current.maxArchiveSnapshots
   }
   const p = getSettingsFilePath()
   const tmp = `${p}.${process.pid}.${Date.now()}.tmp`
@@ -149,6 +155,13 @@ function validateLanguage(v: unknown): LanguageCode | null {
 function validateTurnsAssistantDetail(v: unknown): TurnsAssistantDetail | null {
   if (v === 'full' || v === 'compact' || v === 'minimal') return v
   return null
+}
+
+function validateMaxArchiveSnapshots(v: unknown): number | null {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return null
+  const n = Math.floor(v)
+  if (n < 1) return null
+  return n
 }
 
 // EnvProbe에서 agy 어댑터 가용 여부 확인 — RefineDispatcher가 'auto'/'agy-flash' 처리 시 사용.

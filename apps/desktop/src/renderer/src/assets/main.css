@@ -2352,6 +2352,43 @@ code {
   box-shadow: var(--focus-ring);
 }
 
+/* number input — settings-row-select와 동일 톤. 화살표/spinner 없음, 수동 입력만. */
+.settings-row-number {
+  background-color: transparent;
+  border: 1px solid transparent;
+  color: var(--color-text-primary);
+  font-family: inherit;
+  font-size: 12.5px;
+  cursor: text;
+  padding: 4px 10px;
+  border-radius: 6px;
+  appearance: textfield;
+  -webkit-appearance: textfield;
+  width: 64px;
+  flex-shrink: 0;
+  text-align: right;
+  line-height: 1.2;
+  transition:
+    background-color var(--t-fast),
+    border-color var(--t-fast);
+}
+
+.settings-row-number::-webkit-inner-spin-button,
+.settings-row-number::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.settings-row-number:hover:not(:disabled) {
+  background-color: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.settings-row-number:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
 /* settings-row의 column variant — 라벨/입력/list 세로 배치 (priority 우선순위 list 등). */
 .settings-row-column {
   flex-direction: column;

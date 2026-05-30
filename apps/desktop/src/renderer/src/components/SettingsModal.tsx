@@ -553,6 +553,28 @@ function MainPage({
               <option value="minimal">{TURNS_DETAIL_LABEL.minimal}</option>
             </select>
           </div>
+          <div className="settings-row">
+            <DatabaseIcon className="settings-row-icon" />
+            <span className="settings-row-label">보관 스냅샷 개수</span>
+            <span className="settings-row-value settings-row-desc">
+              과거 IR 스냅샷 누적 상한 (초과분 자동 삭제)
+            </span>
+            <input
+              type="number"
+              min={1}
+              max={100}
+              step={1}
+              className="settings-row-number"
+              value={settings?.maxArchiveSnapshots ?? 15}
+              onChange={(e) => {
+                const n = Math.floor(Number(e.target.value))
+                if (Number.isFinite(n) && n >= 1) {
+                  void onUpdate({ maxArchiveSnapshots: n })
+                }
+              }}
+              title="archive/ 디렉토리에 보관할 compressed_*.jsonl 최대 개수"
+            />
+          </div>
         </div>
       </div>
 

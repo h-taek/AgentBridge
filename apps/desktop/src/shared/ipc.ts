@@ -552,6 +552,9 @@ export type AppSettings = {
   defaultBasePath: string
   // turns.jsonl 안 assistantBody 보존 정도. sliceAssistant의 cap 단계 결정.
   turnsAssistantDetail: TurnsAssistantDetail
+  // 보관할 compacted archive snapshot 최대 개수. 초과분은 오래된 것부터 자동 삭제.
+  // 누적된 과거 IR snapshot이 컨텍스트로 새어들지 않도록 상한 — 토큰 절약 정책.
+  maxArchiveSnapshots: number
 }
 
 // 각 CLI의 정제용 default model. cheap 모델 (토큰 소모량 최소) 기준.

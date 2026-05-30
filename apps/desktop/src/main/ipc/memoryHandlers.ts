@@ -10,7 +10,6 @@ import {
   type ArchiveListResult,
   type ArchiveLoadRequest,
   type ArchiveLoadResult,
-  type ArchiveSnapshotMeta,
   type InstructionFileInfo,
   type InstructionFileKind,
   type InstructionsCreateRequest,
@@ -27,7 +26,8 @@ import {
 import type { IR } from '@shared/ir'
 import { COMPACTION_TRIGGER } from '@shared/turns'
 import { getWorkspacePaths, loadWorkspace } from '../modules/workspaceStore'
-import { readAllTurns, sumBytes } from '../modules/turnsStore'
+import { listArchives, readAllTurns, sumBytes } from '../modules/turnsStore'
+import { loadSettings } from '../modules/settings'
 import { broadcastIrUpdated } from '../modules/irBroadcast'
 import { broadcastTurnsUpdated } from '../modules/turnRecorder'
 
@@ -42,61 +42,12 @@ const INSTRUCTION_FILENAMES: Record<InstructionFileKind, string> = {
   gemini: 'GEMINI.md'
 }
 
-// archive/compressed_*.jsonl 첫 줄 = `{ type: 'ir_snapshot', archivedAt, ir }`. counts/intent만 추출.
-async function readArchiveSnapshotMeta(archivePath: string): Promise<ArchiveSnapshotMeta | null> {
-  let raw: string
-  try {
-    raw = await fs.readFile(archivePath, 'utf8')
-  } catch {
-    return null
-  }
-  const firstLine = raw.split('\n', 1)[0]?.trim()
-  if (!firstLine) return null
-  let parsed: { type?: string; archivedAt?: string; ir?: IR }
-  try {
-    parsed = JSON.parse(firstLine)
-  } catch {
-    return null
-  }
-  if (parsed.type !== 'ir_snapshot' || !parsed.ir || typeof parsed.archivedAt !== 'string') {
-    return null
-  }
-  const ir = parsed.ir
-  return {
-    archivePath,
-    archivedAt: parsed.archivedAt,
-    updatedAt: ir.meta?.updatedAt || parsed.archivedAt,
-    intentGoal: typeof ir.intent?.goal === 'string' ? ir.intent.goal : '',
-    counts: {
-      decisions: Array.isArray(ir.decisions) ? ir.decisions.length : 0,
-      files: Array.isArray(ir.files) ? ir.files.length : 0,
-      commands: Array.isArray(ir.commands) ? ir.commands.length : 0,
-      tests: Array.isArray(ir.tests) ? ir.tests.length : 0,
-      pending: Array.isArray(ir.pending) ? ir.pending.length : 0
-    }
-  }
-}
-
+// archive 목록은 core listArchives에 위임 — maxArchiveSnapshots 초과분은 자동 prune.
 async function handleArchiveList(_e: unknown, req: ArchiveListRequest): Promise<ArchiveListResult> {
-  const { archiveDir } = getWorkspacePaths(req.workspaceId)
-  let names: string[]
-  try {
-    names = await fs.readdir(archiveDir)
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code
-    if (code === 'ENOENT') return { snapshots: [] }
-    throw err
-  }
-  const compressed = names
-    .filter((n) => n.startsWith('compressed_') && n.endsWith('.jsonl'))
-    .map((n) => path.join(archiveDir, n))
-  const snapshots: ArchiveSnapshotMeta[] = []
-  for (const p of compressed) {
-    const meta = await readArchiveSnapshotMeta(p)
-    if (meta) snapshots.push(meta)
-  }
-  // 최신순 정렬 (archivedAt descending).
-  snapshots.sort((a, b) => (a.archivedAt < b.archivedAt ? 1 : -1))
+  const settings = await loadSettings()
+  const snapshots = await listArchives(req.workspaceId, {
+    maxArchiveSnapshots: settings.maxArchiveSnapshots
+  })
   return { snapshots }
 }
 

@@ -2,6 +2,12 @@
 
 이 프로젝트는 [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/) 1.1.0 형식을 따르며 [Semantic Versioning](https://semver.org/spec/v2.0.0.html)을 사용합니다.
 
+## [0.0.6] — 2026-05-30
+
+### Added
+
+- **archive 스냅샷 보관 개수 설정** — 메모리 패널에 누적되는 과거 IR 스냅샷 개수의 상한을 설정에서 지정할 수 있습니다(기본 15개). 초과분은 오래된 것부터 자동 정리되어 메모리 패널이 무한히 늘어나지 않습니다.
+
 ## [0.0.5] — 2026-05-26
 
 메모리 주입 hook의 출력 필터 안정화 + 글로벌 hook 덮어쓰기 방지.
