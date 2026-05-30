@@ -1,0 +1,95 @@
+// 사용자 login shell의 환경변수를 캡처하고, CLI 바이너리 위치를 probe한다.
+// child PTY는 같은 env를 받되 keep-out 키는 제거.
+//
+// keep-out 키:
+//   - OPENAI_API_KEY: Codex의 ChatGPT 구독을 silently 무시 → child에 노출 X
+//   - GEMINI_SYSTEM_MD: Gemini system prompt를 full replacement로 덮어쓰는 차단
+
+import { execSync } from 'child_process';
+import { existsSync } from 'fs';
+import type { CliKind } from './shared/cli';
+import type { Logger } from './interfaces';
+import { noopLogger } from './interfaces';
+
+export interface ProbeResult {
+  found: boolean;
+  path?: string;
+  resolvedPath?: string;
+}
+
+const ADAPTER_ENV_KEEP_OUT: ReadonlyArray<string> = ['OPENAI_API_KEY', 'GEMINI_SYSTEM_MD'];
+
+export type EnvProbeOptions = {
+  logger?: Logger;
+};
+
+export interface EnvProbe {
+  probe(binaryName: CliKind): ProbeResult;
+  getShellEnv(): Record<string, string>;
+}
+
+export function createEnvProbe(opts: EnvProbeOptions = {}): EnvProbe {
+  const log = opts.logger ?? noopLogger;
+  let shellEnvCache: Record<string, string> | null = null;
+
+  function getLoginShellEnv(): Record<string, string> {
+    if (shellEnvCache) return shellEnvCache;
+    try {
+      const raw = execSync('zsh -ilc env 2>/dev/null', {
+        encoding: 'utf8',
+        timeout: 5000,
+      });
+      const env: Record<string, string> = {};
+      for (const line of raw.split('\n')) {
+        const idx = line.indexOf('=');
+        if (idx > 0) {
+          env[line.slice(0, idx)] = line.slice(idx + 1);
+        }
+      }
+      shellEnvCache = env;
+      return env;
+    } catch {
+      log.warn('envProbe: failed to capture login shell env, falling back to process.env');
+      const fallback: Record<string, string> = {};
+      for (const [k, v] of Object.entries(process.env)) {
+        if (typeof v === 'string') fallback[k] = v;
+      }
+      shellEnvCache = fallback;
+      return fallback;
+    }
+  }
+
+  return {
+    // binaryName is a CliKind literal — `which ${binaryName}` interpolation is safe by type constraint.
+    probe(binaryName: CliKind): ProbeResult {
+      const env = getLoginShellEnv();
+      try {
+        const resolved = execSync(`zsh -ilc 'which ${binaryName}' 2>/dev/null`, {
+          encoding: 'utf8',
+          timeout: 5000,
+          env,
+        }).trim();
+        if (resolved && existsSync(resolved)) {
+          log.log(`envProbe: ${binaryName} found at ${resolved}`);
+          return { found: true, path: binaryName, resolvedPath: resolved };
+        }
+      } catch {
+        /* which failed */
+      }
+      log.warn(`envProbe: ${binaryName} not found in PATH`);
+      return { found: false };
+    },
+
+    getShellEnv(): Record<string, string> {
+      const base = getLoginShellEnv();
+      const filtered: Record<string, string> = {};
+      for (const [k, v] of Object.entries(base)) {
+        if (ADAPTER_ENV_KEEP_OUT.includes(k)) continue;
+        filtered[k] = v;
+      }
+      filtered.TERM = 'xterm-256color';
+      filtered.COLORTERM = 'truecolor';
+      return filtered;
+    },
+  };
+}
