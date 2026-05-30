@@ -1,0 +1,14 @@
+node_modules/
+out/
+*.vsix
+webview/dist/
+.DS_Store
+.agents
+.antigravitycli
+.codex
+
+# Local-only — not for the public repo
+test/
+docs/
+probe/
+.agentbridge/

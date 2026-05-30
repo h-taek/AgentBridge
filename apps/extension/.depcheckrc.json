@@ -1,0 +1,21 @@
+{
+  "ignores": [
+    "@xterm/xterm",
+    "@xterm/addon-fit",
+    "@xterm/addon-webgl",
+    "@xterm/addon-unicode11",
+    "vscode",
+    "eslint",
+    "@typescript-eslint/parser",
+    "@typescript-eslint/eslint-plugin",
+    "knip",
+    "madge",
+    "depcheck"
+  ],
+  "ignore-patterns": [
+    "out",
+    "probe",
+    "webview",
+    "node_modules"
+  ]
+}
