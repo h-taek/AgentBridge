@@ -1,0 +1,33 @@
+# deps
+node_modules/
+.pnpm-store/
+
+# build outputs
+out/
+dist/
+build/
+*.vsix
+
+# editor / OS
+.DS_Store
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
+
+# logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# env
+.env
+.env.local
+.env.*.local
+
+# coverage
+coverage/
+
+# misc
+.cache/
+.tmp/
