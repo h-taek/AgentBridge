@@ -28,3 +28,6 @@ export * from './sessionRegistry';
 // 환경 / PTY
 export * from './envProbe';
 export * from './ptyDisplayFilter';
+
+// hook
+export * from './hookInstaller';
