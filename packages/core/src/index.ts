@@ -22,6 +22,8 @@ export * from './interfaces';
 export * from './turnsStore';
 export * from './workspaceStore';
 export * from './hookStatusStore';
+export * from './attachmentStore';
+export * from './sessionRegistry';
 
 // 환경 / PTY
 export * from './envProbe';
