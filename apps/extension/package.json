@@ -1,0 +1,265 @@
+{
+  "name": "agentbridge",
+  "displayName": "AgentBridge",
+  "description": "Bridge multiple AI CLI agents with shared context in your IDE",
+  "version": "0.1.6",
+  "publisher": "h-taek",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/h-taek/AgentBridge_Extension.git"
+  },
+  "homepage": "https://github.com/h-taek/AgentBridge_Extension#readme",
+  "bugs": {
+    "url": "https://github.com/h-taek/AgentBridge_Extension/issues"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "claude",
+    "codex",
+    "gemini",
+    "antigravity",
+    "cli",
+    "pty",
+    "terminal",
+    "context",
+    "memory"
+  ],
+  "engines": {
+    "vscode": "^1.96.0"
+  },
+  "extensionKind": [
+    "workspace"
+  ],
+  "categories": [
+    "Other"
+  ],
+  "icon": "media/icon.png",
+  "activationEvents": [
+    "onWebviewPanel:agentbridge.chat"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "agentbridge",
+          "title": "AgentBridge",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "agentbridge": [
+        {
+          "id": "agentbridge.sessions",
+          "name": "Sessions"
+        },
+        {
+          "type": "webview",
+          "id": "agentbridge.memoryPanel",
+          "name": "Memory"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "agentbridge.newSession",
+        "title": "AgentBridge: New Model Session",
+        "icon": {
+          "light": "media/add-small.svg",
+          "dark": "media/add-small.svg"
+        }
+      },
+      {
+        "command": "agentbridge.newSessionFromTab",
+        "title": "AgentBridge: New Session",
+        "icon": {
+          "light": "media/icon-light.svg",
+          "dark": "media/icon-dark.svg"
+        }
+      },
+      {
+        "command": "agentbridge.refineMemory",
+        "title": "AgentBridge: Refine Memory Now",
+        "icon": "$(sparkle)"
+      },
+      {
+        "command": "agentbridge.resetMemory",
+        "title": "AgentBridge: Reset Memory",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "agentbridge.renameSession",
+        "title": "Rename Session",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "agentbridge.deleteSession",
+        "title": "Delete Session",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "agentbridge.openSession",
+        "title": "AgentBridge: Open Session"
+      },
+      {
+        "command": "agentbridge.selectSession",
+        "title": "AgentBridge: Select Session",
+        "icon": "$(history)"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "agentbridge.newSessionFromTab",
+          "group": "navigation@1"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "agentbridge.newSession",
+          "when": "view == agentbridge.sessions",
+          "group": "navigation"
+        },
+        {
+          "command": "agentbridge.refineMemory",
+          "when": "view == agentbridge.memoryPanel",
+          "group": "navigation@1"
+        },
+        {
+          "command": "agentbridge.resetMemory",
+          "when": "view == agentbridge.memoryPanel",
+          "group": "navigation@2"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "agentbridge.renameSession",
+          "when": "viewItem =~ /^session-/",
+          "group": "inline@1"
+        },
+        {
+          "command": "agentbridge.deleteSession",
+          "when": "viewItem =~ /^session-/",
+          "group": "inline@2"
+        },
+        {
+          "command": "agentbridge.renameSession",
+          "when": "viewItem =~ /^session-/",
+          "group": "context@1"
+        },
+        {
+          "command": "agentbridge.deleteSession",
+          "when": "viewItem =~ /^session-/",
+          "group": "context@2"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "AgentBridge",
+      "properties": {
+        "agentbridge.refine.policy": {
+          "type": "string",
+          "enum": [
+            "priority",
+            "fixed",
+            "active",
+            "off"
+          ],
+          "default": "priority",
+          "enumDescriptions": [
+            "Try CLIs in priority order (free tier first)",
+            "Always use a single fixed CLI",
+            "Use whichever CLI triggered the compaction",
+            "Disable automatic refinement"
+          ],
+          "description": "IR refinement model selection policy"
+        },
+        "agentbridge.refine.priorityOrder": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "agy",
+              "codex",
+              "claude"
+            ]
+          },
+          "default": [
+            "agy",
+            "codex",
+            "claude"
+          ],
+          "minItems": 3,
+          "maxItems": 3,
+          "uniqueItems": true,
+          "description": "CLI try order when policy is 'priority'. Free tier first recommended."
+        },
+        "agentbridge.refine.fixedCli": {
+          "type": "string",
+          "enum": [
+            "agy",
+            "codex",
+            "claude"
+          ],
+          "default": "agy",
+          "description": "CLI to use when policy is 'fixed'"
+        },
+        "agentbridge.turns.assistantDetail": {
+          "type": "string",
+          "enum": [
+            "full",
+            "compact",
+            "minimal"
+          ],
+          "default": "compact",
+          "enumDescriptions": [
+            "Up to 50KB of assistant response",
+            "~500 characters (head + tail)",
+            "~200 characters (head only)"
+          ],
+          "description": "How much assistant response to keep in turns.jsonl"
+        },
+        "agentbridge.memory.maxArchiveSnapshots": {
+          "type": "number",
+          "default": 15,
+          "minimum": 1,
+          "maximum": 100,
+          "description": "Memory 패널에 보관할 IR 스냅샷 최대 개수. 초과분은 가장 오래된 것부터 삭제."
+        }
+      }
+    },
+    "keybindings": []
+  },
+  "scripts": {
+    "compile": "tsc -p .",
+    "watch": "tsc -watch -p .",
+    "package": "vsce package",
+    "lint": "eslint src",
+    "lint:fix": "eslint src --fix",
+    "knip": "knip",
+    "madge:circular": "madge --circular --extensions ts src",
+    "depcheck": "depcheck"
+  },
+  "dependencies": {
+    "@agentbridge/core": "workspace:*",
+    "@xterm/addon-fit": "0.12.0-beta.220",
+    "@xterm/addon-unicode11": "0.10.0-beta.220",
+    "@xterm/addon-webgl": "0.20.0-beta.219",
+    "@xterm/xterm": "6.1.0-beta.220",
+    "node-pty": "1.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.96.0",
+    "@typescript-eslint/eslint-plugin": "^8.59.4",
+    "@typescript-eslint/parser": "^8.59.4",
+    "depcheck": "^1.4.7",
+    "eslint": "^9.39.4",
+    "knip": "^6.14.2",
+    "madge": "^8.0.0",
+    "typescript": "^5.5.0"
+  }
+}
