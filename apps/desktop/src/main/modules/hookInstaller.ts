@@ -15,8 +15,9 @@ import type { CliKind } from '@shared/ipc'
 //
 // 마커 정책:
 //   - JSON 파일: 우리 entry에 `_agentbridge_managed: true` 플래그
-//   - markdown/TOML: `<!-- AgentBridge:start --> ... <!-- AgentBridge:end -->` 또는
-//     `# AgentBridge:start` ... `# AgentBridge:end` (TOML 주석은 # 기반)
+//   - markdown/TOML: `# AgentBridge BEGIN` ... `# AgentBridge END` (TOML 주석은 # 기반)
+//     legacy `# AgentBridge:start` ... `# AgentBridge:end` 블록은 다음 write 시 자동 흡수·삭제
+//     (코어 `packages/core/src/hookInstaller.ts`와 마커 통일 — 같은 cwd에 양쪽 앱이 쓸 때 중복 `[features]` 방지)
 //
 // Cwd 침범 정책 — architecture §15.2 (2026 agy 리브랜드 시점에 갱신):
 //   - 사용자 워크스페이스 cwd엔 3 파일만 생성:
@@ -26,8 +27,11 @@ import type { CliKind } from '@shared/ipc'
 //     (memory.instructionsCreate는 사용자 명시 액션으로만 빈 파일 생성)
 //   - legacy `.gemini/settings.json`(이전 버전 hook 설치 잔재)은 agy hook 설치 시 자동 정리
 
-const TOML_MARKER_START = '# AgentBridge:start'
-const TOML_MARKER_END = '# AgentBridge:end'
+const TOML_MARKER_START = '# AgentBridge BEGIN'
+const TOML_MARKER_END = '# AgentBridge END'
+// 익스텐션·코어와 마커 통일. 데스크탑 구버전이 남긴 `:start/:end` 블록은 다음 write 때 흡수.
+const LEGACY_TOML_MARKER_START = '# AgentBridge:start'
+const LEGACY_TOML_MARKER_END = '# AgentBridge:end'
 
 // dev/prod 모두에서 resources/bin/agentbridge-memory.js 절대경로를 반환.
 // dev: <repo>/resources/bin/... (app.getAppPath()가 repo root)
@@ -424,17 +428,28 @@ async function cleanupLegacyGeminiSettings(cwd: string): Promise<boolean> {
 // 동작하면 매 turn IR이 inject되어 1회 auto-load 백업이 잉여. trust 미승인 시도 첫 turn에만
 // 작용해 차별점(매 메시지 freshness)이 어차피 깨짐. cwd 침범 최소화 정책 5에 따라 제거.
 
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
 async function mergeTomlMarkerBlock(filePath: string, ourBlock: string): Promise<void> {
   const existing = (await readFileIfExists(filePath)) ?? ''
   const wrapped = `${TOML_MARKER_START}\n${ourBlock}\n${TOML_MARKER_END}`
-  const escapedStart = TOML_MARKER_START.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const escapedEnd = TOML_MARKER_END.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const pattern = new RegExp(`${escapedStart}[\\s\\S]*?${escapedEnd}`, 'm')
+  const pattern = new RegExp(
+    `${escapeRegex(TOML_MARKER_START)}[\\s\\S]*?${escapeRegex(TOML_MARKER_END)}`,
+    'm'
+  )
+  // legacy `:start/:end` 블록을 먼저 제거 (codex가 TOML duplicate key로 거부하는 케이스 fix).
+  const legacyPattern = new RegExp(
+    `${escapeRegex(LEGACY_TOML_MARKER_START)}[\\s\\S]*?${escapeRegex(LEGACY_TOML_MARKER_END)}\\n?`,
+    'gm'
+  )
+  const cleaned = existing.replace(legacyPattern, '')
   let newContent: string
-  if (pattern.test(existing)) {
-    newContent = existing.replace(pattern, wrapped)
-  } else if (existing.trim().length > 0) {
-    newContent = existing + (existing.endsWith('\n') ? '\n' : '\n\n') + wrapped + '\n'
+  if (pattern.test(cleaned)) {
+    newContent = cleaned.replace(pattern, wrapped)
+  } else if (cleaned.trim().length > 0) {
+    newContent = cleaned + (cleaned.endsWith('\n') ? '\n' : '\n\n') + wrapped + '\n'
   } else {
     newContent = wrapped + '\n'
   }

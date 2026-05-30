@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+    <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+    <true/>
+    <!-- macOS Sequoia(26+) ad-hoc 서명 우회 — main app과 Electron Framework의 Team ID
+         mismatch로 dyld가 framework 로딩을 거부하는 이슈. 정식 Developer ID 인증서로
+         서명 + 노타리하면 불필요하지만, 베타 빌드 단계에서는 이 entitlement로 우회.
+         정식 배포에서도 hardenedRuntime이 켜진 채 native 모듈을 로드하므로 유지가
+         권장됨(node-pty 등의 prebuilt .node 로딩 안정성). -->
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+  </dict>
+</plist>

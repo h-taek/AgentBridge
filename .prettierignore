@@ -1,9 +1,16 @@
-out
-dist
+# build / deps
+**/out
+**/dist
+**/build
+**/.vite
+**/node_modules
 pnpm-lock.yaml
-LICENSE.md
-tsconfig.json
-tsconfig.*.json
+LICENSE
+
+# tsconfig는 trailing comma 등으로 prettier가 깨뜨릴 수 있어 제외
+**/tsconfig.json
+**/tsconfig.*.json
+
 # 작업 메타·문서·probe 산출물은 prettier로 다루지 않는다.
 # 이유: HANDOFF/PROGRESS는 세션 단위 수동 갱신이라 자동 포맷이 의도와 충돌하고,
 # spec/plan/research 마크다운도 한국어 본문 일관성을 직접 관리한다.

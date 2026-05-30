@@ -1,33 +1,93 @@
-# deps
+# ─── deps ────────────────────────────────────────────────────────────
 node_modules/
 .pnpm-store/
 
-# build outputs
-out/
+# ─── build outputs ───────────────────────────────────────────────────
+# desktop: dist/ + out/ + release/ + dist_electron/
+# extension: out/ + webview/dist/ + *.vsix
+# 주의: 데스크탑 최상위 build/ 는 electron-builder 빌드 리소스(아이콘, entitlements)이므로
+# apps/desktop/build/ 는 무시 안 함. 그 외 build/ 는 무시.
 dist/
+out/
+release/
 build/
+!apps/desktop/build/
+dist_electron/
+webview/dist/
 *.vsix
+*.dmg
+*.zip
+*.exe
+*.AppImage
+*.deb
+*.rpm
+*.tsbuildinfo
+.vite/
+.eslintcache
 
-# editor / OS
-.DS_Store
-.vscode/*
-!.vscode/settings.json
-!.vscode/extensions.json
-.idea/
-
-# logs
-*.log
-npm-debug.log*
-pnpm-debug.log*
-
-# env
+# ─── env / secrets ───────────────────────────────────────────────────
 .env
 .env.local
 .env.*.local
+.env.*
+!.env.example
 
-# coverage
+# ─── OS / iCloud ─────────────────────────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+*.icloud
+
+# ─── editors / IDE ───────────────────────────────────────────────────
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/launch.json
+.idea/
+*.swp
+*.swo
+
+# ─── logs ────────────────────────────────────────────────────────────
+*.log
+logs/
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ─── coverage / cache ────────────────────────────────────────────────
 coverage/
-
-# misc
+.nyc_output/
 .cache/
 .tmp/
+
+# ─── CLI cwd hook 파일 (사용자 cwd 영역, repo와 분리) ─────────────────
+# dev 검증을 repo root에서 진행하면 생길 수 있음. 마커 블록 merge로만 관리.
+.codex/
+.gemini/
+.agents/
+.antigravitycli/
+
+# ─── machine-local config ────────────────────────────────────────────
+.claude/
+.deepsource-local/
+dev-app-update.yml
+.agentbridge/
+workspace_data/
+subspace/
+tmp_asar/
+
+# ─── 내부 개발 문서 (외부 공개 X, 로컬 보존) ──────────────────────────
+# 원본 두 레포 정책 계승: 외부 clone-and-build 흐름 미제공 (배포는 dmg/vsix 산출물로만).
+# 외부 공개: README.md / LICENSE / CHANGELOG.md 만.
+docs/
+CLAUDE.md
+HANDOFF.md
+PROGRESS.md
+RULES.md
+probe/
+test/
