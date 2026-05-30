@@ -14,3 +14,9 @@ export * from './irModule/prompt';
 
 // turnRecorder
 export * from './turnRecorder/sliceAssistant';
+
+// 사이드이펙트 추상화
+export * from './interfaces';
+
+// 저장소
+export * from './turnsStore';
