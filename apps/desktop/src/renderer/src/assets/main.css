@@ -1,0 +1,3653 @@
+@import './base.css';
+
+/* ─── App Shell — 3 column grid with floating panels ──────────────── */
+
+.app-shell {
+  display: grid;
+  grid-template-rows: var(--titlebar-h) 1fr;
+  grid-template-columns: auto 1fr auto;
+  grid-template-areas:
+    'titlebar titlebar titlebar'
+    'left     center   right';
+  gap: var(--panel-gap);
+  padding: 0 var(--panel-inset) var(--panel-inset);
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+  color: var(--color-text-primary);
+}
+
+/* ─── Title Bar — 일체감(투명) + drag ──────────────────────────────── */
+
+.titlebar {
+  grid-area: titlebar;
+  -webkit-app-region: drag;
+  margin: 0 calc(var(--panel-inset) * -1);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 14px;
+  background: transparent;
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  user-select: none;
+  position: relative;
+}
+
+/* 타이틀바 안 컨트롤(토글/상태)은 macOS traffic light 중앙과 시각적으로 맞춰
+   살짝 아래로 보정 — trafficLightPosition.y와 정렬. */
+.titlebar > .icon-btn,
+.titlebar > .titlebar-status {
+  position: relative;
+  top: 3px;
+}
+
+/* 중앙 상태 인디케이터 — 박스 없이 도트 + 텍스트만 */
+.titlebar-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  padding: 0;
+  background: transparent;
+  border: none;
+}
+
+.titlebar-status .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-success);
+  box-shadow: 0 0 6px rgba(111, 210, 138, 0.6);
+}
+
+.titlebar-status .dot.idle {
+  background: var(--color-text-tertiary);
+  box-shadow: none;
+}
+
+.titlebar-traffic-spacer {
+  width: var(--traffic-light-w);
+  height: 100%;
+  flex-shrink: 0;
+}
+
+.titlebar > .icon-btn,
+.titlebar > .titlebar-title,
+.titlebar > .titlebar-actions {
+  -webkit-app-region: no-drag;
+}
+
+.titlebar-title {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--color-text-primary);
+  letter-spacing: 0.01em;
+}
+
+.titlebar-tagline {
+  color: var(--color-text-tertiary);
+  font-size: 11px;
+  margin-left: 8px;
+}
+
+.titlebar-spacer {
+  flex: 1;
+}
+
+.titlebar-actions {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+/* ─── Icon button (Liquid Glass capsule) ─────────────────────────────── */
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-md);
+  background: transparent;
+  border: none;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+  transition:
+    background var(--t-fast),
+    color var(--t-fast),
+    transform var(--t-fast);
+}
+
+.icon-btn:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--color-text-primary);
+}
+
+.icon-btn:active {
+  transform: scale(0.94);
+}
+
+.icon-btn.active {
+  background: rgba(122, 162, 247, 0.18);
+  color: var(--color-accent-strong);
+}
+
+.icon-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.icon-btn svg {
+  width: 15px;
+  height: 15px;
+}
+
+/* ─── Sidebars — Floating Liquid Glass panels ───────────────────────── */
+
+/*
+ * 톤 균형 — body는 솔리드 블랙이므로 사이드바는:
+ *   1) body 대비 살짝 밝은 면 (rgba white overlay) — frosted dark 느낌
+ *   2) 미세 vertical gradient — material thickness
+ *   3) ::before — 상단 inner edge specular (Liquid Glass 시그니처)
+ *   4) ::after — rim light + bottom shadow line
+ *   5) backdrop-filter 절제 — body가 거의 솔리드라 강한 블러는 의미 없음. 미세 saturate만.
+ *   6) panel-radius + shadow-panel으로 floating
+ */
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+  border-radius: var(--panel-radius);
+  /*
+   * 통일된 검정 베이스 — center와 같은 #0c0c10 위에 미세 white overlay(0.025)로 elevation만
+   * 살짝. Liquid Glass 시그니처는 top specular + drop shadow + 부드러운 라운드로 표현.
+   */
+  background: rgba(255, 255, 255, 0.025);
+  box-shadow:
+    0 8px 24px rgba(0, 0, 0, 0.4),
+    0 1px 0 rgba(255, 255, 255, 0.04);
+  transition:
+    width var(--t-med),
+    opacity var(--t-med),
+    margin var(--t-med);
+}
+
+/*
+ * Liquid Glass 시그니처 — 상단 inner edge specular highlight 1줄.
+ * 그라데이션 없이 box-shadow inset으로 깔끔한 빛 한 줄만.
+ */
+.sidebar::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    inset 0 0 0 0.5px rgba(255, 255, 255, 0.06);
+  z-index: 1;
+}
+
+.sidebar > * {
+  position: relative;
+  z-index: 2;
+}
+
+.sidebar-left {
+  grid-area: left;
+  width: var(--sidebar-w-left);
+}
+
+.sidebar-right {
+  grid-area: right;
+  width: var(--sidebar-w-right);
+}
+
+.sidebar.collapsed {
+  width: 0;
+  opacity: 0;
+  pointer-events: none;
+  /* gap이 collapsed 패널의 자리에도 들어가지 않도록 음수 margin로 흡수 */
+  margin-left: calc(var(--panel-gap) * -1);
+}
+
+.sidebar-right.collapsed {
+  margin-left: 0;
+  margin-right: calc(var(--panel-gap) * -1);
+}
+
+.sidebar-inner {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  /* collapsing 중에 내용이 줄어들지 않도록 너비 고정 */
+  min-width: var(--sidebar-w-left);
+}
+
+.sidebar-right .sidebar-inner {
+  min-width: var(--sidebar-w-right);
+}
+
+.sidebar-section {
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.sidebar-section:last-child {
+  border-bottom: none;
+}
+
+/* 사이드바 상단 toggle row — 사이드바 안에 들어간 close 버튼 */
+.sidebar-pane-head {
+  display: flex;
+  align-items: center;
+  padding: 8px 10px 0;
+}
+
+.sidebar-pane-head.right {
+  justify-content: flex-end;
+}
+
+/* 상단 quick action — "+ 새 워크스페이스" 버튼 + 펼쳐지는 form을 한 컨테이너로 묶음. */
+.sidebar-quick {
+  margin: 6px 10px 4px;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  transition: background var(--t-fast);
+}
+
+.sidebar-quick.expanded {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.sidebar-quick-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  background: transparent;
+  border: none;
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+  transition:
+    background var(--t-fast),
+    color var(--t-fast);
+}
+
+.sidebar-quick-row svg {
+  width: 15px;
+  height: 15px;
+}
+
+.sidebar-quick-row:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--color-text-primary);
+}
+
+/* expanded 상태에서 버튼은 컨테이너 색을 그대로 사용 (자체 hover-bg 제거) */
+.sidebar-quick.expanded .sidebar-quick-row {
+  color: var(--color-text-primary);
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+}
+
+.sidebar-quick.expanded .sidebar-quick-row:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.sidebar-quick-row:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* 홈 행 — 활성(홈 화면 상태)이면 disabled여도 강조 표시 */
+.sidebar-quick-row.active {
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--color-text-primary);
+  opacity: 1;
+  cursor: default;
+}
+
+/* 섹션 라벨 (uppercase) — "활성" / "메모리" 등 */
+.sidebar-section-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 14px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-text-tertiary);
+}
+
+/* 브랜드 라벨 (footer) */
+.sidebar-brand {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--color-text-secondary);
+}
+
+/* 워크스페이스 row title 버튼 — 내부 텍스트 영역 */
+.ws-row-title {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+  padding: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ws-row-title:disabled {
+  cursor: not-allowed;
+}
+
+/* 활성 점 — Subspace의 푸른 점 (workspace에 활성 세션 있음) */
+.ws-row-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-info);
+  box-shadow: 0 0 6px rgba(96, 165, 250, 0.55);
+  flex-shrink: 0;
+}
+
+.sidebar-scroll {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 6px 8px;
+}
+
+.sidebar-footer {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 6px 8px 8px;
+  /* border-top/background 제거 — 메인 panel과 일체 */
+  background: transparent;
+  border: none;
+}
+
+.sidebar-footer-id {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.sidebar-footer-avatar {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #7aa2f7, #8e6cef);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  color: white;
+  font-weight: 600;
+}
+
+/* ─── Workspace list (좌 사이드바) ──────────────────────────────────── */
+
+.ws-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ws-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.ws-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 8px;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: 1px solid transparent;
+  text-align: left;
+  width: 100%;
+  font: inherit;
+  transition:
+    background var(--t-fast),
+    color var(--t-fast),
+    border-color var(--t-fast),
+    box-shadow var(--t-fast);
+}
+
+.ws-row:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--color-text-primary);
+}
+
+.ws-row.open {
+  background: rgba(122, 162, 247, 0.14);
+  color: var(--color-text-primary);
+}
+
+.ws-row .chev {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  color: var(--color-text-tertiary);
+  transition: transform var(--t-fast);
+}
+
+.ws-row .chev.expanded {
+  transform: rotate(90deg);
+}
+
+.ws-row .title {
+  flex: 1;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ws-row .count {
+  font-size: 10px;
+  color: var(--color-text-tertiary);
+  font-variant-numeric: tabular-nums;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: var(--color-surface-2);
+}
+
+/* 워크스페이스 row의 휴지통 — 활성 ws만 항상 표시, 그 외는 hover 시. */
+.ws-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  margin-left: auto;
+  opacity: 0;
+  transition: opacity var(--t-fast);
+}
+
+.ws-row:hover .ws-row-actions,
+.ws-row.open .ws-row-actions {
+  opacity: 1;
+}
+
+/* 작은 아이콘 버튼 — 사이드바 안 전반에서 사용 */
+.icon-btn-xs {
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  background: transparent;
+  border: none;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  flex-shrink: 0;
+  transition:
+    background var(--t-fast),
+    color var(--t-fast);
+}
+
+.icon-btn-xs:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--color-text-primary);
+}
+
+.icon-btn-xs:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.icon-btn-xs svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* 워크스페이스 row의 휴지통 아이콘 — 일반 .icon-btn-xs보다 살짝 크게 */
+.ws-row-actions .icon-btn-xs svg {
+  width: 15px;
+  height: 15px;
+}
+
+/* 워크스페이스 row + 버튼 + 드롭다운 메뉴 */
+.ws-add-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.ws-add-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 4px;
+  background: rgba(20, 22, 28, 0.92);
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  border-radius: var(--radius-md);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    0 12px 32px rgba(0, 0, 0, 0.45);
+  min-width: 140px;
+  display: flex;
+  flex-direction: column;
+  z-index: 50;
+  overflow: hidden;
+  padding: 4px 0;
+}
+
+.ws-add-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  background: transparent;
+  border: none;
+  color: var(--color-text-primary);
+  cursor: pointer;
+  font-size: 12px;
+  font-family: inherit;
+  text-align: left;
+  transition: background var(--t-fast);
+}
+
+.ws-add-menu-item:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.ws-add-menu-item:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* 워크스페이스 row 우클릭 컨텍스트 메뉴 — position: fixed (viewport 기준).
+   ws-add-menu와 톤 일관: 다크 blur + specular hairline. */
+.ws-context-menu {
+  position: fixed;
+  background: rgba(20, 22, 28, 0.92);
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  border-radius: var(--radius-md);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    0 12px 32px rgba(0, 0, 0, 0.45);
+  min-width: 168px;
+  display: flex;
+  flex-direction: column;
+  z-index: 200;
+  overflow: hidden;
+  padding: 4px 0;
+  animation: fade-in var(--t-fast);
+}
+
+.ws-context-item {
+  display: flex;
+  align-items: center;
+  padding: 7px 14px;
+  background: transparent;
+  border: none;
+  color: var(--color-text-primary);
+  cursor: pointer;
+  font-size: 12px;
+  font-family: inherit;
+  text-align: left;
+  transition: background var(--t-fast);
+}
+
+.ws-context-item:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.ws-context-item:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.ws-context-danger {
+  color: var(--color-danger, #ff5e6c);
+}
+
+.ws-context-divider {
+  height: 1px;
+  margin: 4px 8px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.ws-sessions {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 4px 8px 6px 22px;
+  animation: slide-down var(--t-med);
+}
+
+.ws-session {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 8px;
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid transparent;
+  font-family: inherit;
+  text-align: left;
+  width: 100%;
+  transition:
+    background var(--t-fast),
+    color var(--t-fast),
+    border-color var(--t-fast);
+}
+
+/* 세션 박스 — hover 시 노출, active 세션은 항상 유지. */
+.ws-session:hover:not(.disabled) {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--color-text-primary);
+}
+
+.ws-session.active {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+
+.ws-session.disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* 세션 row 우측 action 버튼 — 호버 시만 노출. pencil이 우측 끝 그룹의 시작점이 되도록
+   margin-left:auto는 pencil에 적용 — close는 그 옆에 자연스럽게 붙음 (gap만 0~2px). */
+.ws-session-close {
+  opacity: 0;
+  transition: opacity var(--t-fast);
+}
+
+.ws-session:hover .ws-session-close {
+  opacity: 1;
+}
+
+.ws-session-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.ws-session-dot.model-claude {
+  background: var(--model-claude);
+}
+.ws-session-dot.model-codex {
+  background: var(--model-codex);
+}
+.ws-session-dot.model-agy {
+  background: var(--model-agy);
+}
+
+.ws-session-dot.closed {
+  opacity: 0.4;
+}
+
+/* 내장 터미널(shell) 세션 — dot 대신 TerminalIcon. dot과 동일 사이즈로 정렬 통일. */
+.ws-session-icon {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-tertiary);
+}
+.ws-session-icon svg {
+  width: 100%;
+  height: 100%;
+}
+.ws-session-icon.closed {
+  opacity: 0.4;
+}
+
+.ws-session-label {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ws-empty {
+  font-size: 12px;
+  color: var(--color-text-tertiary);
+  padding: 14px 8px;
+  text-align: center;
+}
+
+/* ─── New workspace card (좌 사이드바 상단) ─────────────────────────── */
+
+/* 새 워크스페이스 form — sidebar-quick.expanded 컨테이너 안에서 버튼 바로 아래로 흘러나옴.
+   배경은 컨테이너가 담당하므로 form 자체는 투명. */
+.new-ws {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 10px 12px;
+  background: transparent;
+  border: none;
+  animation: slide-down var(--t-med);
+}
+
+@keyframes slide-down {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.new-ws label {
+  font-size: 10px;
+  color: var(--color-text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.new-ws .row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.input {
+  flex: 1;
+  min-width: 0;
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-md);
+  padding: 7px 10px;
+  font-size: 12px;
+  color: var(--color-text-primary);
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  box-shadow: inset 0 1px 0 rgba(0, 0, 0, 0.32);
+  transition:
+    border-color var(--t-fast),
+    box-shadow var(--t-fast);
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--color-border-accent);
+  box-shadow:
+    inset 0 1px 0 rgba(0, 0, 0, 0.32),
+    var(--focus-ring);
+}
+
+.select {
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-md);
+  padding: 7px 28px 7px 10px;
+  font-size: 12px;
+  color: var(--color-text-primary);
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' fill='none' stroke='%23ffffff80' stroke-width='1.5'%3E%3Cpolyline points='3 5 6 8 9 5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  background-size: 12px;
+}
+
+/* ─── Center column — solid 다크, vibrancy 가림 ───────────────────── */
+
+.app-center {
+  grid-area: center;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  padding: 8px 12px 12px;
+  /* 솔리드 다크 — body는 transparent라 macOS vibrancy가 깔리는데, center는 깔끔히 가림 */
+  background: var(--color-bg-solid);
+}
+
+.center-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 80px;
+  color: var(--color-text-secondary);
+}
+
+.center-empty h2 {
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+.center-empty p {
+  font-size: 12px;
+  color: var(--color-text-tertiary);
+  margin: 0;
+}
+
+.center-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 2px 6px 10px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  position: relative;
+}
+
+.center-header::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.05);
+  pointer-events: none;
+}
+
+.center-header h2 {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.center-header .meta {
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+}
+
+/* ─── Right Sidebar header ──────────────────────────────────────────── */
+
+.right-header {
+  padding: 18px 16px 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.right-eyebrow {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-text-tertiary);
+}
+
+.right-title {
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--color-text-primary);
+  word-break: break-all;
+  line-height: 1.2;
+}
+
+.right-sub {
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  word-break: break-all;
+  margin-top: 2px;
+}
+
+.right-empty {
+  padding: 14px 16px;
+  font-size: 12px;
+  color: var(--color-text-tertiary);
+  line-height: 1.55;
+}
+
+/* 내장 터미널 세션 활성 시 IR 패널 자리에 표시. */
+.right-shell-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 18px 16px;
+}
+.right-shell-icon {
+  width: 28px;
+  height: 28px;
+  color: var(--color-text-tertiary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.right-shell-icon svg {
+  width: 100%;
+  height: 100%;
+}
+.right-shell-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+.right-shell-sub {
+  font-size: 12px;
+  color: var(--color-text-tertiary);
+  line-height: 1.55;
+}
+
+/* ─── Modal (Settings) — Liquid Glass dialog ───────────────────────── */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(var(--blur-md));
+  -webkit-backdrop-filter: blur(var(--blur-md));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  z-index: 200;
+  animation: fade-in var(--t-med);
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    backdrop-filter: blur(0);
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes lift-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.modal {
+  position: relative;
+  background: rgba(20, 22, 28, 0.7);
+  backdrop-filter: blur(50px) saturate(180%);
+  -webkit-backdrop-filter: blur(50px) saturate(180%);
+  border-radius: var(--radius-xl);
+  box-shadow:
+    0 24px 80px rgba(0, 0, 0, 0.55),
+    0 12px 32px rgba(0, 0, 0, 0.45);
+  width: 100%;
+  max-width: 720px;
+  max-height: 84vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: lift-in var(--t-med);
+}
+
+.modal::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    inset 0 0 0 0.5px rgba(255, 255, 255, 0.06);
+  z-index: 1;
+}
+
+.modal > * {
+  position: relative;
+  z-index: 2;
+}
+
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.modal-head h2 {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0;
+  color: var(--color-text-primary);
+}
+
+.modal-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 18px;
+}
+
+.modal-section {
+  margin-bottom: 22px;
+}
+
+.modal-section:last-child {
+  margin-bottom: 0;
+}
+
+.modal-section h3 {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-tertiary);
+  margin: 0 0 8px;
+}
+
+.kv-table {
+  width: 100%;
+  font-size: 12px;
+  border-collapse: collapse;
+}
+
+.kv-table th {
+  text-align: left;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  width: 120px;
+  padding: 5px 12px 5px 0;
+  vertical-align: top;
+}
+
+.kv-table td {
+  padding: 5px 0;
+  color: var(--color-text-primary);
+  word-break: break-all;
+}
+
+.kv-table .mono {
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 11px;
+}
+
+/* ─── Buttons — Liquid Glass capsule ──────────────────────────────── */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--color-text-primary);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 6px 14px;
+  font-size: 12px;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  font-family: inherit;
+  white-space: nowrap;
+  transition:
+    background var(--t-fast),
+    border-color var(--t-fast),
+    transform var(--t-fast),
+    color var(--t-fast);
+}
+
+.btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
+.btn:active:not(:disabled) {
+  transform: scale(0.97);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.btn:disabled {
+  opacity: 0.36;
+  cursor: not-allowed;
+}
+
+.btn:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.btn-primary {
+  background: rgba(122, 162, 247, 0.24);
+  color: #f5f8ff;
+  border-color: rgba(122, 162, 247, 0.4);
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: rgba(122, 162, 247, 0.34);
+  border-color: rgba(122, 162, 247, 0.55);
+}
+
+.btn-ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--color-text-secondary);
+}
+
+.btn-ghost:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--color-text-primary);
+}
+
+.btn-danger {
+  color: var(--color-danger);
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: var(--color-danger-bg);
+  border-color: rgba(248, 113, 113, 0.4);
+}
+
+.btn-block {
+  width: 100%;
+  justify-content: center;
+}
+
+/* ─── Utility ──────────────────────────────────────────────────────── */
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.mono {
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
+.hint {
+  color: var(--color-text-tertiary);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.error {
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+  border: 1px solid rgba(248, 113, 113, 0.3);
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+}
+
+.tag {
+  font-size: 10px;
+  padding: 1px 7px;
+  border-radius: 8px;
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  background: var(--color-surface-3);
+  color: var(--color-text-secondary);
+}
+
+.tag-active {
+  background: var(--color-success-bg);
+  color: var(--color-success);
+}
+
+.tag-open {
+  background: var(--color-accent-bg);
+  color: var(--color-accent-strong);
+}
+
+.tag-found {
+  color: var(--color-success);
+}
+
+.tag-missing {
+  color: var(--color-danger);
+}
+
+details summary {
+  cursor: pointer;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  margin-top: 8px;
+}
+
+details pre {
+  background: var(--color-surface-1);
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--color-text-secondary);
+}
+
+/* ─── Legacy — SessionTabs (M3 L3) — 글래스 톤 갱신 ──────────────── */
+
+.session-tabs {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 8px;
+}
+
+.session-tabs-bar {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  gap: 2px;
+  padding: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  /* overflow:visible — dropdown(absolute)이 bar 영역 밖으로 펼쳐질 수 있어야 함. visible 탭이
+     bar 폭을 넘으면 measure가 visibleCount 조정 + hidden 처리. */
+  overflow: visible;
+  position: relative;
+}
+
+/* overflow ... 버튼 + dropdown */
+.session-tab-overflow-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: stretch;
+}
+
+.session-tab-overflow {
+  background: transparent;
+  border: none;
+  color: var(--color-text-secondary);
+  font-size: 14px;
+  padding: 0 10px;
+  height: 32px;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    background var(--t-fast),
+    color var(--t-fast);
+}
+
+.session-tab-overflow:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--color-text-primary);
+}
+
+.session-tab-overflow:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* overflow-menu — add-menu와 동일 스타일 (시각적 통일). portal로 body에 렌더되어 좌표는 inline style.
+   width는 콘텐츠(가장 긴 항목) 폭에 맞춤 — min-width 강제 없음. */
+.session-tab-overflow-menu {
+  background: rgba(20, 22, 28, 0.85);
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  border-radius: var(--radius-md);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    0 12px 32px rgba(0, 0, 0, 0.45);
+  width: max-content;
+  max-height: 360px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  z-index: 50;
+}
+
+.session-tab-overflow-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  background: transparent;
+  border: none;
+  color: var(--color-text-primary);
+  cursor: pointer;
+  font-size: 12px;
+  text-align: left;
+  font-family: inherit;
+  white-space: nowrap;
+}
+
+.session-tab-overflow-item:hover:not(:disabled) {
+  background: var(--color-surface-2);
+}
+
+.session-tab-overflow-item:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Subspace 스타일 탭 — flat. 활성 = 모델 색 underline. 호버 시만 close 노출 */
+.session-tab {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  line-height: 1;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  font-size: 12px;
+  position: relative;
+  transition: background var(--t-fast);
+}
+
+.session-tab::after {
+  content: '';
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 2px 2px 0 0;
+  background: transparent;
+  transition: background var(--t-fast);
+}
+
+.session-tab:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.session-tab.active::after {
+  background: var(--tab-accent, var(--color-text-primary));
+}
+
+.session-tab.model-claude.active::after {
+  background: var(--model-claude);
+}
+.session-tab.model-codex.active::after {
+  background: var(--model-codex);
+}
+.session-tab.model-agy.active::after {
+  background: var(--model-agy);
+}
+
+.session-tab-label {
+  display: inline-flex;
+  align-items: center;
+  height: 100%;
+  gap: 7px;
+  padding: 0 12px;
+  background: transparent;
+  color: var(--color-text-tertiary);
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  font-family: inherit;
+  letter-spacing: 0.01em;
+  transition: color var(--t-fast);
+}
+
+.session-tab:hover .session-tab-label {
+  color: var(--color-text-secondary);
+}
+
+.session-tab.active .session-tab-label {
+  color: var(--color-text-primary);
+}
+
+.session-tab-label:disabled {
+  cursor: not-allowed;
+}
+
+/* 닫기 × — 호버(또는 active) 시만 노출. UI에서 *숨김*(소프트), 삭제 아님. */
+.session-tab-close {
+  background: transparent;
+  border: none;
+  color: var(--color-text-tertiary);
+  font-size: 13px;
+  line-height: 1;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  margin-right: 6px;
+  cursor: pointer;
+  border-radius: 50%;
+  opacity: 0;
+  transition:
+    opacity var(--t-fast),
+    background var(--t-fast),
+    color var(--t-fast);
+}
+
+.session-tab:hover .session-tab-close {
+  opacity: 1;
+}
+
+.session-tab-close:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--color-text-primary);
+}
+
+.session-tab-close:disabled {
+  cursor: not-allowed;
+}
+
+.session-tab:hover .session-tab-close:disabled {
+  opacity: 0.3;
+}
+
+.session-tab-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.session-tab-dot.model-claude {
+  background: var(--model-claude);
+}
+.session-tab-dot.model-codex {
+  background: var(--model-codex);
+}
+.session-tab-dot.model-agy {
+  background: var(--model-agy);
+}
+
+/* 내장 터미널(shell) 세션 — dot 대신 TerminalIcon. 탭 + 사이드바 + add 메뉴 공용. */
+.session-tab-icon {
+  width: 12px;
+  height: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-tertiary);
+}
+.session-tab-icon svg {
+  width: 100%;
+  height: 100%;
+}
+.session-tab.active .session-tab-icon {
+  color: var(--color-text-primary);
+}
+/* shell 활성 탭 underline — 모델별 색이 없으니 기본 흰톤. */
+.session-tab.model-shell.active::after {
+  background: var(--color-text-secondary);
+}
+/* hook 설치 실패로 IR 주입 비활성 상태 — 사용자에게 차별점 핵심 기능 비활성 명확히 표시. */
+.session-tab-hook-disabled {
+  margin-left: 6px;
+  font-size: 11px;
+  color: #f4a062;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  cursor: help;
+}
+
+.session-tab-add-wrap {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+}
+
+.session-tab-add-wrap {
+  flex-shrink: 0;
+}
+
+.session-tab-add {
+  background: transparent;
+  border: none;
+  color: var(--color-text-tertiary);
+  padding: 0 12px;
+  height: 32px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 0;
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition:
+    color var(--t-fast),
+    background var(--t-fast);
+}
+
+.session-tab-add:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--color-text-primary);
+}
+
+.session-tab-add:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.session-tab-add-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 6px;
+  background: rgba(20, 22, 28, 0.85);
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  border-radius: var(--radius-md);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    0 12px 32px rgba(0, 0, 0, 0.45);
+  width: max-content;
+  display: flex;
+  flex-direction: column;
+  z-index: 50;
+  overflow: hidden;
+}
+
+.session-tab-add-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  background: transparent;
+  border: none;
+  color: var(--color-text-primary);
+  cursor: pointer;
+  font-size: 12px;
+  text-align: left;
+  font-family: inherit;
+}
+
+.session-tab-add-item:hover:not(:disabled) {
+  background: var(--color-surface-2);
+}
+
+.session-tab-add-item:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ─── xterm host stack ─────────────────────────────────────────────── */
+
+.xterm-host-stack {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+/*
+ * 터미널과 주변 패널 일체화 — xterm canvas가 body 솔리드와 동일한 #0c0c10로 그려져
+ * .xterm-wrap에 별도 background/border를 부여하지 않는다. 가장자리는 overflow:hidden +
+ * border-radius로 자연스럽게 정돈.
+ */
+.xterm-host-stack .xterm-wrap {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: transparent;
+}
+
+.xterm-host-stack .xterm-wrap.xterm-host-active {
+  z-index: 2;
+}
+
+.xterm-host-stack .xterm-wrap:not(.xterm-host-active) {
+  pointer-events: none;
+}
+
+.xterm-host {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.xterm-status {
+  padding: 7px 12px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02));
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-text-tertiary);
+}
+
+.status-dot.status-running {
+  background: var(--color-success);
+}
+
+.status-dot.status-error,
+.status-dot.status-exited {
+  background: var(--color-danger);
+}
+
+.status-dot.status-starting {
+  background: var(--color-warn);
+}
+
+.status-detail {
+  color: var(--color-text-tertiary);
+}
+
+.xterm-container {
+  flex: 1;
+  min-height: 0;
+  padding: 4px 0 0 6px;
+}
+
+/* ─── PTY 로딩 오버레이 ──────────────────────────────────────────── */
+
+.xterm-host {
+  position: relative;
+}
+
+.xterm-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  pointer-events: none;
+  z-index: 3;
+  background: #0c0c10;
+  opacity: 1;
+  transition: opacity 240ms ease-out;
+}
+
+.xterm-loading.hidden {
+  opacity: 0;
+}
+
+.xterm-loading-mark {
+  position: relative;
+  width: 80px;
+  height: 80px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* pulse — 로고 뒤로 모델 색 halo */
+.xterm-loading-pulse {
+  position: absolute;
+  inset: 8px;
+  border-radius: 50%;
+  background: var(--mark-color, var(--model-claude));
+  opacity: 0.18;
+  filter: blur(8px);
+  animation: xterm-loading-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes xterm-loading-pulse {
+  0%,
+  100% {
+    transform: scale(0.8);
+    opacity: 0.16;
+  }
+  50% {
+    transform: scale(1.05);
+    opacity: 0.34;
+  }
+}
+
+.xterm-loading-logo {
+  position: relative;
+  z-index: 1;
+  width: 64px;
+  height: 64px;
+  display: block;
+  object-fit: contain;
+  user-select: none;
+}
+
+.xterm-loading-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  letter-spacing: 0.01em;
+}
+
+.xterm-loading-hint {
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  letter-spacing: 0.06em;
+}
+
+.xterm-loading.model-claude {
+  --mark-color: var(--model-claude);
+  --mark-glow: rgba(217, 119, 87, 0.42);
+}
+.xterm-loading.model-codex {
+  --mark-color: var(--model-codex);
+  --mark-glow: rgba(93, 138, 249, 0.42);
+}
+.xterm-loading.model-agy {
+  --mark-color: var(--model-agy);
+  --mark-glow: rgba(142, 108, 239, 0.42);
+}
+/* 내장 터미널 — 모델 색 없음. 무채색 halo. */
+.xterm-loading.model-shell {
+  --mark-color: rgba(255, 255, 255, 0.4);
+  --mark-glow: rgba(255, 255, 255, 0.2);
+}
+
+/* ─── DnD 드롭존 (M3.6 B) ──────────────────────────────────────────── */
+/* 사용자가 OS 파일을 xterm 위로 드래그하면 표시. xterm canvas 위 절대 위치 + dashed border. */
+.xterm-dropzone {
+  position: absolute;
+  inset: 6px;
+  border-radius: 12px;
+  border: 2px dashed rgba(122, 162, 247, 0.55);
+  background: rgba(12, 12, 16, 0.78);
+  backdrop-filter: blur(var(--blur-sm, 8px));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 4;
+  animation: xterm-dropzone-fade 120ms ease-out;
+}
+@keyframes xterm-dropzone-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.xterm-dropzone-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-text-primary);
+}
+.xterm-dropzone-title {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+.xterm-dropzone-hint {
+  font-size: 12px;
+  color: var(--color-text-tertiary);
+}
+
+/* drop 후 에러 토스트 — 우상단 모서리. 3초 표시 후 자동 사라짐. */
+.xterm-drop-error {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  z-index: 5;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(60, 18, 18, 0.85);
+  color: #f5d4d4;
+  font-size: 11px;
+  font-weight: 500;
+  border: 1px solid rgba(255, 100, 100, 0.3);
+  pointer-events: none;
+  animation: xterm-dropzone-fade 120ms ease-out;
+}
+
+/* ─── Legacy — IR Review modal (M3 J) — 글래스 톤 ──────────────────── */
+
+.ir-review-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(var(--blur-sm));
+  -webkit-backdrop-filter: blur(var(--blur-sm));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 24px;
+}
+
+.ir-review-modal {
+  background: rgba(20, 20, 24, 0.88);
+  backdrop-filter: blur(var(--blur-lg)) saturate(150%);
+  -webkit-backdrop-filter: blur(var(--blur-lg)) saturate(150%);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  width: 100%;
+  max-width: 820px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: var(--shadow-3);
+}
+
+.ir-review-header {
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--color-border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.ir-review-body {
+  padding: 16px 20px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.ir-review-footer {
+  padding: 12px 20px;
+  border-top: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ir-section {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  background: var(--color-surface-1);
+}
+
+.ir-section.excluded {
+  opacity: 0.4;
+}
+
+.ir-section-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+
+.ir-section-head strong {
+  font-size: 13px;
+}
+
+.ir-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  margin-left: auto;
+}
+
+.ir-section-view {
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.ir-section-edit textarea {
+  width: 100%;
+  font-size: 12px;
+  padding: 8px 10px;
+  background: var(--color-surface-1);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  resize: vertical;
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+}
+
+.ir-list {
+  list-style: disc;
+  padding-left: 18px;
+  margin: 4px 0;
+}
+
+.ir-list li {
+  margin: 3px 0;
+  word-break: break-word;
+}
+
+.ir-submit {
+  background: var(--color-success-bg);
+  color: var(--color-success);
+  border-color: rgba(111, 210, 138, 0.32);
+}
+
+.ir-submit:hover:not(:disabled) {
+  background: rgba(111, 210, 138, 0.22);
+}
+
+/* ─── Legacy fallback — IrPanel/RefineSettingsPanel 등이 쓰는 클래스 ── */
+
+.thread-meta {
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  margin: 4px 0;
+  word-break: break-all;
+}
+
+/* IrPanel/RefineSettingsPanel/CodexTrustBanner 등 <section> 직접 렌더링 — 우 사이드바
+   안에서 적절한 padding/heading 톤으로 보이도록. */
+.sidebar-scroll > section {
+  padding: 12px 14px;
+  margin-bottom: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: var(--radius-md);
+}
+
+.sidebar-scroll > section > h2 {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-tertiary);
+  margin: 0 0 8px;
+}
+
+.sidebar-scroll > section > h3 {
+  font-size: 12px;
+  font-weight: 600;
+  margin: 0 0 6px;
+  color: var(--color-text-primary);
+}
+
+/* RefineSettingsPanel/RefineTestPanel — modal 안 section 톤 */
+.modal-section section {
+  padding: 0;
+  background: transparent;
+  border: none;
+}
+
+.modal-section section > h2 {
+  display: none;
+}
+
+/* Global heading reset — Liquid Glass 톤 */
+h1,
+h2,
+h3,
+h4 {
+  margin: 0;
+  font-weight: 600;
+}
+
+h2 {
+  font-size: 14px;
+}
+
+h3 {
+  font-size: 13px;
+}
+
+/* code inline */
+code {
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--color-text-primary);
+}
+
+/* CodexTrustBanner — 경고 톤 글래스 */
+.codex-trust-banner {
+  background: rgba(251, 191, 36, 0.1);
+  border: 1px solid rgba(251, 191, 36, 0.28);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  color: var(--color-text-primary);
+  font-size: 12px;
+}
+
+/* ─── Inline rename ───────────────────────────────────────────────── */
+/* 워크스페이스 행 / 세션 행 / SessionTabs label 인라인 편집 input.
+   각 컨테이너에 맞는 polymorphic 스타일 — base.css의 .input 톤을 따르되 padding/font를 줄여
+   라벨과 동일한 frame을 유지. */
+
+.ws-row-title-input,
+.ws-session-label-input {
+  flex: 1;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(122, 162, 247, 0.45);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-primary);
+  font-family: inherit;
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(122, 162, 247, 0.18);
+  min-width: 0;
+}
+
+.ws-row-title-input {
+  padding: 4px 8px;
+  font-size: 12.5px;
+  font-weight: 500;
+  margin: 0 4px;
+}
+
+.ws-session-label-input {
+  padding: 2px 6px;
+  font-size: 12px;
+  margin: 0 4px;
+}
+
+/* 세션 row 우측 action 묶음 — 연필 + 휴지통. 두 버튼이 gap 없이 붙도록 자체 그룹 div로
+   ws-session의 gap을 우회. margin-left:auto로 label과 분리. */
+.ws-session-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  margin-left: auto;
+}
+
+.ws-session-rename {
+  opacity: 0;
+  transition: opacity var(--t-fast);
+}
+.ws-session:hover .ws-session-rename {
+  opacity: 1;
+}
+
+/* ─── Settings 모달 — Apple/ChatGPT list-row 스타일 ──────────────── */
+
+/* 모달 헤더 — 본문(모달 평면)과 동일 background. */
+.settings-modal .settings-head {
+  border-bottom: none;
+  padding: 22px 24px 14px;
+  background: rgba(20, 22, 28, 0.7);
+  position: sticky;
+  top: 0;
+  z-index: 3;
+}
+
+.settings-head-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-back {
+  /* 뒤로 버튼 — 헤더 좌측 */
+}
+
+.settings-modal .settings-head h2 {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.settings-body {
+  padding: 0 24px 28px;
+}
+
+.settings-pages {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.settings-about {
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.settings-about-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 18px;
+}
+
+.settings-app-logo {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
+  flex-shrink: 0;
+}
+
+.settings-about-meta {
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-app-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  letter-spacing: 0.01em;
+}
+
+.settings-app-sub {
+  font-size: 11.5px;
+  color: var(--color-text-tertiary);
+  margin-top: 2px;
+}
+
+.settings-about-rows {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+/* 그룹: 라벨 + 카드 list */
+.settings-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.settings-group-label {
+  font-size: 12.5px;
+  letter-spacing: 0.01em;
+  color: var(--color-text-secondary);
+  padding: 0 4px;
+  font-weight: 500;
+}
+
+.settings-card-list {
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.settings-card-list-pad {
+  /* RefineSettingsPanel처럼 내부에 padding이 필요한 경우 */
+  padding: 14px 16px;
+}
+
+/* Row — list 안 단일 항목 */
+.settings-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 11px 16px;
+  background: transparent;
+  border: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  color: var(--color-text-primary);
+  font-family: inherit;
+  font-size: 13px;
+  text-align: left;
+  width: 100%;
+  cursor: default;
+  min-height: 44px;
+}
+
+.settings-row:first-child,
+.settings-about-rows .settings-row:first-child {
+  border-top: none;
+}
+
+.settings-row-button {
+  cursor: pointer;
+  transition: background var(--t-fast);
+}
+
+.settings-row-button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.settings-row-button:active:not(:disabled) {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.settings-row-icon {
+  width: 17px;
+  height: 17px;
+  color: var(--color-text-secondary);
+  flex-shrink: 0;
+}
+
+.settings-row-label {
+  flex: 1;
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 13px;
+}
+
+.settings-row-value {
+  color: var(--color-text-tertiary);
+  font-size: 12.5px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.settings-path-val {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 320px;
+  direction: rtl;
+  text-align: left;
+}
+
+/* 업데이트 row — 라벨 + 보조 문구 stacked. tone에 따라 우측 색상 변화. */
+.settings-updater-value {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+  max-width: 260px;
+}
+
+.settings-updater-label {
+  color: var(--color-text-secondary);
+  font-size: 12.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 260px;
+}
+
+.settings-updater-sub {
+  color: var(--color-text-tertiary);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 260px;
+}
+
+.settings-updater-row.tone-progress .settings-updater-label {
+  color: var(--color-text-primary);
+}
+
+.settings-updater-row.tone-good .settings-updater-label {
+  color: #6ad07a;
+}
+
+.settings-updater-row.tone-warn .settings-updater-label {
+  color: #e9a36b;
+}
+
+.settings-updater-row:disabled {
+  opacity: 1;
+  cursor: default;
+}
+
+.settings-row-chev {
+  width: 14px;
+  height: 14px;
+  color: var(--color-text-tertiary);
+  flex-shrink: 0;
+}
+
+/* dropdown — ChatGPT 톤. 평상시엔 박스/border 없음 (텍스트 + chevron만), hover 시에만 박스 표시.
+   padding은 좌우 모두 좁혀서 글자가 화살표 바로 왼쪽에 붙도록. */
+.settings-row-select {
+  background-color: transparent;
+  border: 1px solid transparent;
+  color: var(--color-text-primary);
+  font-family: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  padding: 4px 26px 4px 14px;
+  border-radius: 6px;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' width='8' height='12' viewBox='0 0 8 12'%3e%3cpath fill='none' stroke='%23b0b0b0' stroke-width='1.3' stroke-linecap='round' stroke-linejoin='round' d='M2 4.5l2-2.2 2 2.2M2 7.5l2 2.2 2-2.2'/%3e%3c/svg%3e");
+  background-repeat: no-repeat;
+  background-position: right 5px center;
+  flex-shrink: 0;
+  white-space: nowrap;
+  line-height: 1.2;
+  text-align: right;
+  text-align-last: right;
+  transition:
+    background-color var(--t-fast),
+    border-color var(--t-fast);
+}
+
+.settings-row-select:hover:not(:disabled) {
+  background-color: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.settings-row-select:disabled {
+  cursor: not-allowed;
+  color: var(--color-text-tertiary);
+  opacity: 0.85;
+}
+
+.settings-row-select:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* settings-row의 column variant — 라벨/입력/list 세로 배치 (priority 우선순위 list 등). */
+.settings-row-column {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  padding: 12px 14px;
+}
+
+.settings-row-column .settings-row-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.settings-priority-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-left: 26px;
+}
+
+.settings-priority-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.03);
+  font-size: 12.5px;
+  color: var(--color-text-primary);
+}
+
+.settings-priority-label {
+  flex: 1;
+}
+
+.settings-priority-btn {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  color: var(--color-text-secondary);
+  width: 24px;
+  height: 24px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  transition: background var(--t-fast);
+}
+
+.settings-priority-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--color-text-primary);
+}
+
+.settings-priority-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+/* 정책 설명 — 라벨과 dropdown 사이 회색 텍스트 (데이터 위치 경로 표시와 동일 톤) */
+.settings-row-desc {
+  text-align: right;
+  font-size: 11.5px;
+  color: var(--color-text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 280px;
+  white-space: nowrap;
+}
+
+/* CLI sub-page — version / missing 라벨 */
+.settings-row-version {
+  font-size: 11.5px;
+  color: var(--color-text-tertiary);
+  flex-shrink: 0;
+}
+
+.settings-row-missing {
+  color: var(--color-danger);
+  font-size: 11.5px;
+}
+
+/* 우측 작은 control 버튼 (폴더 picker, openExternal 등) */
+.settings-row-control {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--color-text-secondary);
+  width: 30px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+  white-space: nowrap;
+  transition:
+    background var(--t-fast),
+    color var(--t-fast);
+}
+
+.settings-row-control svg {
+  width: 14px;
+  height: 14px;
+}
+
+.settings-row-control:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--color-text-primary);
+}
+
+.settings-row-control:active:not(:disabled) {
+  background: rgba(255, 255, 255, 0.05);
+  transform: scale(0.96);
+}
+
+.settings-row-control:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Help / Shortcuts sub-page */
+.settings-page-intro {
+  margin: 0 4px;
+  font-size: 12px;
+}
+
+.settings-help-list {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  color: var(--color-text-secondary);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.settings-help-list code {
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: var(--radius-sm);
+  padding: 1px 5px;
+  font-size: 11.5px;
+}
+
+/* LICENSE 본문 — 모노스페이스 + 부드러운 wrap. settings-card-list 안 단일 pre로 둠. */
+.settings-license-text {
+  margin: 0;
+  padding: 14px 16px;
+  font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 11.5px;
+  line-height: 1.65;
+  color: var(--color-text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ─── Home pane ───────────────────────────────────────────────────── */
+
+.home-pane {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 32px;
+  overflow-y: auto;
+}
+
+.home-pane-inner {
+  width: 100%;
+  max-width: 640px;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+.home-header {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.home-title {
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin: 0;
+  color: var(--color-text-primary);
+}
+
+.home-subtitle {
+  font-size: 13px;
+  color: var(--color-text-tertiary);
+  margin: 0;
+}
+
+.home-input-wrap {
+  position: relative;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 14px;
+  padding: 14px 14px 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+  transition:
+    border-color var(--t-fast),
+    background var(--t-fast);
+}
+
+.home-input-wrap:focus-within {
+  border-color: rgba(122, 162, 247, 0.5);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.home-input {
+  width: 100%;
+  background: transparent;
+  border: none;
+  resize: none;
+  color: var(--color-text-primary);
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.55;
+  height: 96px;
+  outline: none;
+}
+
+.home-input::placeholder {
+  color: var(--color-text-tertiary);
+}
+
+.home-input-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.home-submit {
+  background: rgba(122, 162, 247, 0.2);
+  border: 1px solid rgba(122, 162, 247, 0.4);
+  color: #f5f8ff;
+  border-radius: 50%;
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition:
+    background var(--t-fast),
+    transform var(--t-fast);
+}
+
+.home-submit:hover:not(:disabled) {
+  background: rgba(122, 162, 247, 0.32);
+}
+
+.home-submit:active:not(:disabled) {
+  transform: scale(0.94);
+}
+
+.home-submit:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.home-submit svg {
+  width: 16px;
+  height: 16px;
+}
+
+.home-models {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+}
+
+.home-model {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+  transition:
+    background var(--t-fast),
+    border-color var(--t-fast),
+    transform var(--t-fast);
+}
+
+.home-model:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+.home-model.selected {
+  background: rgba(122, 162, 247, 0.14);
+  border-color: rgba(122, 162, 247, 0.5);
+}
+
+.home-model.unavailable,
+.home-model:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.home-model-logo {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+
+.home-model-meta {
+  flex: 1;
+  min-width: 0;
+}
+
+.home-model-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.home-model-desc {
+  font-size: 11.5px;
+  color: var(--color-text-tertiary);
+  margin-top: 2px;
+}
+
+/* ─── Memory Panel (M3.5 UI-E) ────────────────────────────────────────
+   우 사이드바 6섹션 카드 뷰. 상위 .sidebar-scroll > section 기본 글래스 프레임을
+   해제하고 자체 톤(헤더 + 섹션 list)으로 구성. */
+
+.sidebar-scroll > section.mem-panel {
+  padding: 0;
+  margin-bottom: 8px;
+  background: transparent;
+  border: none;
+}
+
+/* 3 collapsible 그룹 (AI 지시 / Refine·Quota / 메모리). 그룹 사이 hairline divider. */
+.mem-group {
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 6px 0;
+}
+
+.mem-group:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+
+.mem-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 4px;
+  background: transparent;
+  border: none;
+  color: var(--color-text-secondary);
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.mem-group-head:hover {
+  color: var(--color-text-primary);
+}
+
+.mem-group-chevron {
+  width: 12px;
+  height: 12px;
+  color: var(--color-text-tertiary);
+  flex-shrink: 0;
+  transition: transform var(--t-fast);
+}
+
+.mem-group-chevron.rot {
+  transform: rotate(90deg);
+}
+
+.mem-group-title {
+  flex: 1;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.mem-group-action {
+  flex-shrink: 0;
+}
+
+.mem-group-body {
+  padding: 4px 0 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mem-refine-btn {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--color-text-secondary);
+  width: 30px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+  transition:
+    background var(--t-fast),
+    color var(--t-fast);
+}
+
+.mem-refine-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+.mem-refine-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--color-text-primary);
+}
+
+.mem-refine-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.mem-refine-btn .spin {
+  animation: mem-spin 0.8s linear infinite;
+}
+
+@keyframes mem-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* 메모리 그룹 헤더 action 영역 — 여러 버튼 가로 배치. */
+.mem-group-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* InfoIcon 툴팁(브라우저 native title=). 시각적으로 sparkle/trash와 정렬. */
+.mem-info-tip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  color: var(--color-text-tertiary);
+  cursor: help;
+}
+.mem-info-tip:hover {
+  color: var(--color-text-secondary);
+}
+.mem-info-tip svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* 메모리 초기화 버튼 — refine 버튼과 동일 톤, danger 강조는 호버 시만 (실수 클릭 방지). */
+.mem-reset-btn {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--color-text-secondary);
+  width: 30px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+  transition:
+    background var(--t-fast),
+    color var(--t-fast),
+    border-color var(--t-fast);
+}
+.mem-reset-btn svg {
+  width: 14px;
+  height: 14px;
+}
+.mem-reset-btn:hover:not(:disabled) {
+  background: rgba(229, 90, 90, 0.14);
+  color: #ffb4b4;
+  border-color: rgba(229, 90, 90, 0.4);
+}
+.mem-reset-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* 카드 + 휴지통 wrapper — 카드 본체는 button(클릭=상세 모달), 휴지통은 우상단 absolute child.
+   button 중첩 회피 위해 wrapper는 div. 휴지통은 평소 흐릿하다 hover 시 강조. */
+.mem-card-wrap {
+  position: relative;
+}
+/* button(.mem-card)의 기본 width는 content-based — wrap 안에서 narrow하게 보이는 문제 차단. */
+.mem-card-wrap > .mem-card {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* CurrentIrCard promote 모션 — IR 본문이 바뀌면(promote 또는 refine 직후) IrPanel이
+   key를 갱신하며 wrapper remount → 이 키프레임이 한 번 재생됨.
+   위에서 내려오면서 fade-in. 240ms — 짧고 자연스럽게. */
+@keyframes mem-card-promote-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.mem-card-promote {
+  animation: mem-card-promote-in 240ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+.mem-card-delete {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 26px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    opacity var(--t-fast),
+    background var(--t-fast),
+    color var(--t-fast),
+    border-color var(--t-fast);
+}
+.mem-card-delete svg {
+  width: 13px;
+  height: 13px;
+}
+.mem-card-wrap:hover .mem-card-delete,
+.mem-card-delete:focus-visible {
+  opacity: 1;
+}
+.mem-card-delete:hover {
+  background: rgba(229, 90, 90, 0.16);
+  color: #ffb4b4;
+  border-color: rgba(229, 90, 90, 0.45);
+}
+
+/* 메모리 초기화 확인 모달 — SettingsModal과 동일 backdrop, 작은 dialog. */
+.mem-reset-modal {
+  background: var(--color-surface-1, #15151b);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6);
+  padding: 22px 22px 18px;
+  width: min(420px, 92vw);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.mem-reset-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+.mem-reset-body {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  line-height: 1.55;
+}
+.mem-reset-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+.mem-reset-option input[type='checkbox'] {
+  accent-color: var(--color-danger, #d96a6a);
+}
+.mem-reset-error {
+  font-size: 12px;
+  color: #ffb4b4;
+  background: rgba(229, 90, 90, 0.1);
+  border: 1px solid rgba(229, 90, 90, 0.2);
+  padding: 8px 10px;
+  border-radius: 8px;
+}
+.mem-reset-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.mem-status {
+  padding: 12px;
+  font-size: 12px;
+  color: var(--color-text-tertiary);
+}
+
+.mem-error {
+  padding: 10px 12px;
+  font-size: 12px;
+  color: var(--color-danger, #f87171);
+  background: rgba(248, 113, 113, 0.08);
+  border: 1px solid rgba(248, 113, 113, 0.22);
+  border-radius: var(--radius-md);
+  margin-bottom: 8px;
+  word-break: break-word;
+}
+
+.mem-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mem-section {
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.mem-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 12px;
+  background: rgba(255, 255, 255, 0.015);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.mem-section-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-secondary);
+}
+
+.mem-section-count {
+  font-size: 11px;
+  color: var(--color-text-primary);
+  background: rgba(255, 255, 255, 0.07);
+  padding: 1px 7px;
+  border-radius: 999px;
+  min-width: 20px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.mem-section-count.empty {
+  color: var(--color-text-tertiary);
+  background: transparent;
+}
+
+.mem-section-body {
+  padding: 0;
+}
+
+.mem-empty {
+  padding: 9px 12px;
+  font-size: 12px;
+  color: var(--color-text-tertiary);
+}
+
+.mem-list,
+.mem-list-plain {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.mem-list > li.mem-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 9px 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.mem-list > li.mem-row:first-child {
+  border-top: none;
+}
+
+.mem-row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mem-row-title {
+  font-size: 12.5px;
+  color: var(--color-text-primary);
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.mem-row-sub {
+  font-size: 11.5px;
+  color: var(--color-text-secondary);
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.mem-row-note {
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.mem-intent {
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.mem-intent-goal {
+  font-size: 13px;
+  color: var(--color-text-primary);
+  line-height: 1.4;
+}
+
+.mem-intent-sub {
+  font-size: 11.5px;
+  color: var(--color-text-secondary);
+}
+
+.mem-list-plain {
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mem-list-plain > li {
+  font-size: 11.5px;
+  color: var(--color-text-tertiary);
+  line-height: 1.4;
+  padding-left: 10px;
+  position: relative;
+}
+
+.mem-list-plain > li::before {
+  content: '·';
+  position: absolute;
+  left: 2px;
+}
+
+/* status badges */
+.mem-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 4px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  flex-shrink: 0;
+  margin-top: 1px;
+  font-variant-numeric: tabular-nums;
+}
+
+.mem-badge-add {
+  background: rgba(74, 222, 128, 0.13);
+  color: #86efac;
+}
+
+.mem-badge-mod {
+  background: rgba(251, 191, 36, 0.13);
+  color: #fcd34d;
+}
+
+.mem-badge-del {
+  background: rgba(248, 113, 113, 0.13);
+  color: #fca5a5;
+}
+
+.mem-badge-read {
+  background: rgba(122, 162, 247, 0.13);
+  color: #93c5fd;
+}
+
+.mem-badge-pass {
+  background: rgba(74, 222, 128, 0.13);
+  color: #86efac;
+}
+
+.mem-badge-fail {
+  background: rgba(248, 113, 113, 0.13);
+  color: #fca5a5;
+}
+
+.mem-badge-pend {
+  background: rgba(251, 191, 36, 0.13);
+  color: #fcd34d;
+}
+
+.mem-badge-skip {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--color-text-tertiary);
+}
+
+/* ─── 메모리 패널 — 카드 공통 ────────────────────────────────────────── */
+
+.mem-card {
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+}
+
+.mem-card-static {
+  cursor: default;
+}
+
+.mem-card-empty {
+  font-size: 11.5px;
+  color: var(--color-text-tertiary);
+  padding: 14px 12px;
+  text-align: center;
+}
+
+.mem-card-button {
+  cursor: pointer;
+  transition:
+    background var(--t-fast),
+    border-color var(--t-fast),
+    transform var(--t-fast);
+}
+
+.mem-card-button:hover {
+  background: rgba(255, 255, 255, 0.045);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.mem-card-button:active {
+  transform: scale(0.995);
+}
+
+.mem-card-history {
+  /* CurrentIrCard와 시각적 통일 — background 위계 차이로 크기/강조 인지가 갈리는 문제 해소.
+     계층 차별은 그룹 사이의 .mem-subhead("이전 스냅샷 · N")가 이미 담당. */
+}
+
+.mem-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.mem-card-eyebrow {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-text-tertiary);
+}
+
+.mem-card-time {
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.mem-card-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text-primary);
+  line-height: 1.35;
+  word-break: break-word;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.mem-card-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.mem-count-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10.5px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.mem-count-chip.empty {
+  color: var(--color-text-tertiary);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.mem-count-chip-label {
+  color: var(--color-text-tertiary);
+}
+
+.mem-count-chip-n {
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+
+.mem-count-chip.empty .mem-count-chip-n {
+  color: var(--color-text-tertiary);
+  font-weight: 400;
+}
+
+.mem-count-total {
+  margin-left: auto;
+  font-size: 10.5px;
+  color: var(--color-text-tertiary);
+  align-self: center;
+}
+
+.mem-subhead {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-text-tertiary);
+  padding: 4px 4px 0;
+}
+
+.mem-archive-more {
+  background: transparent;
+  border: 1px dashed rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius-md);
+  padding: 8px;
+  font: inherit;
+  font-size: 11.5px;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  transition:
+    color var(--t-fast),
+    border-color var(--t-fast);
+}
+
+.mem-archive-more:hover {
+  color: var(--color-text-primary);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+/* ─── γ AI 지시 카드 ──────────────────────────────────────────────── */
+
+.mem-instructions-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mem-instruction-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.mem-instruction-row:first-child {
+  border-top: none;
+}
+
+.mem-instruction-meta {
+  flex: 1;
+  min-width: 0;
+}
+
+.mem-instruction-name {
+  font-size: 12px;
+  color: var(--color-text-primary);
+  font-weight: 500;
+}
+
+.mem-instruction-sub {
+  font-size: 10.5px;
+  color: var(--color-text-tertiary);
+  margin-top: 1px;
+}
+
+.mem-instruction-action {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--color-text-secondary);
+  width: 26px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+  transition:
+    background var(--t-fast),
+    color var(--t-fast);
+}
+
+.mem-instruction-action svg {
+  width: 12px;
+  height: 12px;
+}
+
+.mem-instruction-action:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--color-text-primary);
+}
+
+/* ─── δ Refine / Quota 카드 ───────────────────────────────────────── */
+
+.mem-kv-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 0;
+}
+
+.mem-kv-key {
+  font-size: 11.5px;
+  color: var(--color-text-tertiary);
+}
+
+.mem-kv-val {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--color-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.mem-kv-suffix {
+  font-size: 11.5px;
+  color: var(--color-text-secondary);
+}
+
+.mem-kv-note {
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  line-height: 1.45;
+  margin-top: 2px;
+}
+
+/* 세 CLI quota 가로 나열 — 부모 카드 위에 직접 배치 (별도 박스/배경 없음).
+   활성 CLI: dot + 이름 + % + severity 배지. 비활성: dot + % 만. */
+.mem-quota-row {
+  display: flex;
+  align-items: stretch;
+  padding: 4px 0 0;
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+}
+
+.mem-quota-group {
+  display: inline-flex;
+  align-items: stretch;
+  min-width: 0;
+}
+
+.mem-quota-group:first-child {
+  flex: 1 1 auto;
+}
+
+.mem-quota-group:not(:first-child) {
+  flex: 0 0 auto;
+}
+
+/* 활성을 포함하는 그룹은 더 넓게 (이름 + 배지 수용). */
+.mem-quota-group:has(.is-active) {
+  flex: 2 1 auto;
+}
+
+.mem-quota-sep {
+  flex: 0 0 1px;
+  align-self: stretch;
+  margin: 2px 6px;
+  background: var(--color-border);
+}
+
+.mem-quota-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.mem-quota-dot {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--mem-quota-dot, var(--color-text-tertiary));
+}
+
+.mem-quota-item.model-agy {
+  --mem-quota-dot: var(--model-agy);
+}
+.mem-quota-item.model-codex {
+  --mem-quota-dot: var(--model-codex);
+}
+.mem-quota-item.model-claude {
+  --mem-quota-dot: var(--model-claude);
+}
+
+.mem-quota-name {
+  color: var(--color-text-primary);
+  font-weight: 600;
+  font-size: 10.5px;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  flex: 0 1 auto;
+}
+
+.mem-quota-pct {
+  color: var(--color-text-primary);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.mem-quota-item:not(.is-active) .mem-quota-pct {
+  color: var(--color-text-secondary);
+}
+
+.mem-quota-item.is-active .mem-quota-pct {
+  margin-left: 1px;
+}
+
+.mem-quota-item.is-active .mem-badge {
+  margin-left: 1px;
+  font-size: 9.5px;
+  padding: 1px 6px;
+}
+
+/* ─── β Turn 흐름 카드 ───────────────────────────────────────────── */
+
+.mem-flow-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.mem-flow-label {
+  font-size: 11.5px;
+  color: var(--color-text-primary);
+  font-weight: 500;
+}
+
+.mem-flow-count {
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.mem-flow-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mem-flow-axis {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-tertiary);
+  width: 38px;
+  flex-shrink: 0;
+}
+
+.mem-flow-bar {
+  flex: 1;
+  position: relative;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.mem-flow-bar-fill {
+  position: absolute;
+  inset: 0;
+  width: 0;
+  background: linear-gradient(90deg, rgba(122, 162, 247, 0.7), rgba(167, 139, 250, 0.7));
+  border-radius: 999px;
+  transition: width var(--t-med);
+}
+
+.mem-flow-bar-fill.alt {
+  background: linear-gradient(90deg, rgba(96, 165, 250, 0.5), rgba(56, 189, 248, 0.5));
+}
+
+/* turn 카운트 임계 표시 — 1~N-1 위치 안쪽 세로 tick. 바 안에서만 보이도록 overflow:hidden. */
+.mem-flow-tick {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: rgba(255, 255, 255, 0.25);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+/* ─── IR Detail Modal ──────────────────────────────────────────────── */
+
+.mem-detail-modal {
+  max-width: 720px;
+  width: 92vw;
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.mem-detail-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 18px 20px;
+}
+
+.mem-detail-subtitle {
+  font-size: 11.5px;
+  color: var(--color-text-tertiary);
+  margin-top: 2px;
+}
+
+/* ─── View Transitions — 세션 reorder 모션 ────────────────────────────
+   App.tsx의 onTurnsUpdated가 setOpenWorkspace를 startViewTransition으로 감싸면
+   사이드바(ses-sb-*) + 상단 탭(ses-tab-*)의 동일 viewTransitionName 항목이
+   이전/이후 위치를 자동 보간해 슬라이드. duration 짧게(220ms)로 부드럽되 답답하지 않게.
+   접근성: prefers-reduced-motion 사용자엔 transition 즉시. */
+::view-transition-group(*) {
+  animation-duration: 220ms;
+  animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*) {
+    animation-duration: 0.01ms;
+  }
+}
