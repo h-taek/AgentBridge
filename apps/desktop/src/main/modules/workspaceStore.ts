@@ -715,7 +715,11 @@ export async function migrateThreadsToWorkspaces(threadsDir: string): Promise<Mi
         // meta는 workspace.json sessions[]에 통합 저장 — 별도 sessions/<sid>/meta.json 작성 불필요.
       }
 
-      await writeWorkspaceMetaAtomic(workspace)
+      // workspace.json 초기 작성도 코어 락 안에서. 부팅 시 1회 작업이지만 같은 contextId에
+      // 사용자가 동시 진입하면 race 가능 — 코어 메타 변경자들과 같은 mutex로 직렬화.
+      await getCoreStore().withLock(contextId, async () => {
+        await writeWorkspaceMetaAtomic(workspace)
+      })
       result.migrated++
       newlyMigrated.push(contextId)
     } catch (err) {
