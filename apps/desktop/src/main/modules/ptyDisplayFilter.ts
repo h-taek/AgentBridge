@@ -1,5 +1,14 @@
 // PTY display filter — M3 O 청크 후속 (2026-05-11).
 //
+// **코어 packages/core/src/ptyDisplayFilter.ts와의 관계 (의도된 분기, 통합 금지)**:
+//   - 알고리즘은 동일: ANSI/C0 strip → plain 위 indexOf → plainToOrig 복원 → emit/drop.
+//   - 타이밍 상수도 동일 (BLOCK_TIMEOUT_MS, STUCK_WARN_MS).
+//   - 인터페이스만 다름: 코어는 인스턴스 기반 class, 데스크탑은 ptySessionId-keyed Map +
+//     stateless 함수 export.
+//   - 이유: IPC 라이프사이클이 ptySessionId를 키로 사용 — class 인스턴스 핸들을 IPC 너머로
+//     들고 다닐 수 없음. 익스텐션은 워커 안에서 직접 인스턴스 보유 가능해 코어 class 그대로 씀.
+//   - 알고리즘 변경 시 *두 파일을 같이 고쳐야 함*. 코어만 고치면 데스크탑은 안 따라감.
+//
 // codex 0.130.0 + gemini는 hook `additionalContext`를 TUI에 *visible developer message*로
 // 렌더링. `suppressOutput: true`는 no-op (openai/codex#15497, #16933 확정).
 //

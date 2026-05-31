@@ -2,7 +2,7 @@ import type { WebContents } from 'electron'
 import log from 'electron-log/main'
 import { killPty, resizePty, startPty, writePty } from '../ptySession'
 import { extractQuotaPercent, recordQuotaPercent } from '../cliQuotaTracker'
-import { readLastConversationForCwd, watchForNewConversationUuid } from './agyResume'
+import { readLastConversationForCwd, watchForNewConversationUuidViaCache } from './agyResume'
 import { deleteAgyNativeSession } from '@agentbridge/core'
 import { getCoreCliAdapters } from './coreCliAdapters'
 import type {
@@ -80,17 +80,17 @@ async function spawnInteractive(
   )
 
   // 새 세션 또는 resume fallback 케이스 — UUID 후처리 캡처.
-  let modelSessionId: string | null = opts.modelSessionId ?? null
-  if (modelSessionId === null && req.cwd) {
+  // 캡처 결과는 hooks.onModelSessionIdCaptured 콜백으로만 호출자에 전달 (반환값은 이미 결정됨).
+  const initialModelSessionId: string | null = opts.modelSessionId ?? null
+  if (initialModelSessionId === null && req.cwd) {
     const cwd = req.cwd
     void (async (): Promise<void> => {
       const existing = await readLastConversationForCwd(cwd)
       const exclude = new Set<string>(existing ? [existing] : [])
-      await watchForNewConversationUuid({
+      await watchForNewConversationUuidViaCache({
         cwd,
         excludeUuids: exclude,
         onCaptured: (uuid) => {
-          modelSessionId = uuid
           hooks.onModelSessionIdCaptured?.(uuid)
         }
       })
@@ -99,7 +99,7 @@ async function spawnInteractive(
     })
   }
 
-  return { ...result, modelSessionId }
+  return { ...result, modelSessionId: initialModelSessionId }
 }
 
 async function deleteNativeSession(modelSessionId: string | null): Promise<void> {
