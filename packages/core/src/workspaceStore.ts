@@ -189,15 +189,93 @@ export function createWorkspaceStore(
     return join(sessionsDir(workspaceId), sessionId);
   }
 
+  // Phase 6.A/B 통합 직후 옛 익스텐션 데이터(`sessions.json` 분리 schema)를 안고 있는 사용자
+  // 워크스페이스는 workspace.json이 `{}`로 남아 있을 수 있다. defensive fallback으로 필수
+  // 필드를 채우고, 같은 디렉토리의 `sessions.json`이 있으면 한 번 흡수해서 sessions[]로 변환.
+  // 흡수 후에는 정상 schema로 atomic write — 다음 호출부터는 폴백 경로 안 탐.
+  type LegacySessionMeta = {
+    sessionId?: unknown;
+    workspaceId?: unknown;
+    model?: unknown;
+    name?: unknown;
+    createdAt?: unknown;
+    lastActiveAt?: unknown;
+    active?: unknown;
+    modelSessionId?: unknown;
+  };
+
+  async function tryReadLegacySessions(workspaceId: string): Promise<SessionMeta[]> {
+    const p = join(workspaceDir(workspaceId), 'sessions.json');
+    try {
+      const raw = await fsp.readFile(p, 'utf8');
+      const parsed = JSON.parse(raw) as unknown;
+      if (!Array.isArray(parsed)) return [];
+      const out: SessionMeta[] = [];
+      for (const s of parsed as LegacySessionMeta[]) {
+        if (typeof s !== 'object' || s === null) continue;
+        if (typeof s.sessionId !== 'string' || !UUID_RE.test(s.sessionId)) continue;
+        if (typeof s.model !== 'string') continue;
+        out.push({
+          sessionId: s.sessionId,
+          model: s.model as CliKind,
+          modelSessionId: typeof s.modelSessionId === 'string' ? s.modelSessionId : null,
+          createdAt: typeof s.createdAt === 'string' ? s.createdAt : new Date().toISOString(),
+          closedAt: s.active === false ? new Date().toISOString() : null,
+          title: typeof s.name === 'string' ? s.name : undefined,
+          kind: 'cli',
+          lastChattedAt: typeof s.lastActiveAt === 'string' ? s.lastActiveAt : undefined,
+        });
+      }
+      return out;
+    } catch {
+      return [];
+    }
+  }
+
+  function findPathByWorkspaceId(workspaceId: string): string | undefined {
+    const map = loadMap();
+    for (const [path, id] of Object.entries(map)) {
+      if (id === workspaceId) return path;
+    }
+    return undefined;
+  }
+
   async function readWorkspaceMeta(workspaceId: string): Promise<WorkspaceMeta> {
     const p = workspaceMetaPath(workspaceId);
     const raw = await fsp.readFile(p, 'utf8');
-    const parsed = JSON.parse(raw) as WorkspaceMeta;
-    // 기존 데이터 호환 — 필드 누락 시 default.
+    const parsed = JSON.parse(raw) as Partial<WorkspaceMeta>;
+
+    // 빈 객체 또는 workspaceId 누락 — 옛 schema 흔적. 흡수 + 정상 초기화.
+    const needsRepair = !parsed.workspaceId;
+    let legacySessions: SessionMeta[] = [];
+    if (needsRepair) {
+      legacySessions = await tryReadLegacySessions(workspaceId);
+      const folderPath = findPathByWorkspaceId(workspaceId);
+      const now = new Date().toISOString();
+      const repaired: WorkspaceMeta = {
+        workspaceId,
+        title: parsed.title ?? folderPath?.split('/').pop() ?? `Workspace ${workspaceId.slice(0, 8)}`,
+        createdAt: parsed.createdAt ?? legacySessions[0]?.createdAt ?? now,
+        updatedAt: now,
+        workspacePath: parsed.workspacePath ?? folderPath ?? '',
+        sessions: legacySessions,
+        primarySessionId: legacySessions.find((s) => s.closedAt === null)?.sessionId ?? legacySessions[0]?.sessionId ?? null,
+        compactionInProgress: null,
+        codexHookTrust: parsed.codexHookTrust,
+      };
+      // 옛 schema 흡수 시 atomic write — 다음 부팅부터는 fallback 안 탐.
+      await writeWorkspaceMetaAtomic(repaired);
+      log.log(
+        `workspaceStore: repaired legacy workspace ${workspaceId.slice(0, 8)} (sessions imported=${legacySessions.length})`,
+      );
+      return repaired;
+    }
+
+    // 정상 schema — 누락된 보조 필드만 default.
     parsed.sessions = Array.isArray(parsed.sessions) ? parsed.sessions : [];
     parsed.primarySessionId = parsed.primarySessionId ?? null;
     parsed.compactionInProgress = parsed.compactionInProgress ?? null;
-    return parsed;
+    return parsed as WorkspaceMeta;
   }
 
   async function writeWorkspaceMetaAtomic(meta: WorkspaceMeta): Promise<void> {
@@ -221,6 +299,24 @@ export function createWorkspaceStore(
       map[folderFsPath] = id;
       saveMap(map);
       mkdirSync(join(workspaceDir(id), 'sessions'), { recursive: true });
+      // workspace.json 정상 초기화 — folderFsPath를 workspacePath로 사용.
+      // 호스트가 별도 createWorkspace를 호출하지 않아도(예: 익스텐션) 다음 readWorkspaceMeta가
+      // 빈 객체를 보지 않게 함. 옛 schema 흡수 경로는 readWorkspaceMeta의 repair fallback이 처리.
+      const now = new Date().toISOString();
+      const meta: WorkspaceMeta = {
+        workspaceId: id,
+        title: folderFsPath.split('/').pop() ?? `Workspace ${id.slice(0, 8)}`,
+        createdAt: now,
+        updatedAt: now,
+        workspacePath: folderFsPath,
+        sessions: [],
+        primarySessionId: null,
+        compactionInProgress: null,
+      };
+      const metaPath = workspaceMetaPath(id);
+      const tmp = `${metaPath}.${process.pid}.${Date.now()}.tmp`;
+      writeFileSync(tmp, JSON.stringify(meta, null, 2), 'utf8');
+      renameSync(tmp, metaPath);
       log.log(`workspaceStore: created id=${id} for ${folderFsPath}`);
       return id;
     },
