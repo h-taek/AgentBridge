@@ -4,6 +4,7 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
 import {
+  createWorkspaceStore,
   createHookStatusStore,
   createEnvProbe,
   createHookInstaller,
@@ -11,6 +12,7 @@ import {
   createCliAdapters,
   createCompactionScheduler,
   createQuotaTracker,
+  type WorkspaceStore,
   type HookStatusStore,
   type EnvProbe,
   type HookInstaller,
@@ -26,7 +28,6 @@ import { getConfig } from '../settings/config';
 import * as notifications from './notifications';
 import { cleanupSessionAttachments } from './attachmentStore';
 import { createQuotaStore } from './quotaStore';
-import { createWorkspaceStore, type WorkspaceStore } from './workspaceStore';
 
 const logger: Logger = {
   log: (m) => output.log(m),
