@@ -1,11 +1,11 @@
 // 코어 createCliAdapters 인스턴스 lazy singleton.
 //
 // 2026-06-01 Phase 5: 데스크탑이 코어 createCliAdapters로 buildSpawnOptions 위임.
-// 데스크탑 자체 hookInstaller(함수 export 패턴)를 코어 HookInstaller 인터페이스에 wrap.
 // 2026-06-01 Phase A: hookStatusStore 코어 인스턴스 주입 — UI 배지는 코어가 캡처한
-// 사유를 spawn 후 읽어 전달. 데스크탑이 직접 installHooks 호출하지 않음.
+// 사유를 spawn 후 읽어 전달.
+// 2026-06-01 Phase C: 코어 createHookInstaller 직접 사용 — 데스크탑 wrapper 제거.
+// legacy `.gemini/settings.json` 정리는 agy install 후 별도로 호출.
 
-import { app } from 'electron'
 import log from 'electron-log/main'
 import {
   createCliAdapters,
@@ -14,42 +14,28 @@ import {
   type HookInstaller,
   type HookStatusStore
 } from '@agentbridge/core'
-import { installHooksForSession } from '../hookInstaller'
+import { getDesktopHookInstaller, cleanupLegacyGeminiSettings } from '../hookInstaller'
 import { getCoreEnvProbe } from '../envProbe'
 import { getWorkspacePaths } from '../workspaceStore'
 
-function createDesktopHookInstaller(): HookInstaller {
-  const userDataPath = app.getPath('userData')
+// 코어 HookInstaller를 그대로 사용하되, agy install 후 legacy gemini settings 정리만 추가.
+function getCoreHookInstallerWithLegacyCleanup(): HookInstaller {
+  const inner = getDesktopHookInstaller()
   return {
-    async installClaudeHooks(workspaceClaudeDir: string, workspaceId: string): Promise<string> {
-      const result = await installHooksForSession({
-        model: 'claude',
-        workspaceId,
-        workspaceCwd: '',
-        workspaceSettingsDir: workspaceClaudeDir,
-        userDataPath
-      })
-      return result.claudeSettingsPath ?? ''
-    },
-    async installCodexHooks(cwd: string, workspaceId: string) {
-      const result = await installHooksForSession({
-        model: 'codex',
-        workspaceId,
-        workspaceCwd: cwd,
-        workspaceSettingsDir: '',
-        userDataPath
-      })
-      return { hooksJsonPath: result.codexHooksJsonPath ?? '', configTomlPath: '' }
-    },
-    async installAgyHooks(cwd: string, workspaceId: string) {
-      const result = await installHooksForSession({
-        model: 'agy',
-        workspaceId,
-        workspaceCwd: cwd,
-        workspaceSettingsDir: '',
-        userDataPath
-      })
-      return { hooksJsonPath: result.agyHooksJsonPath ?? '' }
+    installClaudeHooks: (workspaceClaudeDir, workspaceId) =>
+      inner.installClaudeHooks(workspaceClaudeDir, workspaceId),
+    installCodexHooks: (cwd, workspaceId) => inner.installCodexHooks(cwd, workspaceId),
+    async installAgyHooks(cwd, workspaceId) {
+      const result = await inner.installAgyHooks(cwd, workspaceId)
+      try {
+        await cleanupLegacyGeminiSettings(cwd)
+      } catch (err) {
+        log.warn('agy install 후 legacy .gemini cleanup 실패 (non-fatal)', {
+          cwd,
+          err: String(err)
+        })
+      }
+      return result
     }
   }
 }
@@ -68,9 +54,11 @@ export function getCoreCliAdapters(): CliAdapterSet {
   if (!_coreCliAdapters) {
     _coreCliAdapters = createCliAdapters({
       envProbe: getCoreEnvProbe(),
-      hookInstaller: createDesktopHookInstaller(),
+      hookInstaller: getCoreHookInstallerWithLegacyCleanup(),
       hookStatusStore: getCoreHookStatusStore(),
-      workspaceClaudeDir: (workspaceId) => getWorkspacePaths(workspaceId).settingsDir,
+      // 코어 installClaudeHooks가 `<workspaceClaudeDir>/settings/claude-settings.json`에 씀.
+      // 데스크탑은 settingsDir=`<workspaceRoot>/settings`이므로 워크스페이스 루트를 넘기면 동일 경로.
+      workspaceClaudeDir: (workspaceId) => getWorkspacePaths(workspaceId).dir,
       logger: {
         log: (m) => log.info(m),
         warn: (m) => log.warn(m)

@@ -33,6 +33,9 @@ type HookEventName =
 
 const TOML_MARKER_START = '# AgentBridge BEGIN';
 const TOML_MARKER_END = '# AgentBridge END';
+// 데스크탑 구버전이 남긴 marker — 다음 write 때 흡수·삭제. codex TOML duplicate key 거부 회피.
+const LEGACY_TOML_MARKER_START = '# AgentBridge:start';
+const LEGACY_TOML_MARKER_END = '# AgentBridge:end';
 
 async function atomicWrite(filePath: string, content: string): Promise<void> {
   const tmp = `${filePath}.${process.pid}.${Date.now()}.tmp`;
@@ -170,11 +173,16 @@ export function createHookInstaller(opts: HookInstallerOptions): HookInstaller {
   }
 
   async function mergeTomlMarkerBlock(filePath: string, ourBlock: string): Promise<void> {
-    const existing = (await readFileSafe(filePath)) ?? '';
+    const raw = (await readFileSafe(filePath)) ?? '';
     const wrapped = `${TOML_MARKER_START}\n${ourBlock}\n${TOML_MARKER_END}`;
     const escapedStart = TOML_MARKER_START.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const escapedEnd = TOML_MARKER_END.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const blockPattern = new RegExp(`${escapedStart}[\\s\\S]*?${escapedEnd}`, 'm');
+    // legacy `:start/:end` 블록 흡수 — duplicate key 거부 회피.
+    const legacyStart = LEGACY_TOML_MARKER_START.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const legacyEnd = LEGACY_TOML_MARKER_END.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const legacyPattern = new RegExp(`${legacyStart}[\\s\\S]*?${legacyEnd}\\n?`, 'gm');
+    const existing = raw.replace(legacyPattern, '');
 
     const outside = existing.replace(blockPattern, '');
     const sectionMatch = /^\[([^\]]+)\]/m.exec(ourBlock.trim());
