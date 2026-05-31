@@ -24,7 +24,7 @@ import {
 import * as output from '../log/output';
 import { getConfig } from '../settings/config';
 import * as notifications from './notifications';
-import { cleanupSessionAttachments } from './attachmentStore';
+import { setAttachmentLogger } from './attachmentStore';
 import { createQuotaStore } from './quotaStore';
 
 const logger: Logger = {
@@ -91,9 +91,8 @@ export function initializeCore(context: vscode.ExtensionContext): void {
     logger,
   });
 
-  // 2026-06-01 Phase 6.B: 옛 sessionRegistry 폐기. 세션 등록/삭제는 workspaceStore가 처리.
-  // attachment 청소는 deleteSession 시점에 호출처가 직접 호출하거나 별도 cleanup 경로 사용.
-  void cleanupSessionAttachments; // 향후 attachment cleanup 호출처 추가 시 사용
+  // attachmentStore에 logger 단방향 주입 (circular dep 제거).
+  setAttachmentLogger(logger);
 
   _cliAdapters = createCliAdapters({
     envProbe: _envProbe,

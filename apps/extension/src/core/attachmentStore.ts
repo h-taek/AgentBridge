@@ -7,7 +7,13 @@ import { promises as fs } from 'fs';
 import { basename, dirname, join } from 'path';
 import * as vscode from 'vscode';
 import { type Logger, noopLogger } from '@agentbridge/core';
-import { getLogger } from './coreInstances';
+
+// 단방향 의존: coreInstances가 init 시점에 setAttachmentLogger로 logger 주입.
+// 이 모듈은 더 이상 coreInstances를 import하지 않음 (circular dep 제거).
+let _logger: Logger = noopLogger;
+export function setAttachmentLogger(logger: Logger): void {
+  _logger = logger;
+}
 
 const TTL_MS = 60 * 60 * 1000; // 1 hour
 const ATTACH_DIR_NAME = '.agentbridge';
@@ -147,7 +153,7 @@ export function attachmentPathFor(
 export async function writeAttachment(absPath: string, base64: string): Promise<void> {
   const cwd = workspaceCwd();
   if (!cwd) throw new Error('No workspace folder');
-  await writeAttachmentInternal(cwd, absPath, base64, { logger: getLogger() });
+  await writeAttachmentInternal(cwd, absPath, base64, { logger: _logger });
 }
 
 export async function cleanupSessionAttachments(
@@ -156,11 +162,11 @@ export async function cleanupSessionAttachments(
 ): Promise<void> {
   const cwd = workspaceCwd();
   if (!cwd) return;
-  await cleanupSessionAttachmentsInternal(cwd, sessionId, { logger: getLogger() });
+  await cleanupSessionAttachmentsInternal(cwd, sessionId, { logger: _logger });
 }
 
 export async function cleanupStaleAttachments(): Promise<void> {
   const cwd = workspaceCwd();
   if (!cwd) return;
-  await cleanupStaleAttachmentsInternal(cwd, { logger: getLogger() });
+  await cleanupStaleAttachmentsInternal(cwd, { logger: _logger });
 }
