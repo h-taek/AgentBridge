@@ -3,11 +3,7 @@
 import { TurnRecorder as CoreTurnRecorder, type TurnsAssistantDetail } from '@agentbridge/core';
 import type { CliKind } from '../../shared/types';
 import * as workspaceStore from '../workspaceStore';
-import {
-  getCompactionScheduler,
-  getSessionRegistry,
-  getLogger,
-} from '../coreInstances';
+import { getCompactionScheduler, getWorkspaceStore, getLogger } from '../coreInstances';
 import { getConfig } from '../../settings/config';
 
 export class TurnRecorder {
@@ -22,7 +18,16 @@ export class TurnRecorder {
       model,
       getAssistantDetail: () => getConfig().assistantDetail as TurnsAssistantDetail,
       scheduler: getCompactionScheduler(),
-      sessionRegistry: getSessionRegistry(),
+      onTurnFlushed: async ({ workspaceId, sessionId, flushedAt }) => {
+        // 옛 sessionRegistry.updateActivity 대체 — workspace.json sessions[]에 lastChattedAt 갱신.
+        try {
+          await getWorkspaceStore().updateSessionMeta(workspaceId, sessionId, {
+            lastChattedAt: flushedAt,
+          });
+        } catch {
+          /* non-fatal */
+        }
+      },
       logger: getLogger(),
     });
   }

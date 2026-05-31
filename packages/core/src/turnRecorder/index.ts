@@ -22,7 +22,12 @@ import { TURN_CAP } from '../shared/turns';
 import type { Logger } from '../interfaces';
 import { noopLogger } from '../interfaces';
 import type { CompactionScheduler } from '../compactionScheduler';
-import type { SessionRegistry } from '../sessionRegistry';
+
+// SessionRegistry는 옛 Phase 6.B에서 폐기됨. 호환 위해 minimal 인터페이스 유지.
+// 새 코드는 onTurnFlushed 콜백 사용.
+interface SessionRegistry {
+  updateActivity(workspaceId: string, workspaceRoot: string, sessionId: string): Promise<void>;
+}
 
 const IDLE_FLUSH_MS = 1_500;
 const ASSISTANT_BUFFER_HARD_CAP = 1_000_000; // 1MB
@@ -267,7 +272,7 @@ export class TurnRecorder {
       if (this.opts.sessionRegistry) {
         void this.opts.sessionRegistry
           .updateActivity(workspaceId, this.opts.workspaceRoot, sessionId)
-          .catch((err) =>
+          .catch((err: unknown) =>
             this.log.warn(`turnRecorder updateActivity 실패: ${String(err)}`),
           );
       }

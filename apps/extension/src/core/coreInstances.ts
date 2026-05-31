@@ -8,7 +8,6 @@ import {
   createHookStatusStore,
   createEnvProbe,
   createHookInstaller,
-  createSessionRegistry,
   createCliAdapters,
   createCompactionScheduler,
   createQuotaTracker,
@@ -16,7 +15,6 @@ import {
   type HookStatusStore,
   type EnvProbe,
   type HookInstaller,
-  type SessionRegistry,
   type CliAdapterSet,
   type CompactionScheduler,
   type CompactionNotifications,
@@ -38,7 +36,6 @@ let _workspaceStore: WorkspaceStore | null = null;
 let _hookStatusStore: HookStatusStore | null = null;
 let _envProbe: EnvProbe | null = null;
 let _hookInstaller: HookInstaller | null = null;
-let _sessionRegistry: SessionRegistry | null = null;
 let _cliAdapters: CliAdapterSet | null = null;
 let _compactionScheduler: CompactionScheduler | null = null;
 let _quotaTracker: QuotaTracker | null = null;
@@ -61,9 +58,6 @@ export function getEnvProbe(): EnvProbe {
 }
 export function getHookInstaller(): HookInstaller {
   return ensureInitialized(_hookInstaller, 'hookInstaller');
-}
-export function getSessionRegistry(): SessionRegistry {
-  return ensureInitialized(_sessionRegistry, 'sessionRegistry');
 }
 export function getCliAdapters(): CliAdapterSet {
   return ensureInitialized(_cliAdapters, 'cliAdapters');
@@ -97,15 +91,9 @@ export function initializeCore(context: vscode.ExtensionContext): void {
     logger,
   });
 
-  _sessionRegistry = createSessionRegistry({
-    logger,
-    onAfterDelete: async (_workspaceId, sessionId) => {
-      // VS Code workspaceFolders[0]를 cwd로. 다른 워크스페이스로 전환된 후 trigger되는 케이스는
-      // sessionRegistry가 이미 처리(워크스페이스별로 cwd가 다를 수 있음). attachmentStore는
-      // 현재 워크스페이스만 청소한다 — 익스텐션 원본 동작과 동일.
-      await cleanupSessionAttachments(_workspaceId, sessionId);
-    },
-  });
+  // 2026-06-01 Phase 6.B: 옛 sessionRegistry 폐기. 세션 등록/삭제는 workspaceStore가 처리.
+  // attachment 청소는 deleteSession 시점에 호출처가 직접 호출하거나 별도 cleanup 경로 사용.
+  void cleanupSessionAttachments; // 향후 attachment cleanup 호출처 추가 시 사용
 
   _cliAdapters = createCliAdapters({
     envProbe: _envProbe,
