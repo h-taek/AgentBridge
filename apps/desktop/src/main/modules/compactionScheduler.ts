@@ -57,6 +57,11 @@ function resolveRefineDecision(activeModel: CliKind, settings: Awaited<ReturnTyp
 let _scheduler: CompactionScheduler | null = null
 let _maxArchive = 5 // 안전한 default; loadSettings 한 번 후 갱신
 
+// turnRecorder 등이 코어 인스턴스를 직접 의존할 수 있도록 노출.
+export async function getCoreCompactionScheduler(): Promise<CompactionScheduler> {
+  return ensureScheduler()
+}
+
 async function ensureScheduler(): Promise<CompactionScheduler> {
   if (_scheduler) return _scheduler
   const settings = await loadSettings()

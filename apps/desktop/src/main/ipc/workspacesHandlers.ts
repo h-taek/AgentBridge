@@ -488,7 +488,8 @@ async function spawnAndAttachSession(
     workspaceId,
     sessionId: session.sessionId,
     ptySessionId: pty.sessionId,
-    model: session.model
+    model: session.model,
+    workspacePath: ws.workspacePath
   })
 
   // primarySessionId가 null인 워크스페이스(손상 마이그레이션 잔재)는 첫 활성 세션으로 채움.

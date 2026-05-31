@@ -172,12 +172,8 @@ export function getCachedWorkspaceTitle(workspaceId: string): string | null {
   return workspaceTitleCache.get(workspaceId) ?? null
 }
 
-async function writeSessionMetaAtomic(workspaceId: string, meta: SessionMeta): Promise<void> {
-  const paths = getSessionPaths(workspaceId, meta.sessionId)
-  const tmp = makeAtomicTmpPath(paths.meta)
-  await fs.writeFile(tmp, JSON.stringify(meta, null, 2), 'utf8')
-  await fs.rename(tmp, paths.meta)
-}
+// writeSessionMetaAtomic 폐기 (2026-06-01 Phase 6). 세션 메타는 workspace.json sessions[]에
+// 단일 source로 통합 저장. sessions/<sid>/meta.json은 더 이상 작성하지 않음 (옛 파일은 무해).
 
 // 워크스페이스 생성 + 첫 세션 등록.
 export async function createWorkspace(
@@ -230,7 +226,6 @@ export async function createWorkspace(
   await fs.writeFile(sp.replayLog, '', 'utf8')
 
   await writeWorkspaceMetaAtomic(workspace)
-  await writeSessionMetaAtomic(workspaceId, firstSession)
 
   return { workspace, firstSession }
 }
@@ -395,11 +390,10 @@ export async function addSessionToWorkspace(
       kind
     }
 
-    // 세션 디렉토리 + 빈 replay.log 생성
+    // 세션 디렉토리 + 빈 replay.log 생성 (meta는 workspace.json sessions[]에 통합 저장)
     const sp = getSessionPaths(workspaceId, sessionId)
     await fs.mkdir(sp.dir, { recursive: true })
     await fs.writeFile(sp.replayLog, '', 'utf8')
-    await writeSessionMetaAtomic(workspaceId, newSession)
 
     // workspace.json sessions[]에 append
     const ws = await loadWorkspace(workspaceId)
@@ -442,15 +436,17 @@ export async function updateSessionMeta(
       updatedAt: new Date().toISOString()
     }
     await writeWorkspaceMetaAtomic(updatedWs)
-    await writeSessionMetaAtomic(workspaceId, merged)
     return merged
   })
 }
 
 export async function loadSession(workspaceId: string, sessionId: string): Promise<SessionMeta> {
-  const paths = getSessionPaths(workspaceId, sessionId)
-  const raw = await fs.readFile(paths.meta, 'utf8')
-  return JSON.parse(raw) as SessionMeta
+  // 2026-06-01 Phase 6: workspace.json sessions[]에서 단일 source로 조회.
+  // 옛 sessions/<sid>/meta.json는 더 이상 작성하지 않음.
+  const ws = await loadWorkspace(workspaceId)
+  const session = ws.sessions.find((s) => s.sessionId === sessionId)
+  if (!session) throw new Error(`session not found: ${workspaceId}/${sessionId}`)
+  return session
 }
 
 // PTY data 도착 시 workspace meta updatedAt 갱신용 — 매 chunk마다 디스크 쓰면 부담이라 throttle.
@@ -800,7 +796,7 @@ export async function migrateThreadsToWorkspaces(threadsDir: string): Promise<Mi
         // primary session에만 legacy replay 복사 (M1/M2는 단일 active 가정이라 replay.log가 1개)
         const replayContent = session.sessionId === primarySessionId ? legacyReplayContent : ''
         await fs.writeFile(sp.replayLog, replayContent, 'utf8')
-        await writeSessionMetaAtomic(contextId, session)
+        // meta는 workspace.json sessions[]에 통합 저장 — 별도 sessions/<sid>/meta.json 작성 불필요.
       }
 
       await writeWorkspaceMetaAtomic(workspace)
