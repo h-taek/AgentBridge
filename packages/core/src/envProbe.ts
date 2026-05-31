@@ -15,12 +15,16 @@ export interface ProbeResult {
   found: boolean;
   path?: string;
   resolvedPath?: string;
+  version?: string;
+  versionError?: string;
 }
 
 const ADAPTER_ENV_KEEP_OUT: ReadonlyArray<string> = ['OPENAI_API_KEY', 'GEMINI_SYSTEM_MD'];
 
 export type EnvProbeOptions = {
   logger?: Logger;
+  // true이면 probe()가 `<bin> --version`까지 호출해 version 필드를 채움. UI 표시용.
+  probeVersion?: boolean;
 };
 
 export interface EnvProbe {
@@ -59,6 +63,21 @@ export function createEnvProbe(opts: EnvProbeOptions = {}): EnvProbe {
     }
   }
 
+  function captureVersion(binaryPath: string): { version?: string; versionError?: string } {
+    try {
+      const out = execSync(`${binaryPath} --version 2>&1`, {
+        encoding: 'utf8',
+        timeout: 5000,
+        env: getLoginShellEnv(),
+      });
+      const firstLine = out.split('\n')[0]?.trim();
+      if (firstLine && firstLine.length > 0) return { version: firstLine };
+      return { versionError: 'empty --version output' };
+    } catch (err) {
+      return { versionError: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
   return {
     // binaryName is a CliKind literal — `which ${binaryName}` interpolation is safe by type constraint.
     probe(binaryName: CliKind): ProbeResult {
@@ -71,7 +90,12 @@ export function createEnvProbe(opts: EnvProbeOptions = {}): EnvProbe {
         }).trim();
         if (resolved && existsSync(resolved)) {
           log.log(`envProbe: ${binaryName} found at ${resolved}`);
-          return { found: true, path: binaryName, resolvedPath: resolved };
+          const base: ProbeResult = { found: true, path: binaryName, resolvedPath: resolved };
+          if (opts.probeVersion) {
+            const ver = captureVersion(resolved);
+            return { ...base, ...ver };
+          }
+          return base;
         }
       } catch {
         /* which failed */

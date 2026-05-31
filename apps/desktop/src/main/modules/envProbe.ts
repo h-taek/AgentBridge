@@ -1,127 +1,47 @@
-import { spawn } from 'child_process'
-import { promises as fs } from 'fs'
-import * as path from 'path'
+import log from 'electron-log/main'
 import type { CliKind, CliPresence, EnvProbeResult } from '@shared/ipc'
+import { createEnvProbe, type EnvProbe } from '@agentbridge/core'
 
-const TIMEOUT_MS = 5000
+// 코어 envProbe wrapper — login shell 캡처 + cli 탐색 + version 캐싱은 코어가 처리.
+// 외부 API(probeEnvOnce/getCliPath/getShellPath/getCachedEnv)와 EnvProbeResult shape는 그대로 유지.
+
 const CLI_KINDS: CliKind[] = ['claude', 'codex', 'agy']
 
-// 사용자 login shell의 PATH 캡처. Electron이 GUI에서 launch될 때 PATH가 빈약하기 때문에
-// brew/asdf/nvm 등 사용자 개별 설치 경로를 잡으려면 login interactive zsh를 한 번 거쳐야 한다.
-async function captureShellPath(): Promise<{ value?: string; error?: string }> {
-  return new Promise((resolve) => {
-    const proc = spawn('/bin/zsh', ['-ilc', 'echo -n $PATH'], {
-      stdio: ['ignore', 'pipe', 'pipe']
+let coreProbe: EnvProbe | null = null
+function getCoreProbe(): EnvProbe {
+  if (!coreProbe) {
+    coreProbe = createEnvProbe({
+      logger: {
+        log: (msg) => log.info(msg),
+        warn: (msg) => log.warn(msg)
+      },
+      probeVersion: true
     })
-    let stdout = ''
-    let stderr = ''
-    const timer = setTimeout(() => {
-      proc.kill('SIGKILL')
-      resolve({ error: `PATH 캡처 timeout (${TIMEOUT_MS}ms)` })
-    }, TIMEOUT_MS)
-
-    proc.stdout.on('data', (chunk: Buffer) => {
-      stdout += chunk.toString('utf8')
-    })
-    proc.stderr.on('data', (chunk: Buffer) => {
-      stderr += chunk.toString('utf8')
-    })
-    proc.on('error', (err) => {
-      clearTimeout(timer)
-      resolve({ error: `zsh spawn 실패: ${err.message}` })
-    })
-    proc.on('exit', (code) => {
-      clearTimeout(timer)
-      if (code === 0 && stdout.length > 0) {
-        resolve({ value: stdout.trim() })
-      } else {
-        resolve({ error: `zsh exit=${code} stderr=${stderr.trim()}` })
-      }
-    })
-  })
-}
-
-async function findInPath(name: CliKind, pathValue: string): Promise<string | undefined> {
-  const dirs = pathValue.split(':').filter((d) => d.length > 0)
-  for (const dir of dirs) {
-    const candidate = path.join(dir, name)
-    try {
-      const stat = await fs.stat(candidate)
-      if (stat.isFile()) {
-        // X_OK 비트 체크 — symlink 통과
-        await fs.access(candidate, fs.constants.X_OK)
-        return candidate
-      }
-    } catch {
-      // not found / not executable — 다음 dir
-    }
   }
-  return undefined
-}
-
-async function runVersion(
-  name: CliKind,
-  binPath: string,
-  shellPath: string
-): Promise<{ version?: string; error?: string }> {
-  return new Promise((resolve) => {
-    const proc = spawn(binPath, ['--version'], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, PATH: shellPath }
-    })
-    let stdout = ''
-    let stderr = ''
-    const timer = setTimeout(() => {
-      proc.kill('SIGKILL')
-      resolve({ error: `${name} --version timeout` })
-    }, TIMEOUT_MS)
-    proc.stdout.on('data', (c: Buffer) => {
-      stdout += c.toString('utf8')
-    })
-    proc.stderr.on('data', (c: Buffer) => {
-      stderr += c.toString('utf8')
-    })
-    proc.on('error', (err) => {
-      clearTimeout(timer)
-      resolve({ error: `${name} spawn 실패: ${err.message}` })
-    })
-    proc.on('exit', (code) => {
-      clearTimeout(timer)
-      const firstLine = stdout.split('\n')[0]?.trim()
-      if (code === 0 && firstLine) {
-        resolve({ version: firstLine })
-      } else {
-        resolve({ error: `exit=${code} ${(stderr || stdout).trim().slice(0, 200)}` })
-      }
-    })
-  })
+  return coreProbe
 }
 
 export async function probeEnv(): Promise<EnvProbeResult> {
+  const probe = getCoreProbe()
   const capturedAt = new Date().toISOString()
-  const pathResult = await captureShellPath()
-  const shellPath = pathResult.value ?? process.env.PATH ?? ''
+  const shellPath = probe.getShellEnv().PATH ?? process.env.PATH ?? ''
 
-  const clis: CliPresence[] = await Promise.all(
-    CLI_KINDS.map(async (kind): Promise<CliPresence> => {
-      const binPath = await findInPath(kind, shellPath)
-      if (!binPath) {
-        return { kind, found: false }
-      }
-      const ver = await runVersion(kind, binPath, shellPath)
-      return {
-        kind,
-        found: true,
-        path: binPath,
-        version: ver.version,
-        error: ver.error
-      }
-    })
-  )
+  const clis: CliPresence[] = CLI_KINDS.map((kind): CliPresence => {
+    const r = probe.probe(kind)
+    if (!r.found || !r.resolvedPath) {
+      return { kind, found: false }
+    }
+    return {
+      kind,
+      found: true,
+      path: r.resolvedPath,
+      version: r.version,
+      error: r.versionError
+    }
+  })
 
   return {
     shellPath,
-    shellPathError: pathResult.error,
     clis,
     capturedAt
   }
@@ -135,6 +55,10 @@ let inflight: Promise<EnvProbeResult> | null = null
 export async function probeEnvOnce(forceRefresh = false): Promise<EnvProbeResult> {
   if (!forceRefresh && cached) return cached
   if (!forceRefresh && inflight) return inflight
+  if (forceRefresh) {
+    // 코어 캐시도 함께 무효화하기 위해 인스턴스 재생성.
+    coreProbe = null
+  }
   inflight = probeEnv().then((r) => {
     cached = r
     inflight = null
@@ -153,4 +77,9 @@ export function getCliPath(kind: CliKind): string | undefined {
 
 export function getShellPath(): string {
   return cached?.shellPath ?? process.env.PATH ?? ''
+}
+
+// 코어 모듈(refineDispatcher 등)이 EnvProbe 인스턴스를 직접 받을 수 있도록 노출.
+export function getCoreEnvProbe(): EnvProbe {
+  return getCoreProbe()
 }

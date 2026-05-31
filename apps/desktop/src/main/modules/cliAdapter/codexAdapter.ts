@@ -1,21 +1,15 @@
-import { promises as fs } from 'fs'
-import * as os from 'os'
-import * as path from 'path'
 import type { WebContents } from 'electron'
 import log from 'electron-log/main'
 import { getCliPath, getShellPath } from '../envProbe'
 import { killPty, resizePty, startPty, writePty } from '../ptySession'
 import { buildAdapterEnv } from './env'
 import { captureNewThreadId, snapshotCodexSessions } from './codexSessionWatcher'
-import { runRefineSpawn } from './refineHeadless'
+import { deleteCodexNativeSession } from '@agentbridge/core'
 import type {
   CLIAdapter,
-  RefineUsage,
   SpawnInteractiveHooks,
   SpawnInteractiveRequest,
-  SpawnInteractiveResult,
-  SpawnRefineRequest,
-  SpawnRefineResult
+  SpawnInteractiveResult
 } from './types'
 
 // Codex 어댑터.
@@ -91,119 +85,13 @@ async function spawnInteractive(
   return { ...result, modelSessionId: isNewSession ? null : (req.sessionId as string) }
 }
 
-// codex refine 헤드리스 — `codex exec --json --skip-git-repo-check -s read-only -` (stdin으로
-// prompt). probe_results §1: stdin이 닫혀야 codex가 종료. JSONL 라인:
-//   {"type":"thread.started","thread_id":"..."}
-//   {"type":"turn.started"}
-//   {"type":"item.completed","item":{...,"text":"..."}}
-//   {"type":"turn.completed","usage":{...}}
-async function spawnRefineIRCodex(req: SpawnRefineRequest): Promise<SpawnRefineResult> {
-  const cliPath = getCliPath('codex')
-  if (!cliPath) {
-    throw new Error('codex CLI not found in PATH')
-  }
-  const env = buildAdapterEnv({ shellPath: getShellPath() })
-  let assistantText = ''
-  let usage: RefineUsage | undefined
-  log.info('codex spawnRefineIR', {
-    promptLen: req.prompt.length,
-    cwd: req.cwd,
-    modelHint: req.modelHint
-  })
-  // -c model="..."는 codex exec 앞에 위치해야 함 (top-level config override).
-  const modelArgs = req.modelHint ? ['-c', `model="${req.modelHint}"`] : []
-  const base = await runRefineSpawn({
-    command: cliPath,
-    args: [...modelArgs, 'exec', '--json', '--skip-git-repo-check', '-s', 'read-only', '-'],
-    cwd: req.cwd,
-    env,
-    stdinPayload: req.prompt,
-    abortSignal: req.abortSignal,
-    timeoutMs: req.timeoutMs,
-    onLine: (line) => {
-      let evt: unknown
-      try {
-        evt = JSON.parse(line)
-      } catch {
-        return
-      }
-      const o = evt as { type?: string; item?: unknown; usage?: unknown }
-      if (o.type === 'item.completed' && o.item && typeof o.item === 'object') {
-        const it = o.item as { text?: string; type?: string }
-        if (typeof it.text === 'string') {
-          assistantText += it.text
-        }
-      } else if (o.type === 'turn.completed' && o.usage && typeof o.usage === 'object') {
-        const u = o.usage as Record<string, number>
-        usage = {
-          inputTokens: u.input_tokens,
-          outputTokens: u.output_tokens,
-          cacheReadTokens: u.cached_input_tokens
-        }
-      }
-    }
-  })
-  return { assistantText, usage, ...base }
-}
-
-// codex thread_id는 codex가 *첫 사용자 메시지를 받아야* 발급되어 ~/.codex/sessions/...
-// jsonl을 만든다. modelSessionId === null이면 codex가 아직 native 세션을 생성하지 않은 것.
-async function hasNativeSession(modelSessionId: string | null): Promise<boolean> {
-  return modelSessionId != null && modelSessionId.length > 0
-}
-
-// ~/.codex/sessions/YYYY/MM/DD/rollout-<ISO>-<UUID>.jsonl 트리에서 thread_id 매칭 파일 삭제.
-// 트리 walk 비용 최소화를 위해 최근 6개월(통상 사용 범위)만 순회. 파일명 suffix로 빠르게 매칭.
+// 네이티브 파일 삭제는 코어 sessionRegistry의 deleteCodexNativeSession에 위임.
 async function deleteNativeSession(modelSessionId: string | null): Promise<void> {
   if (!modelSessionId) return
-  const root = path.join(os.homedir(), '.codex', 'sessions')
-  const target = `-${modelSessionId.toLowerCase()}.jsonl`
-  let years: string[]
-  try {
-    years = await fs.readdir(root)
-  } catch {
-    return
-  }
-  for (const y of years) {
-    const yDir = path.join(root, y)
-    let months: string[] = []
-    try {
-      months = await fs.readdir(yDir)
-    } catch {
-      continue
-    }
-    for (const m of months) {
-      const mDir = path.join(yDir, m)
-      let days: string[] = []
-      try {
-        days = await fs.readdir(mDir)
-      } catch {
-        continue
-      }
-      for (const d of days) {
-        const dDir = path.join(mDir, d)
-        let files: string[] = []
-        try {
-          files = await fs.readdir(dDir)
-        } catch {
-          continue
-        }
-        for (const f of files) {
-          if (!f.toLowerCase().endsWith(target)) continue
-          const file = path.join(dDir, f)
-          try {
-            await fs.unlink(file)
-            log.info('codex native session 삭제', { file })
-          } catch (err) {
-            const code = (err as NodeJS.ErrnoException).code
-            if (code !== 'ENOENT') {
-              log.warn('codex native session 삭제 실패', { file, err: String(err) })
-            }
-          }
-        }
-      }
-    }
-  }
+  await deleteCodexNativeSession(modelSessionId, {
+    log: (msg) => log.info(msg),
+    warn: (msg) => log.warn(msg)
+  })
 }
 
 export const codexAdapter: CLIAdapter = {
@@ -218,7 +106,5 @@ export const codexAdapter: CLIAdapter = {
   write: writePty,
   resize: resizePty,
   killInteractive: killPty,
-  spawnRefineIR: spawnRefineIRCodex,
-  hasNativeSession,
   deleteNativeSession
 }

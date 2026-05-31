@@ -1,28 +1,20 @@
 import type { WebContents } from 'electron'
-import { promises as fs } from 'fs'
-import * as os from 'os'
-import * as path from 'path'
 import log from 'electron-log/main'
 import { getCliPath, getShellPath } from '../envProbe'
 import { killPty, resizePty, startPty, writePty } from '../ptySession'
 import { extractQuotaPercent, recordQuotaPercent } from '../cliQuotaTracker'
 import { buildAdapterEnv } from './env'
 import {
-  deleteAgyConversationFiles,
-  hasAgyConversationFile,
   readLastConversationForCwd,
   resolveResumeArgs,
   watchForNewConversationUuid
 } from './agyResume'
-import { runRefineSpawn } from './refineHeadless'
+import { deleteAgyNativeSession } from '@agentbridge/core'
 import type {
   CLIAdapter,
-  RefineUsage,
   SpawnInteractiveHooks,
   SpawnInteractiveRequest,
-  SpawnInteractiveResult,
-  SpawnRefineRequest,
-  SpawnRefineResult
+  SpawnInteractiveResult
 } from './types'
 
 // ANSI escape strip — agyQuotaTracker.extractQuotaPercent에 정제된 라인 전달용.
@@ -155,55 +147,13 @@ async function spawnInteractive(
   return { ...result, modelSessionId }
 }
 
-// agy refine 헤드리스 — `agy -p '<prompt>' --dangerously-skip-permissions`. agy는 stream-json
-// 출력을 지원하지 않으므로 stdout 전체를 assistant text로 누적. usage 토큰은 추출 불가.
-//
-// **격리 정책**: refine spawn은 *사용자 cwd가 아닌 OS tmpdir*에서 실행하고 `--add-dir`도 추가하지 않는다.
-// 이유: agy는 cwd → conversation UUID 매핑(`~/.gemini/antigravity-cli/cache/last_conversations.json`)을
-// 가지고 있어, 같은 cwd로 spawn된 두 번째 agy 프로세스가 활성 인터랙티브 세션과 **같은 conversation에
-// join**해버린다(라이브 검증: refine prompt가 사용자 채팅창에 노출되는 현상 발생). tmpdir에서
-// spawn하면 agy가 새 conversation을 시작하므로 인터랙티브 세션과 완전 격리.
-// refine은 prompt 안에 모든 데이터가 들어있어 cwd file 접근 불필요 → 격리해도 기능 영향 없음.
-async function spawnRefineIRAgy(req: SpawnRefineRequest): Promise<SpawnRefineResult> {
-  const cliPath = getCliPath('agy')
-  if (!cliPath) {
-    throw new Error('agy CLI not found in PATH')
-  }
-  const env = buildAdapterEnv({ shellPath: getShellPath() })
-  let assistantText = ''
-  const usage: RefineUsage | undefined = undefined
-  // OS tmpdir 하위 격리 디렉토리. 매 호출마다 새 경로라 last_conversations.json 매핑 충돌도 없음.
-  const isolatedCwd = path.join(os.tmpdir(), `agentbridge-refine-${Date.now()}-${process.pid}`)
-  await fs.mkdir(isolatedCwd, { recursive: true })
-  log.info('agy spawnRefineIR', {
-    promptLen: req.prompt.length,
-    originalCwd: req.cwd,
-    isolatedCwd
-  })
-  const base = await runRefineSpawn({
-    command: cliPath,
-    args: ['-p', req.prompt, '--dangerously-skip-permissions'],
-    cwd: isolatedCwd,
-    env,
-    stdinPayload: null,
-    abortSignal: req.abortSignal,
-    timeoutMs: req.timeoutMs,
-    onLine: (line) => {
-      // agy print 모드는 응답을 plain text로 출력 (markdown 가능). 라인별로 누적.
-      assistantText += (assistantText.length > 0 ? '\n' : '') + line
-    }
-  })
-  return { assistantText, usage, ...base }
-}
-
-async function hasNativeSession(modelSessionId: string | null): Promise<boolean> {
-  if (!modelSessionId) return false
-  return hasAgyConversationFile(modelSessionId)
-}
-
+// 네이티브 파일 삭제는 코어 sessionRegistry의 deleteAgyNativeSession에 위임.
 async function deleteNativeSession(modelSessionId: string | null): Promise<void> {
   if (!modelSessionId) return
-  await deleteAgyConversationFiles(modelSessionId)
+  await deleteAgyNativeSession(modelSessionId, {
+    log: (msg) => log.info(msg),
+    warn: (msg) => log.warn(msg)
+  })
 }
 
 export const agyAdapter: CLIAdapter = {
@@ -215,7 +165,5 @@ export const agyAdapter: CLIAdapter = {
   write: writePty,
   resize: resizePty,
   killInteractive: killPty,
-  spawnRefineIR: spawnRefineIRAgy,
-  hasNativeSession,
   deleteNativeSession
 }

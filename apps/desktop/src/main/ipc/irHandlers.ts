@@ -53,8 +53,7 @@ export async function runIrRefine(args: {
     durationMs: result.durationMs,
     exitCode: result.exitCode,
     stderr: result.stderr,
-    rawLineCount: result.rawLineCount,
-    usage: result.usage
+    rawLineCount: result.rawLineCount
   }
 }
 

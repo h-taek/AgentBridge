@@ -7,9 +7,8 @@ import type { CliKind } from './shared/cli';
 import type { EnvProbe } from './envProbe';
 import type { Logger } from './interfaces';
 import { noopLogger } from './interfaces';
-import { tmpdir } from 'os';
-import { join } from 'path';
-import { mkdirSync } from 'fs';
+import { buildRefineSpawnRequest } from './refineCliArgs';
+import { looksLikeQuotaError } from './quotaTracker';
 
 export type RefineModelChoice = {
   spawnedModel: CliKind;
@@ -36,166 +35,127 @@ export class RefineFailedError extends Error {
   }
 }
 
-const REFINE_MODEL_HINT: Record<CliKind, string | null> = {
-  agy: null,
-  codex: 'gpt-5.4-mini',
-  claude: 'claude-haiku-4-5',
-};
+// 호스트가 자기 settings에서 읽어 코어에 넘기는 정책 결정.
+export type RefineDecision =
+  | { policy: 'off' }
+  | { policy: 'fixed' | 'active'; cli: CliKind }
+  | { policy: 'priority'; order: CliKind[] };
 
-const QUOTA_RE = /\b(quota|rate[\s-]?limit|usage limit|too many requests|429|insufficient[_\s]quota)\b/i;
-function looksLikeQuotaError(stderr: string, body: string, exitCode: number | null): boolean {
-  if (exitCode === 0) return false;
-  return QUOTA_RE.test(stderr) || QUOTA_RE.test(body);
-}
+// 호스트가 각 CLI 시도 결과를 관찰해 부가 효과(예: quota 추적, probe 트리거, 잔재 청소)를
+// 실행할 수 있게 콜백을 노출. 코어는 콜백 실패를 swallow — 부가 효과 오류로 정제 흐름을 막지 않음.
+// agy는 격리 tmpdir에서 실행되므로 isolatedCwd가 같이 전달됨 — 호스트는 이걸 받아 9종 잔재 정리.
+export type RefineAttemptEvent =
+  | { cli: CliKind; status: 'success'; result: SpawnRefineResult; isolatedCwd?: string }
+  | { cli: CliKind; status: 'quota'; result: SpawnRefineResult; isolatedCwd?: string }
+  | { cli: CliKind; status: 'empty' | 'invalid-ir'; result: SpawnRefineResult; isolatedCwd?: string }
+  | { cli: CliKind; status: 'unavailable' | 'spawn-error'; error: unknown; isolatedCwd?: string };
 
 export type RunRefineArgs = {
-  // 사용자 설정의 refinePolicy 해석 결과 — 코어는 정책을 모름. 호스트가 계산해서 넘김.
-  // 빈 배열이면 RefineOffError throw.
-  order: CliKind[];
-  // singleCandidate면 첫 실패에 RefineFailedError, 아니면 다음 후보 시도.
-  singleCandidate: boolean;
+  // 사용자 설정의 refinePolicy 해석 결과 — 코어는 정책 출처를 모름. 호스트가 계산해서 넘김.
+  decision: RefineDecision;
   prompt: string;
   cwd?: string;
   timeoutMs?: number;
   envProbe: EnvProbe;
   logger?: Logger;
+  onAttempt?: (event: RefineAttemptEvent) => void | Promise<void>;
 };
+
+function resolveDecisionToOrder(decision: RefineDecision): { order: CliKind[]; singleCandidate: boolean } {
+  switch (decision.policy) {
+    case 'off':
+      return { order: [], singleCandidate: false };
+    case 'fixed':
+    case 'active':
+      return { order: [decision.cli], singleCandidate: true };
+    case 'priority':
+      return { order: decision.order, singleCandidate: false };
+  }
+}
 
 async function tryRefine(
   cli: CliKind,
   args: RunRefineArgs,
   timeoutMs: number,
-): Promise<SpawnRefineResult> {
+): Promise<{ result: SpawnRefineResult; isolatedCwd?: string }> {
   const probe = args.envProbe.probe(cli);
   if (!probe.found || !probe.resolvedPath) throw new Error(`${cli} CLI not found`);
   const command = probe.resolvedPath;
   const env = args.envProbe.getShellEnv();
   const log = args.logger ?? noopLogger;
+
+  const req = buildRefineSpawnRequest(cli, args.prompt, args.cwd);
   let assistantText = '';
+  // agy의 경우 라인을 줄바꿈으로 연결하는 누적 패턴 유지.
+  const accumulate = cli === 'agy'
+    ? (text: string) => { assistantText += (assistantText ? '\n' : '') + text; }
+    : (text: string) => { assistantText += text; };
 
-  if (cli === 'claude') {
-    const modelArgs = REFINE_MODEL_HINT.claude ? ['--model', REFINE_MODEL_HINT.claude] : [];
-    const base = await runRefineSpawn({
-      command,
-      args: [
-        '-p',
-        args.prompt,
-        '--output-format',
-        'stream-json',
-        '--verbose',
-        '--permission-mode',
-        'acceptEdits',
-        ...modelArgs,
-      ],
-      cwd: args.cwd,
-      env,
-      onLine: (line) => {
-        let evt: unknown;
-        try {
-          evt = JSON.parse(line);
-        } catch {
-          return;
-        }
-        const o = evt as {
-          type?: string;
-          message?: { content?: Array<{ type?: string; text?: string }> };
-          usage?: unknown;
-        };
-        if (o.type === 'assistant' && o.message?.content) {
-          for (const c of o.message.content) {
-            if (c.type === 'text' && typeof c.text === 'string') {
-              assistantText += c.text;
-            }
-          }
-        }
-      },
-      timeoutMs,
-      logger: log,
-    });
-    return { assistantText, ...base };
-  }
-
-  if (cli === 'codex') {
-    const modelArgs = REFINE_MODEL_HINT.codex ? ['-c', `model="${REFINE_MODEL_HINT.codex}"`] : [];
-    const base = await runRefineSpawn({
-      command,
-      args: [...modelArgs, 'exec', '--json', '--skip-git-repo-check', '-s', 'read-only', '-'],
-      cwd: args.cwd,
-      env,
-      stdinPayload: args.prompt,
-      onLine: (line) => {
-        try {
-          const o = JSON.parse(line) as {
-            type?: string;
-            item?: { text?: string };
-            usage?: Record<string, number>;
-          };
-          if (o.type === 'item.completed' && o.item?.text) assistantText += o.item.text;
-        } catch {
-          /* skip */
-        }
-      },
-      timeoutMs,
-      logger: log,
-    });
-    return { assistantText, ...base };
-  }
-
-  // agy — isolated cwd to avoid conversation join
-  const isolatedCwd = join(tmpdir(), `agentbridge-refine-${Date.now()}-${process.pid}`);
-  mkdirSync(isolatedCwd, { recursive: true });
   const base = await runRefineSpawn({
     command,
-    args: ['-p', args.prompt, '--dangerously-skip-permissions'],
-    cwd: isolatedCwd,
+    args: req.args,
+    cwd: req.cwd,
     env,
-    onLine: (line) => {
-      assistantText += (assistantText ? '\n' : '') + line;
-    },
+    stdinPayload: req.stdinPayload,
+    onLine: (line) => req.onLine(line, accumulate),
     timeoutMs,
     logger: log,
   });
-  return { assistantText, ...base };
+  return { result: { assistantText, ...base }, isolatedCwd: req.isolatedCwd };
 }
 
 export async function runRefine(args: RunRefineArgs): Promise<RefineModelChoice> {
   const log = args.logger ?? noopLogger;
-  if (args.order.length === 0) throw new RefineOffError();
+  const { order, singleCandidate } = resolveDecisionToOrder(args.decision);
+  if (order.length === 0) throw new RefineOffError();
 
   const timeout = args.timeoutMs ?? 60_000;
   const tried: CliKind[] = [];
   let lastError: unknown = null;
   let lastReason: 'unavailable' | 'quota' | 'spawn-error' | undefined;
 
-  for (let i = 0; i < args.order.length; i++) {
-    const cli = args.order[i];
+  const emit = async (event: RefineAttemptEvent) => {
+    if (!args.onAttempt) return;
+    try {
+      await args.onAttempt(event);
+    } catch (hookErr) {
+      log.warn(`refineDispatcher: onAttempt hook failed — ${String(hookErr)}`);
+    }
+  };
+
+  for (let i = 0; i < order.length; i++) {
+    const cli = order[i];
     tried.push(cli);
     try {
-      const result = await tryRefine(cli, args, timeout);
+      const { result, isolatedCwd } = await tryRefine(cli, args, timeout);
       const quota = looksLikeQuotaError(result.stderr ?? '', result.assistantText, result.exitCode);
       if (quota) {
         log.warn(`refineDispatcher: ${cli} quota error, trying next`);
+        await emit({ cli, status: 'quota', result, isolatedCwd });
         lastError = new Error(`${cli} quota error`);
         lastReason = 'quota';
-        if (args.singleCandidate) throw new RefineFailedError(cli, lastError);
+        if (singleCandidate) throw new RefineFailedError(cli, lastError);
         continue;
       }
       if (result.assistantText.length === 0) {
         log.warn(`refineDispatcher: ${cli} empty response, trying next`);
+        await emit({ cli, status: 'empty', result, isolatedCwd });
         lastError = new Error(`${cli} empty response`);
         lastReason = 'spawn-error';
-        if (args.singleCandidate) throw new RefineFailedError(cli, lastError);
+        if (singleCandidate) throw new RefineFailedError(cli, lastError);
         continue;
       }
       const parsed = parseRefineOutput(result.assistantText);
       if (!parsed.ok) {
         log.warn(`refineDispatcher: ${cli} response not valid IR JSON — ${parsed.error}`);
+        await emit({ cli, status: 'invalid-ir', result, isolatedCwd });
         lastError = new Error(`${cli} invalid IR`);
         lastReason = 'spawn-error';
-        if (args.singleCandidate) throw new RefineFailedError(cli, lastError);
+        if (singleCandidate) throw new RefineFailedError(cli, lastError);
         continue;
       }
       log.log(`refineDispatcher: ${cli} succeeded (${result.durationMs}ms)`);
+      await emit({ cli, status: 'success', result, isolatedCwd });
       return {
         spawnedModel: cli,
         result,
@@ -208,11 +168,12 @@ export async function runRefine(args: RunRefineArgs): Promise<RefineModelChoice>
       log.warn(
         `refineDispatcher: ${cli} failed — ${err instanceof Error ? err.message : String(err)}`,
       );
+      await emit({ cli, status: 'unavailable', error: err });
       lastError = err;
       lastReason = 'unavailable';
-      if (args.singleCandidate) throw new RefineFailedError(cli, err);
+      if (singleCandidate) throw new RefineFailedError(cli, err);
     }
   }
 
-  throw new RefineFailedError(tried[tried.length - 1] ?? args.order[0], lastError);
+  throw new RefineFailedError(tried[tried.length - 1] ?? order[0], lastError);
 }

@@ -179,7 +179,9 @@ export type WorkspaceMeta = {
   primarySessionId: string | null
   // background compaction lock. 다중 탭이 동시 trigger 시 한 번만 실행되도록.
   // null = 진행 중 아님. 5분 stale timeout 후 강제 해제 정책.
-  compactionInProgress: { sessionId: string; startedAt: string } | null
+  // schema: { pid, startedAt } (epoch ms). 2026-05-31 변경 — 이전 {sessionId, ISO} 형태는 5분 TTL로
+  // 자연 소멸되므로 별도 마이그레이션 코드 불필요. 코어 createCompactionScheduler와 통일.
+  compactionInProgress: { pid: number; startedAt: number } | null
   // M3 M 청크 — codex `/hooks` 사용자 trust 상태 (per workspace). claude/gemini는 자동 로드라 미사용.
   //   - undefined / 'pending': 첫 codex 세션 spawn 시 UI 배너 표시
   //   - 'trusted': 사용자가 codex 안에서 `/hooks` 명령 후 UI "승인 완료" 버튼 클릭
@@ -555,17 +557,6 @@ export type AppSettings = {
   // 보관할 compacted archive snapshot 최대 개수. 초과분은 오래된 것부터 자동 삭제.
   // 누적된 과거 IR snapshot이 컨텍스트로 새어들지 않도록 상한 — 토큰 절약 정책.
   maxArchiveSnapshots: number
-}
-
-// 각 CLI의 정제용 default model. cheap 모델 (토큰 소모량 최소) 기준.
-//   agy:    CLI flag로 모델 지정 불가 — 사용자 default 따름. null 표기.
-//   codex:  `-c model="gpt-5.4-mini"` (OpenAI mini variant)
-//   claude: `--model "claude-haiku-4-5"` (Haiku — Opus 대비 약 1/20 비용)
-// 사용자가 수정 가능 (UI에서 외부화 예정. 현재는 hardcoded default).
-export const REFINE_DEFAULT_MODEL: Record<CliKind, string | null> = {
-  agy: null,
-  codex: 'gpt-5.4-mini',
-  claude: 'claude-haiku-4-5'
 }
 
 // quota severity (Phase 2 — per-CLI 슬래시 명령 응답 기반):

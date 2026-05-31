@@ -5,9 +5,20 @@ import * as os from 'os'
 import * as path from 'path'
 import log from 'electron-log/main'
 import { IpcChannel, type CliKind } from '@shared/ipc'
+import {
+  createQuotaTracker,
+  parseQuotaFile,
+  extractQuotaPercent as coreExtractQuotaPercent,
+  looksLikeQuotaError as coreLooksLikeQuotaError,
+  type CliQuotaSnapshot as CoreCliQuotaSnapshot,
+  type QuotaFileMap,
+  type QuotaSeverity as CoreQuotaSeverity,
+  type QuotaStore,
+  type QuotaTracker
+} from '@agentbridge/core'
 import { broadcastToAll } from './windowManager'
 import {
-  deleteAgyConversationFiles,
+  cleanupAgyArtifactsForCwd,
   deleteAgyImplicitDelta,
   deleteAgyLogDelta,
   readLastConversationForCwd,
@@ -39,38 +50,14 @@ const QUOTA_FILE_NAME = 'cli_quota.json'
 const LEGACY_AGY_QUOTA_FILE_NAME = 'agy_quota.json'
 const LEGACY_GEMINI_QUOTA_FILE_NAME = 'gemini_quota.json'
 
-// % used 기반 임계값. agy/codex/claude 동일 적용.
-export const QUOTA_WARN_PERCENT = 80
-export const QUOTA_CRITICAL_PERCENT = 95
-export const QUOTA_EXCEEDED_PERCENT = 100
-
-export type QuotaSeverity = 'unknown' | 'ok' | 'warn' | 'critical' | 'exceeded'
-
-export type CliQuotaSnapshot = {
-  // 슬래시 명령 응답에서 마지막 캡처한 % used. null이면 아직 한 번도 못 봄.
-  usedPercent: number | null
-  lastSeenAt: string | null
-  severity: QuotaSeverity
-  shouldFallback: boolean
-  // 응답 에러로 강제 폴백 마킹된 상태 (UTC 자정 자동 해제).
-  forcedFallback: boolean
-}
-
-type QuotaFile = {
-  usedPercent: number | null
-  lastSeenAt: string | null
-  forcedFallbackDate: string | null
-  forcedFallback: boolean
-}
-
-type QuotaFileMap = Partial<Record<CliKind, QuotaFile>>
-
-const EMPTY_FILE: QuotaFile = {
-  usedPercent: null,
-  lastSeenAt: null,
-  forcedFallbackDate: null,
-  forcedFallback: false
-}
+// 코어 상수/타입 re-export — 호스트 모듈은 데스크탑 내부 export로 계속 사용.
+export {
+  QUOTA_WARN_PERCENT,
+  QUOTA_CRITICAL_PERCENT,
+  QUOTA_EXCEEDED_PERCENT
+} from '@agentbridge/core'
+export type QuotaSeverity = CoreQuotaSeverity
+export type CliQuotaSnapshot = CoreCliQuotaSnapshot
 
 function getQuotaFilePath(): string {
   return path.join(app.getPath('userData'), QUOTA_FILE_NAME)
@@ -88,223 +75,81 @@ function broadcastQuotaUpdated(cli: CliKind, snap: CliQuotaSnapshot): void {
   broadcastToAll(IpcChannel.QuotaUpdated, { cli, snapshot: snap })
 }
 
-function todayKey(): string {
-  const now = new Date()
-  const y = now.getUTCFullYear()
-  const m = String(now.getUTCMonth() + 1).padStart(2, '0')
-  const d = String(now.getUTCDate()).padStart(2, '0')
-  return `${y}-${m}-${d}`
-}
-
-function severityFor(usedPercent: number | null, forcedFallback: boolean): QuotaSeverity {
-  if (forcedFallback) return 'exceeded'
-  if (usedPercent == null) return 'unknown'
-  if (usedPercent >= QUOTA_EXCEEDED_PERCENT) return 'exceeded'
-  if (usedPercent >= QUOTA_CRITICAL_PERCENT) return 'critical'
-  if (usedPercent >= QUOTA_WARN_PERCENT) return 'warn'
-  return 'ok'
-}
-
-function shouldFallbackFor(severity: QuotaSeverity): boolean {
-  return severity === 'critical' || severity === 'exceeded'
-}
-
-function parseFile(raw: unknown): QuotaFile {
-  const o = (raw ?? {}) as Partial<QuotaFile>
-  return {
-    usedPercent: typeof o.usedPercent === 'number' ? o.usedPercent : null,
-    lastSeenAt: typeof o.lastSeenAt === 'string' ? o.lastSeenAt : null,
-    forcedFallbackDate: typeof o.forcedFallbackDate === 'string' ? o.forcedFallbackDate : null,
-    forcedFallback: o.forcedFallback === true
-  }
-}
-
-async function readQuotaFile(): Promise<QuotaFileMap> {
-  // 신규 cli_quota.json 우선. 없으면 legacy agy_quota.json/gemini_quota.json을 agy 슬롯으로 흡수.
-  try {
-    const raw = await fs.readFile(getQuotaFilePath(), 'utf8')
-    const parsed = JSON.parse(raw) as Record<string, unknown>
-    const out: QuotaFileMap = {}
-    for (const k of ['agy', 'codex', 'claude'] as CliKind[]) {
-      if (parsed[k]) out[k] = parseFile(parsed[k])
-    }
-    return out
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code
-    if (code !== 'ENOENT') {
-      log.warn('cli_quota.json 파싱 실패 — 새 schema로 리셋', { err: String(err) })
-    }
-  }
-  // legacy single-file fallback (agy 슬롯으로 한 번만 흡수, 이후 cli_quota.json에 정착).
-  for (const legacyPath of [getLegacyAgyQuotaFilePath(), getLegacyGeminiQuotaFilePath()]) {
+// 데스크탑 QuotaStore 어댑터 — fs + legacy 마이그레이션. 신규 cli_quota.json 우선,
+// 없으면 agy_quota.json/gemini_quota.json을 agy 슬롯으로 한 번 흡수.
+const desktopQuotaStore: QuotaStore = {
+  async read(): Promise<QuotaFileMap> {
     try {
-      const raw = await fs.readFile(legacyPath, 'utf8')
-      const parsed = JSON.parse(raw)
-      log.info('legacy quota 파일을 cli_quota.json/agy로 흡수', { legacyPath })
-      return { agy: parseFile(parsed) }
+      const raw = await fs.readFile(getQuotaFilePath(), 'utf8')
+      const parsed = JSON.parse(raw) as Record<string, unknown>
+      const out: QuotaFileMap = {}
+      for (const k of ['agy', 'codex', 'claude'] as CliKind[]) {
+        if (parsed[k]) out[k] = parseQuotaFile(parsed[k])
+      }
+      return out
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code
       if (code !== 'ENOENT') {
-        log.warn(`${path.basename(legacyPath)} 파싱 실패 — 무시`, { err: String(err) })
+        log.warn('cli_quota.json 파싱 실패 — 새 schema로 리셋', { err: String(err) })
       }
     }
-  }
-  return {}
-}
-
-async function writeQuotaFile(map: QuotaFileMap): Promise<void> {
-  const p = getQuotaFilePath()
-  const tmp = `${p}.${process.pid}.${Date.now()}.tmp`
-  await fs.mkdir(path.dirname(p), { recursive: true })
-  await fs.writeFile(tmp, JSON.stringify(map, null, 2), 'utf8')
-  await fs.rename(tmp, p)
-}
-
-function rolloverIfNeeded(state: QuotaFile): QuotaFile {
-  if (!state.forcedFallback) return state
-  if (state.forcedFallbackDate === todayKey()) return state
-  return { ...state, forcedFallback: false, forcedFallbackDate: null }
-}
-
-function reconcileForcedFallback(state: QuotaFile): QuotaFile {
-  if (
-    state.forcedFallback &&
-    typeof state.usedPercent === 'number' &&
-    state.usedPercent < QUOTA_CRITICAL_PERCENT
-  ) {
-    return { ...state, forcedFallback: false, forcedFallbackDate: null }
-  }
-  return state
-}
-
-function snapshotFrom(state: QuotaFile): CliQuotaSnapshot {
-  const severity = severityFor(state.usedPercent, state.forcedFallback)
-  return {
-    usedPercent: state.usedPercent,
-    lastSeenAt: state.lastSeenAt,
-    severity,
-    shouldFallback: shouldFallbackFor(severity),
-    forcedFallback: state.forcedFallback
+    for (const legacyPath of [getLegacyAgyQuotaFilePath(), getLegacyGeminiQuotaFilePath()]) {
+      try {
+        const raw = await fs.readFile(legacyPath, 'utf8')
+        const parsed = JSON.parse(raw)
+        log.info('legacy quota 파일을 cli_quota.json/agy로 흡수', { legacyPath })
+        return { agy: parseQuotaFile(parsed) }
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code
+        if (code !== 'ENOENT') {
+          log.warn(`${path.basename(legacyPath)} 파싱 실패 — 무시`, { err: String(err) })
+        }
+      }
+    }
+    return {}
+  },
+  async write(map: QuotaFileMap): Promise<void> {
+    const p = getQuotaFilePath()
+    const tmp = `${p}.${process.pid}.${Date.now()}.tmp`
+    await fs.mkdir(path.dirname(p), { recursive: true })
+    await fs.writeFile(tmp, JSON.stringify(map, null, 2), 'utf8')
+    await fs.rename(tmp, p)
   }
 }
+
+const tracker: QuotaTracker = createQuotaTracker({
+  store: desktopQuotaStore,
+  onChange: broadcastQuotaUpdated,
+  logger: { log: (m) => log.info(m), warn: (m) => log.warn(m) }
+})
 
 export async function getQuotaSnapshot(cli: CliKind): Promise<CliQuotaSnapshot> {
-  const map = await readQuotaFile()
-  const raw = map[cli] ?? EMPTY_FILE
-  const afterRollover = rolloverIfNeeded(raw)
-  const afterReconcile = reconcileForcedFallback(afterRollover)
-  if (
-    afterReconcile.forcedFallback !== raw.forcedFallback ||
-    afterReconcile.forcedFallbackDate !== raw.forcedFallbackDate
-  ) {
-    const next = { ...map, [cli]: afterReconcile }
-    await writeQuotaFile(next)
-    const snap = snapshotFrom(afterReconcile)
-    broadcastQuotaUpdated(cli, snap)
-    return snap
-  }
-  return snapshotFrom(afterReconcile)
+  return tracker.getSnapshot(cli)
 }
 
 export async function getAllQuotaSnapshots(): Promise<Record<CliKind, CliQuotaSnapshot>> {
-  const map = await readQuotaFile()
-  const out = {} as Record<CliKind, CliQuotaSnapshot>
-  for (const k of ['agy', 'codex', 'claude'] as CliKind[]) {
-    const raw = map[k] ?? EMPTY_FILE
-    out[k] = snapshotFrom(reconcileForcedFallback(rolloverIfNeeded(raw)))
-  }
-  return out
+  return tracker.getAllSnapshots()
 }
 
 export async function recordQuotaPercent(cli: CliKind, percent: number): Promise<CliQuotaSnapshot> {
-  if (!Number.isFinite(percent) || percent < 0 || percent > 1000) {
-    return getQuotaSnapshot(cli)
-  }
-  const map = await readQuotaFile()
-  let state = rolloverIfNeeded(map[cli] ?? EMPTY_FILE)
-  if (state.usedPercent === percent) {
-    return snapshotFrom(state)
-  }
-  state = { ...state, usedPercent: percent, lastSeenAt: new Date().toISOString() }
-  state = reconcileForcedFallback(state)
-  await writeQuotaFile({ ...map, [cli]: state })
-  log.info('quota 캡처', { cli, usedPercent: percent })
-  const snap = snapshotFrom(state)
-  broadcastQuotaUpdated(cli, snap)
-  return snap
+  return tracker.recordPercent(cli, percent)
 }
 
 export async function markForcedFallback(cli: CliKind): Promise<CliQuotaSnapshot> {
-  const map = await readQuotaFile()
-  let state = rolloverIfNeeded(map[cli] ?? EMPTY_FILE)
-  state = { ...state, forcedFallback: true, forcedFallbackDate: todayKey() }
-  await writeQuotaFile({ ...map, [cli]: state })
-  log.warn('quota 강제 폴백 마킹', { cli })
-  const snap = snapshotFrom(state)
-  broadcastQuotaUpdated(cli, snap)
-  return snap
+  return tracker.markForcedFallback(cli)
 }
 
-// ─── 슬래시 명령 응답 파싱 ─────────────────────────────────────────────
-
-// agy: `<bar> N%\nQuota available|exhausted` — N = 남은 quota → usedPercent = 100 - N.
-const AGY_USAGE_RE = /(\d+)\s*%\s*\n\s*Quota\s+(?:available|exhausted)/i
-
-// codex: `5h limit: ... N% left` — N = 남은 quota → usedPercent = 100 - N.
-const CODEX_STATUS_RE = /5h\s*limit:[\s\S]{0,200}?(\d+)\s*%\s+left/i
-
-// claude: `Current session ... N%used` — N = 사용된 quota 그대로.
-// 라이브 검증: ANSI strip 후 `%`와 `used` 사이 공백이 사라지는 경우(`39%used`)가 있어 \s* 사용.
-const CLAUDE_USAGE_RE = /Current\s+session[\s\S]{0,200}?(\d+)\s*%\s*used/i
-
+// 슬래시 응답 파싱 / 에러 정규식 — 코어 위임.
 export function extractQuotaPercent(cli: CliKind, stripped: string): number | null {
-  let m: RegExpExecArray | null
-  let n: number
-  switch (cli) {
-    case 'agy':
-      m = AGY_USAGE_RE.exec(stripped)
-      if (!m) return null
-      n = Number.parseInt(m[1], 10)
-      if (!Number.isFinite(n) || n < 0 || n > 100) return null
-      return 100 - n
-    case 'codex':
-      m = CODEX_STATUS_RE.exec(stripped)
-      if (!m) return null
-      n = Number.parseInt(m[1], 10)
-      if (!Number.isFinite(n) || n < 0 || n > 100) return null
-      return 100 - n
-    case 'claude':
-      m = CLAUDE_USAGE_RE.exec(stripped)
-      if (!m) return null
-      n = Number.parseInt(m[1], 10)
-      if (!Number.isFinite(n) || n < 0 || n > 100) return null
-      return n
-  }
+  return coreExtractQuotaPercent(cli, stripped)
 }
-
-// agy quota 에러 휴리스틱 — 자연어 응답에 'quota' 단어가 우연 등장하는 false positive를
-// 막기 위해 *에러 컨텍스트와 결합된 강한 패턴*만 매칭.
-const QUOTA_STRONG_PATTERNS: RegExp[] = [
-  /quota\s*(?:exceeded|exhausted|limit|reached|hit|error)/i,
-  /exceed(?:ed|ing)?\s+(?:your\s+)?quota/i,
-  /out\s+of\s+quota/i,
-  /rate[\s_-]*limit(?:ed|ing|\s+exceeded|\s+reached|\s+error)?/i,
-  /resource[\s_-]*exhausted/i,
-  /(?:http\s*\/?\s*)?status[:\s]+429\b/i,
-  /\b429\s+(?:too\s+many|error|status|response|resource|client)/i,
-  /too\s+many\s+requests/i
-]
 
 export function looksLikeQuotaError(
   stderr: string,
   assistantText: string,
   exitCode?: number | null
 ): boolean {
-  if (QUOTA_STRONG_PATTERNS.some((re) => re.test(stderr))) return true
-  if (exitCode != null && exitCode !== 0) {
-    if (QUOTA_STRONG_PATTERNS.some((re) => re.test(assistantText))) return true
-  }
-  return false
+  return coreLooksLikeQuotaError(stderr, assistantText, exitCode)
 }
 
 // ─── Background quota probe — per CLI ───────────────────────────────────
@@ -411,8 +256,8 @@ type ProbeSpec = {
   }): Promise<string | null>
   // native 세션 파일 삭제 (modelSessionId 있으면).
   cleanupNativeSession(modelSessionId: string | null): Promise<void>
-  // beforeSpawn 결과를 받아 추가 cleanup (예: agy implicit/ delta unlink).
-  cleanupExtras?(ctx: Record<string, unknown>): Promise<void>
+  // beforeSpawn 결과를 받아 추가 cleanup. probeCwd도 같이 전달 — agy 9종 잔재 정리에 사용.
+  cleanupExtras?(ctx: Record<string, unknown>, probeCwd: string): Promise<void>
 }
 
 function makeSpec(cli: CliKind): ProbeSpec {
@@ -439,14 +284,19 @@ function makeSpec(cli: CliKind): ProbeSpec {
           logsBefore: await snapshotAgyLogs()
         }),
         captureModelSessionId: async ({ cwd }) => readLastConversationForCwd(cwd),
-        cleanupNativeSession: async (uuid) => {
-          if (uuid) await deleteAgyConversationFiles(uuid)
+        cleanupNativeSession: async () => {
+          // 9종 통합 청소가 cleanupExtras에서 conversation 파일까지 처리하므로 여기서는 no-op.
         },
-        cleanupExtras: async (ctx) => {
-          const implicitBefore = ctx.implicitBefore as Set<string> | undefined
+        cleanupExtras: async (ctx, probeCwd) => {
+          // (1)(2)(3)(4)(5)(7)(8)(9) — tmpdir rm은 cleanup 마지막 단계에서 별도 호출.
+          await cleanupAgyArtifactsForCwd(probeCwd)
+          // (6) log delta — snapshot 기반 (probe는 spawn 전 snapshot 가능).
           const logsBefore = ctx.logsBefore as Set<string> | undefined
-          if (implicitBefore) await deleteAgyImplicitDelta(implicitBefore)
           if (logsBefore) await deleteAgyLogDelta(logsBefore)
+          // implicit delta는 보존 — UUID 기반이 cleanupAgyArtifactsForCwd에서 처리됨.
+          // 단 cache에 매핑이 없는 경우(예: probe가 짧아 cache write 전 종료) 대비:
+          const implicitBefore = ctx.implicitBefore as Set<string> | undefined
+          if (implicitBefore) await deleteAgyImplicitDelta(implicitBefore)
         }
       }
     case 'codex': {
@@ -664,7 +514,7 @@ export async function probeQuotaInBackground(cli: CliKind): Promise<ProbeResult>
       }
       if (spec.cleanupExtras) {
         try {
-          await spec.cleanupExtras(beforeCtx)
+          await spec.cleanupExtras(beforeCtx, probeCwd)
         } catch (err) {
           log.warn(`${cli} probe — cleanupExtras 실패`, { err: String(err) })
         }

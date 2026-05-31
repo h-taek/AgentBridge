@@ -11,6 +11,7 @@ import {
   createSessionRegistry,
   createCliAdapters,
   createCompactionScheduler,
+  createQuotaTracker,
   type WorkspaceStore,
   type HookStatusStore,
   type EnvProbe,
@@ -19,12 +20,14 @@ import {
   type CliAdapterSet,
   type CompactionScheduler,
   type CompactionNotifications,
+  type QuotaTracker,
   type Logger,
 } from '@agentbridge/core';
 import * as output from '../log/output';
 import { getConfig } from '../settings/config';
 import * as notifications from './notifications';
 import { cleanupSessionAttachments } from './attachmentStore';
+import { createQuotaStore } from './quotaStore';
 
 const logger: Logger = {
   log: (m) => output.log(m),
@@ -38,6 +41,7 @@ let _hookInstaller: HookInstaller | null = null;
 let _sessionRegistry: SessionRegistry | null = null;
 let _cliAdapters: CliAdapterSet | null = null;
 let _compactionScheduler: CompactionScheduler | null = null;
+let _quotaTracker: QuotaTracker | null = null;
 
 function ensureInitialized<T>(v: T | null, name: string): T {
   if (v === null) {
@@ -66,6 +70,9 @@ export function getCliAdapters(): CliAdapterSet {
 }
 export function getCompactionScheduler(): CompactionScheduler {
   return ensureInitialized(_compactionScheduler, 'compactionScheduler');
+}
+export function getQuotaTracker(): QuotaTracker {
+  return ensureInitialized(_quotaTracker, 'quotaTracker');
 }
 
 export function getLogger(): Logger {
@@ -118,23 +125,29 @@ export function initializeCore(context: vscode.ExtensionContext): void {
   _compactionScheduler = createCompactionScheduler({
     notifications: compactionNotifications,
     envProbe: _envProbe,
-    resolveRefineOrder: (activeModel) => {
+    resolveRefineDecision: (activeModel) => {
       const cfg = getConfig();
       switch (cfg.refinePolicy) {
         case 'off':
-          return { order: [], singleCandidate: false };
+          return { policy: 'off' };
         case 'fixed':
-          return { order: [cfg.refineFixedCli], singleCandidate: true };
+          return { policy: 'fixed', cli: cfg.refineFixedCli };
         case 'active':
-          return { order: [activeModel], singleCandidate: true };
+          return { policy: 'active', cli: activeModel };
         case 'priority':
           return {
+            policy: 'priority',
             order: Array.from(new Set(cfg.refinePriorityOrder)),
-            singleCandidate: false,
           };
       }
     },
     maxArchiveSnapshots: getConfig().maxArchiveSnapshots,
     logger,
+  });
+
+  _quotaTracker = createQuotaTracker({
+    store: createQuotaStore(context),
+    logger,
+    // UI 미설치 — onChange는 일단 no-op. 미래 sidebar/statusbar 추가 시 broadcast 연결.
   });
 }

@@ -3,22 +3,22 @@
 import * as core from '@agentbridge/core';
 import type { CliKind } from '../shared/types';
 import { getConfig } from '../settings/config';
-import { getEnvProbe, getLogger } from './coreInstances';
+import { getEnvProbe, getLogger, getQuotaTracker } from './coreInstances';
 
 export { RefineOffError, RefineFailedError } from '@agentbridge/core';
 export type { RefineModelChoice } from '@agentbridge/core';
 
-function resolveOrder(activeModel: CliKind): { order: CliKind[]; singleCandidate: boolean } {
+function resolveDecision(activeModel: CliKind): core.RefineDecision {
   const cfg = getConfig();
   switch (cfg.refinePolicy) {
     case 'off':
-      return { order: [], singleCandidate: false };
+      return { policy: 'off' };
     case 'fixed':
-      return { order: [cfg.refineFixedCli], singleCandidate: true };
+      return { policy: 'fixed', cli: cfg.refineFixedCli };
     case 'active':
-      return { order: [activeModel], singleCandidate: true };
+      return { policy: 'active', cli: activeModel };
     case 'priority':
-      return { order: Array.from(new Set(cfg.refinePriorityOrder)), singleCandidate: false };
+      return { policy: 'priority', order: Array.from(new Set(cfg.refinePriorityOrder)) };
   }
 }
 
@@ -28,14 +28,19 @@ export async function runRefine(args: {
   cwd?: string;
   timeoutMs?: number;
 }): Promise<core.RefineModelChoice> {
-  const { order, singleCandidate } = resolveOrder(args.activeModel);
+  const quota = getQuotaTracker();
   return core.runRefine({
-    order,
-    singleCandidate,
+    decision: resolveDecision(args.activeModel),
     prompt: args.prompt,
     cwd: args.cwd,
     timeoutMs: args.timeoutMs,
     envProbe: getEnvProbe(),
     logger: getLogger(),
+    onAttempt: async (event) => {
+      // 익스텐션은 UI 미설치 — quota 강제 폴백만 저장 (데이터 모델 통일).
+      if (event.status === 'quota') {
+        await quota.markForcedFallback(event.cli);
+      }
+    },
   });
 }

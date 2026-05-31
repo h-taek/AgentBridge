@@ -24,7 +24,7 @@ import {
 } from './turnsStore';
 import { buildCompactionPrompt } from './irModule/prompt';
 import { parseRefineOutput, assembleIR, type GitInfo } from './irModule/parse';
-import { runRefine, RefineOffError } from './refineDispatcher';
+import { runRefine, RefineOffError, type RefineDecision } from './refineDispatcher';
 import type { EnvProbe } from './envProbe';
 import type { Logger } from './interfaces';
 import { noopLogger } from './interfaces';
@@ -47,13 +47,26 @@ export type CompactionSchedulerOptions = {
   envProbe: EnvProbe;
   // 호스트가 cwd를 받아 git 정보 반환. 미제공 시 IR.meta의 gitBranch/gitHead는 undefined.
   gitProbe?: (cwd: string) => Promise<GitInfo>;
-  // 호스트가 settings를 보고 refine 순서를 결정. 빈 배열이면 RefineOffError.
-  resolveRefineOrder: (activeModel: CliKind) => { order: CliKind[]; singleCandidate: boolean };
+  // 호스트가 settings를 보고 refine 정책을 결정. policy: 'off'면 RefineOffError.
+  resolveRefineDecision: (activeModel: CliKind) => RefineDecision;
   logger?: Logger;
   // 압축 아카이브 최대 보관 개수 (turnsStore.commitArchive에 전달).
   maxArchiveSnapshots: number;
   // ir:updated / turns:updated 이벤트를 발행할 EventEmitter (호스트가 구독).
   events?: EventEmitter;
+};
+
+// 사용자 명시 trigger(manual)의 풍부한 결과 객체. auto는 void 반환이라 진단 정보 없음.
+// renderer가 표시하는 'IR 새로 정제' 모달이 이 결과를 받아 ok/error/raw 응답 노출.
+export type ManualCompactionResult = {
+  ok: boolean;
+  error?: string;
+  ir?: IR;
+  rawAssistantText: string;
+  durationMs: number;
+  exitCode: number | null;
+  stderr: string;
+  rawLineCount: number;
 };
 
 export interface CompactionScheduler {
@@ -68,6 +81,14 @@ export interface CompactionScheduler {
     workspacePath: string; // 사용자의 프로젝트 cwd
     activeModel: CliKind;
   }): Promise<void>;
+  // manual trigger — auto와 같은 락/2-phase commit 사용하되 trigger 조건 무시 + 모든 turn 처리.
+  runManual(args: {
+    workspaceId: string;
+    workspaceRoot: string;
+    workspacePath: string;
+    activeModel: CliKind;
+    timeoutMs?: number;
+  }): Promise<ManualCompactionResult>;
 }
 
 type WorkspaceLockState = {
@@ -210,13 +231,12 @@ export function createCompactionScheduler(
           currentIR,
         });
 
-        const { order, singleCandidate } = opts.resolveRefineOrder(activeModel);
+        const decision = opts.resolveRefineDecision(activeModel);
 
         let dispatch;
         try {
           dispatch = await runRefine({
-            order,
-            singleCandidate,
+            decision,
             prompt,
             cwd: workspacePath,
             timeoutMs: COMPACTION_TIMEOUT_MS,
@@ -323,6 +343,173 @@ export function createCompactionScheduler(
       } catch (err) {
         const msg = err instanceof Error ? err.stack ?? err.message : String(err);
         log.warn(`compaction: unexpected error — ${msg}`);
+      } finally {
+        if (holdsDiskLock) await releaseDiskLock(workspaceRoot);
+        this.unmarkInFlight(workspaceId);
+      }
+    },
+
+    async runManual(args): Promise<ManualCompactionResult> {
+      const { workspaceId, workspaceRoot, workspacePath, activeModel } = args;
+      const empty = (error?: string): ManualCompactionResult => ({
+        ok: false,
+        error,
+        rawAssistantText: '',
+        durationMs: 0,
+        exitCode: null,
+        stderr: '',
+        rawLineCount: 0,
+      });
+
+      // 동시 호출 방어 — auto와 같은 inFlight + disk lock 채택. 데스크탑 옛 runManualCompaction의
+      // 락 누락 버그를 통합 시점에 자동 수정.
+      if (!this.markInFlight(workspaceId)) {
+        return empty('이미 다른 compaction이 진행 중입니다');
+      }
+      let holdsDiskLock = false;
+      try {
+        const turns = await readAllTurns(workspaceRoot);
+        if (turns.length === 0) {
+          return empty('turns.jsonl이 비어있어 정제할 내용 없음');
+        }
+
+        holdsDiskLock = await acquireDiskLock(workspaceRoot);
+        if (!holdsDiskLock) {
+          return empty('다른 프로세스가 락을 잡고 있어 manual compaction 스킵');
+        }
+
+        const keep = COMPACTION_TRIGGER.keepRecent;
+        const processCount = Math.max(turns.length - keep, 0);
+        const oldest = turns.slice(0, processCount);
+        const remaining = turns.slice(processCount);
+        const currentIR = await loadIR(workspaceRoot);
+
+        const prompt = buildCompactionPrompt({
+          fromModel: activeModel,
+          workspacePath,
+          // 처리 대상 0개여도 IR refine은 의미 있음 — 최근 raw로 IR 추출.
+          turns: oldest.length > 0 ? oldest : remaining,
+          currentIR,
+        });
+
+        const decision = opts.resolveRefineDecision(activeModel);
+
+        let dispatch;
+        try {
+          dispatch = await runRefine({
+            decision,
+            prompt,
+            cwd: workspacePath,
+            timeoutMs: args.timeoutMs ?? COMPACTION_TIMEOUT_MS,
+            envProbe: opts.envProbe,
+            logger: log,
+          });
+        } catch (err) {
+          if (err instanceof RefineOffError) {
+            opts.notifications.notifyRefineOff();
+            return empty("refine 비활성 (settings.refineModel='off')");
+          }
+          throw err;
+        }
+
+        if (dispatch.fallback && dispatch.fallbackReason) {
+          const triedFirst = dispatch.triedCli[0] ?? 'previous CLI';
+          opts.notifications.notifyRefineFallback(
+            triedFirst,
+            dispatch.spawnedModel,
+            dispatch.fallbackReason,
+          );
+        }
+
+        const refine = dispatch.result;
+        if (refine.exitCode !== 0 && refine.assistantText.length === 0) {
+          return {
+            ok: false,
+            error: `refine spawn 실패 (exit=${refine.exitCode}). stderr 일부: ${refine.stderr.slice(0, 400)}`,
+            rawAssistantText: refine.assistantText,
+            durationMs: refine.durationMs,
+            exitCode: refine.exitCode,
+            stderr: refine.stderr,
+            rawLineCount: refine.rawLines.length,
+          };
+        }
+
+        const parsed = parseRefineOutput(refine.assistantText);
+        if (!parsed.ok) {
+          return {
+            ok: false,
+            error: parsed.error,
+            rawAssistantText: refine.assistantText,
+            durationMs: refine.durationMs,
+            exitCode: refine.exitCode,
+            stderr: refine.stderr,
+            rawLineCount: refine.rawLines.length,
+          };
+        }
+
+        const gitInfo = opts.gitProbe ? await opts.gitProbe(workspacePath) : undefined;
+        const ir = assembleIR({
+          contextId: workspaceId,
+          body: parsed.body,
+          fromModel: activeModel,
+          workspacePath,
+          previousIR: currentIR,
+          gitInfo,
+        });
+
+        try {
+          await saveIR(workspaceRoot, ir);
+        } catch (err) {
+          return {
+            ok: false,
+            error: `ir.json write 실패: ${String(err)}`,
+            ir,
+            rawAssistantText: refine.assistantText,
+            durationMs: refine.durationMs,
+            exitCode: refine.exitCode,
+            stderr: refine.stderr,
+            rawLineCount: refine.rawLines.length,
+          };
+        }
+
+        if (processCount > 0) {
+          let stagedArchive: StagedArchive | null = null;
+          if (currentIR) {
+            try {
+              stagedArchive = await stageCompactedTurns(workspaceRoot, oldest, currentIR);
+            } catch (err) {
+              log.warn(
+                `runManual: archive stage failed — ${err instanceof Error ? err.message : String(err)}`,
+              );
+            }
+          }
+          try {
+            await rewriteTurns(workspaceRoot, remaining);
+            if (stagedArchive) {
+              await commitArchive(stagedArchive, {
+                maxArchiveSnapshots: opts.maxArchiveSnapshots,
+                logger: log,
+              });
+            }
+          } catch (err) {
+            log.warn(
+              `runManual: turns rewrite 실패 — IR은 갱신됨: ${err instanceof Error ? err.message : String(err)}`,
+            );
+            if (stagedArchive) await abortArchive(stagedArchive);
+          }
+        }
+
+        events.emit('ir:updated', workspaceId);
+        return {
+          ok: true,
+          ir,
+          error: parsed.warnings.length > 0 ? parsed.warnings.join(' / ') : undefined,
+          rawAssistantText: refine.assistantText,
+          durationMs: refine.durationMs,
+          exitCode: refine.exitCode,
+          stderr: refine.stderr,
+          rawLineCount: refine.rawLines.length,
+        };
       } finally {
         if (holdsDiskLock) await releaseDiskLock(workspaceRoot);
         this.unmarkInFlight(workspaceId);

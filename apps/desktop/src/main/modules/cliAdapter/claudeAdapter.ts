@@ -7,15 +7,12 @@ import log from 'electron-log/main'
 import { getCliPath, getShellPath } from '../envProbe'
 import { killPty, resizePty, startPty, writePty } from '../ptySession'
 import { buildAdapterEnv } from './env'
-import { runRefineSpawn } from './refineHeadless'
+import { deleteClaudeNativeSession } from '@agentbridge/core'
 import type {
   CLIAdapter,
-  RefineUsage,
   SpawnInteractiveHooks,
   SpawnInteractiveRequest,
-  SpawnInteractiveResult,
-  SpawnRefineRequest,
-  SpawnRefineResult
+  SpawnInteractiveResult
 } from './types'
 
 // claude는 메시지 교환 *전*까지 ~/.claude/projects/<cwd-encoded>/<UUID>.jsonl을 만들지 않는다
@@ -110,113 +107,13 @@ async function spawnInteractive(
   return { ...result, modelSessionId: claudeSessionId }
 }
 
-// claude refine 헤드리스 — `claude -p '<prompt>' --output-format stream-json --verbose
-// --permission-mode acceptEdits` (architecture §7.2). stream-json 라인 형식:
-//   {"type":"system","subtype":"init",...}
-//   {"type":"assistant","message":{"content":[{"type":"text","text":"..."}],...}}
-//   {"type":"result","subtype":"success","usage":{...}}
-async function spawnRefineIRClaude(req: SpawnRefineRequest): Promise<SpawnRefineResult> {
-  const cliPath = getCliPath('claude')
-  if (!cliPath) {
-    throw new Error('claude CLI not found in PATH')
-  }
-  const env = buildAdapterEnv({ shellPath: getShellPath() })
-  let assistantText = ''
-  let usage: RefineUsage | undefined
-  log.info('claude spawnRefineIR', {
-    promptLen: req.prompt.length,
-    cwd: req.cwd,
-    modelHint: req.modelHint
-  })
-  const modelArgs = req.modelHint ? ['--model', req.modelHint] : []
-  const base = await runRefineSpawn({
-    command: cliPath,
-    args: [
-      '-p',
-      req.prompt,
-      '--output-format',
-      'stream-json',
-      '--verbose',
-      '--permission-mode',
-      'acceptEdits',
-      ...modelArgs
-    ],
-    cwd: req.cwd,
-    env,
-    stdinPayload: null,
-    abortSignal: req.abortSignal,
-    timeoutMs: req.timeoutMs,
-    onLine: (line) => {
-      let evt: unknown
-      try {
-        evt = JSON.parse(line)
-      } catch {
-        return
-      }
-      const o = evt as { type?: string; message?: unknown; usage?: unknown }
-      if (o.type === 'assistant' && o.message && typeof o.message === 'object') {
-        const m = o.message as { content?: Array<{ type?: string; text?: string }> }
-        if (Array.isArray(m.content)) {
-          for (const c of m.content) {
-            if (c.type === 'text' && typeof c.text === 'string') {
-              assistantText += c.text
-            }
-          }
-        }
-      } else if (o.type === 'result' && o.usage && typeof o.usage === 'object') {
-        const u = o.usage as Record<string, number>
-        usage = {
-          inputTokens: u.input_tokens,
-          outputTokens: u.output_tokens,
-          cacheReadTokens: u.cache_read_input_tokens,
-          cacheCreationTokens: u.cache_creation_input_tokens
-        }
-      }
-    }
-  })
-  return { assistantText, usage, ...base }
-}
-
-async function hasNativeSession(modelSessionId: string | null): Promise<boolean> {
-  if (!modelSessionId) return false
-  return claudeSessionFileExists(modelSessionId)
-}
-
-// 우리가 발급한 sessionId(UUID)를 가진 jsonl 파일을 모든 project 디렉토리에서 unlink.
-// claude의 cwd-encoded 디렉토리명 알고리즘이 정확히 문서화돼있지 않아 각 project 디렉토리를
-// 순회하며 매칭 파일 삭제(claudeSessionFileExists와 같은 패턴).
-//
-// macOS에서 readdir이 .DS_Store 같은 비-디렉토리 entry도 반환하므로 stat으로 isDirectory
-// 체크 후 skip. 안 하면 path.join('.DS_Store', '<UUID>.jsonl').unlink가 ENOTDIR로 실패해
-// 노이즈 warn 발생.
+// 네이티브 파일 삭제는 코어 sessionRegistry의 deleteClaudeNativeSession에 위임.
 async function deleteNativeSession(modelSessionId: string | null): Promise<void> {
   if (!modelSessionId) return
-  const root = path.join(os.homedir(), '.claude', 'projects')
-  let entries: string[]
-  try {
-    entries = await fs.readdir(root)
-  } catch {
-    return
-  }
-  for (const p of entries) {
-    const subDir = path.join(root, p)
-    try {
-      const stat = await fs.stat(subDir)
-      if (!stat.isDirectory()) continue
-    } catch {
-      continue
-    }
-    const file = path.join(subDir, `${modelSessionId}.jsonl`)
-    try {
-      await fs.unlink(file)
-      log.info('claude native session 삭제', { file })
-    } catch (err) {
-      const code = (err as NodeJS.ErrnoException).code
-      if (code !== 'ENOENT') {
-        log.warn('claude native session 삭제 실패', { file, err: String(err) })
-      }
-    }
-  }
+  await deleteClaudeNativeSession(modelSessionId, {
+    log: (msg) => log.info(msg),
+    warn: (msg) => log.warn(msg)
+  })
 }
 
 export const claudeAdapter: CLIAdapter = {
@@ -226,7 +123,5 @@ export const claudeAdapter: CLIAdapter = {
   write: writePty,
   resize: resizePty,
   killInteractive: killPty,
-  spawnRefineIR: spawnRefineIRClaude,
-  hasNativeSession,
   deleteNativeSession
 }

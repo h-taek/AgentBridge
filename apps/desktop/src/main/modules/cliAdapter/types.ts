@@ -48,39 +48,6 @@ export type ChatSubmitStep = {
   delayMs?: number
 }
 
-// IR refine 헤드리스 spawn — 메인 PTY와 별도 child_process. architecture §7.1/§7.2.
-// stream-json 출력을 정규화해 assistant.text 누적 + usage 추출.
-export type SpawnRefineRequest = {
-  prompt: string
-  cwd?: string
-  abortSignal?: AbortSignal
-  // optional 정밀 비용 추적용 — 미설정 시 60s.
-  timeoutMs?: number
-  // 모델 지정. agy는 CLI flag로 지정 불가 — 무시. codex는 `-c model=`, claude는 `--model`로 전달.
-  // null/undefined면 각 CLI의 default 모델 사용.
-  modelHint?: string | null
-}
-
-export type RefineUsage = {
-  inputTokens?: number
-  outputTokens?: number
-  cacheReadTokens?: number
-  cacheCreationTokens?: number
-}
-
-export type SpawnRefineResult = {
-  // 정규화된 assistant.text 누적 — refine 응답 본문.
-  assistantText: string
-  usage?: RefineUsage
-  // 디버깅·진단용 raw JSONL 라인 (정상/비정상 모두).
-  rawLines: string[]
-  // child 자식 종료 코드.
-  exitCode: number | null
-  // child stderr (있으면 진단용).
-  stderr: string
-  durationMs: number
-}
-
 export type CLIAdapter = {
   kind: CliKind
   // 채팅 입력창에서 PTY stdin으로 메시지 보낼 때 어댑터별 송신 시퀀스 직렬화.
@@ -99,17 +66,6 @@ export type CLIAdapter = {
   write(sessionId: string, data: string): void
   resize(sessionId: string, cols: number, rows: number): void
   killInteractive(sessionId: string): void
-  // IR refine 헤드리스 spawn — 메인 PTY를 건드리지 않고 새 child_process로 stream-json 호출.
-  // 결과로 누적 assistant.text + usage 반환.
-  spawnRefineIR(req: SpawnRefineRequest): Promise<SpawnRefineResult>
-  // 빈 세션 판정 — 각 CLI는 *사용자 메시지가 도착해야 native 세션 파일을 디스크에 만든다*.
-  // 그 사실을 직접 확인해 빈 세션을 판별. AgentBridge가 자체적으로 입력 추적할 필요 없이
-  // 진실의 원천(disk) 그대로 위임. 호출 시점은 sessions:close 직후 PTY kill 끝난 뒤.
-  //   - claude: ~/.claude/projects/<cwd-encoded>/<modelSessionId>.jsonl 존재 확인
-  //   - codex:  modelSessionId === null이면 native session 미생성 (codex thread_id 캡처는
-  //             첫 사용자 메시지가 도착해야 발생)
-  //   - agy:    ~/.gemini/antigravity-cli/conversations/<UUID>.pb 존재 확인
-  hasNativeSession(modelSessionId: string | null, cwd?: string): Promise<boolean>
   // CLI native 세션 파일을 디스크에서 hard delete. AgentBridge에서 세션을 삭제했는데 외부
   // CLI(예: `claude --resume`, `codex resume`, `gemini --resume`)에서 그 세션이 보이면
   // 정책 (1) "외부 agent 노출 차단" 위반. 따라서 우리 sessions/<sid>/ 삭제와 동시에 각

@@ -160,6 +160,156 @@ export async function deleteAgyConversationFiles(modelSessionId: string): Promis
   }
 }
 
+// === 9종 청소 추가 함수 (2026-05-31 실측 기반) ===
+// agy spawn은 cwd → 9곳에 흔적을 남김. 기존 conversation/.pb (3), implicit (5), log (6)에 더해
+// 아래 5종 추가.
+
+function getBrainDir(): string {
+  return path.join(AGY_BASE_DIR, 'brain')
+}
+
+function getGeminiHomeDir(): string {
+  return path.join(os.homedir(), '.gemini')
+}
+
+// (2) last_conversations.json의 cwd 키 제거. atomic rewrite로 진행.
+export async function removeLastConversationsEntry(cwd: string): Promise<string | null> {
+  const cachePath = getLastConversationsCachePath()
+  let parsed: Record<string, string>
+  try {
+    const raw = await fs.readFile(cachePath, 'utf8')
+    parsed = JSON.parse(raw) as Record<string, string>
+  } catch {
+    return null
+  }
+  const uuid = parsed[cwd]
+  if (!uuid) return null
+  delete parsed[cwd]
+  const tmp = `${cachePath}.${process.pid}.${Date.now()}.tmp`
+  try {
+    await fs.writeFile(tmp, JSON.stringify(parsed, null, 2), 'utf8')
+    await fs.rename(tmp, cachePath)
+    log.info('agy last_conversations.json 엔트리 제거', { cwd, uuid })
+  } catch (err) {
+    log.warn('agy last_conversations.json rewrite 실패', { cwd, err: String(err) })
+    await fs.unlink(tmp).catch(() => undefined)
+  }
+  return uuid
+}
+
+// (4) brain/<UUID>/ 폴더 전체 삭제. antigravity 데스크탑 사이드바가 brain transcript를 참조.
+export async function deleteAgyBrainFolder(uuid: string): Promise<void> {
+  const dir = path.join(getBrainDir(), uuid)
+  try {
+    await fs.rm(dir, { recursive: true, force: true })
+    log.info('agy brain 폴더 삭제', { dir })
+  } catch (err) {
+    log.warn('agy brain 폴더 삭제 실패', { dir, err: String(err) })
+  }
+}
+
+// (7) ~/.gemini/config/projects/<UUID>.json 삭제. antigravity 데스크탑 Projects 사이드바의 진짜 출처.
+export async function deleteGeminiConfigProjectFile(uuid: string): Promise<void> {
+  const file = path.join(getGeminiHomeDir(), 'config', 'projects', `${uuid}.json`)
+  try {
+    await fs.unlink(file)
+    log.info('agy config/projects/<UUID>.json 삭제', { file })
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code
+    if (code !== 'ENOENT') {
+      log.warn('agy config/projects/<UUID>.json 삭제 실패', { file, err: String(err) })
+    }
+  }
+}
+
+// (8) ~/.gemini/history/<cwd-basename>/ 폴더 삭제. agy가 cwd마다 history 폴더를 만듦.
+//      cwd가 격리 tmpdir이라 basename이 그대로 폴더명 (`agentbridge-refine-<ts>-<pid>` 등).
+export async function deleteGeminiHistoryFolderForCwd(cwd: string): Promise<void> {
+  const base = path.basename(cwd)
+  // 안전 가드: agentbridge-refine-* 또는 agentbridge-quota-probe-* 패턴만 정리.
+  if (!base.startsWith('agentbridge-refine-') && !base.startsWith('agentbridge-quota-probe-')) {
+    return
+  }
+  const dir = path.join(getGeminiHomeDir(), 'history', base)
+  try {
+    await fs.rm(dir, { recursive: true, force: true })
+    log.info('agy history 폴더 삭제', { dir })
+  } catch (err) {
+    log.warn('agy history 폴더 삭제 실패', { dir, err: String(err) })
+  }
+}
+
+// (9) antigravity-cli/settings.json의 .trustedWorkspaces[] 배열에서 cwd 항목 제거.
+//      agy가 spawn 시 cwd를 trust 목록에 자동 등록. atomic rewrite.
+export async function removeTrustedWorkspaceEntry(cwd: string): Promise<void> {
+  const settingsPath = path.join(AGY_BASE_DIR, 'settings.json')
+  let parsed: { trustedWorkspaces?: string[]; [k: string]: unknown }
+  try {
+    const raw = await fs.readFile(settingsPath, 'utf8')
+    parsed = JSON.parse(raw) as { trustedWorkspaces?: string[] }
+  } catch {
+    return
+  }
+  if (!Array.isArray(parsed.trustedWorkspaces)) return
+  const before = parsed.trustedWorkspaces.length
+  parsed.trustedWorkspaces = parsed.trustedWorkspaces.filter((w) => w !== cwd)
+  if (parsed.trustedWorkspaces.length === before) return
+  const tmp = `${settingsPath}.${process.pid}.${Date.now()}.tmp`
+  try {
+    await fs.writeFile(tmp, JSON.stringify(parsed, null, 2), 'utf8')
+    await fs.rename(tmp, settingsPath)
+    log.info('agy settings.json trustedWorkspaces 엔트리 제거', { cwd })
+  } catch (err) {
+    log.warn('agy settings.json rewrite 실패', { cwd, err: String(err) })
+    await fs.unlink(tmp).catch(() => undefined)
+  }
+}
+
+// (5) implicit/<UUID>.pb 직접 unlink. UUID가 있으면 snapshot delta 없이도 매칭.
+export async function deleteAgyImplicitFile(uuid: string): Promise<void> {
+  const file = path.join(getImplicitDir(), `${uuid}.pb`)
+  try {
+    await fs.unlink(file)
+    log.info('agy implicit/<UUID>.pb 삭제', { file })
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code
+    if (code !== 'ENOENT') {
+      log.warn('agy implicit/<UUID>.pb 삭제 실패', { file, err: String(err) })
+    }
+  }
+}
+
+// 통합 헬퍼 — refine 격리 cwd 끝난 직후 9곳 중 8곳을 한 번에 청소 (tmpdir 자체 rm은 호출자).
+// UUID 기반이라 spawn 전 snapshot 불필요. log/cli-*.log는 보수적으로 건드리지 않음 (진단 가치).
+export async function cleanupAgyArtifactsForCwd(cwd: string): Promise<void> {
+  // (2) cache 엔트리 제거하면서 UUID 회수
+  const uuid = await removeLastConversationsEntry(cwd)
+  if (uuid) {
+    // (3) conversations/.pb
+    await deleteAgyConversationFiles(uuid)
+    // (4) brain/<UUID>/
+    await deleteAgyBrainFolder(uuid)
+    // (5) implicit/<UUID>.pb
+    await deleteAgyImplicitFile(uuid)
+    // (7) config/projects/<UUID>.json
+    await deleteGeminiConfigProjectFile(uuid)
+  }
+  // (8) history/<basename>/
+  await deleteGeminiHistoryFolderForCwd(cwd)
+  // (9) settings.json trustedWorkspaces[]
+  await removeTrustedWorkspaceEntry(cwd)
+}
+
+// tmpdir 자체 삭제 — 호출자가 lifecycle 알 때 사용.
+export async function rmIsolatedCwd(cwd: string): Promise<void> {
+  try {
+    await fs.rm(cwd, { recursive: true, force: true })
+    log.info('agy isolated tmpdir 삭제', { cwd })
+  } catch (err) {
+    log.warn('agy isolated tmpdir 삭제 실패', { cwd, err: String(err) })
+  }
+}
+
 export type ResumeResolveOptions = {
   // 우리가 캡처해둔 modelSessionId(full UUID). 없으면 fallback으로 `--continue` 사용.
   sessionId: string | null

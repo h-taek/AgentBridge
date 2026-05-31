@@ -30,6 +30,118 @@ export type SessionRegistryOptions = {
   onAfterDelete?: (workspaceId: string, sessionId: string) => void | Promise<void>;
 };
 
+// CLI별 native 세션 파일 삭제 — sessionRegistry.delete 외에 호스트가 별도 호출 가능하도록 export.
+//   - claude: ~/.claude/projects/<*>/<sessionId>.jsonl
+//   - codex:  ~/.codex/sessions/<Y>/<M>/<D>/rollout-*-<sessionId>.jsonl
+//   - agy:    ~/.gemini/antigravity-cli/conversations/<sessionId>.pb
+
+export async function deleteClaudeNativeSession(sessionId: string, logger: Logger = noopLogger): Promise<void> {
+  const root = join(homedir(), '.claude', 'projects');
+  let entries: string[];
+  try {
+    entries = await fs.readdir(root);
+  } catch {
+    return;
+  }
+  for (const p of entries) {
+    const subDir = join(root, p);
+    try {
+      const stat = await fs.stat(subDir);
+      if (!stat.isDirectory()) continue;
+    } catch {
+      continue;
+    }
+    const file = join(subDir, `${sessionId}.jsonl`);
+    try {
+      await fs.unlink(file);
+      logger.log(`sessionRegistry: claude native session deleted — ${file}`);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+        logger.warn(`sessionRegistry: claude native delete failed — ${file}`);
+      }
+    }
+  }
+}
+
+export async function deleteCodexNativeSession(sessionId: string, logger: Logger = noopLogger): Promise<void> {
+  const root = join(homedir(), '.codex', 'sessions');
+  const target = `-${sessionId.toLowerCase()}.jsonl`;
+  let years: string[];
+  try {
+    years = await fs.readdir(root);
+  } catch {
+    return;
+  }
+  for (const y of years) {
+    const yDir = join(root, y);
+    let months: string[];
+    try {
+      months = await fs.readdir(yDir);
+    } catch {
+      continue;
+    }
+    for (const m of months) {
+      const mDir = join(yDir, m);
+      let days: string[];
+      try {
+        days = await fs.readdir(mDir);
+      } catch {
+        continue;
+      }
+      for (const d of days) {
+        const dDir = join(mDir, d);
+        let files: string[];
+        try {
+          files = await fs.readdir(dDir);
+        } catch {
+          continue;
+        }
+        for (const f of files) {
+          if (!f.toLowerCase().endsWith(target)) continue;
+          const file = join(dDir, f);
+          try {
+            await fs.unlink(file);
+            logger.log(`sessionRegistry: codex native session deleted — ${file}`);
+          } catch (err) {
+            if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+              logger.warn(`sessionRegistry: codex native delete failed — ${file}`);
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+export async function deleteAgyNativeSession(sessionId: string, logger: Logger = noopLogger): Promise<void> {
+  const file = join(
+    homedir(),
+    '.gemini',
+    'antigravity-cli',
+    'conversations',
+    `${sessionId}.pb`,
+  );
+  try {
+    await fs.unlink(file);
+    logger.log(`sessionRegistry: agy native conversation deleted — ${file}`);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+      logger.warn(`sessionRegistry: agy native delete failed — ${file}`);
+    }
+  }
+}
+
+export async function deleteNativeSession(model: CliKind, sessionId: string, logger?: Logger): Promise<void> {
+  switch (model) {
+    case 'claude':
+      return deleteClaudeNativeSession(sessionId, logger);
+    case 'codex':
+      return deleteCodexNativeSession(sessionId, logger);
+    case 'agy':
+      return deleteAgyNativeSession(sessionId, logger);
+  }
+}
+
 export interface SessionRegistry {
   register(workspaceId: string, workspaceRoot: string, sessionId: string, model: CliKind): Promise<SessionMeta>;
   updateActivity(workspaceId: string, workspaceRoot: string, sessionId: string): Promise<void>;
@@ -104,112 +216,9 @@ export function createSessionRegistry(opts: SessionRegistryOptions = {}): Sessio
     await fs.rename(tmp, p);
   }
 
-  async function deleteClaudeNative(sessionId: string): Promise<void> {
-    const root = join(homedir(), '.claude', 'projects');
-    let entries: string[];
-    try {
-      entries = await fs.readdir(root);
-    } catch {
-      return;
-    }
-    for (const p of entries) {
-      const subDir = join(root, p);
-      try {
-        const stat = await fs.stat(subDir);
-        if (!stat.isDirectory()) continue;
-      } catch {
-        continue;
-      }
-      const file = join(subDir, `${sessionId}.jsonl`);
-      try {
-        await fs.unlink(file);
-        log.log(`sessionRegistry: claude native session deleted — ${file}`);
-      } catch (err) {
-        if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
-          log.warn(`sessionRegistry: claude native delete failed — ${file}`);
-        }
-      }
-    }
-  }
-
-  async function deleteCodexNative(sessionId: string): Promise<void> {
-    const root = join(homedir(), '.codex', 'sessions');
-    const target = `-${sessionId.toLowerCase()}.jsonl`;
-    let years: string[];
-    try {
-      years = await fs.readdir(root);
-    } catch {
-      return;
-    }
-    for (const y of years) {
-      const yDir = join(root, y);
-      let months: string[];
-      try {
-        months = await fs.readdir(yDir);
-      } catch {
-        continue;
-      }
-      for (const m of months) {
-        const mDir = join(yDir, m);
-        let days: string[];
-        try {
-          days = await fs.readdir(mDir);
-        } catch {
-          continue;
-        }
-        for (const d of days) {
-          const dDir = join(mDir, d);
-          let files: string[];
-          try {
-            files = await fs.readdir(dDir);
-          } catch {
-            continue;
-          }
-          for (const f of files) {
-            if (!f.toLowerCase().endsWith(target)) continue;
-            const file = join(dDir, f);
-            try {
-              await fs.unlink(file);
-              log.log(`sessionRegistry: codex native session deleted — ${file}`);
-            } catch (err) {
-              if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
-                log.warn(`sessionRegistry: codex native delete failed — ${file}`);
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-
-  async function deleteAgyNative(sessionId: string): Promise<void> {
-    const file = join(
-      homedir(),
-      '.gemini',
-      'antigravity-cli',
-      'conversations',
-      `${sessionId}.pb`,
-    );
-    try {
-      await fs.unlink(file);
-      log.log(`sessionRegistry: agy native conversation deleted — ${file}`);
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
-        log.warn(`sessionRegistry: agy native delete failed — ${file}`);
-      }
-    }
-  }
-
-  async function deleteNativeSession(model: CliKind, sessionId: string): Promise<void> {
-    switch (model) {
-      case 'claude':
-        return deleteClaudeNative(sessionId);
-      case 'codex':
-        return deleteCodexNative(sessionId);
-      case 'agy':
-        return deleteAgyNative(sessionId);
-    }
-  }
+  // Module-level deleteNativeSession을 logger 주입해 호출.
+  const deleteNativeSessionInternal = (model: CliKind, sessionId: string): Promise<void> =>
+    deleteNativeSession(model, sessionId, log);
 
   return {
     async register(workspaceId, workspaceRoot, sessionId, model) {
@@ -311,7 +320,7 @@ export function createSessionRegistry(opts: SessionRegistryOptions = {}): Sessio
           // claude는 sessionId === modelSessionId. codex/agy는 캡처된 modelSessionId가 있어야 native 정리.
           const nativeId = target.modelSessionId ?? (target.model === 'claude' ? sessionId : null);
           if (nativeId) {
-            await deleteNativeSession(target.model, nativeId);
+            await deleteNativeSessionInternal(target.model, nativeId);
           }
         }
         const filtered = sessions.filter((x) => x.sessionId !== sessionId);
