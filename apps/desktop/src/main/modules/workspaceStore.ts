@@ -2,6 +2,7 @@ import { app } from 'electron'
 import { promises as fs } from 'fs'
 import * as path from 'path'
 import { randomUUID } from 'crypto'
+import log from 'electron-log/main'
 import type {
   CliKind,
   SessionKind,
@@ -11,6 +12,7 @@ import type {
   WorkspaceListEntry
 } from '@shared/ipc'
 import type { IR } from '@shared/ir'
+import { createWorkspaceStore, type WorkspaceStore as CoreWorkspaceStore } from '@agentbridge/core'
 import { withWorkspaceLock } from './workspaceLock'
 import { normalizeWorkspacePath, validateWorkspacePath } from './workspacePath'
 
@@ -85,6 +87,19 @@ function getDirs(): WorkspaceDirs {
     throw new Error('WorkspaceStore 미초기화 — ensureWorkspaceDirs() 먼저 호출')
   }
   return dirsCache
+}
+
+// 코어 WorkspaceStore 인스턴스 — Phase 6.A (2026-06-01): 핵심 CRUD를 코어로 위임.
+// 데스크탑 부수(IR/archive/replay/title cache)는 wrapper에 남기되, workspace.json sessions[]
+// read/write + lock + UUID 생성은 코어가 처리.
+let _coreStore: CoreWorkspaceStore | null = null
+function getCoreStore(): CoreWorkspaceStore {
+  if (!_coreStore) {
+    _coreStore = createWorkspaceStore(getDirs().root, {
+      logger: { log: (m) => log.info(m), warn: (m) => log.warn(m) }
+    })
+  }
+  return _coreStore
 }
 
 // workspaceId / sessionId 안전성 — randomUUID() 출력만 허용. legacy contextId 마이그레이션도 동일
@@ -175,57 +190,34 @@ export function getCachedWorkspaceTitle(workspaceId: string): string | null {
 // writeSessionMetaAtomic 폐기 (2026-06-01 Phase 6). 세션 메타는 workspace.json sessions[]에
 // 단일 source로 통합 저장. sessions/<sid>/meta.json은 더 이상 작성하지 않음 (옛 파일은 무해).
 
-// 워크스페이스 생성 + 첫 세션 등록.
+// 워크스페이스 생성 + 첫 세션 등록. 코어 createWorkspace 위임 + 데스크탑 부수 작업
+// (archive/settings 디렉토리, ir.json/turns.jsonl 빈 파일, replay.log 초기화).
 export async function createWorkspace(
   input: WorkspaceCreateRequest
 ): Promise<{ workspace: WorkspaceMeta; firstSession: SessionMeta }> {
-  const workspaceId = randomUUID()
-  const sessionId = randomUUID()
-  const now = new Date().toISOString()
-
-  const firstSession: SessionMeta = {
-    sessionId,
-    model: input.initialModel,
-    modelSessionId: null,
-    createdAt: now,
-    closedAt: null,
-    kind: 'cli'
-  }
-
-  // Finder "경로 복사" / zsh escape / 따옴표 / ~ 등 사용자 입력 변형을 OS cwd로 정상화.
-  // 미존재/파일 경로는 즉시 throw — 잘못된 저장으로 인한 spawn 후속 ENOENT를 사전 차단.
-  // home:submit이 자동 생성한 신규 폴더 등 "이미 검증된" 호출자도 동일 정규화 통과해 무해.
   const normalizedPath = normalizeWorkspacePath(input.workspacePath)
   validateWorkspacePath(normalizedPath)
 
   const folderName = path.basename(normalizedPath.trim()) || 'workspace'
-  const workspace: WorkspaceMeta = {
-    workspaceId,
-    title: input.title?.trim() || folderName,
-    createdAt: now,
-    updatedAt: now,
+  const workspace = await getCoreStore().createWorkspace({
     workspacePath: normalizedPath,
-    sessions: [firstSession],
-    primarySessionId: sessionId,
-    compactionInProgress: null
-  }
+    title: input.title?.trim() || folderName,
+    initialModel: input.initialModel,
+    initialKind: 'cli'
+  })
+  workspaceTitleCache.set(workspace.workspaceId, workspace.title)
 
-  // 디렉토리 구조 생성
-  const wp = getWorkspacePaths(workspaceId)
-  await fs.mkdir(wp.dir, { recursive: true })
+  // 데스크탑 고유 부수 — 코어가 안 만드는 디렉토리/파일.
+  const wp = getWorkspacePaths(workspace.workspaceId)
   await fs.mkdir(wp.archiveDir, { recursive: true })
-  await fs.mkdir(wp.sessionsDir, { recursive: true })
   await fs.mkdir(wp.settingsDir, { recursive: true })
-  // 빈 IR + 빈 turns.jsonl 파일 미리 — append/read 시 ENOENT 회피
   await fs.writeFile(wp.ir, '{}', 'utf8')
   await fs.writeFile(wp.turnsJsonl, '', 'utf8')
-
-  // 첫 세션 디렉토리 + replay.log 빈 파일
-  const sp = getSessionPaths(workspaceId, sessionId)
-  await fs.mkdir(sp.dir, { recursive: true })
-  await fs.writeFile(sp.replayLog, '', 'utf8')
-
-  await writeWorkspaceMetaAtomic(workspace)
+  const firstSession = workspace.sessions[0]
+  if (firstSession) {
+    const sp = getSessionPaths(workspace.workspaceId, firstSession.sessionId)
+    await fs.writeFile(sp.replayLog, '', 'utf8')
+  }
 
   return { workspace, firstSession }
 }
@@ -247,41 +239,27 @@ function migrateLegacyGeminiToAgy(meta: WorkspaceMeta): WorkspaceMeta {
 }
 
 export async function loadWorkspace(workspaceId: string): Promise<WorkspaceMeta> {
-  const paths = getWorkspacePaths(workspaceId)
-  const raw = await fs.readFile(paths.meta, 'utf8')
-  const meta = migrateLegacyGeminiToAgy(JSON.parse(raw) as WorkspaceMeta)
+  const meta = migrateLegacyGeminiToAgy(await getCoreStore().loadWorkspace(workspaceId))
   workspaceTitleCache.set(meta.workspaceId, meta.title)
   return meta
 }
 
 export async function listWorkspaces(): Promise<WorkspaceListEntry[]> {
-  const dir = getDirs().workspaces
-  let entries: string[]
-  try {
-    entries = await fs.readdir(dir)
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code
-    if (code === 'ENOENT') return []
-    throw err
-  }
-  const workspaces: WorkspaceListEntry[] = []
-  for (const name of entries) {
-    if (name.startsWith('.') || name.startsWith('_')) continue
-    const metaPath = path.join(dir, name, 'workspace.json')
+  // 코어 listWorkspaces가 디렉토리 스캔 + 메타 로드. 데스크탑은 각 메타를 풀로딩해
+  // activeSessionCount + legacy migration 처리해야 하므로 entries만 사용 후 loadWorkspace로 재로딩.
+  const entries = await getCoreStore().listWorkspaces()
+  const out: WorkspaceListEntry[] = []
+  for (const e of entries) {
     try {
-      const raw = await fs.readFile(metaPath, 'utf8')
-      const meta = migrateLegacyGeminiToAgy(JSON.parse(raw) as WorkspaceMeta)
-      if (typeof meta.workspaceId !== 'string' || meta.workspaceId.length === 0) continue
-      workspaceTitleCache.set(meta.workspaceId, meta.title)
-      // activeSessionCount는 메모리 derive — sessionActive 모듈에서 조회. K 청크 단계에선 0으로 표시.
-      // L 청크에서 sessionActive 모듈 통합 시 정확 값으로 교체.
-      workspaces.push({ ...meta, activeSessionCount: 0 })
+      const meta = await loadWorkspace(e.workspaceId)
+      // activeSessionCount는 sessionActive 모듈이 메모리 derive. 여기선 0 표시.
+      out.push({ ...meta, activeSessionCount: 0 })
     } catch {
-      // 깨진 메타는 무시
+      /* 깨진 메타는 무시 */
     }
   }
-  workspaces.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1))
-  return workspaces
+  out.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1))
+  return out
 }
 
 export type WorkspaceUpdatePatch = Partial<{
@@ -296,21 +274,22 @@ export async function updateWorkspaceMeta(
   workspaceId: string,
   patch: WorkspaceUpdatePatch
 ): Promise<WorkspaceMeta> {
-  return withWorkspaceLock(workspaceId, async () => {
-    const current = await loadWorkspace(workspaceId)
-    const merged: WorkspaceMeta = {
-      ...current,
-      ...patch,
-      updatedAt: new Date().toISOString()
-    }
-    await writeWorkspaceMetaAtomic(merged)
-    return merged
-  })
+  // 코어 updateWorkspaceMeta는 void 반환 — 데스크탑은 갱신된 메타 반환이 필요해 wrapper에서 재로드.
+  // workspacePath patch는 코어 WorkspaceUpdatePatch에 없어 별도 처리.
+  const { workspacePath: newPath, ...coreFields } = patch
+  await getCoreStore().updateWorkspaceMeta(workspaceId, coreFields)
+  if (newPath !== undefined) {
+    await withWorkspaceLock(workspaceId, async () => {
+      const cur = await loadWorkspace(workspaceId)
+      const merged: WorkspaceMeta = { ...cur, workspacePath: newPath, updatedAt: new Date().toISOString() }
+      await writeWorkspaceMetaAtomic(merged)
+    })
+  }
+  return loadWorkspace(workspaceId)
 }
 
 export async function deleteWorkspace(workspaceId: string): Promise<void> {
-  const paths = getWorkspacePaths(workspaceId)
-  await fs.rm(paths.dir, { recursive: true, force: true })
+  await getCoreStore().deleteWorkspace(workspaceId)
   workspaceTitleCache.delete(workspaceId)
 }
 
@@ -349,63 +328,24 @@ export async function deleteLegacyThreadBackup(
 // handler(workspacesHandlers)에서 직접 어댑터 dispatch하도록 한다 — 여기엔 isSessionEmpty
 // 헬퍼를 두지 않는다.
 
-// 세션 디렉토리 + workspace.json sessions[]에서 제거. closedAt 무관.
-// 호출 전 sessionActive 정리 + PTY kill은 호출자 책임.
+// 세션 디렉토리 + workspace.json sessions[]에서 제거. 코어 deleteSession 위임.
+// 호출 전 sessionActive 정리 + PTY kill + CLI native session 파일 unlink는 호출자 책임.
 export async function deleteSession(workspaceId: string, sessionId: string): Promise<void> {
-  return withWorkspaceLock(workspaceId, async () => {
-    const sessionPaths = getSessionPaths(workspaceId, sessionId)
-    await fs.rm(sessionPaths.dir, { recursive: true, force: true })
-
-    // workspace.json sessions[]에서 제거 + primarySessionId가 이거면 null로
-    const ws = await loadWorkspace(workspaceId)
-    const newSessions = ws.sessions.filter((s) => s.sessionId !== sessionId)
-    const newPrimary = ws.primarySessionId === sessionId ? null : ws.primarySessionId
-    const updated: WorkspaceMeta = {
-      ...ws,
-      sessions: newSessions,
-      primarySessionId: newPrimary,
-      updatedAt: new Date().toISOString()
-    }
-    await writeWorkspaceMetaAtomic(updated)
-  })
+  await getCoreStore().deleteSession(workspaceId, sessionId)
 }
 
-// 워크스페이스 안에 새 세션 추가 (= 새 모델 탭 추가).
-// 기존 sessions[]에 append, primarySessionId는 변경 없음 (UI가 active 결정).
+// 워크스페이스 안에 새 세션 추가 (= 새 모델 탭 추가). 코어 addSession 위임 + replay.log 초기화.
 // kind='shell'이면 일반 터미널 세션 — model 값은 placeholder(UI 미사용, 어댑터 dispatch X).
 export async function addSessionToWorkspace(
   workspaceId: string,
   model: CliKind,
   kind: SessionKind = 'cli'
 ): Promise<SessionMeta> {
-  return withWorkspaceLock(workspaceId, async () => {
-    const sessionId = randomUUID()
-    const now = new Date().toISOString()
-    const newSession: SessionMeta = {
-      sessionId,
-      model,
-      modelSessionId: null,
-      createdAt: now,
-      closedAt: null,
-      kind
-    }
-
-    // 세션 디렉토리 + 빈 replay.log 생성 (meta는 workspace.json sessions[]에 통합 저장)
-    const sp = getSessionPaths(workspaceId, sessionId)
-    await fs.mkdir(sp.dir, { recursive: true })
-    await fs.writeFile(sp.replayLog, '', 'utf8')
-
-    // workspace.json sessions[]에 append
-    const ws = await loadWorkspace(workspaceId)
-    const updated: WorkspaceMeta = {
-      ...ws,
-      sessions: [...ws.sessions, newSession],
-      updatedAt: now
-    }
-    await writeWorkspaceMetaAtomic(updated)
-
-    return newSession
-  })
+  const newSession = await getCoreStore().addSession(workspaceId, model, kind)
+  // 데스크탑 고유 부수 — 코어는 세션 디렉토리만 만들고 replay.log는 안 만듦.
+  const sp = getSessionPaths(workspaceId, newSession.sessionId)
+  await fs.writeFile(sp.replayLog, '', 'utf8')
+  return newSession
 }
 
 export type SessionUpdatePatch = Partial<{
@@ -420,33 +360,12 @@ export async function updateSessionMeta(
   sessionId: string,
   patch: SessionUpdatePatch
 ): Promise<SessionMeta> {
-  return withWorkspaceLock(workspaceId, async () => {
-    const ws = await loadWorkspace(workspaceId)
-    const sessionIdx = ws.sessions.findIndex((s) => s.sessionId === sessionId)
-    if (sessionIdx < 0) {
-      throw new Error(`session not found: ${workspaceId}/${sessionId}`)
-    }
-    const merged: SessionMeta = { ...ws.sessions[sessionIdx], ...patch }
-    // sessions[]도 갱신, workspace.json도 atomic write
-    const newSessions = [...ws.sessions]
-    newSessions[sessionIdx] = merged
-    const updatedWs: WorkspaceMeta = {
-      ...ws,
-      sessions: newSessions,
-      updatedAt: new Date().toISOString()
-    }
-    await writeWorkspaceMetaAtomic(updatedWs)
-    return merged
-  })
+  await getCoreStore().updateSessionMeta(workspaceId, sessionId, patch)
+  return getCoreStore().loadSession(workspaceId, sessionId)
 }
 
 export async function loadSession(workspaceId: string, sessionId: string): Promise<SessionMeta> {
-  // 2026-06-01 Phase 6: workspace.json sessions[]에서 단일 source로 조회.
-  // 옛 sessions/<sid>/meta.json는 더 이상 작성하지 않음.
-  const ws = await loadWorkspace(workspaceId)
-  const session = ws.sessions.find((s) => s.sessionId === sessionId)
-  if (!session) throw new Error(`session not found: ${workspaceId}/${sessionId}`)
-  return session
+  return getCoreStore().loadSession(workspaceId, sessionId)
 }
 
 // PTY data 도착 시 workspace meta updatedAt 갱신용 — 매 chunk마다 디스크 쓰면 부담이라 throttle.
