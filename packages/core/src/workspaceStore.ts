@@ -78,6 +78,7 @@ export type SessionUpdatePatch = Partial<{
 
 export type WorkspaceUpdatePatch = Partial<{
   title: string;
+  workspacePath: string;
   primarySessionId: string | null;
   compactionInProgress: WorkspaceMeta['compactionInProgress'];
   codexHookTrust: WorkspaceMeta['codexHookTrust'];
@@ -103,6 +104,10 @@ export interface WorkspaceStore {
   updateSessionMeta(workspaceId: string, sessionId: string, patch: SessionUpdatePatch): Promise<void>;
   loadSession(workspaceId: string, sessionId: string): Promise<SessionMeta>;
   deleteSession(workspaceId: string, sessionId: string): Promise<void>;
+
+  // workspaceId 단위 read-modify-write 직렬화 — 호스트가 코어 외 부수 작업(IR/replay 등)을
+  // workspace.json 갱신과 같은 임계영역에서 처리해야 할 때 사용.
+  withLock<T>(workspaceId: string, fn: () => Promise<T>): Promise<T>;
 }
 
 export type WorkspaceStoreOptions = {
@@ -269,7 +274,20 @@ export function createWorkspaceStore(
           updatedAt: new Date().toISOString(),
         };
         await writeWorkspaceMetaAtomic(next);
+        // workspacePath 변경 시 workspaces.json 매핑도 같은 락 안에서 갱신.
+        if (patch.workspacePath !== undefined && patch.workspacePath !== meta.workspacePath) {
+          const map = loadMap();
+          for (const [k, v] of Object.entries(map)) {
+            if (v === workspaceId) delete map[k];
+          }
+          map[patch.workspacePath] = workspaceId;
+          saveMap(map);
+        }
       });
+    },
+
+    async withLock(workspaceId, fn) {
+      return withWorkspaceLock(workspaceId, fn);
     },
 
     async deleteWorkspace(workspaceId) {

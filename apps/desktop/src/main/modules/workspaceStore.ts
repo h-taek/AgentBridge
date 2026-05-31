@@ -13,7 +13,6 @@ import type {
 } from '@shared/ipc'
 import type { IR } from '@shared/ir'
 import { createWorkspaceStore, type WorkspaceStore as CoreWorkspaceStore } from '@agentbridge/core'
-import { withWorkspaceLock } from './workspaceLock'
 import { normalizeWorkspacePath, validateWorkspacePath } from './workspacePath'
 
 // M3 K 청크 — Workspace 데이터 모델 + 영속화.
@@ -274,17 +273,9 @@ export async function updateWorkspaceMeta(
   workspaceId: string,
   patch: WorkspaceUpdatePatch
 ): Promise<WorkspaceMeta> {
-  // 코어 updateWorkspaceMeta는 void 반환 — 데스크탑은 갱신된 메타 반환이 필요해 wrapper에서 재로드.
-  // workspacePath patch는 코어 WorkspaceUpdatePatch에 없어 별도 처리.
-  const { workspacePath: newPath, ...coreFields } = patch
-  await getCoreStore().updateWorkspaceMeta(workspaceId, coreFields)
-  if (newPath !== undefined) {
-    await withWorkspaceLock(workspaceId, async () => {
-      const cur = await loadWorkspace(workspaceId)
-      const merged: WorkspaceMeta = { ...cur, workspacePath: newPath, updatedAt: new Date().toISOString() }
-      await writeWorkspaceMetaAtomic(merged)
-    })
-  }
+  // 2026-06-01 Phase D: workspacePath 포함 모든 필드를 코어가 단일 락 안에서 처리.
+  // 코어 updateWorkspaceMeta는 void 반환 — 데스크탑 wrapper는 갱신된 메타 재로드해 반환.
+  await getCoreStore().updateWorkspaceMeta(workspaceId, patch)
   return loadWorkspace(workspaceId)
 }
 
@@ -378,7 +369,7 @@ export async function touchWorkspace(workspaceId: string): Promise<void> {
   if (now - last < TOUCH_INTERVAL_MS) return
   lastTouchAt.set(workspaceId, now)
   try {
-    await withWorkspaceLock(workspaceId, async () => {
+    await getCoreStore().withLock(workspaceId, async () => {
       const meta = await loadWorkspace(workspaceId)
       meta.updatedAt = new Date(now).toISOString()
       await writeWorkspaceMetaAtomic(meta)
