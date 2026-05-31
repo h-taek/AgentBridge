@@ -12,6 +12,22 @@ import {
 
 const wid = '11111111-2222-3333-4444-555555555555';
 
+// 코어 WorkspaceStore.loadWorkspace는 정상 schema를 기대. raw 시드 시 필수 필드 채워둠.
+function baseMeta(extra: Record<string, unknown> = {}): Record<string, unknown> {
+  const now = new Date().toISOString();
+  return {
+    workspaceId: wid,
+    title: 'test',
+    createdAt: now,
+    updatedAt: now,
+    workspacePath: '/tmp/test',
+    sessions: [],
+    primarySessionId: null,
+    compactionInProgress: null,
+    ...extra,
+  };
+}
+
 describe('compactionScheduler locks', () => {
   let storagePath: string;
 
@@ -19,6 +35,9 @@ describe('compactionScheduler locks', () => {
     storagePath = await fs.mkdtemp(join(tmpdir(), 'agentbridge-test-'));
     workspaceStore.init(storagePath);
     await fs.mkdir(join(storagePath, 'workspaces', wid), { recursive: true });
+    // workspace.json 정상 시드 — acquireDiskLock이 loadWorkspace 호출하므로 필수.
+    const metaPath = join(workspaceStore.getWorkspacePath(wid), 'workspace.json');
+    await fs.writeFile(metaPath, JSON.stringify(baseMeta()), 'utf8');
   });
 
   afterEach(async () => {
@@ -32,11 +51,10 @@ describe('compactionScheduler locks', () => {
   });
 
   it('returns false when lock is already held by another (simulated) pid', async () => {
-    // Pre-seed workspace.json with an active lock owned by a different pid, not stale.
     const lockPath = join(workspaceStore.getWorkspacePath(wid), 'workspace.json');
     await fs.writeFile(
       lockPath,
-      JSON.stringify({ compactionInProgress: { pid: 999999, startedAt: Date.now() } }),
+      JSON.stringify(baseMeta({ compactionInProgress: { pid: 999999, startedAt: Date.now() } })),
       'utf8',
     );
     const ok = await acquireDiskLock(wid);
@@ -48,7 +66,9 @@ describe('compactionScheduler locks', () => {
     const sixMinutesAgo = Date.now() - 6 * 60 * 1000;
     await fs.writeFile(
       lockPath,
-      JSON.stringify({ compactionInProgress: { pid: 999999, startedAt: sixMinutesAgo } }),
+      JSON.stringify(
+        baseMeta({ compactionInProgress: { pid: 999999, startedAt: sixMinutesAgo } }),
+      ),
       'utf8',
     );
     const ok = await acquireDiskLock(wid);

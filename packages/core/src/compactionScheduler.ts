@@ -28,6 +28,7 @@ import { runRefine, RefineOffError, type RefineDecision } from './refineDispatch
 import type { EnvProbe } from './envProbe';
 import type { Logger } from './interfaces';
 import { noopLogger } from './interfaces';
+import type { WorkspaceStore } from './workspaceStore';
 
 const COMPACTION_TIMEOUT_MS = 60_000;
 const LOCK_STALE_MS = 5 * 60 * 1000;
@@ -45,6 +46,9 @@ export interface CompactionNotifications {
 export type CompactionSchedulerOptions = {
   notifications: CompactionNotifications;
   envProbe: EnvProbe;
+  // workspace.json 갱신을 single SSOT(WorkspaceStore)로 일원화 — compactionInProgress 마킹도
+  // updateWorkspaceMeta로 처리해 다른 메타 변경과 같은 락 안에서 직렬화됨.
+  workspaceStore: WorkspaceStore;
   // 호스트가 cwd를 받아 git 정보 반환. 미제공 시 IR.meta의 gitBranch/gitHead는 undefined.
   gitProbe?: (cwd: string) => Promise<GitInfo>;
   // 호스트가 settings를 보고 refine 정책을 결정. policy: 'off'면 RefineOffError.
@@ -71,8 +75,8 @@ export type ManualCompactionResult = {
 
 export interface CompactionScheduler {
   readonly events: EventEmitter;
-  acquireDiskLock(workspaceRoot: string): Promise<boolean>;
-  releaseDiskLock(workspaceRoot: string): Promise<void>;
+  acquireDiskLock(workspaceId: string): Promise<boolean>;
+  releaseDiskLock(workspaceId: string): Promise<void>;
   markInFlight(workspaceId: string): boolean;
   unmarkInFlight(workspaceId: string): void;
   checkAndRun(args: {
@@ -91,66 +95,46 @@ export interface CompactionScheduler {
   }): Promise<ManualCompactionResult>;
 }
 
-type WorkspaceLockState = {
-  compactionInProgress?: { pid: number; startedAt: number };
-};
-
 export function createCompactionScheduler(
   opts: CompactionSchedulerOptions,
 ): CompactionScheduler {
   const log = opts.logger ?? noopLogger;
   const events = opts.events ?? new EventEmitter();
   const inFlight = new Set<string>();
+  const workspaceStore = opts.workspaceStore;
 
-  function lockFilePath(workspaceRoot: string): string {
-    return join(workspaceRoot, 'workspace.json');
-  }
-
-  async function readLock(workspaceRoot: string): Promise<WorkspaceLockState> {
+  // disk lock — workspace.json의 compactionInProgress 필드로 표현. 갱신은 workspaceStore의
+  // updateWorkspaceMeta(같은 in-memory mutex) 안에서 일어나 다른 메타 변경과 직렬화됨.
+  async function acquireDiskLock(workspaceId: string): Promise<boolean> {
     try {
-      const raw = await fs.readFile(lockFilePath(workspaceRoot), 'utf8');
-      return JSON.parse(raw) as WorkspaceLockState;
-    } catch {
-      return {};
-    }
-  }
-
-  async function writeLock(workspaceRoot: string, state: WorkspaceLockState): Promise<void> {
-    const p = lockFilePath(workspaceRoot);
-    const tmp = `${p}.${process.pid}.${Date.now()}.tmp`;
-    await fs.mkdir(workspaceRoot, { recursive: true });
-    await fs.writeFile(tmp, JSON.stringify(state, null, 2), 'utf8');
-    await fs.rename(tmp, p);
-  }
-
-  async function acquireDiskLock(workspaceRoot: string): Promise<boolean> {
-    const state = await readLock(workspaceRoot);
-    const existing = state.compactionInProgress;
-    if (existing) {
-      const age = Date.now() - existing.startedAt;
-      if (age < LOCK_STALE_MS) return false;
+      const meta = await workspaceStore.loadWorkspace(workspaceId);
+      const existing = meta.compactionInProgress;
+      if (existing) {
+        const age = Date.now() - existing.startedAt;
+        if (age < LOCK_STALE_MS) return false;
+        log.warn(
+          `compaction: stale lock detected (age=${age}ms, pid=${existing.pid}) — overriding`,
+        );
+      }
+      await workspaceStore.updateWorkspaceMeta(workspaceId, {
+        compactionInProgress: { pid: process.pid, startedAt: Date.now() },
+      });
+      return true;
+    } catch (err) {
       log.warn(
-        `compaction: stale lock detected (age=${age}ms, pid=${existing.pid}) — overriding`,
+        `compaction: lock acquire failed — ${err instanceof Error ? err.message : String(err)}`,
       );
-    }
-    state.compactionInProgress = { pid: process.pid, startedAt: Date.now() };
-    await writeLock(workspaceRoot, state);
-    const verify = await readLock(workspaceRoot);
-    if (
-      verify.compactionInProgress?.pid !== process.pid ||
-      verify.compactionInProgress?.startedAt !== state.compactionInProgress.startedAt
-    ) {
       return false;
     }
-    return true;
   }
 
-  async function releaseDiskLock(workspaceRoot: string): Promise<void> {
+  async function releaseDiskLock(workspaceId: string): Promise<void> {
     try {
-      const state = await readLock(workspaceRoot);
-      if (state.compactionInProgress?.pid === process.pid) {
-        delete state.compactionInProgress;
-        await writeLock(workspaceRoot, state);
+      const meta = await workspaceStore.loadWorkspace(workspaceId);
+      if (meta.compactionInProgress?.pid === process.pid) {
+        await workspaceStore.updateWorkspaceMeta(workspaceId, {
+          compactionInProgress: null,
+        });
       }
     } catch (err) {
       log.warn(
@@ -209,7 +193,7 @@ export function createCompactionScheduler(
         const turns = await readAllTurns(workspaceRoot);
         if (!shouldTrigger(turns)) return;
 
-        holdsDiskLock = await acquireDiskLock(workspaceRoot);
+        holdsDiskLock = await acquireDiskLock(workspaceId);
         if (!holdsDiskLock) {
           log.log(`compaction: another process holds the lock, skipping`);
           return;
@@ -344,7 +328,7 @@ export function createCompactionScheduler(
         const msg = err instanceof Error ? err.stack ?? err.message : String(err);
         log.warn(`compaction: unexpected error — ${msg}`);
       } finally {
-        if (holdsDiskLock) await releaseDiskLock(workspaceRoot);
+        if (holdsDiskLock) await releaseDiskLock(workspaceId);
         this.unmarkInFlight(workspaceId);
       }
     },
@@ -373,7 +357,7 @@ export function createCompactionScheduler(
           return empty('turns.jsonl이 비어있어 정제할 내용 없음');
         }
 
-        holdsDiskLock = await acquireDiskLock(workspaceRoot);
+        holdsDiskLock = await acquireDiskLock(workspaceId);
         if (!holdsDiskLock) {
           return empty('다른 프로세스가 락을 잡고 있어 manual compaction 스킵');
         }
@@ -511,7 +495,7 @@ export function createCompactionScheduler(
           rawLineCount: refine.rawLines.length,
         };
       } finally {
-        if (holdsDiskLock) await releaseDiskLock(workspaceRoot);
+        if (holdsDiskLock) await releaseDiskLock(workspaceId);
         this.unmarkInFlight(workspaceId);
       }
     },

@@ -101,6 +101,12 @@ function getCoreStore(): CoreWorkspaceStore {
   return _coreStore
 }
 
+// 코어 인스턴스를 다른 모듈에 노출 — compactionScheduler 등 같은 락/메타 갱신을 공유해야
+// 하는 모듈이 사용. 직접 호출하지 말고 이 함수로만 접근해 단일 인스턴스 보장.
+export function getCoreWorkspaceStore(): CoreWorkspaceStore {
+  return getCoreStore()
+}
+
 // workspaceId / sessionId 안전성 — randomUUID() 출력만 허용. legacy contextId 마이그레이션도 동일
 // 포맷이라 호환된다. 정규식 거치지 않으면 `path.join`의 `..` collapse로 userData 상위로 escape 가능
 // (예: workspaceId='../../etc' → fs.rm으로 임의 디렉토리 삭제).

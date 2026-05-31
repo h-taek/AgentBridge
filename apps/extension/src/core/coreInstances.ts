@@ -113,6 +113,7 @@ export function initializeCore(context: vscode.ExtensionContext): void {
   _compactionScheduler = createCompactionScheduler({
     notifications: compactionNotifications,
     envProbe: _envProbe,
+    workspaceStore: _workspaceStore!,
     resolveRefineDecision: (activeModel) => {
       const cfg = getConfig();
       switch (cfg.refinePolicy) {

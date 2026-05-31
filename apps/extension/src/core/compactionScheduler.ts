@@ -24,11 +24,11 @@ export function unmarkCompactionInFlight(workspaceId: string): void {
 }
 
 export async function acquireDiskLock(workspaceId: string): Promise<boolean> {
-  return getCompactionScheduler().acquireDiskLock(workspaceStore.getWorkspacePath(workspaceId));
+  return getCompactionScheduler().acquireDiskLock(workspaceId);
 }
 
 export async function releaseDiskLock(workspaceId: string): Promise<void> {
-  return getCompactionScheduler().releaseDiskLock(workspaceStore.getWorkspacePath(workspaceId));
+  return getCompactionScheduler().releaseDiskLock(workspaceId);
 }
 
 export async function checkAndRunCompaction(

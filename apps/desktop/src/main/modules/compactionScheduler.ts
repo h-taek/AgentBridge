@@ -6,7 +6,7 @@ import {
   type ManualCompactionResult as CoreManualCompactionResult,
   type RefineDecision
 } from '@agentbridge/core'
-import { loadWorkspace } from './workspaceStore'
+import { loadWorkspace, getCoreWorkspaceStore } from './workspaceStore'
 import { getWorkspacePaths } from './workspaceStore'
 import { getCoreEnvProbe } from './envProbe'
 import { loadSettings } from './settings'
@@ -68,6 +68,7 @@ async function ensureScheduler(): Promise<CompactionScheduler> {
   _maxArchive = settings.maxArchiveSnapshots
   const sched = createCompactionScheduler({
     envProbe: getCoreEnvProbe(),
+    workspaceStore: getCoreWorkspaceStore(),
     maxArchiveSnapshots: _maxArchive,
     notifications: {
       // TODO: Electron Notification 연결. 현재는 로그만.
