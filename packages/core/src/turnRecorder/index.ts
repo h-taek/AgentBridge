@@ -38,7 +38,11 @@ export type TurnRecorderOptions = {
   // assistantDetail은 사용자 설정 — 매 flush 시 현재값을 읽기 위해 콜백.
   getAssistantDetail: () => TurnsAssistantDetail;
   scheduler: CompactionScheduler;
-  sessionRegistry: SessionRegistry;
+  // sessionRegistry는 옵션 — 익스텐션은 코어 sessionRegistry로 updateActivity 호출.
+  // 데스크탑은 자체 명부(workspace.json sessions[]) 사용. 둘 다 미사용 시 onTurnFlushed로 처리.
+  sessionRegistry?: SessionRegistry;
+  // 매 turn flush 직후 호출. 호스트가 자기 명부에 lastChattedAt 등 갱신용.
+  onTurnFlushed?: (info: { workspaceId: string; sessionId: string; flushedAt: string }) => void | Promise<void>;
   logger?: Logger;
 };
 
@@ -256,11 +260,22 @@ export class TurnRecorder {
         `turnRecorder: flush turn (userBytes=${turn.userBytes}, bodyBytes=${turn.assistantBodyBytes}, toolCalls=${turn.toolCalls.length})`,
       );
       this.opts.scheduler.events.emit('turns:updated', workspaceId);
-      void this.opts.sessionRegistry
-        .updateActivity(workspaceId, this.opts.workspaceRoot, sessionId)
-        .catch((err) =>
-          this.log.warn(`turnRecorder updateActivity 실패: ${String(err)}`),
+      // 세션 활성 갱신 — 호스트 선택:
+      //   1) sessionRegistry (옛 패턴, 익스텐션이 코어 sessionRegistry 사용 시)
+      //   2) onTurnFlushed 콜백 (호스트가 직접 명부 갱신, 데스크탑 패턴)
+      const flushedAt = new Date().toISOString();
+      if (this.opts.sessionRegistry) {
+        void this.opts.sessionRegistry
+          .updateActivity(workspaceId, this.opts.workspaceRoot, sessionId)
+          .catch((err) =>
+            this.log.warn(`turnRecorder updateActivity 실패: ${String(err)}`),
+          );
+      }
+      if (this.opts.onTurnFlushed) {
+        void Promise.resolve(this.opts.onTurnFlushed({ workspaceId, sessionId, flushedAt })).catch((err) =>
+          this.log.warn(`turnRecorder onTurnFlushed 실패: ${String(err)}`),
         );
+      }
     } catch (err) {
       this.log.warn(`turnRecorder appendTurn 실패: ${String(err)}`);
       return;

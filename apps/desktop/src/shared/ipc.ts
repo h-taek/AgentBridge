@@ -142,53 +142,16 @@ export type IrRefineResult = {
 // threads/는 그대로 유지. 기존 threads:* IPC + UI는 변경 없이 작동.
 // L 청크에서 UI를 새 IPC로 전환하면서 threads/ archive 처리.
 
-// 세션 종류 — 'cli'는 claude/codex/gemini 어댑터 경유. 'shell'은 일반 zsh/bash PTY로
-// AgentBridge hook / IR refine / turnRecorder / quota 모두 bypass(내장 터미널 세션).
-// 기존 디스크 데이터엔 필드 자체가 없으므로 optional + load 시 'cli' 폴백.
-export type SessionKind = 'cli' | 'shell'
-
-export type SessionMeta = {
-  sessionId: string
-  model: CliKind
-  // CLI native session ID (claude --session-id <UUID> / codex thread_id / gemini index UUID).
-  // null이면 spawn 직후 비동기 캡처 대기 중 (codex 패턴). shell 세션은 항상 null.
-  modelSessionId: string | null
-  createdAt: string // ISO 8601
-  // 세션이 닫혔는지 여부. UI에서는 closedAt이 null인 세션만 "활성 탭"으로 간주.
-  // 닫혀도 record는 보관 (history/replay 접근용).
-  closedAt: string | null
-  // 사용자가 지정한 탭 이름. 비어있으면 UI는 모델명을 fallback으로 표시.
-  title?: string
-  // 'shell'이면 일반 터미널 세션 — 어댑터 / hook / TurnRecorder / IR refine 전부 bypass.
-  // 미지정/누락 시 'cli'로 간주 (기존 디스크 데이터 호환).
-  kind?: SessionKind
-  // 가장 최근 채팅(turn 완료) 시점. SessionTabs 정렬에 사용 — 최근 채팅 세션을 좌측 끝으로.
-  // turn flush 시 turnRecorder가 갱신. 채팅 안 한 세션은 undefined.
-  lastChattedAt?: string
-}
-
-export type WorkspaceMeta = {
-  workspaceId: string
-  title: string
-  createdAt: string
-  updatedAt: string
-  // 사용자가 지정한 cwd. 워크스페이스 안 모든 sessions가 이 cwd에서 spawn됨.
-  workspacePath: string
-  sessions: SessionMeta[]
-  // single-active 시절 (M1/M2) 호환 — 기본 활성 세션. multi-tab UI 도입 후엔 UI가 active 탭을 추적.
-  primarySessionId: string | null
-  // background compaction lock. 다중 탭이 동시 trigger 시 한 번만 실행되도록.
-  // null = 진행 중 아님. 5분 stale timeout 후 강제 해제 정책.
-  // schema: { pid, startedAt } (epoch ms). 2026-05-31 변경 — 이전 {sessionId, ISO} 형태는 5분 TTL로
-  // 자연 소멸되므로 별도 마이그레이션 코드 불필요. 코어 createCompactionScheduler와 통일.
-  compactionInProgress: { pid: number; startedAt: number } | null
-  // M3 M 청크 — codex `/hooks` 사용자 trust 상태 (per workspace). claude/gemini는 자동 로드라 미사용.
-  //   - undefined / 'pending': 첫 codex 세션 spawn 시 UI 배너 표시
-  //   - 'trusted': 사용자가 codex 안에서 `/hooks` 명령 후 UI "승인 완료" 버튼 클릭
-  // 마이그레이션 시점 워크스페이스는 codex 세션이 있어도 이전 흐름에서 신뢰됐을 수 있으나, 우리가
-  // 알 수 없으므로 보수적으로 'pending'으로 표시. 사용자가 한 번 토글하면 영구.
-  codexHookTrust?: 'pending' | 'trusted'
-}
+// SessionMeta / WorkspaceMeta / SessionKind — 2026-06-01 Phase 6: 코어로 통합.
+// schema 정의는 packages/core/src/workspaceStore.ts. 데스크탑 호환을 위해 re-export + 로컬 alias.
+import type {
+  SessionKind as CoreSessionKind,
+  SessionMeta as CoreSessionMeta,
+  WorkspaceMeta as CoreWorkspaceMeta
+} from '@agentbridge/core'
+export type SessionKind = CoreSessionKind
+export type SessionMeta = CoreSessionMeta
+export type WorkspaceMeta = CoreWorkspaceMeta
 
 export type WorkspaceCreateRequest = {
   initialModel: CliKind
