@@ -16,8 +16,10 @@ import { snapshotAgyConversations, resolveResumeArgs } from './agyResume';
 
 export type CliAdapterOptions = {
   envProbe: EnvProbe;
-  hookInstaller: HookInstaller;
-  hookStatusStore: HookStatusStore;
+  // 옵셔널 — 미제공 시 buildSpawnOptions가 hook 설치 단계 skip. 데스크탑처럼 자체 hook 시스템을
+  // 가진 호스트는 hookInstaller 안 주입하고 spawn 후 별도로 hooks 설치 가능.
+  hookInstaller?: HookInstaller;
+  hookStatusStore?: HookStatusStore;
   // claude 어댑터가 hookInstaller.installClaudeHooks(workspaceClaudeDir, …)에 전달할 디렉토리.
   // 호스트가 workspace 단위 storage 경로를 안다 — workspaceId로 매핑.
   workspaceClaudeDir: (workspaceId: string) => string;
@@ -82,18 +84,19 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
         const probe = envProbe.probe('claude');
         const command = probe.resolvedPath ?? 'claude';
 
-        let settingsFile: string;
-        try {
-          settingsFile = await hookInstaller.installClaudeHooks(
-            opts.workspaceClaudeDir(workspaceId),
-            workspaceId,
-          );
-          hookStatusStore.clearDisabled(workspaceId, 'claude');
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          log.warn(`claudeAdapter: hook install failed — ${msg}`);
-          hookStatusStore.setDisabled(workspaceId, 'claude', msg);
-          settingsFile = '';
+        let settingsFile = '';
+        if (hookInstaller) {
+          try {
+            settingsFile = await hookInstaller.installClaudeHooks(
+              opts.workspaceClaudeDir(workspaceId),
+              workspaceId,
+            );
+            hookStatusStore?.clearDisabled(workspaceId, 'claude');
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            log.warn(`claudeAdapter: hook install failed — ${msg}`);
+            hookStatusStore?.setDisabled(workspaceId, 'claude', msg);
+          }
         }
 
         let args: string[];
@@ -133,13 +136,15 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
         const probe = envProbe.probe('codex');
         const command = probe.resolvedPath ?? 'codex';
 
-        try {
-          await hookInstaller.installCodexHooks(cwd, workspaceId);
-          hookStatusStore.clearDisabled(workspaceId, 'codex');
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          log.warn(`codexAdapter: hook install failed — ${msg}`);
-          hookStatusStore.setDisabled(workspaceId, 'codex', msg);
+        if (hookInstaller) {
+          try {
+            await hookInstaller.installCodexHooks(cwd, workspaceId);
+            hookStatusStore?.clearDisabled(workspaceId, 'codex');
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            log.warn(`codexAdapter: hook install failed — ${msg}`);
+            hookStatusStore?.setDisabled(workspaceId, 'codex', msg);
+          }
         }
 
         const isNewSession = !resumeSessionId;
@@ -186,13 +191,15 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
         const probe = envProbe.probe('agy');
         const command = probe.resolvedPath ?? 'agy';
 
-        try {
-          await hookInstaller.installAgyHooks(cwd, workspaceId);
-          hookStatusStore.clearDisabled(workspaceId, 'agy');
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          log.warn(`agyAdapter: hook install failed — ${msg}`);
-          hookStatusStore.setDisabled(workspaceId, 'agy', msg);
+        if (hookInstaller) {
+          try {
+            await hookInstaller.installAgyHooks(cwd, workspaceId);
+            hookStatusStore?.clearDisabled(workspaceId, 'agy');
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            log.warn(`agyAdapter: hook install failed — ${msg}`);
+            hookStatusStore?.setDisabled(workspaceId, 'agy', msg);
+          }
         }
 
         const cwdArgs = cwd ? ['--add-dir', cwd] : [];

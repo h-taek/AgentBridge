@@ -13,13 +13,13 @@ export type SpawnInteractiveRequest = {
   // null  = 새 세션 (어댑터가 모델 UUID를 발급해 --session-id로 통제 후 modelSessionId로 반환)
   // 값    = 이어가기 (--resume <id>). Codex는 thread_id 캡처 휴리스틱.
   sessionId: string | null
+  // 2026-06-01 Phase 5: 코어 createCliAdapters로 spawn options 위임 — workspaceId 필수.
+  workspaceId: string
+  // codex/agy resume 시 native modelSessionId가 있어야 thread_id/conversation 인자 생성 가능.
+  modelSessionId?: string
   cwd?: string
   cols?: number
   rows?: number
-  // claude는 우리 격리 settings.json을 `--settings <path>`로 가리켜 hook을 적용한다.
-  // codex/gemini는 cwd 안 hook config를 자동 로드하므로 어댑터 측에서 별도 인자 불필요 —
-  // HookInstaller가 sessions:create/open 시점에 cwd 파일을 작성해두면 spawn 시 그대로 적용.
-  claudeSettingsPath?: string
 }
 
 export type SpawnInteractiveResult = CliSpawnInteractiveResult

@@ -414,13 +414,17 @@ async function spawnAndAttachSession(
   // IR 주입은 hook 시스템 — argv 기반 spawn-time 주입은 폐기됨.
   // TurnRecorder는 spawn 직후 ptySessionId가 결정되면 등록 — onData 콜백 closure가 ptyIdRef로 lookup.
   const ptyIdRef: { current: string | null } = { current: null }
+  // 2026-06-01 Phase 5: hook 설치는 코어 createCliAdapters가 spawn 옵션 빌드 시 자동 호출 (데스크탑
+  // hookInstaller wrapper 통해). claudeSettingsPath는 옛 wrapper 인자 — 폐기됨.
+  void claudeSettingsPath
   const pty = await adapter.spawnInteractive(
     {
+      workspaceId,
       sessionId: session.modelSessionId,
+      modelSessionId: session.modelSessionId ?? undefined,
       cwd: ws.workspacePath,
       cols: opts.cols,
-      rows: opts.rows,
-      claudeSettingsPath
+      rows: opts.rows
     },
     event.sender,
     {
