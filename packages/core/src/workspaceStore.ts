@@ -355,6 +355,14 @@ export function createWorkspaceStore(
         await fsp.mkdir(sessionDir(workspaceId, s.sessionId), { recursive: true });
       }
       await writeWorkspaceMetaAtomic(meta);
+      // workspaces.json folder→id 매핑도 같이 채워 두 진입점(createWorkspace,
+      // getOrCreateWorkspaceId) 사이 storage 일관성 유지. 기존 매핑이 있으면 보존 —
+      // 같은 폴더로 두 번 createWorkspace 부르면 첫 매핑만 유효 (정책: 중복 생성은 호스트 책임).
+      const map = loadMap();
+      if (!map[args.workspacePath]) {
+        map[args.workspacePath] = workspaceId;
+        saveMap(map);
+      }
       return meta;
     },
 
