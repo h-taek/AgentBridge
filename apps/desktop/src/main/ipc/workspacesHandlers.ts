@@ -1,4 +1,4 @@
-import { app, ipcMain } from 'electron'
+import { ipcMain } from 'electron'
 import type { IpcMainInvokeEvent } from 'electron'
 import { promises as fs } from 'fs'
 import * as path from 'path'
@@ -38,7 +38,6 @@ import {
   deleteSession,
   deleteWorkspace,
   getSessionPaths,
-  getWorkspacePaths,
   listWorkspaces,
   loadSession,
   loadWorkspace,
@@ -47,7 +46,7 @@ import {
   updateSessionMeta,
   updateWorkspaceMeta
 } from '../modules/workspaceStore'
-import { installHooksForSession } from '../modules/hookInstaller'
+import { getCoreHookStatusStore } from '../modules/cliAdapter/coreCliAdapters'
 import { onAssistantData, registerRecorder, unregisterRecorder } from '../modules/turnRecorder'
 import { registerDisplayFilter, unregisterDisplayFilter } from '../modules/ptyDisplayFilter'
 import { ensureConversationDirs } from '../modules/conversationStore'
@@ -363,7 +362,6 @@ async function spawnAndAttachSession(
   const ws = await loadWorkspace(workspaceId)
   const adapter = getAdapter(session.model)
   const sessionPaths = getSessionPaths(workspaceId, session.sessionId)
-  const workspacePaths = getWorkspacePaths(workspaceId)
 
   // 직전 active가 *동일 workspace+session*에 등록돼 있으면 — 새 spawn 들어가기 전 정리.
   // 정상적으로는 sessions:close가 먼저 와야 하나, 사용자 더블클릭 등 race 방어.
@@ -382,41 +380,19 @@ async function spawnAndAttachSession(
     clearActiveSession(workspaceId, session.sessionId)
   }
 
-  // M3 M 청크 — hook config install. spawn 직전에 매번 install해 helper binary 경로 변경
-  // (dev/prod 전환, electron 재빌드 등)에도 항상 최신 경로 반영. 마커 블록 merge라 사용자 콘텐츠 보존.
-  // 실패 시: spawn은 진행하되 hookDisabledReason을 결과에 포함해 UI가 "메모리 비활성" 배지 표시.
-  // (이전엔 silent로 IR 주입 비활성 상태가 됐는데 사용자가 핵심 기능 동작 중이라 오해할 위험.)
-  let claudeSettingsPath: string | undefined
-  let hookDisabledReason: string | undefined
-  try {
-    const hooks = await installHooksForSession({
-      model: session.model,
-      workspaceId,
-      workspaceCwd: ws.workspacePath,
-      workspaceSettingsDir: workspacePaths.settingsDir,
-      userDataPath: app.getPath('userData')
-    })
-    claudeSettingsPath = hooks.claudeSettingsPath
-    // codex 첫 spawn 시 trust 상태 미설정이면 'pending' 마킹 — UI가 안내 배너 표시.
-    if (session.model === 'codex' && ws.codexHookTrust == null) {
-      await updateWorkspaceMeta(workspaceId, { codexHookTrust: 'pending' })
-    }
-  } catch (err) {
-    hookDisabledReason = String(err)
-    log.error('HookInstaller 실패 — IR 주입 비활성 상태로 spawn (UI에 배지 표시)', {
-      workspaceId,
-      sessionId: session.sessionId,
-      model: session.model,
-      err: hookDisabledReason
-    })
+  // M3 M 청크 — hook config install은 spawn 시점에 코어 createCliAdapters가 자동 호출
+  // (데스크탑 hookInstaller wrapper 통해). 실패 시 코어 hookStatusStore에 사유 기록 — spawn 후
+  // 읽어 hookDisabledReason으로 응답에 포함, UI가 "메모리 비활성" 배지 표시.
+  //
+  // codex 첫 spawn 시 trust 상태 미설정이면 'pending' 마킹 — UI가 안내 배너 표시.
+  // hook 설치 결과와 무관하게 마킹 (설치 실패시에도 사용자 동의 흐름은 진행 필요).
+  if (session.model === 'codex' && ws.codexHookTrust == null) {
+    await updateWorkspaceMeta(workspaceId, { codexHookTrust: 'pending' })
   }
 
   // IR 주입은 hook 시스템 — argv 기반 spawn-time 주입은 폐기됨.
   // TurnRecorder는 spawn 직후 ptySessionId가 결정되면 등록 — onData 콜백 closure가 ptyIdRef로 lookup.
   const ptyIdRef: { current: string | null } = { current: null }
-  // 2026-06-01 Phase 5: hook 설치는 코어 createCliAdapters가 spawn 옵션 빌드 시 자동 호출 (데스크탑
-  // hookInstaller wrapper 통해). claudeSettingsPath는 옛 wrapper 인자 — 폐기됨.
-  void claudeSettingsPath
   const pty = await adapter.spawnInteractive(
     {
       workspaceId,
@@ -504,6 +480,12 @@ async function spawnAndAttachSession(
   const updatedWs = await loadWorkspace(workspaceId)
   const updatedSession = await loadSession(workspaceId, session.sessionId)
   const replay = await readSessionReplay(workspaceId, session.sessionId)
+
+  // 코어 hookStatusStore가 현재 (workspace, model)에 대해 캡처한 사유 — spawn 시 코어 어댑터가
+  // 설치 실패 시 setDisabled, 성공 시 clearDisabled 호출함. UI 배지에 그대로 전달.
+  const hookDisabledReason = getCoreHookStatusStore()
+    .getDisabledReasons(workspaceId)
+    .find((r) => r.model === session.model)?.reason
 
   return {
     workspace: updatedWs,
