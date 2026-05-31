@@ -5,7 +5,7 @@ import type { CliKind } from '../shared/types';
 import * as workspaceStore from './workspaceStore';
 import { getSessionRegistry } from './coreInstances';
 
-export type { SessionMeta } from '@agentbridge/core';
+export type { LegacySessionMeta as SessionMeta } from '@agentbridge/core';
 
 function root(workspaceId: string): string {
   return workspaceStore.getWorkspacePath(workspaceId);
@@ -15,7 +15,7 @@ export async function registerSession(
   workspaceId: string,
   sessionId: string,
   model: CliKind,
-): Promise<import('@agentbridge/core').SessionMeta> {
+): Promise<import('@agentbridge/core').LegacySessionMeta> {
   return getSessionRegistry().register(workspaceId, root(workspaceId), sessionId, model);
 }
 
@@ -62,6 +62,6 @@ export async function deleteSession(workspaceId: string, sessionId: string): Pro
 
 export async function getSessions(
   workspaceId: string,
-): Promise<import('@agentbridge/core').SessionMeta[]> {
+): Promise<import('@agentbridge/core').LegacySessionMeta[]> {
   return getSessionRegistry().list(root(workspaceId));
 }

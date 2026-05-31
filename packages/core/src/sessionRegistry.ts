@@ -11,7 +11,10 @@ import { CLI_DISPLAY_NAME, type CliKind } from './shared/cli';
 import type { Logger } from './interfaces';
 import { noopLogger } from './interfaces';
 
-export interface SessionMeta {
+// LegacySessionMeta — Phase 6 마이그레이션 중. 익스텐션이 아직 이 schema에 의존하므로
+// 호환용으로 남겨둠. 새 코드는 workspaceStore의 SessionMeta(closedAt/title/kind/lastChattedAt) 사용.
+// 이름이 SessionMeta가 아닌 이유: workspaceStore가 새 SessionMeta를 export하므로 충돌 회피.
+export interface LegacySessionMeta {
   sessionId: string;
   workspaceId: string;
   model: CliKind;
@@ -20,7 +23,6 @@ export interface SessionMeta {
   lastActiveAt: string;
   turnCount: number;
   active: boolean;
-  // codex thread_id / agy conversation UUID. claude는 sessionId === modelSessionId.
   modelSessionId?: string;
 }
 
@@ -143,7 +145,7 @@ export async function deleteNativeSession(model: CliKind, sessionId: string, log
 }
 
 export interface SessionRegistry {
-  register(workspaceId: string, workspaceRoot: string, sessionId: string, model: CliKind): Promise<SessionMeta>;
+  register(workspaceId: string, workspaceRoot: string, sessionId: string, model: CliKind): Promise<LegacySessionMeta>;
   updateActivity(workspaceId: string, workspaceRoot: string, sessionId: string): Promise<void>;
   setModelSessionId(workspaceId: string, workspaceRoot: string, sessionId: string, modelSessionId: string): Promise<void>;
   markClosed(workspaceId: string, workspaceRoot: string, sessionId: string): Promise<void>;
@@ -151,7 +153,7 @@ export interface SessionRegistry {
   markActive(workspaceId: string, workspaceRoot: string, sessionId: string): Promise<void>;
   rename(workspaceId: string, workspaceRoot: string, sessionId: string, name: string): Promise<void>;
   delete(workspaceId: string, workspaceRoot: string, sessionId: string): Promise<void>;
-  list(workspaceRoot: string): Promise<SessionMeta[]>;
+  list(workspaceRoot: string): Promise<LegacySessionMeta[]>;
 }
 
 export function createSessionRegistry(opts: SessionRegistryOptions = {}): SessionRegistry {
@@ -180,7 +182,7 @@ export function createSessionRegistry(opts: SessionRegistryOptions = {}): Sessio
     return join(workspaceRoot, 'sessions.json');
   }
 
-  async function loadRegistry(workspaceRoot: string): Promise<SessionMeta[]> {
+  async function loadRegistry(workspaceRoot: string): Promise<LegacySessionMeta[]> {
     const p = registryPath(workspaceRoot);
     let raw: string;
     try {
@@ -194,7 +196,7 @@ export function createSessionRegistry(opts: SessionRegistryOptions = {}): Sessio
       if (!Array.isArray(parsed)) {
         throw new Error('sessions.json is not an array');
       }
-      return parsed as SessionMeta[];
+      return parsed as LegacySessionMeta[];
     } catch (err) {
       const backup = `${p}.broken.${Date.now()}.bak`;
       try {
@@ -209,7 +211,7 @@ export function createSessionRegistry(opts: SessionRegistryOptions = {}): Sessio
     }
   }
 
-  async function saveRegistry(workspaceRoot: string, sessions: SessionMeta[]): Promise<void> {
+  async function saveRegistry(workspaceRoot: string, sessions: LegacySessionMeta[]): Promise<void> {
     const p = registryPath(workspaceRoot);
     const tmp = `${p}.${process.pid}.${Date.now()}.tmp`;
     await fs.writeFile(tmp, JSON.stringify(sessions, null, 2), 'utf8');
@@ -225,7 +227,7 @@ export function createSessionRegistry(opts: SessionRegistryOptions = {}): Sessio
       return withWriteLock(workspaceId, async () => {
         const sessions = await loadRegistry(workspaceRoot);
         const now = new Date().toISOString();
-        const meta: SessionMeta = {
+        const meta: LegacySessionMeta = {
           sessionId,
           workspaceId,
           model,
