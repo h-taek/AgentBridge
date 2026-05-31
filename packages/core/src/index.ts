@@ -21,10 +21,9 @@ export * from './interfaces';
 
 // 저장소
 export * from './turnsStore';
-export * from './workspaceStore';
 export * from './hookStatusStore';
-export * from './attachmentStore';
 export * from './sessionRegistry';
+// workspaceStore / attachmentStore는 익스텐션 전용 — 2026-06-01 apps/extension/src/core/로 이전.
 
 // 환경 / PTY
 export * from './envProbe';
