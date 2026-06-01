@@ -65,7 +65,7 @@ async function handleIrRefine(_e: unknown, req: IrRefineRequest): Promise<IrRefi
   if (result.ok && result.ir) {
     broadcastIrUpdated({ workspaceId: req.workspaceId, source: 'manual' })
   }
-  // refine 종료 후 quota probe는 RefineDispatcher가 *실제 spawn된 CLI*만 trigger한다.
+  // refine 종료 후 quota probe/폴백 마킹은 compactionScheduler facade의 onRefineAttempt가 처리한다.
   return result
 }
 

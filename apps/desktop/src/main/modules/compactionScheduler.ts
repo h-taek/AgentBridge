@@ -11,14 +11,20 @@ import { getWorkspacePaths } from './workspaceStore'
 import { getCoreEnvProbe } from './envProbe'
 import { loadSettings } from './settings'
 import { broadcastIrUpdated } from './irBroadcast'
+import { markForcedFallback, probeQuotaIfStale } from './cliQuotaTracker'
 
 // 데스크탑 CompactionScheduler facade — 코어 createCompactionScheduler 위임.
 // 호스트 책임:
 //   - workspaceRoot 계산 (workspaceStore.getWorkspacePaths(id).dir)
 //   - activeModel 결정 (pickActiveModel: WorkspaceMeta.sessions 기반)
 //   - RefineDecision 결정 (settings.refineModel 기반)
+//   - quota 부가효과 (onRefineAttempt: markForcedFallback / background probe)
 //   - 알림 — 현재는 no-op (메뉴/Toast 미설치, 추후 추가)
 //   - events.on('ir:updated') → broadcastIrUpdated 변환
+
+// refine 성공 후 "spawn 안 된" CLI 재측정 주기 — 이보다 최근 측정이 있으면 probe 스킵.
+// 실제 spawn된 CLI는 방금 quota를 소비했으므로 maxAge 0(무조건 재측정).
+const QUOTA_PROBE_STALE_MS = 30 * 60_000
 
 export type ManualCompactionResult = CoreManualCompactionResult
 
@@ -80,6 +86,32 @@ async function ensureScheduler(): Promise<CompactionScheduler> {
     resolveRefineDecision: (activeModel) => {
       // 동기 함수라 settings cache 사용. 첫 진입 후엔 background에서 refresh.
       return resolveRefineDecision(activeModel, settings)
+    },
+    // refine attempt별 quota 부가효과. 5/31 core 일원화(531546a) 때 데스크탑 refineDispatcher가
+    // dead code화되면서 끊겼던 배선 복원 — 이제 auto/manual compaction 모두 이 hook을 탄다.
+    onRefineAttempt: async (event) => {
+      switch (event.status) {
+        case 'quota':
+          await markForcedFallback(event.cli)
+          log.warn('Compaction — refine quota 에러', {
+            cli: event.cli,
+            exitCode: event.result.exitCode
+          })
+          break
+        case 'success':
+          // 세 CLI 전부 background probe — spawn된 CLI는 무조건(방금 quota 소비), 나머지는
+          // stale(30분)할 때만. fire-and-forget, in-flight 중복은 probeQuotaIfStale이 dedup.
+          for (const cli of ['agy', 'codex', 'claude'] as CliKind[]) {
+            void probeQuotaIfStale(cli, cli === event.cli ? 0 : QUOTA_PROBE_STALE_MS).catch(
+              (err) => {
+                log.warn('Compaction — quota probe 실패, 무시', { cli, err: String(err) })
+              }
+            )
+          }
+          break
+        default:
+          break
+      }
     },
     logger: {
       log: (m) => log.info(m),

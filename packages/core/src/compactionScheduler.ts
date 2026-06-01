@@ -24,7 +24,12 @@ import {
 } from './turnsStore';
 import { buildCompactionPrompt } from './irModule/prompt';
 import { parseRefineOutput, assembleIR, type GitInfo } from './irModule/parse';
-import { runRefine, RefineOffError, type RefineDecision } from './refineDispatcher';
+import {
+  runRefine,
+  RefineOffError,
+  type RefineDecision,
+  type RefineAttemptEvent,
+} from './refineDispatcher';
 import type { EnvProbe } from './envProbe';
 import type { Logger } from './interfaces';
 import { noopLogger } from './interfaces';
@@ -53,6 +58,9 @@ export type CompactionSchedulerOptions = {
   gitProbe?: (cwd: string) => Promise<GitInfo>;
   // 호스트가 settings를 보고 refine 정책을 결정. policy: 'off'면 RefineOffError.
   resolveRefineDecision: (activeModel: CliKind) => RefineDecision;
+  // refine attempt별 호스트 부가효과 hook — quota 추적(markForcedFallback) / PTY probe 트리거 등.
+  // runRefine onAttempt로 그대로 전달됨. 미제공 시 부가효과 없음.
+  onRefineAttempt?: (event: RefineAttemptEvent) => void | Promise<void>;
   logger?: Logger;
   // 압축 아카이브 최대 보관 개수 (turnsStore.commitArchive에 전달).
   maxArchiveSnapshots: number;
@@ -226,6 +234,7 @@ export function createCompactionScheduler(
             timeoutMs: COMPACTION_TIMEOUT_MS,
             envProbe: opts.envProbe,
             logger: log,
+            onAttempt: opts.onRefineAttempt,
           });
         } catch (err) {
           if (err instanceof RefineOffError) {
@@ -387,6 +396,7 @@ export function createCompactionScheduler(
             timeoutMs: args.timeoutMs ?? COMPACTION_TIMEOUT_MS,
             envProbe: opts.envProbe,
             logger: log,
+            onAttempt: opts.onRefineAttempt,
           });
         } catch (err) {
           if (err instanceof RefineOffError) {
