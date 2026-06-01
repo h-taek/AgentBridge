@@ -1,8 +1,18 @@
 # Changelog
 
-All notable changes to the AgentBridge extension. 본 익스텐션은 원본 [AgentBridge_App](https://github.com/h-taek/AgentBridge_App)의 IDE 포팅판이다.
+All notable changes to the AgentBridge extension. 본 익스텐션은 데스크탑 앱의 IDE 포팅판으로 시작했으며, 현재는 데스크탑·공용 코어와 함께 [AgentBridge 통합 저장소](https://github.com/h-taek/AgentBridge)에서 관리된다.
 
 [Keep a Changelog](https://keepachangelog.com/) 형식을 따른다 — 항목은 `Added` / `Changed` / `Fixed` / `Removed` / `Security`로 구분한다.
+
+## [Unreleased]
+
+### Changed
+
+- 데스크탑 앱·익스텐션·공용 코어가 하나의 저장소([h-taek/AgentBridge](https://github.com/h-taek/AgentBridge))로 통합됐다. 익스텐션 기능과 사용 방법은 동일하다.
+
+### Fixed
+
+- 패널 크기 조절 중 채팅 화면이 과도하게 다시 그려지면서 과거 출력 위로 깨진 조각이 쌓이던 현상 완화 — 크기 조절이 끝난 시점에 한 번만 다시 그려진다. 참고: 크기 변경 후 이미 지나간 출력이 새 폭에 맞지 않는 것은 모든 터미널 공통의 구조적 한계이며, 탭을 닫고 다시 열면 현재 폭으로 다시 그려진다.
 
 ## [0.1.6] — 2026-05-24
 

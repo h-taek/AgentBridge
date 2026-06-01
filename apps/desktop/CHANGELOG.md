@@ -2,6 +2,16 @@
 
 이 프로젝트는 [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/) 1.1.0 형식을 따르며 [Semantic Versioning](https://semver.org/spec/v2.0.0.html)을 사용합니다.
 
+## [Unreleased]
+
+### Changed
+
+- **프로젝트 저장소 통합** — 데스크탑 앱과 IDE 익스텐션이 공용 코어와 함께 하나의 저장소([h-taek/AgentBridge](https://github.com/h-taek/AgentBridge))로 통합되었습니다. 앱 기능과 사용 방법은 동일합니다.
+
+### Fixed
+
+- **창 크기 조절 중 화면 오염 완화** — 창 크기를 드래그하는 동안 채팅 화면이 과도하게 다시 그려지면서 과거 출력 위로 깨진 화면 조각이 쌓이던 현상을 줄였습니다. 이제 크기 조절이 끝난 시점에 한 번만 다시 그려집니다. 참고: 크기 변경 후 이미 지나간 출력의 줄바꿈이 새 폭에 맞지 않는 것은 모든 터미널 공통의 구조적 한계이며, 탭을 닫고 다시 열면 현재 폭으로 깨끗하게 다시 그려집니다.
+
 ## [0.0.6] — 2026-05-30
 
 ### Added
