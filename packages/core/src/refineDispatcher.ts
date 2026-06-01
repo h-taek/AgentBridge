@@ -9,6 +9,7 @@ import type { Logger } from './interfaces';
 import { noopLogger } from './interfaces';
 import { buildRefineSpawnRequest } from './refineCliArgs';
 import { looksLikeQuotaError } from './quotaTracker';
+import { cleanupAgyArtifactsForCwd, rmIsolatedCwd } from './cliAdapter/agyResume';
 
 export type RefineModelChoice = {
   spawnedModel: CliKind;
@@ -41,14 +42,14 @@ export type RefineDecision =
   | { policy: 'fixed' | 'active'; cli: CliKind }
   | { policy: 'priority'; order: CliKind[] };
 
-// 호스트가 각 CLI 시도 결과를 관찰해 부가 효과(예: quota 추적, probe 트리거, 잔재 청소)를
+// 호스트가 각 CLI 시도 결과를 관찰해 부가 효과(예: quota 추적, probe 트리거)를
 // 실행할 수 있게 콜백을 노출. 코어는 콜백 실패를 swallow — 부가 효과 오류로 정제 흐름을 막지 않음.
-// agy는 격리 tmpdir에서 실행되므로 isolatedCwd가 같이 전달됨 — 호스트는 이걸 받아 9종 잔재 정리.
+// agy 격리 tmpdir 잔재(9종)는 코어가 attempt 종료 시점에 직접 청소 — 호스트 책임 아님 (tryRefine 참조).
 export type RefineAttemptEvent =
-  | { cli: CliKind; status: 'success'; result: SpawnRefineResult; isolatedCwd?: string }
-  | { cli: CliKind; status: 'quota'; result: SpawnRefineResult; isolatedCwd?: string }
-  | { cli: CliKind; status: 'empty' | 'invalid-ir'; result: SpawnRefineResult; isolatedCwd?: string }
-  | { cli: CliKind; status: 'unavailable' | 'spawn-error'; error: unknown; isolatedCwd?: string };
+  | { cli: CliKind; status: 'success'; result: SpawnRefineResult }
+  | { cli: CliKind; status: 'quota'; result: SpawnRefineResult }
+  | { cli: CliKind; status: 'empty' | 'invalid-ir'; result: SpawnRefineResult }
+  | { cli: CliKind; status: 'unavailable' | 'spawn-error'; error: unknown };
 
 export type RunRefineArgs = {
   // 사용자 설정의 refinePolicy 해석 결과 — 코어는 정책 출처를 모름. 호스트가 계산해서 넘김.
@@ -77,7 +78,7 @@ async function tryRefine(
   cli: CliKind,
   args: RunRefineArgs,
   timeoutMs: number,
-): Promise<{ result: SpawnRefineResult; isolatedCwd?: string }> {
+): Promise<{ result: SpawnRefineResult }> {
   const probe = args.envProbe.probe(cli);
   if (!probe.found || !probe.resolvedPath) throw new Error(`${cli} CLI not found`);
   const command = probe.resolvedPath;
@@ -91,17 +92,32 @@ async function tryRefine(
     ? (text: string) => { assistantText += (assistantText ? '\n' : '') + text; }
     : (text: string) => { assistantText += text; };
 
-  const base = await runRefineSpawn({
-    command,
-    args: req.args,
-    cwd: req.cwd,
-    env,
-    stdinPayload: req.stdinPayload,
-    onLine: (line) => req.onLine(line, accumulate),
-    timeoutMs,
-    logger: log,
-  });
-  return { result: { assistantText, ...base }, isolatedCwd: req.isolatedCwd };
+  try {
+    const base = await runRefineSpawn({
+      command,
+      args: req.args,
+      cwd: req.cwd,
+      env,
+      stdinPayload: req.stdinPayload,
+      onLine: (line) => req.onLine(line, accumulate),
+      timeoutMs,
+      logger: log,
+    });
+    return { result: { assistantText, ...base } };
+  } finally {
+    // agy는 격리 tmpdir에서 실행됨 — spawn 종료(성공/실패 무관) 후 코어가 직접 잔재 청소.
+    // 만든 쪽(buildAgyRefineSpawn)이 치우는 걸로 일원화. 이전엔 호스트 onAttempt hook 책임이었으나
+    // 익스텐션/compaction 경로 누락으로 잔재가 누수됐음 (2026-06-01).
+    // 청소 함수가 last_conversations.json 등을 atomic rewrite하므로 await 직렬 처리.
+    if (req.isolatedCwd) {
+      try {
+        await cleanupAgyArtifactsForCwd(req.isolatedCwd, log);
+        await rmIsolatedCwd(req.isolatedCwd, log);
+      } catch (err) {
+        log.warn(`refineDispatcher: agy 잔재 청소 실패 — ${String(err)}`);
+      }
+    }
+  }
 }
 
 export async function runRefine(args: RunRefineArgs): Promise<RefineModelChoice> {
@@ -127,11 +143,11 @@ export async function runRefine(args: RunRefineArgs): Promise<RefineModelChoice>
     const cli = order[i];
     tried.push(cli);
     try {
-      const { result, isolatedCwd } = await tryRefine(cli, args, timeout);
+      const { result } = await tryRefine(cli, args, timeout);
       const quota = looksLikeQuotaError(result.stderr ?? '', result.assistantText, result.exitCode);
       if (quota) {
         log.warn(`refineDispatcher: ${cli} quota error, trying next`);
-        await emit({ cli, status: 'quota', result, isolatedCwd });
+        await emit({ cli, status: 'quota', result });
         lastError = new Error(`${cli} quota error`);
         lastReason = 'quota';
         if (singleCandidate) throw new RefineFailedError(cli, lastError);
@@ -139,7 +155,7 @@ export async function runRefine(args: RunRefineArgs): Promise<RefineModelChoice>
       }
       if (result.assistantText.length === 0) {
         log.warn(`refineDispatcher: ${cli} empty response, trying next`);
-        await emit({ cli, status: 'empty', result, isolatedCwd });
+        await emit({ cli, status: 'empty', result });
         lastError = new Error(`${cli} empty response`);
         lastReason = 'spawn-error';
         if (singleCandidate) throw new RefineFailedError(cli, lastError);
@@ -148,14 +164,14 @@ export async function runRefine(args: RunRefineArgs): Promise<RefineModelChoice>
       const parsed = parseRefineOutput(result.assistantText);
       if (!parsed.ok) {
         log.warn(`refineDispatcher: ${cli} response not valid IR JSON — ${parsed.error}`);
-        await emit({ cli, status: 'invalid-ir', result, isolatedCwd });
+        await emit({ cli, status: 'invalid-ir', result });
         lastError = new Error(`${cli} invalid IR`);
         lastReason = 'spawn-error';
         if (singleCandidate) throw new RefineFailedError(cli, lastError);
         continue;
       }
       log.log(`refineDispatcher: ${cli} succeeded (${result.durationMs}ms)`);
-      await emit({ cli, status: 'success', result, isolatedCwd });
+      await emit({ cli, status: 'success', result });
       return {
         spawnedModel: cli,
         result,

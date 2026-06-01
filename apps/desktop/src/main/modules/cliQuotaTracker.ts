@@ -6,6 +6,7 @@ import * as path from 'path'
 import log from 'electron-log/main'
 import { IpcChannel, type CliKind } from '@shared/ipc'
 import {
+  cleanupAgyArtifactsForCwd,
   createQuotaTracker,
   parseQuotaFile,
   extractQuotaPercent as coreExtractQuotaPercent,
@@ -18,7 +19,6 @@ import {
 } from '@agentbridge/core'
 import { broadcastToAll } from './windowManager'
 import {
-  cleanupAgyArtifactsForCwd,
   deleteAgyImplicitDelta,
   deleteAgyLogDelta,
   readLastConversationForCwd,
@@ -40,7 +40,7 @@ import { captureNewThreadId, snapshotCodexSessions } from './cliAdapter/codexSes
 //
 // 정리 흐름 (per CLI):
 //   agy:    spawn 직후 cwd → ~/.gemini/antigravity-cli/cache/last_conversations.json 매핑 polling
-//           → UUID 캡처 시 deleteAgyConversationFiles(uuid)
+//           → 코어 cleanupAgyArtifactsForCwd가 UUID 기반 9종 일괄 정리
 //   codex:  spawn 직전 ~/.codex/sessions 스냅샷 → captureNewThreadId → 파일명 매칭 unlink
 //   claude: 사전 발급한 UUID로 `--session-id <uuid>` spawn → ~/.claude/projects/*/${uuid}.jsonl 삭제
 //
@@ -118,10 +118,13 @@ const desktopQuotaStore: QuotaStore = {
   }
 }
 
+// 코어 함수(quotaTracker / agy 잔재 청소)에 주입할 Logger 어댑터 — electron-log 바인딩.
+const coreLogger = { log: (m: string) => log.info(m), warn: (m: string) => log.warn(m) }
+
 const tracker: QuotaTracker = createQuotaTracker({
   store: desktopQuotaStore,
   onChange: broadcastQuotaUpdated,
-  logger: { log: (m) => log.info(m), warn: (m) => log.warn(m) }
+  logger: coreLogger
 })
 
 export async function getQuotaSnapshot(cli: CliKind): Promise<CliQuotaSnapshot> {
@@ -290,7 +293,7 @@ function makeSpec(cli: CliKind): ProbeSpec {
         },
         cleanupExtras: async (ctx, probeCwd) => {
           // (1)(2)(3)(4)(5)(7)(8)(9) — tmpdir rm은 cleanup 마지막 단계에서 별도 호출.
-          await cleanupAgyArtifactsForCwd(probeCwd)
+          await cleanupAgyArtifactsForCwd(probeCwd, coreLogger)
           // (6) log delta — snapshot 기반 (probe는 spawn 전 snapshot 가능).
           const logsBefore = ctx.logsBefore as Set<string> | undefined
           if (logsBefore) await deleteAgyLogDelta(logsBefore)
