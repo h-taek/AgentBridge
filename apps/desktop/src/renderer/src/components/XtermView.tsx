@@ -222,19 +222,31 @@ export function XtermView({
     // 마운트 직후 PTY를 xterm 실측 크기로 resize (main spawn 시 default cols/rows 사용했으므로).
     void window.agentbridge.pty.resize(sid, term.cols, term.rows)
 
+    // 창 드래그 중 ResizeObserver는 매 프레임 발화한다. 매번 PTY에 resize(SIGWINCH)를 보내면
+    // CLI가 중간 폭마다 화면을 다시 그리며 스크롤백에 깨진 조각이 누적된다.
+    // → fit()은 즉시(캔버스는 창을 따라감), PTY 통보만 trailing debounce로 마지막 1회.
+    const PTY_RESIZE_DEBOUNCE_MS = 200
+    let ptyResizeTimer: ReturnType<typeof setTimeout> | null = null
     const ro = new ResizeObserver(() => {
       try {
         fit.fit()
-        void window.agentbridge.pty.resize(sid, term.cols, term.rows)
       } catch {
         // dispose 직후 호출되면 무시
+        return
       }
+      if (ptyResizeTimer) clearTimeout(ptyResizeTimer)
+      ptyResizeTimer = setTimeout(() => {
+        ptyResizeTimer = null
+        // fire 시점의 term.cols/rows = 마지막 fit() 결과(최종 크기).
+        void window.agentbridge.pty.resize(sid, term.cols, term.rows)
+      }, PTY_RESIZE_DEBOUNCE_MS)
     })
     ro.observe(container)
 
     return () => {
       log.info('XtermView unmount', { sessionId: sid })
       if (pendingFallbackTimer) clearTimeout(pendingFallbackTimer)
+      if (ptyResizeTimer) clearTimeout(ptyResizeTimer)
       dataDisposable.dispose()
       ro.disconnect()
       offData()
