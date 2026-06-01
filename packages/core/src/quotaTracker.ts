@@ -114,8 +114,11 @@ export function snapshotFrom(state: QuotaFile): CliQuotaSnapshot {
 
 // ─── 슬래시 명령 응답 파싱 (per CLI) ─────────────────────────────────────
 
-// agy: `<bar> N%\nQuota available|exhausted` — N = 남은 quota → usedPercent = 100 - N.
+// agy: 두 가지 포맷 — N = 남은 quota → usedPercent = 100 - N.
+//   미사용(100%) 시: `<bar> N%\nQuota available|exhausted`
+//   일부 사용 시:    `<bar> N%\nN% remaining · Refreshes in 1h 3m` ("Quota available" 줄이 사라짐)
 const AGY_USAGE_RE = /(\d+)\s*%\s*\n\s*Quota\s+(?:available|exhausted)/i;
+const AGY_REMAINING_RE = /(\d+)\s*%\s+remaining\b/i;
 // codex: `5h limit: ... N% left` — N = 남은 quota → usedPercent = 100 - N.
 const CODEX_STATUS_RE = /5h\s*limit:[\s\S]{0,200}?(\d+)\s*%\s+left/i;
 // claude: `Current session ... N%used` — N = 사용된 quota 그대로.
@@ -126,7 +129,7 @@ export function extractQuotaPercent(cli: CliKind, stripped: string): number | nu
   let n: number;
   switch (cli) {
     case 'agy':
-      m = AGY_USAGE_RE.exec(stripped);
+      m = AGY_USAGE_RE.exec(stripped) ?? AGY_REMAINING_RE.exec(stripped);
       if (!m) return null;
       n = Number.parseInt(m[1], 10);
       if (!Number.isFinite(n) || n < 0 || n > 100) return null;
@@ -231,9 +234,8 @@ export function createQuotaTracker(opts: QuotaTrackerOptions): QuotaTracker {
       }
       const map = await opts.store.read();
       let state = rolloverIfNeeded(map[cli] ?? EMPTY_QUOTA_FILE);
-      if (state.usedPercent === percent) {
-        return snapshotFrom(state);
-      }
+      // 같은 %여도 lastSeenAt은 갱신 — 측정 신선도(stale 판단)는 값 변화와 무관하게 유지되어야
+      // probeQuotaIfStale 류의 재측정 스킵이 올바르게 동작한다.
       state = { ...state, usedPercent: percent, lastSeenAt: new Date().toISOString() };
       state = reconcileForcedFallback(state);
       await opts.store.write({ ...map, [cli]: state });
