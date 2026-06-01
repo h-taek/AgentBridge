@@ -815,8 +815,17 @@ export class ChatPanel {
       return false;
     });
 
+    // 패널 드래그 중 fit()은 매 프레임 발화한다. 매번 호스트로 resize를 보내면 PTY SIGWINCH가
+    // 연발되어 CLI가 중간 폭마다 화면을 다시 그리며 스크롤백에 깨진 조각이 누적된다.
+    // → fit()은 즉시(캔버스는 패널을 따라감), 호스트 통보만 trailing debounce로 마지막 1회.
+    const PTY_RESIZE_DEBOUNCE_MS = 200;
+    let ptyResizeTimer = null;
     term.onResize(({ cols, rows }) => {
-      vscode.postMessage({ type: 'resize', cols, rows });
+      if (ptyResizeTimer) clearTimeout(ptyResizeTimer);
+      ptyResizeTimer = setTimeout(() => {
+        ptyResizeTimer = null;
+        vscode.postMessage({ type: 'resize', cols, rows });
+      }, PTY_RESIZE_DEBOUNCE_MS);
     });
 
     // Shift+Drag-and-drop file attach — document-level capture phase로 IDE 핸들러보다 먼저 가로채야 작동.
