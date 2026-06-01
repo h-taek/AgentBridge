@@ -144,6 +144,16 @@ function getGeminiHomeDir(): string {
   return path.join(os.homedir(), '.gemini');
 }
 
+// macOS tmpdir 심볼릭 링크 보정 — join(tmpdir(), …)는 `/var/folders/…`를 주지만 agy는
+// 심볼릭 링크를 해석한 실제 경로(`/private/var/folders/…`)로 cwd를 기록한다
+// (last_conversations.json 실측 2026-06-01). 정확 일치 조회가 항상 빗나가므로 양쪽 형태 모두 후보로.
+function cwdKeyCandidates(cwd: string): string[] {
+  const out = [cwd];
+  if (cwd.startsWith('/var/')) out.push(`/private${cwd}`);
+  else if (cwd.startsWith('/private/')) out.push(cwd.slice('/private'.length));
+  return out;
+}
+
 // (2) last_conversations.json의 cwd 키 제거. atomic rewrite. 매핑돼 있던 UUID 반환.
 export async function removeLastConversationsEntry(
   cwd: string,
@@ -157,9 +167,15 @@ export async function removeLastConversationsEntry(
   } catch {
     return null;
   }
-  const uuid = parsed[cwd];
+  let uuid: string | null = null;
+  for (const key of cwdKeyCandidates(cwd)) {
+    const v = parsed[key];
+    if (typeof v === 'string' && v.length > 0) {
+      uuid = v;
+      delete parsed[key];
+    }
+  }
   if (!uuid) return null;
-  delete parsed[cwd];
   const tmp = `${cachePath}.${process.pid}.${Date.now()}.tmp`;
   try {
     await fs.writeFile(tmp, JSON.stringify(parsed, null, 2), 'utf8');
@@ -247,7 +263,8 @@ export async function removeTrustedWorkspaceEntry(
   }
   if (!Array.isArray(parsed.trustedWorkspaces)) return;
   const before = parsed.trustedWorkspaces.length;
-  parsed.trustedWorkspaces = parsed.trustedWorkspaces.filter((w) => w !== cwd);
+  const candidates = new Set(cwdKeyCandidates(cwd));
+  parsed.trustedWorkspaces = parsed.trustedWorkspaces.filter((w) => !candidates.has(w));
   if (parsed.trustedWorkspaces.length === before) return;
   const tmp = `${settingsPath}.${process.pid}.${Date.now()}.tmp`;
   try {
