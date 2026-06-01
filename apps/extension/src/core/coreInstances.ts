@@ -113,6 +113,14 @@ export function initializeCore(context: vscode.ExtensionContext): void {
     notifications: compactionNotifications,
     envProbe: _envProbe,
     workspaceStore: _workspaceStore!,
+    // refine attempt 부가효과 — 익스텐션은 PTY probe 미설치, quota 강제 폴백 마킹만 (데이터 모델 통일).
+    // 데스크탑은 같은 hook으로 markForcedFallback + background probe까지 수행.
+    // (hook은 refine 실행 시점에 호출되므로 아래 _quotaTracker 초기화 순서와 무관.)
+    onRefineAttempt: async (event) => {
+      if (event.status === 'quota') {
+        await getQuotaTracker().markForcedFallback(event.cli);
+      }
+    },
     resolveRefineDecision: (activeModel) => {
       const cfg = getConfig();
       switch (cfg.refinePolicy) {
