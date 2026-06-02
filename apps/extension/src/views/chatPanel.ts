@@ -6,7 +6,7 @@ import { join } from 'path';
 import * as output from '../log/output';
 import { TurnRecorder } from '../core/turnRecorder';
 import { PtyDisplayFilter } from '../core/ptyDisplayFilter';
-import { getSessions, renameSession, deleteSession, setModelSessionId } from '../core/sessionRegistry';
+import { getSessions, renameSession, deleteSession, setModelSessionId, type SessionMeta } from '../core/sessionRegistry';
 import { captureNewThreadId } from '../core/cliAdapter/codexSessionWatcher';
 import { watchForNewConversationUuid } from '../core/cliAdapter/agyResume';
 import * as workspaceStore from '../core/workspaceStore';
@@ -132,17 +132,13 @@ export class ChatPanel {
           this.handleGetSessions();
           break;
         case 'openSession':
-          vscode.commands.executeCommand('agentbridge.openSession', {
-            sessionId: msg.sessionId,
-            workspaceId: msg.workspaceId,
-            model: msg.model,
-          });
+          void this.handleOpenSession(msg.workspaceId, msg.sessionId);
           break;
         case 'renameSession':
-          this.handleRenameSession(msg.workspaceId, msg.sessionId, msg.currentName);
+          void this.handleRenameSession(msg.workspaceId, msg.sessionId);
           break;
         case 'deleteSession':
-          this.handleDeleteSession(msg.workspaceId, msg.sessionId, msg.name);
+          void this.handleDeleteSession(msg.workspaceId, msg.sessionId);
           break;
         case 'newSession':
           vscode.commands.executeCommand('agentbridge.newSession');
@@ -339,15 +335,46 @@ export class ChatPanel {
     this.panel.webview.postMessage({ type: 'sessions', sessions });
   }
 
-  private async handleRenameSession(workspaceId: string, sessionId: string, currentName: string): Promise<void> {
-    const newName = await vscode.window.showInputBox({ prompt: 'Session name', value: currentName });
+  // webview 메시지의 소유권 검증 (V-29) — 메시지는 세션을 "지목"만 할 수 있고, 실제 데이터는
+  // 전부 호스트 저장소에서 가져온다. 이 패널의 워크스페이스에 실재하는 세션만 통과.
+  // 정상 사용에선 검증 실패가 발생하지 않으므로, 경고 로그가 찍히면 그 자체가 이상 신호.
+  private async resolveOwnedSession(workspaceId: string, sessionId: string): Promise<SessionMeta | null> {
+    const folderUri = vscode.workspace.workspaceFolders?.[0]?.uri;
+    if (!folderUri) return null;
+    const ownWid = workspaceStore.getOrCreateWorkspaceId(folderUri.fsPath);
+    if (workspaceId !== ownWid) {
+      output.warn('chatPanel: webview 메시지의 workspaceId가 패널 워크스페이스와 불일치 — 무시');
+      return null;
+    }
+    const sessions = await getSessions(ownWid);
+    const session = sessions.find((s) => s.sessionId === sessionId) ?? null;
+    if (!session) {
+      output.warn('chatPanel: webview 메시지가 지목한 세션이 워크스페이스에 없음 — 무시');
+    }
+    return session;
+  }
+
+  private async handleOpenSession(workspaceId: string, sessionId: string): Promise<void> {
+    const session = await this.resolveOwnedSession(workspaceId, sessionId);
+    if (!session) return;
+    // 메시지의 model 값 대신 저장소의 세션 객체 전체를 전달 — modelSessionId(resume용)도 함께 간다.
+    vscode.commands.executeCommand('agentbridge.openSession', session);
+  }
+
+  private async handleRenameSession(workspaceId: string, sessionId: string): Promise<void> {
+    const session = await this.resolveOwnedSession(workspaceId, sessionId);
+    if (!session) return;
+    const newName = await vscode.window.showInputBox({ prompt: 'Session name', value: session.name });
     if (newName === undefined) return;
     await renameSession(workspaceId, sessionId, newName);
     this.handleGetSessions();
   }
 
-  private async handleDeleteSession(workspaceId: string, sessionId: string, name: string): Promise<void> {
-    const answer = await vscode.window.showWarningMessage(`Delete session "${name}"?`, { modal: true }, 'Delete');
+  private async handleDeleteSession(workspaceId: string, sessionId: string): Promise<void> {
+    const session = await this.resolveOwnedSession(workspaceId, sessionId);
+    if (!session) return;
+    // 확인 모달에는 메시지가 주장한 이름이 아니라 저장소의 실제 이름을 띄운다 (이름표 바꿔치기 차단).
+    const answer = await vscode.window.showWarningMessage(`Delete session "${session.name}"?`, { modal: true }, 'Delete');
     if (answer !== 'Delete') return;
     const activePanel = activePanels.get(sessionId);
     if (activePanel) activePanel.markDeleted();
