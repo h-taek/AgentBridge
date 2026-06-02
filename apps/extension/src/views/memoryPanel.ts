@@ -4,25 +4,8 @@ import { promises as fs } from 'fs';
 import { join } from 'path';
 import * as output from '../log/output';
 import * as workspaceStore from '../core/workspaceStore';
-import {
-  readAllTurns,
-  rewriteTurns,
-  listArchives,
-  stageCompactedTurns,
-  commitArchive,
-  abortArchive,
-  type StagedArchive,
-} from '../core/turnsStore';
-import { buildCompactionPrompt } from '../core/irModule/prompt';
-import { parseRefineOutput, assembleIR } from '../core/irModule/parse';
-import { runRefine } from '../core/refineDispatcher';
-import {
-  acquireDiskLock,
-  releaseDiskLock,
-  markCompactionInFlight,
-  unmarkCompactionInFlight,
-  compactionEvents,
-} from '../core/compactionScheduler';
+import { readAllTurns, listArchives } from '../core/turnsStore';
+import { runManualCompaction } from '../core/compactionScheduler';
 import { getHookDisabledReasons } from '../core/hookStatusStore';
 import type { CliKind, IR } from '../shared/types';
 
@@ -129,104 +112,25 @@ export class MemoryPanelProvider implements vscode.WebviewViewProvider {
     const folderUri = vscode.workspace.workspaceFolders?.[0]?.uri;
     const workspacePath = folderUri?.fsPath ?? '';
 
-    const turns = await readAllTurns(wid);
-    if (turns.length === 0) {
-      vscode.window.showInformationMessage('AgentBridge: No turns to refine.');
-      return;
-    }
-
-    // Coordinate with compactionScheduler: in-process inFlight guard + cross-process disk lock.
-    // Prevents the manual Refine path from racing with background auto-compaction over ir.json/turns.jsonl.
-    if (!markCompactionInFlight(wid)) {
-      vscode.window.showWarningMessage('AgentBridge: Compaction already in progress.');
-      return;
-    }
-    let holdsDiskLock = false;
+    // activeModel은 직전 IR의 lastModel 기준(없으면 claude). 정제 파이프라인 본체
+    // (inFlight/disk lock · refine · IR write · 2-phase archive · ir:updated emit)는
+    // core runManual이 담당 — 자동 compaction과 동일 경로로 통일, 호스트 중복 제거 (V-13).
+    const currentIR = await this.loadIR(wid);
+    const activeModel: CliKind = (currentIR?.meta.lastModel as CliKind) ?? 'claude';
 
     this.postMessage({ type: 'ir:refining', active: true });
-
     try {
-      holdsDiskLock = await acquireDiskLock(wid);
-      if (!holdsDiskLock) {
-        vscode.window.showWarningMessage('AgentBridge: Another process holds the compaction lock — try again shortly.');
-        return;
+      const result = await runManualCompaction(wid, activeModel, workspacePath, 60_000);
+      if (result.ok) {
+        vscode.window.showInformationMessage(`AgentBridge: Refined (${result.durationMs}ms)`);
+      } else {
+        vscode.window.showWarningMessage(`AgentBridge: Refine failed — ${result.error ?? 'unknown error'}`);
       }
-
-      const currentIR = await this.loadIR(wid);
-      const activeModel: CliKind = (currentIR?.meta.lastModel as CliKind) ?? 'claude';
-      const prompt = buildCompactionPrompt({
-        fromModel: activeModel,
-        workspacePath,
-        turns,
-        currentIR,
-      });
-
-      const dispatch = await runRefine({
-        activeModel,
-        prompt,
-        cwd: workspacePath,
-        timeoutMs: 60_000,
-      });
-
-      const parsed = parseRefineOutput(dispatch.result.assistantText);
-      if (!parsed.ok) {
-        vscode.window.showWarningMessage(`AgentBridge: Refine parse failed — ${parsed.error}`);
-        return;
-      }
-
-      const ir = await assembleIR({
-        contextId: wid,
-        body: parsed.body,
-        fromModel: activeModel,
-        workspacePath,
-        previousIR: currentIR,
-      });
-
-      const irPath = join(workspaceStore.getWorkspacePath(wid), 'ir.json');
-      const tmp = `${irPath}.${process.pid}.${Date.now()}.tmp`;
-      await fs.writeFile(tmp, JSON.stringify(ir, null, 2), 'utf8');
-      await fs.rename(tmp, irPath);
-
-      // 2-phase commit (matches compactionScheduler auto path) — archive the dropped turns
-      // so users can browse history. Stage first; commit only after rewriteTurns succeeds.
-      const keepRecent = 3;
-      const dropped = turns.length > keepRecent ? turns.slice(0, turns.length - keepRecent) : [];
-      let staged: StagedArchive | null = null;
-      if (currentIR && dropped.length > 0) {
-        try {
-          staged = await stageCompactedTurns(wid, dropped, currentIR);
-        } catch (err) {
-          output.warn(`memoryPanel: archive stage failed — ${err instanceof Error ? err.message : String(err)}`);
-        }
-      }
-
-      if (dropped.length > 0) {
-        try {
-          await rewriteTurns(wid, turns.slice(turns.length - keepRecent));
-        } catch (err) {
-          if (staged) await abortArchive(staged);
-          throw err;
-        }
-      }
-
-      if (staged) {
-        try {
-          await commitArchive(staged);
-        } catch (err) {
-          output.warn(`memoryPanel: archive commit failed — ${err instanceof Error ? err.message : String(err)}`);
-        }
-      }
-
-      output.log(`memoryPanel: manual refine complete (archived=${dropped.length}, kept=${Math.min(turns.length, keepRecent)})`);
-      compactionEvents.emit('ir:updated', wid);
-      vscode.window.showInformationMessage(`AgentBridge: Refined with ${dispatch.spawnedModel} (${dispatch.result.durationMs}ms)`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       output.warn(`memoryPanel: refine failed — ${msg}`);
       vscode.window.showErrorMessage(`AgentBridge: Refine failed — ${msg}`);
     } finally {
-      if (holdsDiskLock) await releaseDiskLock(wid);
-      unmarkCompactionInFlight(wid);
       this.postMessage({ type: 'ir:refining', active: false });
       await this.sendIR();
     }

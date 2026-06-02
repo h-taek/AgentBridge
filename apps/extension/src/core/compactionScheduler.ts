@@ -2,6 +2,7 @@
 // 호환을 위해 workspaceStore.getWorkspacePath로 workspaceRoot resolve.
 
 import type { EventEmitter } from 'events';
+import type { ManualCompactionResult } from '@agentbridge/core';
 import type { CliKind } from '../shared/types';
 import * as workspaceStore from './workspaceStore';
 import { getCompactionScheduler } from './coreInstances';
@@ -41,5 +42,22 @@ export async function checkAndRunCompaction(
     workspaceRoot: workspaceStore.getWorkspacePath(workspaceId),
     workspacePath,
     activeModel,
+  });
+}
+
+// 수동 정제("Refine now") — core runManual에 위임. 락/refine/IR write/2-phase archive를
+// 코어가 일괄 처리하므로 호스트별 중복 파이프라인이 사라진다 (V-13).
+export async function runManualCompaction(
+  workspaceId: string,
+  activeModel: CliKind,
+  workspacePath: string,
+  timeoutMs?: number,
+): Promise<ManualCompactionResult> {
+  return getCompactionScheduler().runManual({
+    workspaceId,
+    workspaceRoot: workspaceStore.getWorkspacePath(workspaceId),
+    workspacePath,
+    activeModel,
+    timeoutMs,
   });
 }
