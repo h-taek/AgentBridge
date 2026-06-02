@@ -7,19 +7,19 @@
 //   - workspaceClaudePath: claude settings.json이 들어갈 디렉토리(원본은 workspace storage 하위)
 
 import { promises as fsp } from 'fs';
-import { join, dirname, resolve } from 'path';
-import { homedir } from 'os';
+import { join, dirname } from 'path';
 import type { CliKind } from './shared/cli';
 import { quoteArg } from './shellQuote';
+import { findBlockedGlobalCliConfigDir } from './cliGlobalDirs';
 import type { Logger } from './interfaces';
 import { noopLogger } from './interfaces';
 
 function assertWorkspaceCwd(cwd: string, label: string): void {
-  const home = resolve(homedir());
-  const resolved = resolve(cwd);
-  if (resolved === home) {
+  // 홈 자체 + CLI 글로벌 설정 디렉토리(~/.codex 등) 하위면 거부 — 글로벌 hook 덮어쓰기 방지.
+  const blocked = findBlockedGlobalCliConfigDir(cwd);
+  if (blocked) {
     throw new Error(
-      `${label}: refusing to install hooks in $HOME (${home}). Open a workspace folder first.`,
+      `${label}: refusing to install hooks under ${blocked} — CLI global config directory. Open a project folder first.`,
     );
   }
 }

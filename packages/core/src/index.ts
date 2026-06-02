@@ -7,6 +7,7 @@ export * from './shared/turns';
 
 // 순수 유틸
 export * from './shellQuote';
+export * from './cliGlobalDirs';
 
 // IR module
 export * from './irModule/parse';
