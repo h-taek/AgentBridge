@@ -12,16 +12,17 @@
  * 패키지 안 .app/Contents/Resources/bin/agentbridge-memory.js로 들어간다 (M4 패키징 단계 검증).
  * dev에서는 <repo>/resources/bin/agentbridge-memory.js 그대로 실행.
  *
- * Hook command 형식: `node <abs-path> inject --agent <claude|codex|agy> --workspace <id>`
+ * Hook command 형식:
+ *   `node <abs-path> inject --agent <claude|codex|agy> --workspace <id> --user-data <path> --event <name>`
  *
- * 사용자 글로벌 데이터 위치: ~/Library/Application Support/AgentBridge/workspaces/<id>/ir.json
- * (Electron app.getPath('userData')와 동일 경로 — macOS 한정. M4 멀티 플랫폼 시 분기).
+ * 사용자 글로벌 데이터 위치는 호스트 앱(데스크탑/extension)이 --user-data로 주입한다.
+ * 헬퍼가 경로를 추측하지 않는다 — 호스트마다 저장소가 다르므로 (데스크탑: Application Support,
+ * extension: IDE globalStorage) 추측은 엉뚱한 메모리 주입으로 이어진다.
  */
 
 'use strict'
 
 const fs = require('fs')
-const os = require('os')
 const path = require('path')
 
 // claude/codex/agy 모두 stdout JSON의 `hookEventName`이 *호출된 hook event 이름과 정확히 일치*
@@ -48,7 +49,7 @@ const ALLOWED_EVENTS = new Set([
 ])
 
 function parseArgs(argv) {
-  // 형식: inject --agent <kind> --workspace <id> --event <name> [--user-data <path>]
+  // 형식: inject --agent <kind> --workspace <id> --user-data <path> --event <name>
   const out = {
     cmd: argv[0] || null,
     agent: null,
@@ -74,12 +75,6 @@ function parseArgs(argv) {
     }
   }
   return out
-}
-
-function getUserDataDir(override) {
-  if (override) return override
-  // macOS 표준 위치. M4에서 process.platform 분기 추가 시 갱신.
-  return path.join(os.homedir(), 'Library', 'Application Support', 'AgentBridge')
 }
 
 function readJsonSafe(p) {
@@ -295,7 +290,7 @@ function main() {
   const parsed = parseArgs(process.argv.slice(2))
   if (parsed.cmd !== 'inject') {
     process.stderr.write(
-      'agentbridge-memory: usage: inject --agent <kind> --workspace <id> --event <name>\n'
+      'agentbridge-memory: usage: inject --agent <kind> --workspace <id> --user-data <path> --event <name>\n'
     )
     process.exit(2)
   }
@@ -313,7 +308,18 @@ function main() {
     )
     process.exit(2)
   }
-  const userData = getUserDataDir(parsed.userData)
+  if (!parsed.userData) {
+    // 과거에는 macOS 데스크탑 경로(~/Library/Application Support/AgentBridge)로 조용히 폴백했다.
+    // extension 등 다른 호스트에서는 엉뚱한 저장소를 읽어 "IR이 안 따라온다"로만 보이는 문제 —
+    // 추측 대신 빈 컨텍스트 + stderr 진단으로 fail-safe. exit 2는 claude가 프롬프트를 차단하므로
+    // CLI 흐름을 깨지 않는 exit 0 유지 (하단 catch 블록과 같은 원칙).
+    process.stderr.write(
+      'agentbridge-memory: --user-data required (stale or broken hook command — reopen the session in the app to reinstall hooks)\n'
+    )
+    process.stdout.write(JSON.stringify(buildHookOutput(parsed.agent, parsed.event, '')))
+    process.exit(0)
+  }
+  const userData = parsed.userData
   const wsDir = path.join(userData, 'workspaces', parsed.workspace)
   const irPath = path.join(wsDir, 'ir.json')
   const turnsPath = path.join(wsDir, 'turns.jsonl')
