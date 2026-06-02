@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# build-mac-external.sh — iCloud Drive 디렉토리 우회 빌드.
+# build-mac-external.sh — iCloud Drive 디렉토리 우회 빌드 (pnpm 모노레포).
 #
 # 왜 필요한가:
 #   본 프로젝트 작업 디렉토리가 ~/Library/Mobile Documents/com~apple~CloudDocs/... (iCloud Drive)
@@ -9,28 +9,30 @@
 #   xattr -dr로도 제거 불가 (시스템 보호 attribute).
 #
 # 우회 방식:
-#   ~/.agentbridge-build/ (iCloud 영역 밖) 으로 source를 sync한 뒤 그곳에서 빌드.
-#   provenance가 부여되지 않으므로 codesign 정상 통과. 빌드 산출물(dist/*.dmg/*.zip/...)만
-#   원래 위치로 회수.
+#   ~/.agentbridge-build/ (iCloud 영역 밖) 으로 *모노레포 전체*를 sync한 뒤 그곳에서 빌드.
+#   provenance가 부여되지 않으므로 codesign 정상 통과. 산출물(apps/desktop/dist/*)만 회수.
 #
 # 흐름:
-#   1) source sync — tar로 xattr 자동 제외하며 BUILD_DIR로 복사 (node_modules/dist/out/.git 제외)
-#   2) node_modules — package-lock 변경 감지해 clean install (첫 빌드 + 의존성 변경 시만)
-#   3) build:mac in BUILD_DIR — electron-vite build + electron-builder --mac
-#   4) artifacts 회수 — BUILD_DIR/dist → PROJECT_DIR/dist
+#   1) source sync — tar로 xattr 자동 제외하며 BUILD_DIR로 *레포 루트 전체* 복사
+#      (node_modules/dist/out/.git 제외 — 어느 깊이든)
+#   2) pnpm install — pnpm-lock 변경 감지 시만 (workspace 전체, 네이티브 rebuild 포함)
+#   3) build — core 먼저(desktop main이 번들로 인라인) → desktop build:mac
+#   4) artifacts 회수 — BUILD_DIR/apps/desktop/dist → <repo>/apps/desktop/dist
 #
-# 사용: `npm run build:mac:external`
+# 사용: `npm run build:mac:external` (apps/desktop에서)
 
 set -euo pipefail
 
-PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+# 스크립트 위치: <repo>/apps/desktop/scripts/ → 루트는 세 단계 위.
+REPO_ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
+DESKTOP_DIR="$REPO_ROOT/apps/desktop"
 BUILD_DIR="${AGENTBRIDGE_BUILD_DIR:-$HOME/.agentbridge-build}"
-LOCK_CACHE="$BUILD_DIR/.last-package-lock"
+LOCK_CACHE="$BUILD_DIR/.last-pnpm-lock"
 
-echo "[external-build] project    = $PROJECT_DIR"
+echo "[external-build] repo root  = $REPO_ROOT"
 echo "[external-build] build dir  = $BUILD_DIR"
 
-# 1) source sync — tar로 xattr 제외하며 복사.
+# 1) source sync — 모노레포 전체를 tar로 복사 (tar는 xattr를 옮기지 않음).
 echo "[external-build] sync source → $BUILD_DIR"
 mkdir -p "$BUILD_DIR"
 tar -cf - \
@@ -39,39 +41,40 @@ tar -cf - \
   --exclude=out \
   --exclude=.git \
   --exclude=.DS_Store \
-  -C "$PROJECT_DIR" . \
+  -C "$REPO_ROOT" . \
   | tar -xf - -C "$BUILD_DIR"
 
-# 2) node_modules — clean install이 필요한 경우만.
+# 2) pnpm install — pnpm-lock 변경 감지 시만. desktop postinstall이 네이티브 모듈을
+#    electron ABI로 rebuild한다(electron-builder install-app-deps).
 NEEDS_INSTALL=0
 if [ ! -d "$BUILD_DIR/node_modules" ]; then
   NEEDS_INSTALL=1
-  echo "[external-build] node_modules 없음 — clean install 진행"
-elif [ ! -f "$LOCK_CACHE" ] || ! cmp -s "$PROJECT_DIR/package-lock.json" "$LOCK_CACHE"; then
+  echo "[external-build] node_modules 없음 — install 진행"
+elif [ ! -f "$LOCK_CACHE" ] || ! cmp -s "$REPO_ROOT/pnpm-lock.yaml" "$LOCK_CACHE"; then
   NEEDS_INSTALL=1
-  echo "[external-build] package-lock 변경 감지 — clean install 진행"
+  echo "[external-build] pnpm-lock 변경 감지 — install 진행"
 fi
 
 if [ "$NEEDS_INSTALL" -eq 1 ]; then
-  rm -rf "$BUILD_DIR/node_modules"
-  (cd "$BUILD_DIR" && npm install)
-  cp "$PROJECT_DIR/package-lock.json" "$LOCK_CACHE"
+  (cd "$BUILD_DIR" && pnpm install)
+  cp "$REPO_ROOT/pnpm-lock.yaml" "$LOCK_CACHE"
 fi
 
-# 3) build:mac — external dir에서 직접 호출.
-echo "[external-build] running build:mac in $BUILD_DIR"
+# 3) build — core(desktop main에 번들) 먼저, 그다음 desktop build:mac.
+echo "[external-build] build core + desktop in $BUILD_DIR"
 (
   cd "$BUILD_DIR"
+  pnpm --filter @agentbridge/core build
+  cd apps/desktop
   unset ELECTRON_RUN_AS_NODE
-  npx electron-vite build
-  npx electron-builder --mac
+  pnpm run build:mac
 )
 
-# 4) artifacts 회수.
-echo "[external-build] sync artifacts → $PROJECT_DIR/dist"
-rm -rf "$PROJECT_DIR/dist"
-mkdir -p "$PROJECT_DIR/dist"
-cp -R "$BUILD_DIR/dist/." "$PROJECT_DIR/dist/"
+# 4) artifacts 회수 → apps/desktop/dist.
+echo "[external-build] sync artifacts → $DESKTOP_DIR/dist"
+rm -rf "$DESKTOP_DIR/dist"
+mkdir -p "$DESKTOP_DIR/dist"
+cp -R "$BUILD_DIR/apps/desktop/dist/." "$DESKTOP_DIR/dist/"
 
 echo "[external-build] done"
-ls -lh "$PROJECT_DIR/dist/" | head -20
+ls -lh "$DESKTOP_DIR/dist/" | head -20
