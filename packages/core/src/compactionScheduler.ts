@@ -13,7 +13,7 @@ import type { TurnRecord } from './shared/turns';
 import { COMPACTION_TRIGGER } from './shared/turns';
 import {
   readAllTurns,
-  rewriteTurns,
+  dropProcessedTurns,
   stageCompactedTurns,
   commitArchive,
   abortArchive,
@@ -191,7 +191,6 @@ export function createCompactionScheduler(
         if (processCount <= 0) return;
 
         const oldest = turns.slice(0, processCount);
-        const remaining = turns.slice(processCount);
         const currentIR = await readIR(workspaceRoot);
 
         log.log(`compaction: starting (${turns.length} turns, processing ${processCount})`);
@@ -287,7 +286,7 @@ export function createCompactionScheduler(
         }
 
         try {
-          await rewriteTurns(workspaceRoot, remaining);
+          await dropProcessedTurns(workspaceRoot, new Set(oldest.map((t) => t.id)));
         } catch (err) {
           log.warn(
             `compaction: turns rewrite failed — ${err instanceof Error ? err.message : String(err)}`,
@@ -310,7 +309,7 @@ export function createCompactionScheduler(
         }
 
         log.log(
-          `compaction: done (${dispatch.spawnedModel}, processed=${oldest.length}, kept=${remaining.length})`,
+          `compaction: done (${dispatch.spawnedModel}, processed=${oldest.length}, kept=${turns.length - oldest.length})`,
         );
         events.emit('ir:updated', workspaceId);
       } catch (err) {
@@ -458,7 +457,7 @@ export function createCompactionScheduler(
             }
           }
           try {
-            await rewriteTurns(workspaceRoot, remaining);
+            await dropProcessedTurns(workspaceRoot, new Set(oldest.map((t) => t.id)));
             if (stagedArchive) {
               await commitArchive(stagedArchive, {
                 maxArchiveSnapshots: opts.maxArchiveSnapshots,

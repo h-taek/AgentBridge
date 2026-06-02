@@ -3,9 +3,11 @@
 // 호스트 차이 흡수: workspace 경로 계산은 호스트가 책임지고, 코어는 받은 절대경로에 대해서만
 // 동작한다. 로깅도 Logger 주입.
 //
-// 알려진 이슈 (CODE_REVIEW_2026-05-29):
-//   - appendTurn은 락이 없음. compaction의 rewriteTurns와 경합 가능 — 호출자가 직렬화 필요.
-//   - rotateIfNeeded와 appendTurn 간에도 경합 — 동일.
+// 쓰기 직렬화 (V-03): turns.jsonl의 모든 쓰기(append/rewrite/rotate)는 workspaceRoot별
+// in-process mutex(withTurnsLock)를 거친다. compaction은 정제(최대 60초)는 락 밖에서 하고,
+// 끝나면 dropProcessedTurns로 *현재* turns를 다시 읽어 정제한 id만 빼고 rewrite한다. 그래서
+// 정제 도중 append된 turn이 옛 스냅샷 기준 rewrite에 덮어써지지 않는다. (같은 프로세스 안의
+// turnRecorder append ↔ compaction rewrite 경합 차단. 두 앱 다 이 core 함수 하나를 공유.)
 
 import { promises as fs } from 'fs';
 import { join } from 'path';
@@ -13,6 +15,22 @@ import type { TurnRecord } from './shared/turns';
 import { TURNS_ROTATE } from './shared/turns';
 import type { Logger } from './interfaces';
 import { noopLogger } from './interfaces';
+
+// workspaceRoot별 직렬화 큐 — 이전 작업이 끝난 뒤 다음 작업을 실행. 이전 작업의 성공/실패와
+// 무관하게 진행하고, 저장된 tail은 reject되지 않게 해 다음 락이 막히지 않도록 한다.
+const writeChains = new Map<string, Promise<unknown>>();
+function withTurnsLock<T>(workspaceRoot: string, fn: () => Promise<T>): Promise<T> {
+  const prev = writeChains.get(workspaceRoot) ?? Promise.resolve();
+  const result = prev.then(fn, fn);
+  writeChains.set(
+    workspaceRoot,
+    result.then(
+      () => undefined,
+      () => undefined,
+    ),
+  );
+  return result;
+}
 
 export type TurnsStoreOptions = {
   // 압축된 아카이브(`compressed_*.jsonl`) 최대 개수. 초과분은 오래된 것부터 unlink.
@@ -45,8 +63,10 @@ function deserialize(line: string): TurnRecord | null {
 }
 
 export async function appendTurn(workspaceRoot: string, turn: TurnRecord): Promise<void> {
-  await fs.mkdir(workspaceRoot, { recursive: true });
-  await fs.appendFile(turnsPath(workspaceRoot), serialize(turn), 'utf8');
+  return withTurnsLock(workspaceRoot, async () => {
+    await fs.mkdir(workspaceRoot, { recursive: true });
+    await fs.appendFile(turnsPath(workspaceRoot), serialize(turn), 'utf8');
+  });
 }
 
 export async function readAllTurns(workspaceRoot: string): Promise<TurnRecord[]> {
@@ -66,12 +86,30 @@ export async function readAllTurns(workspaceRoot: string): Promise<TurnRecord[]>
   return out;
 }
 
-export async function rewriteTurns(workspaceRoot: string, turns: TurnRecord[]): Promise<void> {
+async function writeTurnsRaw(workspaceRoot: string, turns: TurnRecord[]): Promise<void> {
   const p = turnsPath(workspaceRoot);
   const tmp = `${p}.${process.pid}.${Date.now()}.tmp`;
   const body = turns.map(serialize).join('');
   await fs.writeFile(tmp, body, 'utf8');
   await fs.rename(tmp, p);
+}
+
+export async function rewriteTurns(workspaceRoot: string, turns: TurnRecord[]): Promise<void> {
+  return withTurnsLock(workspaceRoot, () => writeTurnsRaw(workspaceRoot, turns));
+}
+
+// compaction 전용 — 정제 끝난 뒤 호출. 옛 스냅샷의 `remaining`으로 통째 덮어쓰지 않고,
+// 락 안에서 *현재* turns를 다시 읽어 processed id만 빼고 rewrite. 정제(락 밖, 최대 60초)
+// 도중 append된 turn이 보존된다 (V-03 — turns 유실 방지).
+export async function dropProcessedTurns(
+  workspaceRoot: string,
+  processedIds: ReadonlySet<string>,
+): Promise<void> {
+  return withTurnsLock(workspaceRoot, async () => {
+    const current = await readAllTurns(workspaceRoot);
+    const remaining = current.filter((t) => !processedIds.has(t.id));
+    await writeTurnsRaw(workspaceRoot, remaining);
+  });
 }
 
 // 2-phase commit: archive를 .tmp로 먼저 쓰고, turns.jsonl rewrite 성공 후 commitArchive() 호출.
@@ -171,6 +209,8 @@ export async function rotateIfNeeded(workspaceRoot: string, opts?: { logger?: Lo
   }
   if (!needsRotate) return false;
 
+  // rename+truncate는 append와 같은 락에서 — 회전 도중 append 유실 방지 (V-03 동일 경합).
+  return withTurnsLock(workspaceRoot, async () => {
   const dir = archiveDir(workspaceRoot);
   await fs.mkdir(dir, { recursive: true });
   const ts = new Date().toISOString().replace(/[:.]/g, '-');
@@ -183,6 +223,7 @@ export async function rotateIfNeeded(workspaceRoot: string, opts?: { logger?: Lo
   } catch {
     return false;
   }
+  });
 }
 
 export type ArchiveSnapshotMeta = {
