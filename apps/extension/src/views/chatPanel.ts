@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import * as pty from 'node-pty';
+import { randomBytes } from 'crypto';
 import { chmodSync } from 'fs';
 import { join } from 'path';
 import * as output from '../log/output';
@@ -1091,10 +1092,6 @@ export class ChatPanel {
 }
 
 function getNonce(): string {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  let nonce = '';
-  for (let i = 0; i < 32; i++) {
-    nonce += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return nonce;
+  // CSP nonce는 예측 불가능해야 하므로 Math.random()이 아닌 crypto 난수 사용
+  return randomBytes(16).toString('base64');
 }
