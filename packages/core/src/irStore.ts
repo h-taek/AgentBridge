@@ -25,3 +25,12 @@ export async function writeIR(workspaceRoot: string, ir: IR): Promise<void> {
   await fs.writeFile(tmp, JSON.stringify(ir, null, 2), 'utf8');
   await fs.rename(tmp, irPath);
 }
+
+// 메모리 초기화(reset) 전용 — ir.json을 빈 객체로 원자적 비우기. unlink 대신 '{}' write로
+// 통일하면 readIR이 항상 valid JSON을 읽고(meta 없음 → null) 읽기 도중 경합도 없다. (V-06/V-14)
+export async function clearIR(workspaceRoot: string): Promise<void> {
+  const irPath = join(workspaceRoot, 'ir.json');
+  const tmp = `${irPath}.${process.pid}.${Date.now()}.tmp`;
+  await fs.writeFile(tmp, '{}', 'utf8');
+  await fs.rename(tmp, irPath);
+}

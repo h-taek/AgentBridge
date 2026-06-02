@@ -30,6 +30,7 @@ import { listArchives, readAllTurns, sumBytes } from '../modules/turnsStore'
 import { loadSettings } from '../modules/settings'
 import { broadcastIrUpdated } from '../modules/irBroadcast'
 import { broadcastTurnsUpdated } from '../modules/turnRecorder'
+import { resetMemoryForWorkspace } from '../modules/compactionScheduler'
 
 // M3.5 UI-E 후속 — 메모리 관리 패널 IPC.
 //   archive:list / archive:load — workspaces/<id>/archive/compressed_<TS>.jsonl 인덱싱 + 단건 read
@@ -202,39 +203,20 @@ async function handleMemoryReset(_e: unknown, req: MemoryResetRequest): Promise<
   try {
     // 워크스페이스 존재 검증 (잘못된 id면 throw — 손상된 워크스페이스의 빈 파일 생성 회피).
     await loadWorkspace(req.workspaceId)
-    const paths = getWorkspacePaths(req.workspaceId)
 
-    // ir.json atomic write — tmp 후 rename으로 동시 read 중에도 일관성 보장.
-    const irTmp = `${paths.ir}.${process.pid}.${Date.now()}.tmp`
-    await fs.writeFile(irTmp, '{}', 'utf8')
-    await fs.rename(irTmp, paths.ir)
-
-    if (req.alsoTurns) {
-      const turnsTmp = `${paths.turnsJsonl}.${process.pid}.${Date.now()}.tmp`
-      await fs.writeFile(turnsTmp, '', 'utf8')
-      await fs.rename(turnsTmp, paths.turnsJsonl)
-    }
-
-    // archive 디렉토리 안 모든 파일 unlink — 디렉토리 자체는 유지(다음 compaction이 재생성).
-    try {
-      const entries = await fs.readdir(paths.archiveDir)
-      await Promise.all(
-        entries.map(async (name) => {
-          try {
-            await fs.unlink(path.join(paths.archiveDir, name))
-          } catch (err) {
-            const code = (err as NodeJS.ErrnoException).code
-            if (code !== 'ENOENT') {
-              log.warn('archive 항목 unlink 실패', { name, err: String(err) })
-            }
-          }
-        })
-      )
-    } catch (err) {
-      const code = (err as NodeJS.ErrnoException).code
-      if (code !== 'ENOENT') {
-        log.warn('archive 디렉토리 정리 실패', { err: String(err) })
+    // V-06/V-14: reset도 compaction과 같은 락으로 직렬화하고, 쓰기 로직은 core resetMemory로 통합.
+    const result = await resetMemoryForWorkspace({
+      workspaceId: req.workspaceId,
+      alsoTurns: !!req.alsoTurns
+    })
+    if (!result.ok) {
+      if (result.error === 'compaction-in-progress') {
+        return {
+          ok: false,
+          error: '메모리 정리(compaction)가 진행 중입니다. 잠시 후 다시 시도하세요.'
+        }
       }
+      return { ok: false, error: result.error }
     }
 
     broadcastIrUpdated({ workspaceId: req.workspaceId, source: 'manual' })

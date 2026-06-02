@@ -17,12 +17,14 @@ import {
   stageCompactedTurns,
   commitArchive,
   abortArchive,
+  clearTurns,
+  clearArchive,
   sumBytes,
   type StagedArchive,
 } from './turnsStore';
 import { buildCompactionPrompt } from './irModule/prompt';
 import { parseRefineOutput, assembleIR, type GitInfo } from './irModule/parse';
-import { readIR, writeIR } from './irStore';
+import { readIR, writeIR, clearIR } from './irStore';
 import {
   runRefine,
   RefineOffError,
@@ -80,12 +82,22 @@ export type ManualCompactionResult = {
   rawLineCount: number;
 };
 
+// 메모리 초기화 결과. error==='compaction-in-progress'면 락 미획득(재시도 안내), 그 외는 실제 오류.
+export type MemoryResetOutcome = { ok: boolean; error?: string };
+
 export interface CompactionScheduler {
   readonly events: EventEmitter;
   acquireDiskLock(workspaceId: string): Promise<boolean>;
   releaseDiskLock(workspaceId: string): Promise<void>;
   markInFlight(workspaceId: string): boolean;
   unmarkInFlight(workspaceId: string): void;
+  // 메모리 초기화 — compaction과 같은 inFlight + disk lock으로 상호배제(V-06). 락 미획득 시
+  // 거절({ok:false, error:'compaction-in-progress'}). alsoTurns면 turns.jsonl도 비움.
+  resetMemory(args: {
+    workspaceId: string;
+    workspaceRoot: string;
+    alsoTurns: boolean;
+  }): Promise<MemoryResetOutcome>;
   checkAndRun(args: {
     workspaceId: string;
     workspaceRoot: string;
@@ -171,6 +183,34 @@ export function createCompactionScheduler(
 
     unmarkInFlight(workspaceId) {
       inFlight.delete(workspaceId);
+    },
+
+    async resetMemory(args): Promise<MemoryResetOutcome> {
+      const { workspaceId, workspaceRoot, alsoTurns } = args;
+      // compaction과 동일한 가드 — 같은 앱 안에서는 inFlight, 다른 인스턴스까지는 disk lock으로
+      // 막아 정제 도중 reset이 겹쳐 옛 내용이 되살아나는 경합을 차단 (V-06).
+      if (!this.markInFlight(workspaceId)) {
+        return { ok: false, error: 'compaction-in-progress' };
+      }
+      let holdsDiskLock = false;
+      try {
+        holdsDiskLock = await acquireDiskLock(workspaceId);
+        if (!holdsDiskLock) {
+          return { ok: false, error: 'compaction-in-progress' };
+        }
+        await clearIR(workspaceRoot);
+        if (alsoTurns) await clearTurns(workspaceRoot);
+        await clearArchive(workspaceRoot);
+        log.log(`resetMemory: done (workspace=${workspaceId}, alsoTurns=${alsoTurns})`);
+        return { ok: true };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        log.warn(`resetMemory: failed — ${msg}`);
+        return { ok: false, error: msg };
+      } finally {
+        if (holdsDiskLock) await releaseDiskLock(workspaceId);
+        this.unmarkInFlight(workspaceId);
+      }
     },
 
     async checkAndRun(args) {

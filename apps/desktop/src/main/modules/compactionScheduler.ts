@@ -4,6 +4,7 @@ import {
   createCompactionScheduler,
   type CompactionScheduler,
   type ManualCompactionResult as CoreManualCompactionResult,
+  type MemoryResetOutcome,
   type RefineDecision
 } from '@agentbridge/core'
 import { loadWorkspace, getCoreWorkspaceStore } from './workspaceStore'
@@ -158,4 +159,19 @@ export async function runManualCompaction(args: {
     broadcastIrUpdated({ workspaceId: args.workspaceId, source: 'manual' })
   }
   return result
+}
+
+// 메모리 초기화 — core resetMemory에 위임. compaction과 같은 락으로 직렬화되며(V-06), reset
+// 쓰기 로직이 core 한 곳으로 통합된다(V-14). broadcast는 호출자(IPC 핸들러)가 담당.
+export async function resetMemoryForWorkspace(args: {
+  workspaceId: string
+  alsoTurns: boolean
+}): Promise<MemoryResetOutcome> {
+  const sched = await ensureScheduler()
+  const workspaceRoot = getWorkspacePaths(args.workspaceId).dir
+  return sched.resetMemory({
+    workspaceId: args.workspaceId,
+    workspaceRoot,
+    alsoTurns: args.alsoTurns
+  })
 }

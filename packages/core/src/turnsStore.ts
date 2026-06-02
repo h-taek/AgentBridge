@@ -98,6 +98,35 @@ export async function rewriteTurns(workspaceRoot: string, turns: TurnRecord[]): 
   return withTurnsLock(workspaceRoot, () => writeTurnsRaw(workspaceRoot, turns));
 }
 
+// 메모리 초기화(reset) 전용 — turns.jsonl 비우기. append/rotate와 같은 락을 거쳐, 마침 기록
+// 중인 turn과 안 부딪히게 한다. (V-06)
+export async function clearTurns(workspaceRoot: string): Promise<void> {
+  return withTurnsLock(workspaceRoot, () => writeTurnsRaw(workspaceRoot, []));
+}
+
+// 메모리 초기화(reset) 전용 — archive 디렉토리 안 파일 전부 삭제(디렉토리는 유지). rotate가
+// archive에 쓰는 것과 같은 락을 거쳐 직렬화. (V-06)
+export async function clearArchive(workspaceRoot: string): Promise<void> {
+  return withTurnsLock(workspaceRoot, async () => {
+    const dir = archiveDir(workspaceRoot);
+    let files: string[];
+    try {
+      files = await fs.readdir(dir);
+    } catch {
+      return; // 디렉토리 없으면 할 일 없음
+    }
+    await Promise.all(
+      files.map(async (name) => {
+        try {
+          await fs.unlink(join(dir, name));
+        } catch {
+          /* 이미 없으면 skip */
+        }
+      }),
+    );
+  });
+}
+
 // compaction 전용 — 정제 끝난 뒤 호출. 옛 스냅샷의 `remaining`으로 통째 덮어쓰지 않고,
 // 락 안에서 *현재* turns를 다시 읽어 processed id만 빼고 rewrite. 정제(락 밖, 최대 60초)
 // 도중 append된 turn이 보존된다 (V-03 — turns 유실 방지).

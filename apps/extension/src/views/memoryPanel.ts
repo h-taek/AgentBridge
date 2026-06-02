@@ -1,12 +1,11 @@
 import * as vscode from 'vscode';
 import { randomBytes } from 'crypto';
 import { promises as fs } from 'fs';
-import { join } from 'path';
 import * as output from '../log/output';
 import * as workspaceStore from '../core/workspaceStore';
 import { readIR } from '@agentbridge/core';
 import { readAllTurns, listArchives } from '../core/turnsStore';
-import { runManualCompaction } from '../core/compactionScheduler';
+import { runManualCompaction, resetMemory } from '../core/compactionScheduler';
 import { getHookDisabledReasons } from '../core/hookStatusStore';
 import type { CliKind, IR } from '../shared/types';
 
@@ -160,19 +159,18 @@ export class MemoryPanelProvider implements vscode.WebviewViewProvider {
     );
     if (answer !== 'Reset') return;
 
-    const wsPath = workspaceStore.getWorkspacePath(wid);
-    const irPath = join(wsPath, 'ir.json');
-    const turnsPath = join(wsPath, 'turns.jsonl');
-    const archiveDir = join(wsPath, 'archive');
-
-    try { await fs.unlink(irPath); } catch { /* may not exist */ }
-    try { await fs.unlink(turnsPath); } catch { /* may not exist */ }
-    try {
-      const files = await fs.readdir(archiveDir);
-      for (const f of files) {
-        try { await fs.unlink(join(archiveDir, f)); } catch { /* skip */ }
+    // V-06/V-14: reset도 compaction과 같은 락으로 직렬화하고, 쓰기 로직은 core resetMemory로 통합.
+    const result = await resetMemory(wid);
+    if (!result.ok) {
+      if (result.error === 'compaction-in-progress') {
+        vscode.window.showWarningMessage(
+          'AgentBridge: Memory compaction is in progress. Please try again in a moment.',
+        );
+      } else {
+        vscode.window.showErrorMessage(`AgentBridge: Memory reset failed — ${result.error}`);
       }
-    } catch { /* archive dir may not exist */ }
+      return;
+    }
 
     output.log('memoryPanel: memory reset');
     vscode.window.showInformationMessage('AgentBridge: Memory reset.');

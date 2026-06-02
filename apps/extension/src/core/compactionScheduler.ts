@@ -2,7 +2,7 @@
 // 호환을 위해 workspaceStore.getWorkspacePath로 workspaceRoot resolve.
 
 import type { EventEmitter } from 'events';
-import type { ManualCompactionResult } from '@agentbridge/core';
+import type { ManualCompactionResult, MemoryResetOutcome } from '@agentbridge/core';
 import type { CliKind } from '../shared/types';
 import * as workspaceStore from './workspaceStore';
 import { getCompactionScheduler } from './coreInstances';
@@ -59,5 +59,15 @@ export async function runManualCompaction(
     workspacePath,
     activeModel,
     timeoutMs,
+  });
+}
+
+// 메모리 초기화 — core resetMemory에 위임. compaction과 같은 락으로 직렬화(V-06), reset 쓰기
+// 로직이 core로 통합된다(V-14). 익스텐션 reset은 항상 turns까지 비우므로 alsoTurns=true.
+export async function resetMemory(workspaceId: string): Promise<MemoryResetOutcome> {
+  return getCompactionScheduler().resetMemory({
+    workspaceId,
+    workspaceRoot: workspaceStore.getWorkspacePath(workspaceId),
+    alsoTurns: true,
   });
 }
