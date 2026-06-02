@@ -203,6 +203,26 @@ export async function createWorkspace(
   const normalizedPath = normalizeWorkspacePath(input.workspacePath)
   validateWorkspacePath(normalizedPath)
 
+  // V-23: 같은 폴더로 이미 워크스페이스가 있으면 새로 만들지 않고 그 워크스페이스에 세션만 추가.
+  // (사이드바 중복 카드 + 작업 이력 분산 방지. 코어는 중복 가드를 호스트 책임으로 둠.)
+  if (input.initialModel) {
+    const existing = (await getCoreStore().listWorkspaces()).find(
+      (w) => w.workspacePath === normalizedPath
+    )
+    if (existing) {
+      const session = await getCoreStore().addSession(
+        existing.workspaceId,
+        input.initialModel,
+        'cli'
+      )
+      const sp = getSessionPaths(existing.workspaceId, session.sessionId)
+      await fs.writeFile(sp.replayLog, '', 'utf8')
+      const workspace = await getCoreStore().loadWorkspace(existing.workspaceId)
+      workspaceTitleCache.set(workspace.workspaceId, workspace.title)
+      return { workspace, firstSession: session }
+    }
+  }
+
   const folderName = path.basename(normalizedPath.trim()) || 'workspace'
   const workspace = await getCoreStore().createWorkspace({
     workspacePath: normalizedPath,
