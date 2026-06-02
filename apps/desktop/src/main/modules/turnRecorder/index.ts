@@ -3,7 +3,7 @@ import { IpcChannel, type CliKind, type TurnsUpdatedEvent } from '@shared/ipc'
 import { TurnRecorder as CoreTurnRecorder, type TurnsAssistantDetail } from '@agentbridge/core'
 import { sendToWorkspaceWindow } from '../windowManager'
 import { getCoreCompactionScheduler } from '../compactionScheduler'
-import { loadSettings } from '../settings'
+import { getCachedSettings } from '../settings'
 import { getWorkspacePaths, updateSessionMeta } from '../workspaceStore'
 
 // 2026-06-01 Phase 6.7: 코어 TurnRecorder 인스턴스로 전환.
@@ -41,15 +41,16 @@ export function registerRecorder(args: {
   pendingBytes.set(args.ptySessionId, 0)
   void (async () => {
     try {
+      // getCoreCompactionScheduler가 내부에서 loadSettings를 await하므로 이 시점엔 settings cache가
+      // 채워져 있다. 콜백은 매 flush마다 getCachedSettings로 *현재* 설정을 읽는다 (V-11).
       const scheduler = await getCoreCompactionScheduler()
-      const settings = await loadSettings()
       const recorder = new CoreTurnRecorder({
         workspaceId: args.workspaceId,
         workspaceRoot,
         workspacePath: args.workspacePath,
         sessionId: args.sessionId,
         model: args.model,
-        getAssistantDetail: () => settings.turnsAssistantDetail as TurnsAssistantDetail,
+        getAssistantDetail: () => getCachedSettings().turnsAssistantDetail as TurnsAssistantDetail,
         scheduler,
         onTurnFlushed: async ({ workspaceId, sessionId, flushedAt }) => {
           try {

@@ -11,6 +11,7 @@ import {
   createCliAdapters,
   createCompactionScheduler,
   createQuotaTracker,
+  resolveRefineDecisionFromConfig,
   type WorkspaceStore,
   type HookStatusStore,
   type EnvProbe,
@@ -122,20 +123,13 @@ export function initializeCore(context: vscode.ExtensionContext): void {
       }
     },
     resolveRefineDecision: (activeModel) => {
+      // 변환 switch는 core resolveRefineDecisionFromConfig 단일 구현 사용 (V-11).
+      // 빈 priority 목록 → 기본 순서 폴백도 core가 처리.
       const cfg = getConfig();
-      switch (cfg.refinePolicy) {
-        case 'off':
-          return { policy: 'off' };
-        case 'fixed':
-          return { policy: 'fixed', cli: cfg.refineFixedCli };
-        case 'active':
-          return { policy: 'active', cli: activeModel };
-        case 'priority':
-          return {
-            policy: 'priority',
-            order: Array.from(new Set(cfg.refinePriorityOrder)),
-          };
-      }
+      return resolveRefineDecisionFromConfig(
+        { policy: cfg.refinePolicy, fixedCli: cfg.refineFixedCli, priorityOrder: cfg.refinePriorityOrder },
+        activeModel,
+      );
     },
     maxArchiveSnapshots: getConfig().maxArchiveSnapshots,
     logger,

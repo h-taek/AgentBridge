@@ -42,6 +42,36 @@ export type RefineDecision =
   | { policy: 'fixed' | 'active'; cli: CliKind }
   | { policy: 'priority'; order: CliKind[] };
 
+// 호스트 설정값 → RefineDecision 변환의 공통 입력. 호스트는 자기 설정 키를 이 모양으로 매핑만 한다.
+export type RefinePolicyConfig = {
+  policy: 'off' | 'fixed' | 'active' | 'priority';
+  fixedCli: CliKind;
+  priorityOrder: CliKind[];
+};
+
+// 설정값 → RefineDecision 변환 — desktop/extension에 중복돼 있던 switch의 단일 구현 (V-11).
+// priority 목록이 비어 있으면 기본 순서로 폴백해 빈 순서로 인한 정제 실패를 막는다.
+export function resolveRefineDecisionFromConfig(
+  cfg: RefinePolicyConfig,
+  activeModel: CliKind,
+): RefineDecision {
+  switch (cfg.policy) {
+    case 'off':
+      return { policy: 'off' };
+    case 'fixed':
+      return { policy: 'fixed', cli: cfg.fixedCli };
+    case 'active':
+      return { policy: 'active', cli: activeModel };
+    case 'priority': {
+      const order =
+        cfg.priorityOrder.length > 0
+          ? Array.from(new Set(cfg.priorityOrder))
+          : (['agy', 'codex', 'claude'] as CliKind[]);
+      return { policy: 'priority', order };
+    }
+  }
+}
+
 // 호스트가 각 CLI 시도 결과를 관찰해 부가 효과(예: quota 추적, probe 트리거)를
 // 실행할 수 있게 콜백을 노출. 코어는 콜백 실패를 swallow — 부가 효과 오류로 정제 흐름을 막지 않음.
 // agy 격리 tmpdir 잔재(9종)는 코어가 attempt 종료 시점에 직접 청소 — 호스트 책임 아님 (tryRefine 참조).

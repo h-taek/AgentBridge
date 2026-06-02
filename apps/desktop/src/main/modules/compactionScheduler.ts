@@ -2,15 +2,15 @@ import log from 'electron-log/main'
 import type { CliKind, SessionMeta } from '@shared/ipc'
 import {
   createCompactionScheduler,
+  resolveRefineDecisionFromConfig,
   type CompactionScheduler,
   type ManualCompactionResult as CoreManualCompactionResult,
-  type MemoryResetOutcome,
-  type RefineDecision
+  type MemoryResetOutcome
 } from '@agentbridge/core'
 import { loadWorkspace, getCoreWorkspaceStore } from './workspaceStore'
 import { getWorkspacePaths } from './workspaceStore'
 import { getCoreEnvProbe } from './envProbe'
-import { loadSettings } from './settings'
+import { loadSettings, getCachedSettings } from './settings'
 import { broadcastIrUpdated } from './irBroadcast'
 import { markForcedFallback, probeQuotaIfStale } from './cliQuotaTracker'
 
@@ -43,24 +43,6 @@ function pickActiveModel(ws: {
   return cliSession?.model ?? 'claude'
 }
 
-function resolveRefineDecision(activeModel: CliKind, settings: Awaited<ReturnType<typeof loadSettings>>): RefineDecision {
-  switch (settings.refineModel) {
-    case 'off':
-      return { policy: 'off' }
-    case 'fixed':
-      return { policy: 'fixed', cli: settings.refineFixedCli }
-    case 'active':
-      return { policy: 'active', cli: activeModel }
-    case 'priority': {
-      const order =
-        settings.refinePriorityOrder && settings.refinePriorityOrder.length > 0
-          ? Array.from(new Set(settings.refinePriorityOrder))
-          : (['agy', 'codex', 'claude'] as CliKind[])
-      return { policy: 'priority', order }
-    }
-  }
-}
-
 let _scheduler: CompactionScheduler | null = null
 let _maxArchive = 5 // 안전한 default; loadSettings 한 번 후 갱신
 
@@ -85,8 +67,13 @@ async function ensureScheduler(): Promise<CompactionScheduler> {
         log.info('Compaction: refine fallback', { tried, spawned, reason })
     },
     resolveRefineDecision: (activeModel) => {
-      // 동기 함수라 settings cache 사용. 첫 진입 후엔 background에서 refresh.
-      return resolveRefineDecision(activeModel, settings)
+      // 매 호출 시 현재 설정 cache를 읽는다 — 설정 변경이 재시작 없이 compaction에 반영 (V-11).
+      // 변환 switch는 core resolveRefineDecisionFromConfig 단일 구현 사용.
+      const s = getCachedSettings()
+      return resolveRefineDecisionFromConfig(
+        { policy: s.refineModel, fixedCli: s.refineFixedCli, priorityOrder: s.refinePriorityOrder },
+        activeModel
+      )
     },
     // refine attempt별 quota 부가효과. 5/31 core 일원화(531546a) 때 데스크탑 refineDispatcher가
     // dead code화되면서 끊겼던 배선 복원 — 이제 auto/manual compaction 모두 이 hook을 탄다.

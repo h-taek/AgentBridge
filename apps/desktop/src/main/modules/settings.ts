@@ -52,6 +52,13 @@ function getSettingsFilePath(): string {
 
 let cache: AppSettings | null = null
 
+// 동기 캐시 getter — 스케줄러/recorder의 콜백이 매 호출 시 *현재* 설정을 읽기 위함 (V-11).
+// saveSettings가 cache를 새 객체로 교체하므로, 콜백이 옛 객체를 붙잡고 있으면 설정 변경이
+// 재시작 전까지 반영되지 않는다. 콜백에서는 이 getter를 호출할 것.
+export function getCachedSettings(): AppSettings {
+  return cache ?? { ...DEFAULT_SETTINGS }
+}
+
 export async function loadSettings(): Promise<AppSettings> {
   if (cache) return cache
   const p = getSettingsFilePath()
