@@ -74,18 +74,19 @@ export function createHookInstaller(opts: HookInstallerOptions): HookInstaller {
   const log = opts.logger ?? noopLogger;
 
   function buildHookCommand(agent: CliKind, event: HookEventName, workspaceId: string): string {
+    // agent/event는 코드가 정한 타입 리터럴이라 현재는 안전하나, quoteArg로 통일 (V-31 ④).
     return [
       'node',
       quoteArg(opts.helperPath),
       'inject',
       '--agent',
-      agent,
+      quoteArg(agent),
       '--workspace',
       quoteArg(workspaceId),
       '--user-data',
       quoteArg(opts.globalStoragePath),
       '--event',
-      event,
+      quoteArg(event),
     ].join(' ');
   }
 

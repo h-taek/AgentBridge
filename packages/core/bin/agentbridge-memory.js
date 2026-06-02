@@ -320,6 +320,14 @@ function main() {
     process.exit(0)
   }
   const userData = parsed.userData
+  // --workspace는 workspaces/ 아래 단일 디렉토리명으로만 쓰인다. 경로 구분자나 '..'가 들어오면
+  // path.join이 workspaces/ 밖을 가리켜 임의 파일을 읽을 수 있다 (path traversal 방어, V-31 ①).
+  // 정상 흐름에선 hookInstaller가 UUID를 주므로 발생하지 않음 — 발생 시 빈 컨텍스트로 fail-safe.
+  if (parsed.workspace !== path.basename(parsed.workspace) || parsed.workspace === '..') {
+    process.stderr.write('agentbridge-memory: --workspace must be a single path segment\n')
+    process.stdout.write(JSON.stringify(buildHookOutput(parsed.agent, parsed.event, '')))
+    process.exit(0)
+  }
   const wsDir = path.join(userData, 'workspaces', parsed.workspace)
   const irPath = path.join(wsDir, 'ir.json')
   const turnsPath = path.join(wsDir, 'turns.jsonl')
