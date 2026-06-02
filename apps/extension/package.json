@@ -234,10 +234,10 @@
     "keybindings": []
   },
   "scripts": {
-    "compile": "node esbuild.mjs",
-    "watch": "node esbuild.mjs --watch",
+    "compile": "node ../../scripts/sync-helper.mjs && node esbuild.mjs",
+    "watch": "node ../../scripts/sync-helper.mjs && node esbuild.mjs --watch",
     "typecheck": "tsc -p . --noEmit",
-    "vscode:prepublish": "npm run typecheck && node esbuild.mjs --production",
+    "vscode:prepublish": "npm run typecheck && node ../../scripts/sync-helper.mjs && node esbuild.mjs --production",
     "package": "npx vsce package --no-dependencies",
     "lint": "eslint src",
     "lint:fix": "eslint src --fix",
