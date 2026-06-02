@@ -47,12 +47,11 @@ export async function registerSession(
   sessionId: string,
   model: CliKind,
 ): Promise<SessionMeta> {
-  // 옛 호출처는 sessionId를 외부 발급. 코어 addSession은 자체 발급이므로 발급된 메타에
-  // 외부 sessionId를 덮어쓰지 않고 그대로 사용 — 호출처가 반환 sid를 받아 쓰도록 유도.
-  // 단 옛 sessionId가 이미 의미를 가질 경우 호출처가 반환 sid로 갱신 필요.
-  const _ = sessionId; // 추적 위해 변수 유지, 사용은 안 함
-  void _;
-  const created = await getWorkspaceStore().addSession(workspaceId, model, 'cli');
+  // 호출처가 발급한 sessionId(= AgentBridge 세션 ID: PTY spawn·webview state·패널 키)를
+  // 그대로 workspace.json에 저장한다. 과거엔 이 id를 버리고 addSession이 새 UUID를 발급해,
+  // 이후 setModelSessionId(workspaceId, 이 sessionId)가 "session not found"로 실패(삼켜짐)
+  // → codex/agy의 modelSessionId가 영속화되지 않아 resume이 항상 깨졌다 (V-04).
+  const created = await getWorkspaceStore().addSession(workspaceId, model, 'cli', sessionId);
   return toLegacy(workspaceId, created);
 }
 

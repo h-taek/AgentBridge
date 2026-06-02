@@ -100,7 +100,15 @@ export interface WorkspaceStore {
   listWorkspaces(): Promise<WorkspaceListEntry[]>;
 
   // 세션 관리 — sessions[]는 workspace.json 안에 통합 저장.
-  addSession(workspaceId: string, model: CliKind, kind?: SessionKind): Promise<SessionMeta>;
+  // sessionId 생략 시 자체 발급. 호출처가 이미 AgentBridge 세션 ID를 발급한 경우(extension:
+  // PTY/패널/webview state 키) 그 id를 넘겨 일관성 유지 — 후속 updateSessionMeta가 같은 id로
+  // 매칭되게 한다 (V-04). 제공된 sessionId가 이미 있으면 기존 세션을 반환(중복 추가 방지).
+  addSession(
+    workspaceId: string,
+    model: CliKind,
+    kind?: SessionKind,
+    sessionId?: string,
+  ): Promise<SessionMeta>;
   updateSessionMeta(workspaceId: string, sessionId: string, patch: SessionUpdatePatch): Promise<void>;
   loadSession(workspaceId: string, sessionId: string): Promise<SessionMeta>;
   deleteSession(workspaceId: string, sessionId: string): Promise<void>;
@@ -432,19 +440,27 @@ export function createWorkspaceStore(
     },
 
     // ── 세션 관리 ──
-    async addSession(workspaceId, model, kind = 'cli') {
+    async addSession(workspaceId, model, kind = 'cli', sessionId) {
+      const sid = sessionId ?? randomUUID();
+      // 호출처 제공 id는 sessionDir(path.join)에 그대로 쓰이므로 UUID 형식 강제 — traversal 방어.
+      if (!UUID_RE.test(sid)) {
+        throw new Error(`workspaceStore.addSession: invalid sessionId "${sid}"`);
+      }
       return withWorkspaceLock(workspaceId, async () => {
         const meta = await readWorkspaceMeta(workspaceId);
+        // 같은 id가 이미 있으면 중복 추가 없이 기존 반환 (재등록 idempotent).
+        const dup = meta.sessions.find((s) => s.sessionId === sid);
+        if (dup) return dup;
         const now = new Date().toISOString();
         const session: SessionMeta = {
-          sessionId: randomUUID(),
+          sessionId: sid,
           model,
           modelSessionId: null,
           createdAt: now,
           closedAt: null,
           kind,
         };
-        await fsp.mkdir(sessionDir(workspaceId, session.sessionId), { recursive: true });
+        await fsp.mkdir(sessionDir(workspaceId, sid), { recursive: true });
         meta.sessions.push(session);
         meta.updatedAt = now;
         await writeWorkspaceMetaAtomic(meta);
