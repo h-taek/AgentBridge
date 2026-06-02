@@ -32,19 +32,6 @@ export async function releaseDiskLock(workspaceId: string): Promise<void> {
   return getCompactionScheduler().releaseDiskLock(workspaceId);
 }
 
-export async function checkAndRunCompaction(
-  workspaceId: string,
-  activeModel: CliKind,
-  workspacePath: string,
-): Promise<void> {
-  return getCompactionScheduler().checkAndRun({
-    workspaceId,
-    workspaceRoot: workspaceStore.getWorkspacePath(workspaceId),
-    workspacePath,
-    activeModel,
-  });
-}
-
 // 수동 정제("Refine now") — core runManual에 위임. 락/refine/IR write/2-phase archive를
 // 코어가 일괄 처리하므로 호스트별 중복 파이프라인이 사라진다 (V-13).
 export async function runManualCompaction(

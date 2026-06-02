@@ -54,9 +54,6 @@ export function getWorkspaceStore(): WorkspaceStore {
 export function getHookStatusStore(): HookStatusStore {
   return ensureInitialized(_hookStatusStore, 'hookStatusStore');
 }
-export function getEnvProbe(): EnvProbe {
-  return ensureInitialized(_envProbe, 'envProbe');
-}
 export function getHookInstaller(): HookInstaller {
   return ensureInitialized(_hookInstaller, 'hookInstaller');
 }
@@ -66,7 +63,8 @@ export function getCliAdapters(): CliAdapterSet {
 export function getCompactionScheduler(): CompactionScheduler {
   return ensureInitialized(_compactionScheduler, 'compactionScheduler');
 }
-export function getQuotaTracker(): QuotaTracker {
+// 외부 미사용 — initializeCore의 onRefineAttempt 콜백에서만 호출.
+function getQuotaTracker(): QuotaTracker {
   return ensureInitialized(_quotaTracker, 'quotaTracker');
 }
 

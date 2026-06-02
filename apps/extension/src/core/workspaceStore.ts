@@ -9,10 +9,6 @@ export function init(storagePath: string): void {
   // 실제 셋업은 coreInstances.initializeCore()에서 수행됨.
 }
 
-export function getGlobalStoragePath(): string {
-  return getWorkspaceStore().getGlobalStoragePath();
-}
-
 export function getOrCreateWorkspaceId(folderFsPath: string): string {
   return getWorkspaceStore().getOrCreateWorkspaceId(folderFsPath);
 }
