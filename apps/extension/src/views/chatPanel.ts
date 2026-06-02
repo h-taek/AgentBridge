@@ -403,13 +403,18 @@ export class ChatPanel {
 
     // VS Code 재시작 시 panel을 복구하기 위한 최소 state. serializer.deserializeWebviewPanel에서
     // 다시 받아 buildOpts로 재구성한다.
+    // '<'를 유니코드 이스케이프 표기로 치환 — 값에 닫는 script 태그가 들어와도 블록을 탈출하지 못하게 (V-28).
     const restoreState = JSON.stringify({
       sessionId: this.opts.sessionId ?? null,
       model: this.opts.model ?? null,
       workspaceId: this.opts.workspaceId ?? null,
       modelSessionId: this.opts.modelSessionId ?? null,
       terminalName: this.opts.terminalName,
-    });
+    }).replace(/</g, '\\u003c');
+
+    // webview script 안 JS 문자열로 끼워 넣는 자기 세션 ID — JSON.stringify로 따옴표/역슬래시를
+    // 안전한 리터럴로 만들고, <까지 치환해 script 탈출을 차단 (V-28).
+    const ownSessionIdJs = JSON.stringify(this.opts.sessionId ?? '').replace(/</g, '\\u003c');
 
     return /*html*/ `<!DOCTYPE html>
 <html lang="en">
@@ -642,8 +647,8 @@ export class ChatPanel {
 <body>
   <div class="sp-overlay" id="spOverlay"></div>
   <div class="header">
-    <span class="model-badge">${modelLabel}</span>
-    <span class="session-name">${this.opts.terminalName}</span>
+    <span class="model-badge">${escapeHtml(modelLabel)}</span>
+    <span class="session-name">${escapeHtml(this.opts.terminalName)}</span>
     <div class="header-actions">
       <button id="btnSelectSession" title="Select session">
         <svg viewBox="0 0 16 16"><path d="M13.5 8a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0ZM8 3.5a4.5 4.5 0 1 0 0 9 4.5 4.5 0 0 0 0-9ZM8.5 5v2.793l1.854 1.853-.708.708L7.5 8.207V5h1Z"/></svg>
@@ -1005,7 +1010,7 @@ export class ChatPanel {
       }
       spList.innerHTML = sessions.map(s => {
         const desc = s.active ? 'active' : (s.lastActiveAt || '');
-        return '<div class="sp-item' + (s.sessionId === '${this.opts.sessionId ?? ''}' ? ' active' : '') + '" data-sid="' + s.sessionId + '" data-wid="' + s.workspaceId + '" data-model="' + s.model + '">'
+        return '<div class="sp-item' + (s.sessionId === ${ownSessionIdJs} ? ' active' : '') + '" data-sid="' + esc(s.sessionId) + '" data-wid="' + esc(s.workspaceId) + '" data-model="' + esc(s.model) + '">'
           + '<span class="sp-item-name">' + esc(s.name) + '</span>'
           + '<span class="sp-item-desc">' + esc(desc) + '</span>'
           + '<div class="sp-item-actions">'
@@ -1016,10 +1021,14 @@ export class ChatPanel {
     }
 
     function esc(s) {
+      // 요소 내용뿐 아니라 속성 값(data-*)에도 쓰이므로 따옴표까지 무력화 (V-28).
       if (!s) return '';
-      const d = document.createElement('div');
-      d.textContent = s;
-      return d.innerHTML;
+      return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
     }
 
     document.getElementById('btnSelectSession').addEventListener('click', (e) => {
@@ -1094,4 +1103,16 @@ export class ChatPanel {
 function getNonce(): string {
   // CSP nonce는 예측 불가능해야 하므로 Math.random()이 아닌 crypto 난수 사용
   return randomBytes(16).toString('base64');
+}
+
+// 호스트 쪽 HTML 이스케이프 — webview HTML 템플릿에 끼워 넣는 표시값은 모두 이 함수를 거친다.
+// 현재 끼워 넣는 값(CLI_DISPLAY_NAME enum, terminalName)은 코드가 만드는 고정값이지만,
+// 값의 출처가 바뀌어도 안전하도록 방어 계층을 유지한다 (V-28).
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
