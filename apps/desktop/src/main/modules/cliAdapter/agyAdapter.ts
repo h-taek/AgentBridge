@@ -2,8 +2,7 @@ import type { WebContents } from 'electron'
 import log from 'electron-log/main'
 import { killPty, resizePty, startPty, writePty } from '../ptySession'
 import { extractQuotaPercent, recordQuotaPercent } from '../cliQuotaTracker'
-import { readLastConversationForCwd, watchForNewConversationUuidViaCache } from './agyResume'
-import { deleteAgyNativeSession } from '@agentbridge/core'
+import { deleteAgyNativeSession, watchForNewConversationUuid } from '@agentbridge/core'
 import { getCoreCliAdapters } from './coreCliAdapters'
 import type {
   CLIAdapter,
@@ -81,20 +80,20 @@ async function spawnInteractive(
 
   // 새 세션 또는 resume fallback 케이스 — UUID 후처리 캡처.
   // 캡처 결과는 hooks.onModelSessionIdCaptured 콜백으로만 호출자에 전달 (반환값은 이미 결정됨).
+  // core watchForNewConversationUuid 사용 — conversations/ FS 스캔(mtime) + spawn 전 스냅샷
+  // (opts.agyWatchUuid.excludeUuids). cwd-키 캐시 폴링(/private 불일치로 실패)을 대체 (V-17).
   const initialModelSessionId: string | null = opts.modelSessionId ?? null
-  if (initialModelSessionId === null && req.cwd) {
+  if (initialModelSessionId === null && req.cwd && opts.agyWatchUuid) {
     const cwd = req.cwd
-    void (async (): Promise<void> => {
-      const existing = await readLastConversationForCwd(cwd)
-      const exclude = new Set<string>(existing ? [existing] : [])
-      await watchForNewConversationUuidViaCache({
-        cwd,
-        excludeUuids: exclude,
-        onCaptured: (uuid) => {
-          hooks.onModelSessionIdCaptured?.(uuid)
-        }
-      })
-    })().catch((err) => {
+    const exclude = opts.agyWatchUuid.excludeUuids
+    void watchForNewConversationUuid({
+      cwd,
+      excludeUuids: exclude,
+      onCaptured: (uuid) => {
+        hooks.onModelSessionIdCaptured?.(uuid)
+      },
+      logger: { log: (m) => log.info(m), warn: (m) => log.warn(m) }
+    }).catch((err) => {
       log.warn('agy modelSessionId 캡처 중 에러', { err: String(err) })
     })
   }

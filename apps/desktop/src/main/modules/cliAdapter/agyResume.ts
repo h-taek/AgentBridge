@@ -172,43 +172,8 @@ export async function resolveResumeArgs(opts: ResumeResolveOptions): Promise<str
   return ['--conversation', opts.sessionId]
 }
 
-// 새 세션 spawn 후 cwd→UUID 매핑이 last_conversations.json에 나타날 때까지 대기.
-// agy는 첫 사용자 메시지가 도착해야 UUID를 생성·영속화한다(추정). 따라서 spawn 직후엔 매핑이
-// 없을 수 있어 polling으로 캡처.
-//
-// 이름에 "ViaCache"가 들어간 이유 — 코어 cliAdapter/agyResume의 동명 함수는 conversations/
-// 디렉토리 FS 스냅샷 diff로 새 UUID를 감지함. 이 데스크탑 변종은 agy가 별도 관리하는
-// last_conversations.json 캐시 파일을 폴링. 같은 목적, 다른 메커니즘 — 통합 가능성은 있지만
-// 우선 이름으로 의도를 명시.
-//
-// 호출자는 spawn 후 fire-and-forget으로 호출하고, 캡처되면 onCaptured 콜백으로 modelSessionId
-// 전달. 워크스페이스 메타에 영속화는 호출자 책임.
-export async function watchForNewConversationUuidViaCache(opts: {
-  cwd: string
-  // 이미 알려진 UUID 목록 — polling 결과가 이 set 안에 있으면 무시(새 UUID만 캡처).
-  excludeUuids: Set<string>
-  // 최대 대기 시간. 미설정 시 5분.
-  timeoutMs?: number
-  // 캡처 성공 시 1회 호출.
-  onCaptured: (uuid: string) => void
-  // 외부 abort 시 polling 중지.
-  abortSignal?: AbortSignal
-}): Promise<void> {
-  const start = Date.now()
-  const limit = opts.timeoutMs ?? 5 * 60_000
-  const interval = 1_000
-  while (!opts.abortSignal?.aborted) {
-    const elapsed = Date.now() - start
-    if (elapsed > limit) {
-      log.warn('agy modelSessionId 캡처 timeout', { cwd: opts.cwd, elapsed })
-      return
-    }
-    const uuid = await readLastConversationForCwd(opts.cwd)
-    if (uuid && !opts.excludeUuids.has(uuid)) {
-      log.info('agy modelSessionId 캡처 완료', { cwd: opts.cwd, uuid })
-      opts.onCaptured(uuid)
-      return
-    }
-    await new Promise<void>((r) => setTimeout(r, interval))
-  }
-}
+// 새 세션 spawn 후 conversation UUID 캡처는 core watchForNewConversationUuid(conversations/
+// FS 스캔 + spawn 전 스냅샷)로 일원화 (V-17). 과거 데스크탑 전용
+// watchForNewConversationUuidViaCache(last_conversations.json cwd-키 폴링)는 macOS
+// /var↔/private/var 불일치로 캡처가 빗나가는 문제가 있어 제거.
+// (readLastConversationForCwd는 cliQuotaTracker probe 경로에서 계속 사용하므로 유지.)
