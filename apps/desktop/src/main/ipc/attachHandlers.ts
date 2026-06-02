@@ -1,6 +1,7 @@
 import { BrowserWindow, ipcMain, type IpcMainInvokeEvent } from 'electron'
 import { promises as fs } from 'node:fs'
 import log from 'electron-log/main'
+import { quoteArg } from '@agentbridge/core'
 import {
   IpcChannel,
   type AttachFileAccepted,
@@ -53,11 +54,10 @@ async function statFile(
   }
 }
 
-// zsh quoting — 공백/특수문자 있을 때만 작은따옴표로 감싼다.
-function shellQuoteIfNeeded(p: string): string {
-  if (/^[A-Za-z0-9_@%+=:,./~-]+$/.test(p)) return p
-  return `'${p.replace(/'/g, `'\\''`)}'`
-}
+// POSIX 단일 따옴표 quoting — core quoteArg를 사용 (SSOT).
+// 과거 자체 구현은 작은따옴표 escape에 `'\''`라는 비표준(셸에서 깨지는) 패턴을 썼다.
+// core quoteArg는 `'"'"'`(올바른 패턴)를 쓰며, 안전 문자셋도 core 기준을 따른다.
+const shellQuoteIfNeeded = quoteArg
 
 async function handleAttachFiles(
   event: IpcMainInvokeEvent,
