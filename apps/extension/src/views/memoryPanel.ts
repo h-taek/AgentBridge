@@ -4,6 +4,7 @@ import { promises as fs } from 'fs';
 import { join } from 'path';
 import * as output from '../log/output';
 import * as workspaceStore from '../core/workspaceStore';
+import { readIR } from '@agentbridge/core';
 import { readAllTurns, listArchives } from '../core/turnsStore';
 import { runManualCompaction } from '../core/compactionScheduler';
 import { getHookDisabledReasons } from '../core/hookStatusStore';
@@ -59,13 +60,8 @@ export class MemoryPanelProvider implements vscode.WebviewViewProvider {
   }
 
   private async loadIR(workspaceId: string): Promise<IR | null> {
-    const irPath = join(workspaceStore.getWorkspacePath(workspaceId), 'ir.json');
-    try {
-      const raw = await fs.readFile(irPath, 'utf8');
-      return JSON.parse(raw) as IR;
-    } catch {
-      return null;
-    }
+    // core readIR로 위임 — 손상(meta 누락) ir.json 방어 검증을 core와 공유 (V-14).
+    return readIR(workspaceStore.getWorkspacePath(workspaceId));
   }
 
   private async sendIR(): Promise<void> {

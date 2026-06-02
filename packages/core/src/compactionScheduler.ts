@@ -7,8 +7,6 @@
 //   - envProbe, gitProbe: 호스트가 인스턴스/콜백 전달
 
 import { EventEmitter } from 'events';
-import { promises as fs } from 'fs';
-import { join } from 'path';
 import type { CliKind } from './shared/cli';
 import type { IR } from './shared/ir';
 import type { TurnRecord } from './shared/turns';
@@ -24,6 +22,7 @@ import {
 } from './turnsStore';
 import { buildCompactionPrompt } from './irModule/prompt';
 import { parseRefineOutput, assembleIR, type GitInfo } from './irModule/parse';
+import { readIR, writeIR } from './irStore';
 import {
   runRefine,
   RefineOffError,
@@ -157,25 +156,6 @@ export function createCompactionScheduler(
     return false;
   }
 
-  async function loadIR(workspaceRoot: string): Promise<IR | null> {
-    const irPath = join(workspaceRoot, 'ir.json');
-    try {
-      const raw = await fs.readFile(irPath, 'utf8');
-      const parsed = JSON.parse(raw);
-      // 손상된 ir.json이 빈 객체/배열로 파싱되면 meta 누락 → assembleIR throw 가능. 방어적 검증.
-      if (!parsed || typeof parsed !== 'object' || !('meta' in parsed)) return null;
-      return parsed as IR;
-    } catch {
-      return null;
-    }
-  }
-
-  async function saveIR(workspaceRoot: string, ir: IR): Promise<void> {
-    const irPath = join(workspaceRoot, 'ir.json');
-    const tmp = `${irPath}.${process.pid}.${Date.now()}.tmp`;
-    await fs.writeFile(tmp, JSON.stringify(ir, null, 2), 'utf8');
-    await fs.rename(tmp, irPath);
-  }
 
   return {
     events,
@@ -212,7 +192,7 @@ export function createCompactionScheduler(
 
         const oldest = turns.slice(0, processCount);
         const remaining = turns.slice(processCount);
-        const currentIR = await loadIR(workspaceRoot);
+        const currentIR = await readIR(workspaceRoot);
 
         log.log(`compaction: starting (${turns.length} turns, processing ${processCount})`);
 
@@ -285,7 +265,7 @@ export function createCompactionScheduler(
         });
 
         try {
-          await saveIR(workspaceRoot, ir);
+          await writeIR(workspaceRoot, ir);
           log.log(`compaction: ir.json saved (intent.goal="${ir.intent.goal?.slice(0, 50)}")`);
         } catch (err) {
           log.warn(
@@ -375,7 +355,7 @@ export function createCompactionScheduler(
         const processCount = Math.max(turns.length - keep, 0);
         const oldest = turns.slice(0, processCount);
         const remaining = turns.slice(processCount);
-        const currentIR = await loadIR(workspaceRoot);
+        const currentIR = await readIR(workspaceRoot);
 
         const prompt = buildCompactionPrompt({
           fromModel: activeModel,
@@ -452,7 +432,7 @@ export function createCompactionScheduler(
         });
 
         try {
-          await saveIR(workspaceRoot, ir);
+          await writeIR(workspaceRoot, ir);
         } catch (err) {
           return {
             ok: false,
