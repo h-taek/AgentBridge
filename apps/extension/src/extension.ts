@@ -312,6 +312,9 @@ export function activate(context: vscode.ExtensionContext) {
         return;
       }
       const opts = await buildOpts(s.model, folder.fsPath, s.workspaceId, s.sessionId, s.modelSessionId);
+      // activate의 resetAllSessionsActive(모든 세션 비활성)와 경합 회피 — reset 완료 후 active 표시.
+      // 안 기다리면 reset이 이 복구된 세션의 active 플래그를 덮어써 비활성으로 남을 수 있음 (V-21).
+      if (pendingResetDone) await pendingResetDone;
       await markSessionActive(s.workspaceId, s.sessionId);
       sessionTree.refresh();
       const chat = ChatPanel.revive(panel, context.extensionUri, opts);
