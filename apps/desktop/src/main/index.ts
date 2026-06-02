@@ -21,7 +21,7 @@ import {
   startPty,
   writePty
 } from './modules/ptySession'
-import { onUserInput } from './modules/turnRecorder'
+import { onUserInput, disposeAndFlushAll } from './modules/turnRecorder'
 import { registerProbeDeps } from './modules/cliQuotaTracker'
 import { getCurrentUpdaterStatus, initAppUpdater, triggerManualCheck } from './modules/appUpdater'
 import {
@@ -357,11 +357,23 @@ app.on('window-all-closed', () => {
 //   없으므로 즉시 SIGKILL. 그래도 다른 이벤트 루프 작업(파일 flush, child_process, 등)이
 //   pending이면 hard timeout으로 process.exit(0). 정상 흐름이면 timeout 전에 자연 종료.
 let isQuitting = false
-app.on('before-quit', () => {
+app.on('before-quit', (event) => {
   if (isQuitting) return
   isQuitting = true
-  log.info('before-quit — PTY SIGKILL all + arming hard exit timeout')
-  killAllForce()
+  // 진행 중 turn flush를 위해 종료를 잠시 보류하고 비동기로 처리 (V-07 — 모델 응답 직후
+  // ⌘Q 시 마지막 턴이 turns.jsonl에 안 남던 문제). flush는 in-memory 버퍼 → appendFile이라 빠름.
+  event.preventDefault()
+  log.info('before-quit — flushing recorders, then SIGKILL + quit')
+  void (async () => {
+    try {
+      await disposeAndFlushAll()
+    } catch (err) {
+      log.warn('before-quit — recorder flush 실패 (non-fatal)', { err: String(err) })
+    }
+    killAllForce()
+    app.quit() // isQuitting=true → 재진입 시 통과
+  })()
+  // 안전망: flush가 hang해도 1.5초 후 무조건 종료.
   setTimeout(() => {
     log.warn('before-quit — hard exit timeout fired, calling process.exit(0)')
     process.exit(0)

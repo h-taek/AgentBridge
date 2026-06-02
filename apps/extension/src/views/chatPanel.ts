@@ -408,6 +408,18 @@ export class ChatPanel {
     if (!this.deletedExternally) this.onDisposeCallback?.();
   }
 
+  // 앱/익스텐션 종료(deactivate) 시 — 진행 중 turn을 flush 완료까지 await한 뒤 dispose (V-07).
+  // 일반 dispose()는 recorder.dispose()를 fire-and-forget으로 호출해 마지막 턴이 유실될 수 있음.
+  async disposeAndFlush(): Promise<void> {
+    if (this.disposed) return;
+    try {
+      await this.recorder?.disposeAndFlush();
+    } catch {
+      /* noop — flush 실패해도 종료는 진행 */
+    }
+    this.dispose();
+  }
+
   private buildHtml(): string {
     const webview = this.panel.webview;
     const xtermCss = webview.asWebviewUri(

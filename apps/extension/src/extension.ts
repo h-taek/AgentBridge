@@ -342,8 +342,8 @@ function timeAgo(iso: string): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
-export function deactivate() {
-  for (const panel of getAllPanels()) {
-    panel.dispose();
-  }
+export async function deactivate(): Promise<void> {
+  // 진행 중 turn flush를 await한 뒤 종료 — 모델 응답 직후 종료 시 마지막 턴 유실 방지 (V-07).
+  // VS Code는 deactivate가 반환한 Promise를 (타임아웃 한도 내에서) 기다린다.
+  await Promise.allSettled(getAllPanels().map((p) => p.disposeAndFlush()));
 }

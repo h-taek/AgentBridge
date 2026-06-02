@@ -82,6 +82,14 @@ export function unregisterRecorder(ptySessionId: string): void {
   recorders.delete(ptySessionId)
 }
 
+// 앱 종료(before-quit) 시 모든 활성 recorder의 진행 중 turn을 flush 완료까지 await (V-07).
+// 호출자가 await한 뒤 종료해야 마지막 턴이 turns.jsonl에 남는다.
+export async function disposeAndFlushAll(): Promise<void> {
+  const all = Array.from(recorders.values())
+  recorders.clear()
+  await Promise.allSettled(all.map((r) => r.disposeAndFlush()))
+}
+
 export function onUserInput(ptySessionId: string, data: string): void {
   const r = recorders.get(ptySessionId)
   if (!r) {
