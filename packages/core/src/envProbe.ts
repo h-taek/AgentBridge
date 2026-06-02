@@ -5,11 +5,15 @@
 //   - OPENAI_API_KEY: Codex의 ChatGPT 구독을 silently 무시 → child에 노출 X
 //   - GEMINI_SYSTEM_MD: Gemini system prompt를 full replacement로 덮어쓰는 차단
 
-import { execSync } from 'child_process';
+import { execSync, execFileSync } from 'child_process';
 import { existsSync } from 'fs';
 import type { CliKind } from './shared/cli';
 import type { Logger } from './interfaces';
 import { noopLogger } from './interfaces';
+
+// 사용자의 기본 로그인 셸. zsh 외(bash/fish 등) 사용자도 CLI를 찾을 수 있게 $SHELL을 따른다
+// (미설정 시 zsh 폴백). 플래그는 -i -l -c 분리 전달 — zsh/bash/fish 모두 호환 (V-22).
+const LOGIN_SHELL = process.env.SHELL || 'zsh';
 
 export interface ProbeResult {
   found: boolean;
@@ -39,9 +43,10 @@ export function createEnvProbe(opts: EnvProbeOptions = {}): EnvProbe {
   function getLoginShellEnv(): Record<string, string> {
     if (shellEnvCache) return shellEnvCache;
     try {
-      const raw = execSync('zsh -ilc env 2>/dev/null', {
+      const raw = execFileSync(LOGIN_SHELL, ['-i', '-l', '-c', 'env'], {
         encoding: 'utf8',
         timeout: 5000,
+        stdio: ['ignore', 'pipe', 'ignore'],
       });
       const env: Record<string, string> = {};
       for (const line of raw.split('\n')) {
@@ -79,14 +84,15 @@ export function createEnvProbe(opts: EnvProbeOptions = {}): EnvProbe {
   }
 
   return {
-    // binaryName is a CliKind literal — `which ${binaryName}` interpolation is safe by type constraint.
+    // binaryName is a CliKind literal — `which ${binaryName}` arg is safe by type constraint.
     probe(binaryName: CliKind): ProbeResult {
       const env = getLoginShellEnv();
       try {
-        const resolved = execSync(`zsh -ilc 'which ${binaryName}' 2>/dev/null`, {
+        const resolved = execFileSync(LOGIN_SHELL, ['-i', '-l', '-c', `which ${binaryName}`], {
           encoding: 'utf8',
           timeout: 5000,
           env,
+          stdio: ['ignore', 'pipe', 'ignore'],
         }).trim();
         if (resolved && existsSync(resolved)) {
           log.log(`envProbe: ${binaryName} found at ${resolved}`);

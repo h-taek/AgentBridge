@@ -147,7 +147,8 @@ export type IrRefineResult = {
 import type {
   SessionKind as CoreSessionKind,
   SessionMeta as CoreSessionMeta,
-  WorkspaceMeta as CoreWorkspaceMeta
+  WorkspaceMeta as CoreWorkspaceMeta,
+  ArchiveSnapshotMeta as CoreArchiveSnapshotMeta
 } from '@agentbridge/core'
 export type SessionKind = CoreSessionKind
 export type SessionMeta = CoreSessionMeta
@@ -298,20 +299,8 @@ export type HookTrustSetRequest = {
 
 // archive:list — 워크스페이스 archive 디렉토리의 compressed_*.jsonl 인덱스.
 // 각 파일 첫 줄(IR snapshot 메타)만 파싱해 카드 렌더에 필요한 최소 정보 반환.
-export type ArchiveSnapshotMeta = {
-  // load 시 다시 식별 — archivePath (절대경로) 그대로 전달.
-  archivePath: string
-  archivedAt: string
-  updatedAt: string
-  intentGoal: string
-  counts: {
-    decisions: number
-    files: number
-    commands: number
-    tests: number
-    pending: number
-  }
-}
+// core turnsStore의 ArchiveSnapshotMeta를 그대로 사용 (재정의 제거 — V-24 DUP-6).
+export type ArchiveSnapshotMeta = CoreArchiveSnapshotMeta
 
 export type ArchiveListRequest = { workspaceId: string }
 export type ArchiveListResult = { snapshots: ArchiveSnapshotMeta[] }
