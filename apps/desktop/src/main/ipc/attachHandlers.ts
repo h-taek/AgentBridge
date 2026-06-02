@@ -11,6 +11,7 @@ import {
 } from '@shared/ipc'
 import { getActiveSession } from '../modules/sessionActive'
 import { writePty } from '../modules/ptySession'
+import { onUserInput } from '../modules/turnRecorder'
 import { loadWorkspace } from '../modules/workspaceStore'
 import { getWorkspaceIdByWindow } from '../modules/windowManager'
 
@@ -156,12 +157,17 @@ async function handleAttachFiles(
   // ASCII 파일명은 NFC=NFD 동치라 무영향.
   const toNfc = (s: string): string => s.normalize('NFC')
   try {
+    // V-10: 일반 입력 경로(index.ts pty:write — onUserInput → writePty)와 동일하게, PTY 쓰기 전에
+    // TurnRecorder에 같은 데이터를 통지해 DnD 첨부 경로도 turns.jsonl에 기록되게 한다. recorder가
+    // ANSI 시퀀스(bracketed paste 마커)를 걸러내므로 wrapped를 그대로 통지해도 경로 텍스트만 남는다.
     if (kind === 'shell') {
       const text = accepted.map((a) => shellQuoteIfNeeded(toNfc(a.path))).join(' ') + ' '
+      onUserInput(activeSess.ptySessionId, text)
       writePty(activeSess.ptySessionId, text)
     } else {
       const body = accepted.map((a) => `"@${toNfc(a.path)}"`).join(' ') + ' '
       const wrapped = `\x1b[200~${body}\x1b[201~`
+      onUserInput(activeSess.ptySessionId, wrapped)
       writePty(activeSess.ptySessionId, wrapped)
     }
   } catch (err) {
