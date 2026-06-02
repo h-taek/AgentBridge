@@ -69,11 +69,11 @@ export class ChatPanel {
         enableScripts: true,
         retainContextWhenHidden: true,
         localResourceRoots: [
-          vscode.Uri.joinPath(extensionUri, 'node_modules', '@xterm', 'xterm', 'css'),
-          vscode.Uri.joinPath(extensionUri, 'node_modules', '@xterm', 'xterm', 'lib'),
-          vscode.Uri.joinPath(extensionUri, 'node_modules', '@xterm', 'addon-fit', 'lib'),
-          vscode.Uri.joinPath(extensionUri, 'node_modules', '@xterm', 'addon-webgl', 'lib'),
-          vscode.Uri.joinPath(extensionUri, 'node_modules', '@xterm', 'addon-unicode11', 'lib'),
+          vscode.Uri.joinPath(extensionUri, 'out', 'vendor', '@xterm', 'xterm', 'css'),
+          vscode.Uri.joinPath(extensionUri, 'out', 'vendor', '@xterm', 'xterm', 'lib'),
+          vscode.Uri.joinPath(extensionUri, 'out', 'vendor', '@xterm', 'addon-fit', 'lib'),
+          vscode.Uri.joinPath(extensionUri, 'out', 'vendor', '@xterm', 'addon-webgl', 'lib'),
+          vscode.Uri.joinPath(extensionUri, 'out', 'vendor', '@xterm', 'addon-unicode11', 'lib'),
         ],
       },
     );
@@ -411,19 +411,19 @@ export class ChatPanel {
   private buildHtml(): string {
     const webview = this.panel.webview;
     const xtermCss = webview.asWebviewUri(
-      vscode.Uri.joinPath(this.extensionUri, 'node_modules', '@xterm', 'xterm', 'css', 'xterm.css'),
+      vscode.Uri.joinPath(this.extensionUri, 'out', 'vendor', '@xterm', 'xterm', 'css', 'xterm.css'),
     );
     const xtermJs = webview.asWebviewUri(
-      vscode.Uri.joinPath(this.extensionUri, 'node_modules', '@xterm', 'xterm', 'lib', 'xterm.js'),
+      vscode.Uri.joinPath(this.extensionUri, 'out', 'vendor', '@xterm', 'xterm', 'lib', 'xterm.js'),
     );
     const fitJs = webview.asWebviewUri(
-      vscode.Uri.joinPath(this.extensionUri, 'node_modules', '@xterm', 'addon-fit', 'lib', 'addon-fit.js'),
+      vscode.Uri.joinPath(this.extensionUri, 'out', 'vendor', '@xterm', 'addon-fit', 'lib', 'addon-fit.js'),
     );
     const webglJs = webview.asWebviewUri(
-      vscode.Uri.joinPath(this.extensionUri, 'node_modules', '@xterm', 'addon-webgl', 'lib', 'addon-webgl.js'),
+      vscode.Uri.joinPath(this.extensionUri, 'out', 'vendor', '@xterm', 'addon-webgl', 'lib', 'addon-webgl.js'),
     );
     const unicode11Js = webview.asWebviewUri(
-      vscode.Uri.joinPath(this.extensionUri, 'node_modules', '@xterm', 'addon-unicode11', 'lib', 'addon-unicode11.js'),
+      vscode.Uri.joinPath(this.extensionUri, 'out', 'vendor', '@xterm', 'addon-unicode11', 'lib', 'addon-unicode11.js'),
     );
     const nonce = getNonce();
     const modelLabel = this.opts.model ? CLI_DISPLAY_NAME[this.opts.model].toUpperCase() : 'CLI';

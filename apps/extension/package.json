@@ -234,9 +234,11 @@
     "keybindings": []
   },
   "scripts": {
-    "compile": "tsc -p .",
-    "watch": "tsc -watch -p .",
-    "package": "vsce package",
+    "compile": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "typecheck": "tsc -p . --noEmit",
+    "vscode:prepublish": "npm run typecheck && node esbuild.mjs --production",
+    "package": "npx vsce package --no-dependencies",
     "lint": "eslint src",
     "lint:fix": "eslint src --fix",
     "knip": "knip",
@@ -257,6 +259,7 @@
     "@typescript-eslint/eslint-plugin": "^8.59.4",
     "@typescript-eslint/parser": "^8.59.4",
     "depcheck": "^1.4.7",
+    "esbuild": "^0.25.0",
     "eslint": "^9.39.4",
     "knip": "^6.14.2",
     "madge": "^8.0.0",

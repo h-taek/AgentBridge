@@ -4,28 +4,12 @@ probe/**
 docs/**
 webview/src/**
 
-# Exclude all of node_modules, then whitelist only what node-pty needs at runtime
-# (lib + darwin prebuilds). Avoid `!node_modules/node-pty/**` because it re-includes
-# every win32/linux prebuild and *.pdb file, blowing up the VSIX to ~60 MB.
+# node_modules는 전부 제외 — pnpm 심링크라 vsce가 못 다루고, `vsce package --no-dependencies`로
+# 싼다. 런타임에 필요한 것(node-pty 네이티브, xterm webview 에셋)은 esbuild.mjs가 빌드 시
+# out/ 하위로 vendoring하므로 아래 `!out/**`로 함께 포함된다.
+#   - node-pty  → out/node_modules/node-pty (require("node-pty") 해석 위치)
+#   - xterm     → out/vendor/@xterm/...      (chatPanel asWebviewUri 로드 위치)
 node_modules/**
-!node_modules/node-pty/package.json
-!node_modules/node-pty/lib/**
-!node_modules/node-pty/prebuilds/darwin-arm64/**
-!node_modules/node-pty/prebuilds/darwin-x64/**
-
-# xterm webview assets — loaded by chatPanel via asWebviewUri from node_modules
-!node_modules/@xterm/xterm/package.json
-!node_modules/@xterm/xterm/css/**
-!node_modules/@xterm/xterm/lib/**
-!node_modules/@xterm/addon-fit/package.json
-!node_modules/@xterm/addon-fit/lib/**
-!node_modules/@xterm/addon-webgl/package.json
-!node_modules/@xterm/addon-webgl/lib/**
-!node_modules/@xterm/addon-unicode11/package.json
-!node_modules/@xterm/addon-unicode11/lib/**
-
-# Trim source maps from shipped xterm bundles to keep VSIX small
-node_modules/@xterm/**/*.map
 
 **/*.pdb
 **/*.ts
@@ -38,6 +22,7 @@ tsconfig.test.json
 .mocharc.json
 .depcheckrc.json
 eslint.config.mjs
+esbuild.mjs
 knip.json
 package-lock.json
 *.vsix
