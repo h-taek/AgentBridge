@@ -2,8 +2,8 @@ import { strict as assert } from 'assert';
 import { promises as fs } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import * as workspaceStore from '../src/core/workspaceStore';
 import { installClaudeHooks, installCodexHooks, installAgyHooks } from '../src/core/hookInstaller';
+import { initCoreForTest } from './helpers';
 
 const wid = '33333333-3333-3333-3333-333333333333';
 
@@ -14,7 +14,7 @@ describe('hookInstaller', () => {
   beforeEach(async () => {
     storagePath = await fs.mkdtemp(join(tmpdir(), 'agentbridge-test-'));
     workspaceCwd = await fs.mkdtemp(join(tmpdir(), 'agentbridge-ws-'));
-    workspaceStore.init(storagePath);
+    initCoreForTest(storagePath);
     await fs.mkdir(join(storagePath, 'workspaces', wid, 'settings'), { recursive: true });
   });
 

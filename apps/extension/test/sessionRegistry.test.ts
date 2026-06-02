@@ -4,16 +4,17 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import * as workspaceStore from '../src/core/workspaceStore';
 import { getSessions, registerSession } from '../src/core/sessionRegistry';
-
-const wid = '22222222-2222-2222-2222-222222222222';
+import { initCoreForTest } from './helpers';
 
 describe('sessionRegistry', () => {
   let storagePath: string;
+  let wid: string;
 
   beforeEach(async () => {
     storagePath = await fs.mkdtemp(join(tmpdir(), 'agentbridge-test-'));
-    workspaceStore.init(storagePath);
-    await fs.mkdir(join(storagePath, 'workspaces', wid), { recursive: true });
+    initCoreForTest(storagePath);
+    // 실제 익스텐션 흐름과 동일 — getOrCreateWorkspaceId가 mapping + 정상 schema workspace.json 생성.
+    wid = workspaceStore.getOrCreateWorkspaceId('/tmp/agentbridge-test-project');
   });
 
   afterEach(async () => {
@@ -25,24 +26,32 @@ describe('sessionRegistry', () => {
     assert.deepEqual(sessions, []);
   });
 
-  it('backs up a corrupt sessions.json to .broken.<ts>.bak and returns empty list', async () => {
-    const sessionsPath = join(workspaceStore.getWorkspacePath(wid), 'sessions.json');
-    await fs.writeFile(sessionsPath, '{not valid json', 'utf8');
+  it('repairs an old-schema (empty) workspace.json and returns empty list', async () => {
+    // 옛 schema 흔적 시뮬레이션 — 빈 객체 workspace.json. readWorkspaceMeta의 repair fallback이
+    // 정상 schema로 복구해야 한다. (과거 sessions.json + .broken 백업 방식은 core 통합 때 repair로 대체)
+    const metaPath = join(workspaceStore.getWorkspacePath(wid), 'workspace.json');
+    await fs.writeFile(metaPath, '{}', 'utf8');
 
     const sessions = await getSessions(wid);
     assert.deepEqual(sessions, []);
 
-    const dir = workspaceStore.getWorkspacePath(wid);
-    const entries = await fs.readdir(dir);
-    const backup = entries.find(e => e.startsWith('sessions.json.broken.'));
-    assert.ok(backup, `expected a .broken.<ts>.bak backup, got entries: ${entries.join(', ')}`);
+    // repair 후 workspace.json이 정상 schema로 복구되었는지 확인.
+    const repaired = JSON.parse(await fs.readFile(metaPath, 'utf8'));
+    assert.equal(repaired.workspaceId, wid);
+    assert.ok(Array.isArray(repaired.sessions));
   });
 
   it('registers a session and reads it back', async () => {
-    await registerSession(wid, 'test-session-1', 'claude');
+    // 실제 익스텐션 흐름과 동일하게 UUID 형식 sessionId 사용 (addSession이 UUID 형식을 강제 — V-04).
+    const sid = '12345678-1234-1234-1234-123456789abc';
+    await registerSession(wid, sid, 'claude');
     const sessions = await getSessions(wid);
     assert.equal(sessions.length, 1);
-    assert.equal(sessions[0].sessionId, 'test-session-1');
+    assert.equal(sessions[0].sessionId, sid);
     assert.equal(sessions[0].model, 'claude');
+  });
+
+  it('rejects a non-UUID sessionId (V-04 path traversal guard)', async () => {
+    await assert.rejects(() => registerSession(wid, '../escape', 'claude'), /invalid sessionId/);
   });
 });

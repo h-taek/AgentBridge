@@ -9,6 +9,7 @@ import {
   markCompactionInFlight,
   unmarkCompactionInFlight,
 } from '../src/core/compactionScheduler';
+import { initCoreForTest } from './helpers';
 
 const wid = '11111111-2222-3333-4444-555555555555';
 
@@ -33,7 +34,7 @@ describe('compactionScheduler locks', () => {
 
   beforeEach(async () => {
     storagePath = await fs.mkdtemp(join(tmpdir(), 'agentbridge-test-'));
-    workspaceStore.init(storagePath);
+    initCoreForTest(storagePath);
     await fs.mkdir(join(storagePath, 'workspaces', wid), { recursive: true });
     // workspace.json 정상 시드 — acquireDiskLock이 loadWorkspace 호출하므로 필수.
     const metaPath = join(workspaceStore.getWorkspacePath(wid), 'workspace.json');

@@ -237,6 +237,7 @@
     "compile": "node ../../scripts/sync-helper.mjs && node esbuild.mjs",
     "watch": "node ../../scripts/sync-helper.mjs && node esbuild.mjs --watch",
     "typecheck": "tsc -p . --noEmit",
+    "test": "mocha",
     "vscode:prepublish": "npm run typecheck && node ../../scripts/sync-helper.mjs && node esbuild.mjs --production",
     "package": "npx vsce package --no-dependencies",
     "lint": "eslint src",
@@ -254,6 +255,7 @@
     "node-pty": "1.1.0"
   },
   "devDependencies": {
+    "@types/mocha": "^10.0.10",
     "@types/node": "^20.0.0",
     "@types/vscode": "^1.96.0",
     "@typescript-eslint/eslint-plugin": "^8.59.4",
@@ -263,6 +265,8 @@
     "eslint": "^9.39.4",
     "knip": "^6.14.2",
     "madge": "^8.0.0",
+    "mocha": "^11.7.6",
+    "ts-node": "^10.9.2",
     "typescript": "^5.5.0"
   }
 }

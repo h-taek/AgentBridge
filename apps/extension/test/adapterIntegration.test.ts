@@ -7,10 +7,10 @@ import { promises as fs } from 'fs';
 import { existsSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import * as workspaceStore from '../src/core/workspaceStore';
 import * as claudeAdapter from '../src/core/cliAdapter/claudeAdapter';
 import * as codexAdapter from '../src/core/cliAdapter/codexAdapter';
 import * as agyAdapter from '../src/core/cliAdapter/agyAdapter';
+import { initCoreForTest } from './helpers';
 
 const wid = '44444444-4444-4444-4444-444444444444';
 
@@ -21,7 +21,7 @@ describe('adapter integration (M16 await chain regression guard)', () => {
   beforeEach(async () => {
     storagePath = await fs.mkdtemp(join(tmpdir(), 'agentbridge-int-'));
     workspaceCwd = await fs.mkdtemp(join(tmpdir(), 'agentbridge-int-ws-'));
-    workspaceStore.init(storagePath);
+    initCoreForTest(storagePath);
     await fs.mkdir(join(storagePath, 'workspaces', wid, 'settings'), { recursive: true });
   });
 
