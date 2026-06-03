@@ -1,1 +1,1 @@
-export { watchForNewConversationUuid } from '@agentbridge/core';
+export { watchForNewConversationUuid, parseConversationFilename } from '@agentbridge/core';

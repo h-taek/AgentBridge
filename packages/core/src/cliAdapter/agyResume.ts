@@ -1,7 +1,8 @@
 // Agy(Antigravity) resume + 격리 cwd 잔재 청소.
 //
 // 저장 위치:
-//   - conversations: `~/.gemini/antigravity-cli/conversations/<UUID>.pb` (protobuf)
+//   - conversations: `~/.gemini/antigravity-cli/conversations/<UUID>.db` (SQLite)
+//     ※ agy CLI 2026-06-02 업데이트 전에는 `<UUID>.pb` (protobuf) — 구버전 호환 위해 둘 다 인식.
 //   - cwd→UUID 매핑: `~/.gemini/antigravity-cli/cache/last_conversations.json` (사용 안 함 — stale 가능)
 //
 // resume: `--conversation <UUID>`. 새 세션은 agy가 UUID 자체 생성 → spawn 후 conversations/ snapshot diff로 캡처.
@@ -23,17 +24,24 @@ function getConversationsDir(): string {
   return path.join(AGY_BASE_DIR, 'conversations');
 }
 
-function getConversationFilePath(uuid: string): string {
-  return path.join(getConversationsDir(), `${uuid}.pb`);
+// agy CLI 2026-06-02 업데이트로 conversation 저장 포맷이 .pb(protobuf) → .db(SQLite)로 변경됨.
+// 신포맷 우선, 구버전 사용자 호환을 위해 .pb도 함께 처리한다. (V-17 실기 검증에서 발견)
+const CONVERSATION_EXTENSIONS = ['.db', '.pb'] as const;
+
+function getConversationFilePathCandidates(uuid: string): string[] {
+  return CONVERSATION_EXTENSIONS.map((ext) => path.join(getConversationsDir(), `${uuid}${ext}`));
 }
 
 async function hasAgyConversationFile(modelSessionId: string): Promise<boolean> {
-  try {
-    const stat = await fs.stat(getConversationFilePath(modelSessionId));
-    return stat.isFile() && stat.size > 0;
-  } catch {
-    return false;
+  for (const file of getConversationFilePathCandidates(modelSessionId)) {
+    try {
+      const stat = await fs.stat(file);
+      if (stat.isFile() && stat.size > 0) return true;
+    } catch {
+      /* 다음 확장자 후보 시도 */
+    }
   }
+  return false;
 }
 
 export type ResumeResolveOptions = {
@@ -58,15 +66,21 @@ export async function resolveResumeArgs(opts: ResumeResolveOptions): Promise<str
   return ['--conversation', opts.sessionId];
 }
 
-const UUID_RE = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.pb$/i;
+const UUID_RE = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.(?:pb|db)$/i;
+
+// conversation 파일명 → UUID. 매칭 안 되면 null. (.pb/.db 모두 인식 — 회귀 테스트 대상)
+export function parseConversationFilename(filename: string): string | null {
+  const m = UUID_RE.exec(filename);
+  return m ? m[1].toLowerCase() : null;
+}
 
 export async function snapshotAgyConversations(): Promise<Set<string>> {
   const out = new Set<string>();
   try {
     const entries = await fs.readdir(getConversationsDir());
     for (const e of entries) {
-      const m = UUID_RE.exec(e);
-      if (m) out.add(m[1].toLowerCase());
+      const uuid = parseConversationFilename(e);
+      if (uuid) out.add(uuid);
     }
   } catch {
     /* dir 없으면 빈 set */
@@ -96,9 +110,8 @@ export async function watchForNewConversationUuid(opts: {
       const entries = await fs.readdir(getConversationsDir());
       let newest: { uuid: string; mtimeMs: number } | null = null;
       for (const e of entries) {
-        const m = UUID_RE.exec(e);
-        if (!m) continue;
-        const uuid = m[1].toLowerCase();
+        const uuid = parseConversationFilename(e);
+        if (!uuid) continue;
         if (opts.excludeUuids.has(uuid)) continue;
         try {
           const stat = await fs.stat(path.join(getConversationsDir(), e));
@@ -124,7 +137,7 @@ export async function watchForNewConversationUuid(opts: {
 
 // === 격리 cwd 잔재 청소 (2026-05-31 실측 기반 9종) ===
 // agy spawn은 cwd → 9곳에 흔적: (1) tmpdir 자체 (2) cache/last_conversations.json 매핑
-// (3) conversations/<UUID>.pb (4) brain/<UUID>/ (5) implicit/<UUID>.pb (6) log/cli-*.log
+// (3) conversations/<UUID>.db|.pb (4) brain/<UUID>/ (5) implicit/<UUID>.pb (6) log/cli-*.log
 // (7) ~/.gemini/config/projects/<UUID>.json (8) ~/.gemini/history/<cwd-basename>/
 // (9) settings.json trustedWorkspaces[]. (6)은 진단 가치로 보존, (1)은 rmIsolatedCwd 별도.
 
@@ -287,7 +300,7 @@ export async function cleanupAgyArtifactsForCwd(
   // (2) cache 엔트리 제거하면서 UUID 회수
   const uuid = await removeLastConversationsEntry(cwd, logger);
   if (uuid) {
-    // (3) conversations/<UUID>.pb
+    // (3) conversations/<UUID>.db|.pb
     await deleteAgyNativeSession(uuid, logger);
     // (4) brain/<UUID>/
     await deleteAgyBrainFolder(uuid, logger);

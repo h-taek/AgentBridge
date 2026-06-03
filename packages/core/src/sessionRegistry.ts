@@ -5,7 +5,7 @@
 // 이 파일에는 호스트가 직접 호출하는 native 파일 삭제 함수들만 남김.
 //   - claude: ~/.claude/projects/<*>/<sessionId>.jsonl
 //   - codex:  ~/.codex/sessions/<Y>/<M>/<D>/rollout-*-<sessionId>.jsonl
-//   - agy:    ~/.gemini/antigravity-cli/conversations/<sessionId>.pb
+//   - agy:    ~/.gemini/antigravity-cli/conversations/<sessionId>.db (구버전: .pb)
 
 import { promises as fs } from 'fs';
 import { join } from 'path';
@@ -93,19 +93,18 @@ export async function deleteCodexNativeSession(sessionId: string, logger: Logger
 }
 
 export async function deleteAgyNativeSession(sessionId: string, logger: Logger = noopLogger): Promise<void> {
-  const file = join(
-    homedir(),
-    '.gemini',
-    'antigravity-cli',
-    'conversations',
-    `${sessionId}.pb`,
-  );
-  try {
-    await fs.unlink(file);
-    logger.log(`sessionRegistry: agy native conversation deleted — ${file}`);
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
-      logger.warn(`sessionRegistry: agy native delete failed — ${file}`);
+  // agy CLI 2026-06-02 업데이트로 conversation 포맷이 .pb(protobuf) → .db(SQLite)로 변경됨.
+  // 구버전 호환을 위해 두 확장자 모두 삭제 시도.
+  const conversationsDir = join(homedir(), '.gemini', 'antigravity-cli', 'conversations');
+  for (const ext of ['.db', '.pb']) {
+    const file = join(conversationsDir, `${sessionId}${ext}`);
+    try {
+      await fs.unlink(file);
+      logger.log(`sessionRegistry: agy native conversation deleted — ${file}`);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+        logger.warn(`sessionRegistry: agy native delete failed — ${file}`);
+      }
     }
   }
 }
