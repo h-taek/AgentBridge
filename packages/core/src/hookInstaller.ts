@@ -321,3 +321,53 @@ export function createHookInstaller(opts: HookInstallerOptions): HookInstaller {
     installAgyHooks,
   };
 }
+
+// ─── hook helper 단일 설치 (V-12) ─────────────────────────────────────────
+//
+// 두 앱이 각자 번들 내부 경로로 hook을 설치하면, 같은 프로젝트의 hooks.json을 서로
+// 다른 경로로 덮어쓰는 쟁탈전이 생긴다. helper를 ~/.agentbridge/bin/에 한 부만 설치하고
+// 양쪽 hook 명령이 그 canonical 경로를 가리키게 해 쟁탈전을 없앤다.
+
+const HELPER_VERSION_RE = /@agentbridge-helper-version (\d+\.\d+\.\d+)/;
+
+export function getCanonicalHelperPath(storageRoot: string): string {
+  return join(storageRoot, 'bin', 'agentbridge-memory.js');
+}
+
+function compareSemver(a: string, b: string): number {
+  const pa = a.split('.').map(Number);
+  const pb = b.split('.').map(Number);
+  for (let i = 0; i < 3; i++) {
+    if ((pa[i] ?? 0) !== (pb[i] ?? 0)) return (pa[i] ?? 0) - (pb[i] ?? 0);
+  }
+  return 0;
+}
+
+// 번들 helper를 canonical 위치에 설치. 설치본이 더 새것이면 건드리지 않는다.
+// 반환값: canonical 경로 (hook command에 사용).
+export async function installHelperToCanonicalPath(
+  bundledHelperPath: string,
+  storageRoot: string,
+  logger: Logger = noopLogger,
+): Promise<string> {
+  const canonical = getCanonicalHelperPath(storageRoot);
+  const bundled = await fsp.readFile(bundledHelperPath, 'utf8');
+  const bundledVer = HELPER_VERSION_RE.exec(bundled)?.[1] ?? '0.0.0';
+
+  let installedVer: string | null = null;
+  try {
+    const installed = await fsp.readFile(canonical, 'utf8');
+    installedVer = HELPER_VERSION_RE.exec(installed)?.[1] ?? '0.0.0';
+  } catch {
+    // 미설치
+  }
+
+  if (installedVer === null || compareSemver(bundledVer, installedVer) > 0) {
+    const tmp = `${canonical}.${process.pid}.${Date.now()}.tmp`;
+    await fsp.mkdir(dirname(canonical), { recursive: true });
+    await fsp.writeFile(tmp, bundled, 'utf8');
+    await fsp.rename(tmp, canonical);
+    logger.log(`hookInstaller: helper ${bundledVer} → ${canonical} (이전: ${installedVer ?? '미설치'})`);
+  }
+  return canonical;
+}

@@ -13,7 +13,13 @@ import { is } from '@electron-toolkit/utils'
 import { promises as fs } from 'fs'
 import * as path from 'path'
 import log from 'electron-log/main'
-import { createHookInstaller, getStorageRoot, type HookInstaller } from '@agentbridge/core'
+import {
+  createHookInstaller,
+  getStorageRoot,
+  getCanonicalHelperPath,
+  installHelperToCanonicalPath,
+  type HookInstaller
+} from '@agentbridge/core'
 
 // dev/prod 모두에서 resources/bin/agentbridge-memory.js 절대경로를 반환.
 // dev: <repo>/resources/bin/... (app.getAppPath()가 repo root)
@@ -47,19 +53,28 @@ let _coreHookInstaller: HookInstaller | null = null
 
 export function getDesktopHookInstaller(): HookInstaller {
   if (!_coreHookInstaller) {
-    const helperPath = getHelperBinaryPath()
+    const bundledHelperPath = getHelperBinaryPath()
+    const storageRoot = getStorageRoot()
     _coreHookInstaller = createHookInstaller({
-      helperPath,
-      globalStoragePath: getStorageRoot(),
+      // hook 명령은 번들 안 경로가 아니라 양 앱 공용 canonical 경로(~/.agentbridge/bin/)를 가리킨다 (V-12).
+      helperPath: getCanonicalHelperPath(storageRoot),
+      globalStoragePath: storageRoot,
       logger: {
         log: (m) => log.info(m),
         warn: (m) => log.warn(m)
       }
     })
-    // helper 누락 가드 — 처음 호출 시점에 sync 검증. install 단계에서 silent fail 방지.
-    void assertHelperExists(helperPath).catch((err) => {
-      log.error('hookInstaller: helper binary 검증 실패', { helperPath, err: String(err) })
-    })
+    // 번들 helper 존재 검증 + canonical 위치에 설치 (비동기, 실패 시 로그만)
+    void assertHelperExists(bundledHelperPath)
+      .then(() =>
+        installHelperToCanonicalPath(bundledHelperPath, storageRoot, {
+          log: (m) => log.info(m),
+          warn: (m) => log.warn(m)
+        })
+      )
+      .catch((err) => {
+        log.error('hookInstaller: helper 설치/검증 실패', { err: String(err) })
+      })
   }
   return _coreHookInstaller
 }

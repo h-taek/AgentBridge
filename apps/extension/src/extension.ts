@@ -4,7 +4,8 @@ import * as claudeAdapter from './core/cliAdapter/claudeAdapter';
 import * as codexAdapter from './core/cliAdapter/codexAdapter';
 import * as agyAdapter from './core/cliAdapter/agyAdapter';
 import * as workspaceStore from './core/workspaceStore';
-import { initializeCore } from './core/coreInstances';
+import { installHelperToCanonicalPath } from '@agentbridge/core';
+import { initializeCore, getBundledHelperPath, getWorkspaceStore, getLogger } from './core/coreInstances';
 import * as output from './log/output';
 import { MemoryPanelProvider } from './views/memoryPanel';
 import { SessionTreeProvider, SessionItem } from './views/sessionTreeView';
@@ -54,6 +55,15 @@ export function activate(context: vscode.ExtensionContext) {
   // 코어 인스턴스 셋업 — workspaceStore, envProbe, hookInstaller, sessionRegistry,
   // cliAdapter, compactionScheduler 등 모든 코어 팩토리 인스턴스를 한 번에 초기화.
   initializeCore(context);
+
+  // hook helper를 ~/.agentbridge/bin/에 설치 (V-12 — 양 앱 공용 canonical 경로).
+  // 실패해도 익스텐션 동작에는 지장 없음 (hook만 비활성) — 로그만 남김.
+  void installHelperToCanonicalPath(
+    getBundledHelperPath(),
+    getWorkspaceStore().getGlobalStoragePath(),
+    getLogger(),
+  ).catch((err) => output.warn(`helper 설치 실패: ${String(err)}`));
+
   workspaceStore.init(context.globalStorageUri.fsPath);
 
   // activate 시점엔 어떤 panel도 안 열려있음 — 모든 세션 active 플래그 초기화.
