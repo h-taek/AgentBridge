@@ -3,6 +3,10 @@
 // 같은 폴더면 어느 앱(데스크탑/익스텐션)이 언제 계산해도 같은 ID가 나온다.
 // 덕분에 "폴더 → ID" 매핑 장부(workspaces.json)가 필요 없고, 장부 동시 갱신 충돌도 원천 제거.
 //
+// 경로는 NFC로 정규화해 비ASCII 인코딩 차이를 흡수한다.
+// macOS가 같은 한글 폴더를 NFD(자모 분해) 또는 NFC(완성형)로 다르게 전달해도
+// 같은 ID를 보장한다.
+//
 // 형식은 표준 UUID — 기존 코드의 UUID 검증(경로 탈출 방어)을 그대로 통과한다.
 
 import { createHash } from 'crypto';
@@ -25,6 +29,9 @@ export function deterministicWorkspaceId(folderFsPath: string): string {
   } catch {
     canonical = resolve(folderFsPath);
   }
+  // macOS는 같은 폴더 이름을 NFD/NFC로 다르게 저장/전달할 수 있다. NFC로 통일해
+  // 인코딩과 무관하게 같은 폴더 → 같은 ID 보장 (V-12 — 한글 등 비ASCII 경로).
+  canonical = canonical.normalize('NFC');
 
   // RFC 4122 §4.3 UUID v5: SHA-1(namespace bytes + name bytes) → version/variant 비트 세팅
   const hash = createHash('sha1')

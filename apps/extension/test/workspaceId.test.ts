@@ -47,4 +47,11 @@ describe('deterministicWorkspaceId', () => {
       await fs.rm(base, { recursive: true, force: true });
     }
   });
+
+  it('같은 한글 경로의 NFC/NFD 인코딩이 같은 ID를 반환한다 (macOS 정규화 무관)', () => {
+    const nfc = '/Users/x/사주라/프로젝트'.normalize('NFC');
+    const nfd = '/Users/x/사주라/프로젝트'.normalize('NFD');
+    // 존재하지 않는 경로 → realpath 폴백(resolve) 경로를 타므로 순수 정규화 동작 검증
+    assert.equal(deterministicWorkspaceId(nfc), deterministicWorkspaceId(nfd));
+  });
 });
