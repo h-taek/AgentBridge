@@ -13,6 +13,7 @@ import * as workspaceStore from '../core/workspaceStore';
 import { CLI_DISPLAY_NAME, type CliKind } from '../shared/types';
 import { quoteCommandLine } from '../shared/shellQuote';
 import type { SpawnOptions } from '../pty/types';
+import { createGroupLocker, type GroupLocker } from './groupLock';
 
 const activePanels = new Map<string, ChatPanel>();
 
@@ -46,6 +47,7 @@ export class ChatPanel {
   private readonly opts: SpawnOptions;
   private readonly extensionUri: vscode.Uri;
   private onDisposeCallback: (() => void) | null = null;
+  private readonly groupLocker: GroupLocker;
 
   markDeleted(): void {
     this.deletedExternally = true;
@@ -97,6 +99,10 @@ export class ChatPanel {
     this.panel = panel;
     this.extensionUri = extensionUri;
     this.opts = opts;
+    this.groupLocker = createGroupLocker({
+      executeCommand: (cmd) => vscode.commands.executeCommand(cmd),
+      warn: (msg) => output.warn(msg),
+    });
 
     if (opts.sessionId) activePanels.set(opts.sessionId, this);
 
@@ -154,6 +160,7 @@ export class ChatPanel {
     });
 
     this.panel.onDidChangeViewState((e) => {
+      this.groupLocker.onViewState(e.webviewPanel.active);
       if (e.webviewPanel.active && this.opts.sessionId) {
         chatPanelEvents.fire({ sessionId: this.opts.sessionId });
       }
@@ -167,6 +174,9 @@ export class ChatPanel {
         }
       }, 50);
     }
+    // 생성 직후 이미 active인 패널의 그룹 잠금 — onDidChangeViewState는 변화만 감지하므로
+    // 초기 상태는 직접 1회 전달한다. (sessionId 유무와 무관하므로 위 블록 안에 넣지 않는다)
+    this.groupLocker.onViewState(this.panel.active);
   }
 
   get sessionId(): string {
