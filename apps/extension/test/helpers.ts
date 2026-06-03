@@ -9,7 +9,7 @@ import { initializeCore } from '../src/core/coreInstances';
 export function initCoreForTest(storagePath: string): void {
   const globalState = new Map<string, unknown>();
   const context = {
-    globalStorageUri: { fsPath: storagePath },
+    globalStorageUri: { fsPath: storagePath }, // 일부 모듈(quotaStore 등)이 참조할 수 있어 유지
     extensionPath: resolve(__dirname, '..'),
     globalState: {
       get: (key: string) => globalState.get(key),
@@ -18,5 +18,5 @@ export function initCoreForTest(storagePath: string): void {
       },
     },
   } as unknown as vscode.ExtensionContext;
-  initializeCore(context);
+  initializeCore(context, { storageRootForTesting: storagePath });
 }

@@ -2,7 +2,7 @@
 //
 // 책임:
 //   1) agentbridge-memory 헬퍼 binary 절대경로 해석 (dev/prod 분기)
-//   2) globalStoragePath 해석 (app.getPath('userData'))
+//   2) globalStoragePath 해석 (core getStorageRoot — ~/.agentbridge, V-12)
 //   3) 코어 createHookInstaller 인스턴스 lazy singleton
 //   4) legacy `.gemini/settings.json` _agentbridge_managed entry 정리 (옛 desktop 잔재)
 //
@@ -13,7 +13,7 @@ import { is } from '@electron-toolkit/utils'
 import { promises as fs } from 'fs'
 import * as path from 'path'
 import log from 'electron-log/main'
-import { createHookInstaller, type HookInstaller } from '@agentbridge/core'
+import { createHookInstaller, getStorageRoot, type HookInstaller } from '@agentbridge/core'
 
 // dev/prod 모두에서 resources/bin/agentbridge-memory.js 절대경로를 반환.
 // dev: <repo>/resources/bin/... (app.getAppPath()가 repo root)
@@ -50,7 +50,7 @@ export function getDesktopHookInstaller(): HookInstaller {
     const helperPath = getHelperBinaryPath()
     _coreHookInstaller = createHookInstaller({
       helperPath,
-      globalStoragePath: app.getPath('userData'),
+      globalStoragePath: getStorageRoot(),
       logger: {
         log: (m) => log.info(m),
         warn: (m) => log.warn(m)

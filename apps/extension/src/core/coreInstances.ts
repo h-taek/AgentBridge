@@ -72,11 +72,15 @@ export function getLogger(): Logger {
   return logger;
 }
 
-export function initializeCore(context: vscode.ExtensionContext): void {
-  // VS Code globalStorageUri는 익스텐션 전용 스토리지 경로.
-  const globalStoragePath = context.globalStorageUri.fsPath;
-
-  _workspaceStore = createWorkspaceStore(globalStoragePath, { logger });
+export function initializeCore(
+  context: vscode.ExtensionContext,
+  // ⚠️ 테스트 전용 — 프로덕션 호출(extension.ts)은 두 번째 인자를 넘기지 않는다.
+  testOverrides?: { storageRootForTesting?: string },
+): void {
+  _workspaceStore = createWorkspaceStore({
+    logger,
+    rootPathForTesting: testOverrides?.storageRootForTesting,
+  });
   _hookStatusStore = createHookStatusStore();
   _envProbe = createEnvProbe({ logger });
 
@@ -86,7 +90,8 @@ export function initializeCore(context: vscode.ExtensionContext): void {
 
   _hookInstaller = createHookInstaller({
     helperPath,
-    globalStoragePath,
+    // 저장소 루트와 hook --user-data가 같은 곳을 가리키도록 store에서 가져옴 (테스트 포함 일관성)
+    globalStoragePath: _workspaceStore.getGlobalStoragePath(),
     logger,
   });
 

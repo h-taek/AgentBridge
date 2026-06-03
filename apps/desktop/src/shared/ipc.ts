@@ -130,7 +130,7 @@ export type IrRefineResult = {
 // architecture §14.2 / §14.3 / §14.10. workspace = thread를 대체하는 상위 컨테이너.
 // 한 workspace 안에 *여러 session*(=모델별 PTY 인스턴스)이 동시 활성 가능.
 //
-// 데이터 위치: ~/Library/Application Support/AgentBridge/workspaces/<workspaceId>/
+// 데이터 위치: ~/.agentbridge/workspaces/<workspaceId>/
 //   - workspace.json   : WorkspaceMeta
 //   - ir.json          : 압축된 IR
 //   - turns.jsonl      : raw 턴 로그 (workspace 단위 단일 파일)

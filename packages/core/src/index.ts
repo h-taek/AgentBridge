@@ -21,6 +21,7 @@ export * from './turnRecorder/index';
 export * from './interfaces';
 
 // 저장소
+export * from './storageRoot';
 export * from './fileLock';
 export * from './workspaceId';
 export * from './turnsStore';

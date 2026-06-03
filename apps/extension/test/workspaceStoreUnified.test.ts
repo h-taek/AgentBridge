@@ -17,33 +17,33 @@ describe('workspaceStore (V-12 통일 동작)', () => {
   });
 
   it('getOrCreateWorkspaceId가 결정적 ID를 반환한다', () => {
-    const store = createWorkspaceStore(storagePath);
+    const store = createWorkspaceStore({ rootPathForTesting: storagePath });
     const id = store.getOrCreateWorkspaceId('/tmp/agentbridge-unified-project');
     assert.equal(id, deterministicWorkspaceId('/tmp/agentbridge-unified-project'));
   });
 
   it('서로 다른 스토어 인스턴스(다른 앱 시뮬레이션)가 같은 폴더에 같은 ID를 반환한다', () => {
-    const storeA = createWorkspaceStore(storagePath); // 데스크탑 역할
-    const storeB = createWorkspaceStore(storagePath); // 익스텐션 역할
+    const storeA = createWorkspaceStore({ rootPathForTesting: storagePath }); // 데스크탑 역할
+    const storeB = createWorkspaceStore({ rootPathForTesting: storagePath }); // 익스텐션 역할
     const idA = storeA.getOrCreateWorkspaceId('/tmp/agentbridge-unified-project');
     const idB = storeB.getOrCreateWorkspaceId('/tmp/agentbridge-unified-project');
     assert.equal(idA, idB);
   });
 
   it('workspaces.json 장부 파일을 더 이상 만들지 않는다', () => {
-    const store = createWorkspaceStore(storagePath);
+    const store = createWorkspaceStore({ rootPathForTesting: storagePath });
     store.getOrCreateWorkspaceId('/tmp/agentbridge-unified-project');
     assert.equal(existsSync(join(storagePath, 'workspaces.json')), false);
   });
 
   it('createWorkspace가 같은 폴더에 대해 결정적 ID를 사용한다', async () => {
-    const store = createWorkspaceStore(storagePath);
+    const store = createWorkspaceStore({ rootPathForTesting: storagePath });
     const ws = await store.createWorkspace({ workspacePath: '/tmp/agentbridge-unified-project' });
     assert.equal(ws.workspaceId, deterministicWorkspaceId('/tmp/agentbridge-unified-project'));
   });
 
   it('createWorkspace를 같은 폴더로 두 번 불러도 워크스페이스가 하나다 (idempotent)', async () => {
-    const store = createWorkspaceStore(storagePath);
+    const store = createWorkspaceStore({ rootPathForTesting: storagePath });
     const first = await store.createWorkspace({
       workspacePath: '/tmp/agentbridge-unified-project',
       initialModel: 'claude',
@@ -59,8 +59,8 @@ describe('workspaceStore (V-12 통일 동작)', () => {
   });
 
   it('두 스토어 인스턴스가 동시에 세션을 추가해도 둘 다 살아남는다 (파일 락)', async () => {
-    const storeA = createWorkspaceStore(storagePath);
-    const storeB = createWorkspaceStore(storagePath);
+    const storeA = createWorkspaceStore({ rootPathForTesting: storagePath });
+    const storeB = createWorkspaceStore({ rootPathForTesting: storagePath });
     const wid = storeA.getOrCreateWorkspaceId('/tmp/agentbridge-unified-project');
     storeB.getOrCreateWorkspaceId('/tmp/agentbridge-unified-project');
 

@@ -1,4 +1,3 @@
-import { app } from 'electron'
 import { promises as fs } from 'fs'
 import * as path from 'path'
 import { randomUUID } from 'crypto'
@@ -12,7 +11,11 @@ import type {
   WorkspaceListEntry
 } from '@shared/ipc'
 import type { IR } from '@shared/ir'
-import { createWorkspaceStore, type WorkspaceStore as CoreWorkspaceStore } from '@agentbridge/core'
+import {
+  createWorkspaceStore,
+  getStorageRoot,
+  type WorkspaceStore as CoreWorkspaceStore
+} from '@agentbridge/core'
 import { normalizeWorkspacePath, validateWorkspacePath } from './workspacePath'
 
 // M3 K 청크 — Workspace 데이터 모델 + 영속화.
@@ -41,7 +44,7 @@ import { normalizeWorkspacePath, validateWorkspacePath } from './workspacePath'
 // ────────────────────────────────────────────────────────────────────────
 //
 // 디렉토리 구조:
-//   ~/Library/Application Support/AgentBridge/workspaces/<workspaceId>/
+//   ~/.agentbridge/workspaces/<workspaceId>/
 //     ├── workspace.json         ← WorkspaceMeta (atomic write)
 //     ├── ir.json                ← 압축된 IR (M2 G 청크 schema 그대로)
 //     ├── turns.jsonl            ← raw 턴 로그 (workspace 단위 단일 파일, O 청크에서 채움)
@@ -64,14 +67,15 @@ import { normalizeWorkspacePath, validateWorkspacePath } from './workspacePath'
 //   - L 청크에서 UI 전환 시 threads/는 archive 처리
 
 export type WorkspaceDirs = {
-  root: string // ~/Library/Application Support/AgentBridge/
+  root: string // ~/.agentbridge/ (V-12: core getStorageRoot)
   workspaces: string // <root>/workspaces/
 }
 
 let dirsCache: WorkspaceDirs | null = null
 
 export async function ensureWorkspaceDirs(): Promise<WorkspaceDirs> {
-  const root = app.getPath('userData')
+  // V-12: 저장소 루트는 core가 단독 결정 (~/.agentbridge). Application Support 사용 중단.
+  const root = getStorageRoot()
   const dirs: WorkspaceDirs = {
     root,
     workspaces: path.join(root, 'workspaces')
@@ -94,7 +98,7 @@ function getDirs(): WorkspaceDirs {
 let _coreStore: CoreWorkspaceStore | null = null
 function getCoreStore(): CoreWorkspaceStore {
   if (!_coreStore) {
-    _coreStore = createWorkspaceStore(getDirs().root, {
+    _coreStore = createWorkspaceStore({
       logger: { log: (m) => log.info(m), warn: (m) => log.warn(m) }
     })
   }

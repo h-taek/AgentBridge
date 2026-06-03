@@ -24,6 +24,7 @@ import { CLI_DISPLAY_NAME, type CliKind } from './shared/cli';
 import { type Logger, noopLogger } from './interfaces';
 import { deterministicWorkspaceId } from './workspaceId';
 import { withFileLock } from './fileLock';
+import { getStorageRoot } from './storageRoot';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -121,14 +122,14 @@ export type WorkspaceStoreOptions = {
   logger?: Logger;
   // delete 후 호출 (attachment 청소, native session 파일 unlink 등). throw하지 않도록 caller 책임.
   onAfterDeleteSession?: (workspaceId: string, session: SessionMeta) => void | Promise<void>;
+  // ⚠️ 테스트 전용 — 프로덕션 코드 사용 금지 (사용 시 V-12 재발).
+  rootPathForTesting?: string;
 };
 
 // ─── 구현 ──────────────────────────────────────────────────────────────
 
-export function createWorkspaceStore(
-  globalStoragePath: string,
-  opts: WorkspaceStoreOptions = {},
-): WorkspaceStore {
+export function createWorkspaceStore(opts: WorkspaceStoreOptions = {}): WorkspaceStore {
+  const globalStoragePath = opts.rootPathForTesting ?? getStorageRoot();
   const log = opts.logger ?? noopLogger;
   const onAfterDeleteSession = opts.onAfterDeleteSession;
   mkdirSync(globalStoragePath, { recursive: true });
