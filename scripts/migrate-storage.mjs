@@ -34,22 +34,50 @@ const NEW_ROOT = path.join(homedir(), '.agentbridge');
 
 // ── 수집: 옛 워크스페이스 전부 읽기 ──────────────────────────────────────
 
+/**
+ * 옛 장부(workspaces.json)를 읽어 workspaceId → folderPath 역방향 맵을 반환.
+ * 장부 구조: { folderPath: workspaceId }
+ */
+function buildLedgerReverseMap(root) {
+  const ledgerPath = path.join(root, 'workspaces.json');
+  if (!fs.existsSync(ledgerPath)) return {};
+  try {
+    const ledger = JSON.parse(fs.readFileSync(ledgerPath, 'utf8'));
+    // 뒤집기: { workspaceId: folderPath }
+    return Object.fromEntries(Object.entries(ledger).map(([folder, id]) => [id, folder]));
+  } catch {
+    console.warn(`  [warn] ${ledgerPath} 장부 파싱 실패 — 장부 폴백 비활성`);
+    return {};
+  }
+}
+
 function listOldWorkspaces() {
   const found = [];
   for (const { app, root } of OLD_ROOTS) {
     const wsDir = path.join(root, 'workspaces');
     if (!fs.existsSync(wsDir)) continue;
+
+    // 이 root의 장부에서 역방향 맵(workspaceId → folderPath) 구성
+    const ledgerPathById = buildLedgerReverseMap(root);
+
     for (const id of fs.readdirSync(wsDir)) {
       const dir = path.join(wsDir, id);
       const metaPath = path.join(dir, 'workspace.json');
       if (!fs.existsSync(metaPath)) continue;
       try {
         const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
-        if (!meta.workspacePath) {
-          console.warn(`  [skip] ${app}/${id} — workspacePath 없음 (손상)`);
+        // workspacePath가 없으면 장부 역방향 맵에서 폴백으로 복구
+        const workspacePath = meta.workspacePath || ledgerPathById[id];
+        if (!workspacePath) {
+          console.warn(
+            `  [skip] ${app}/${id} — 옛 스키마이고 장부에서도 경로 복구 실패 (수동 확인 필요)`,
+          );
           continue;
         }
-        found.push({ app, id, dir, meta });
+        if (!meta.workspacePath) {
+          console.log(`  [복구] ${app}/${id} — 장부에서 경로 복구: ${workspacePath}`);
+        }
+        found.push({ app, id, dir, meta, workspacePath });
       } catch {
         console.warn(`  [skip] ${app}/${id} — workspace.json 파싱 실패`);
       }
@@ -101,9 +129,10 @@ function main() {
   console.log(`옛 워크스페이스 ${old.length}개 발견:\n`);
 
   // 폴더 경로별로 그룹 (NFC 정규화: macOS HFS+는 NFD, VS Code 익스텐션은 NFC를 쓰므로 통일)
+  // ws.workspacePath = 복구된 경로(장부 폴백 포함), ws.meta.workspacePath는 없을 수 있음
   const byFolder = new Map(); // key = NFC 정규화 경로
   for (const ws of old) {
-    const key = ws.meta.workspacePath.normalize('NFC');
+    const key = ws.workspacePath.normalize('NFC');
     if (!byFolder.has(key)) byFolder.set(key, []);
     byFolder.get(key).push(ws);
   }
@@ -166,6 +195,13 @@ function main() {
       copyDirRecursive(path.join(g.dir, 'sessions'), path.join(newDir, 'sessions'));
       copyDirRecursive(path.join(g.dir, 'archive'), path.join(newDir, 'archive'));
       copyDirRecursive(path.join(g.dir, 'settings'), path.join(newDir, 'settings'));
+      // 옛 분리 스키마({}): sessions.json이 워크스페이스 루트에 있는 경우 복사.
+      // 런타임 readWorkspaceMeta의 repair fallback이 이걸 흡수해 세션까지 복구된다.
+      const oldSessionsJson = path.join(g.dir, 'sessions.json');
+      const newSessionsJson = path.join(newDir, 'sessions.json');
+      if (fs.existsSync(oldSessionsJson) && !fs.existsSync(newSessionsJson)) {
+        fs.copyFileSync(oldSessionsJson, newSessionsJson);
+      }
     }
     merged++;
   }
