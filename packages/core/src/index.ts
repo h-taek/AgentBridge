@@ -22,6 +22,7 @@ export * from './interfaces';
 
 // 저장소
 export * from './fileLock';
+export * from './workspaceId';
 export * from './turnsStore';
 export * from './irStore';
 export * from './workspaceStore';
