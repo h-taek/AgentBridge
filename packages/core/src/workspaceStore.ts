@@ -1,11 +1,10 @@
-// 워크스페이스 → UUID 매핑 + workspace.json sessions[] 통합 관리.
+// 워크스페이스 메타 + workspace.json sessions[] 통합 관리.
 //
 // 2026-06-01 Phase 6: 데스크탑 패턴(workspace.json 내 sessions[] 배열) 채택.
-// 기존 core/sessionRegistry의 sessions.json 분리 패턴 폐기. workspaceStore가
-// WorkspaceMeta + 세션 메타 일체를 하나의 atomic write로 관리한다.
+// 2026-06-03 V-12: 결정적 워크스페이스 ID(UUID v5) 전환 — workspaces.json 장부 제거.
+//   같은 폴더 → 같은 ID가 계산으로 보장되므로 매핑 파일이 필요 없다.
+//   workspace.json read-modify-write는 파일 락(fileLock.ts)으로 프로세스 간 직렬화.
 //
-// 호스트 차이 흡수: globalStoragePath만 호스트가 결정. 디렉토리 구조는 동일.
-//   <storage>/workspaces.json                  — 경로 → workspaceId 매핑
 //   <storage>/workspaces/<id>/workspace.json   — 워크스페이스 메타 + sessions[]
 //   <storage>/workspaces/<id>/ir.json
 //   <storage>/workspaces/<id>/turns.jsonl
@@ -16,15 +15,15 @@ import { randomUUID } from 'crypto';
 import {
   existsSync,
   mkdirSync,
-  readFileSync,
   renameSync,
   writeFileSync,
-  copyFileSync,
   promises as fsp,
 } from 'fs';
 import { join } from 'path';
 import { CLI_DISPLAY_NAME, type CliKind } from './shared/cli';
 import { type Logger, noopLogger } from './interfaces';
+import { deterministicWorkspaceId } from './workspaceId';
+import { withFileLock } from './fileLock';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -126,10 +125,6 @@ export type WorkspaceStoreOptions = {
 
 // ─── 구현 ──────────────────────────────────────────────────────────────
 
-interface WorkspaceMap {
-  [folderFsPath: string]: string;
-}
-
 export function createWorkspaceStore(
   globalStoragePath: string,
   opts: WorkspaceStoreOptions = {},
@@ -139,45 +134,21 @@ export function createWorkspaceStore(
   mkdirSync(globalStoragePath, { recursive: true });
   mkdirSync(join(globalStoragePath, 'workspaces'), { recursive: true });
 
-  // ── workspace.json read-modify-write 직렬화 mutex (workspaceId 단위) ──
+  // ── workspace.json read-modify-write 직렬화 ──
+  // 1단계: in-process mutex (같은 인스턴스 내 직렬화 — 빠름)
+  // 2단계: 파일 락 (프로세스/인스턴스 간 직렬화 — V-12)
   const writeMutex = new Map<string, Promise<unknown>>();
   async function withWorkspaceLock<T>(workspaceId: string, fn: () => Promise<T>): Promise<T> {
     const prev = writeMutex.get(workspaceId) ?? Promise.resolve();
-    const next: Promise<T> = prev.catch(() => undefined).then(() => fn());
+    const next: Promise<T> = prev
+      .catch(() => undefined)
+      .then(() => withFileLock(workspaceDir(workspaceId), fn));
     writeMutex.set(workspaceId, next);
     try {
       return await next;
     } finally {
       if (writeMutex.get(workspaceId) === next) writeMutex.delete(workspaceId);
     }
-  }
-
-  // ── workspaces.json (경로 매핑) ──
-  function mapFilePath(): string {
-    return join(globalStoragePath, 'workspaces.json');
-  }
-  function loadMap(): WorkspaceMap {
-    const p = mapFilePath();
-    if (!existsSync(p)) return {};
-    try {
-      return JSON.parse(readFileSync(p, 'utf8'));
-    } catch (err) {
-      const backup = `${p}.broken.${Date.now()}.bak`;
-      try {
-        copyFileSync(p, backup);
-        log.warn(`workspaceStore: corrupt workspaces.json backed up to ${backup}`);
-      } catch {
-        /* noop */
-      }
-      log.warn(`workspaceStore: workspaces.json reset — ${err instanceof Error ? err.message : String(err)}`);
-      return {};
-    }
-  }
-  function saveMap(map: WorkspaceMap): void {
-    const p = mapFilePath();
-    const tmp = `${p}.${process.pid}.${Date.now()}.tmp`;
-    writeFileSync(tmp, JSON.stringify(map, null, 2), 'utf8');
-    renameSync(tmp, p);
   }
 
   // ── workspace.json (메타 + sessions[]) ──
@@ -240,14 +211,6 @@ export function createWorkspaceStore(
     }
   }
 
-  function findPathByWorkspaceId(workspaceId: string): string | undefined {
-    const map = loadMap();
-    for (const [path, id] of Object.entries(map)) {
-      if (id === workspaceId) return path;
-    }
-    return undefined;
-  }
-
   async function readWorkspaceMeta(workspaceId: string): Promise<WorkspaceMeta> {
     const p = workspaceMetaPath(workspaceId);
     const raw = await fsp.readFile(p, 'utf8');
@@ -258,7 +221,7 @@ export function createWorkspaceStore(
     let legacySessions: SessionMeta[] = [];
     if (needsRepair) {
       legacySessions = await tryReadLegacySessions(workspaceId);
-      const folderPath = findPathByWorkspaceId(workspaceId);
+      const folderPath = parsed.workspacePath; // 장부 제거로 역방향 조회 불가 — 파일 내 값만 사용
       const now = new Date().toISOString();
       const repaired: WorkspaceMeta = {
         workspaceId,
@@ -299,17 +262,19 @@ export function createWorkspaceStore(
     getGlobalStoragePath: () => globalStoragePath,
 
     getOrCreateWorkspaceId(folderFsPath: string): string {
-      const map = loadMap();
-      if (map[folderFsPath] && UUID_RE.test(map[folderFsPath])) {
-        return map[folderFsPath];
-      }
-      const id = randomUUID();
-      map[folderFsPath] = id;
-      saveMap(map);
+      const id = deterministicWorkspaceId(folderFsPath);
+      const metaPath = workspaceMetaPath(id);
+      // 이미 초기화된 워크스페이스면 그대로 반환.
+      if (existsSync(metaPath)) return id;
+
+      // workspace.json 초기화 — 호스트가 별도 createWorkspace를 호출하지 않아도(예: 익스텐션)
+      // 다음 readWorkspaceMeta가 빈 객체를 보지 않게 함.
+      // 주의: 두 호출이 동시에 이 분기에 들어올 수 있다(TOCTOU). getOrCreateWorkspaceId끼리는
+      // 둘 다 같은 빈 메타를 atomic rename으로 쓰므로 무해하다. getOrCreateWorkspaceId(빈 sessions)와
+      // createWorkspace(session 있음)가 같은 폴더에 동시 진입하면 빈 파일이 이기는 edge case가
+      // 있으나, 익스텐션은 getOrCreate만·데스크탑은 createWorkspace만 쓰고 같은 폴더를 동시에
+      // 처음 여는 경우는 없으므로 실제로 발생하지 않는다.
       mkdirSync(join(workspaceDir(id), 'sessions'), { recursive: true });
-      // workspace.json 정상 초기화 — folderFsPath를 workspacePath로 사용.
-      // 호스트가 별도 createWorkspace를 호출하지 않아도(예: 익스텐션) 다음 readWorkspaceMeta가
-      // 빈 객체를 보지 않게 함. 옛 schema 흡수 경로는 readWorkspaceMeta의 repair fallback이 처리.
       const now = new Date().toISOString();
       const meta: WorkspaceMeta = {
         workspaceId: id,
@@ -321,7 +286,6 @@ export function createWorkspaceStore(
         primarySessionId: null,
         compactionInProgress: null,
       };
-      const metaPath = workspaceMetaPath(id);
       const tmp = `${metaPath}.${process.pid}.${Date.now()}.tmp`;
       writeFileSync(tmp, JSON.stringify(meta, null, 2), 'utf8');
       renameSync(tmp, metaPath);
@@ -335,43 +299,50 @@ export function createWorkspaceStore(
 
     // ── workspace 메타 ──
     async createWorkspace(args) {
-      const workspaceId = randomUUID();
-      const now = new Date().toISOString();
-      const sessions: SessionMeta[] = [];
-      if (args.initialModel) {
-        sessions.push({
-          sessionId: randomUUID(),
-          model: args.initialModel,
-          modelSessionId: null,
-          createdAt: now,
-          closedAt: null,
-          kind: args.initialKind ?? 'cli',
-        });
-      }
-      const meta: WorkspaceMeta = {
-        workspaceId,
-        title: args.title ?? args.workspacePath.split('/').pop() ?? 'Workspace',
-        createdAt: now,
-        updatedAt: now,
-        workspacePath: args.workspacePath,
-        sessions,
-        primarySessionId: sessions[0]?.sessionId ?? null,
-        compactionInProgress: null,
-      };
-      await fsp.mkdir(sessionsDir(workspaceId), { recursive: true });
-      for (const s of sessions) {
-        await fsp.mkdir(sessionDir(workspaceId, s.sessionId), { recursive: true });
-      }
-      await writeWorkspaceMetaAtomic(meta);
-      // workspaces.json folder→id 매핑도 같이 채워 두 진입점(createWorkspace,
-      // getOrCreateWorkspaceId) 사이 storage 일관성 유지. 기존 매핑이 있으면 보존 —
-      // 같은 폴더로 두 번 createWorkspace 부르면 첫 매핑만 유효 (정책: 중복 생성은 호스트 책임).
-      const map = loadMap();
-      if (!map[args.workspacePath]) {
-        map[args.workspacePath] = workspaceId;
-        saveMap(map);
-      }
-      return meta;
+      const workspaceId = deterministicWorkspaceId(args.workspacePath);
+      return withWorkspaceLock(workspaceId, async () => {
+        // 결정적 ID — 같은 폴더로 재호출되면 기존 워크스페이스에 세션만 추가.
+        // (데스크탑 V-23 중복 가드가 코어로 흡수됨)
+        let meta: WorkspaceMeta;
+        try {
+          meta = await readWorkspaceMeta(workspaceId);
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+          // 파일 없음(ENOENT)만 새 메타 생성. 손상 파일(JSON 파싱 실패 등)은 re-throw —
+          // 빈 메타로 덮어써 기존 sessions[]를 날리지 않는다.
+          const now = new Date().toISOString();
+          meta = {
+            workspaceId,
+            title: args.title ?? args.workspacePath.split('/').pop() ?? 'Workspace',
+            createdAt: now,
+            updatedAt: now,
+            workspacePath: args.workspacePath,
+            sessions: [],
+            primarySessionId: null,
+            compactionInProgress: null,
+          };
+        }
+
+        if (args.initialModel) {
+          const now = new Date().toISOString();
+          const session: SessionMeta = {
+            sessionId: randomUUID(),
+            model: args.initialModel,
+            modelSessionId: null,
+            createdAt: now,
+            closedAt: null,
+            kind: args.initialKind ?? 'cli',
+          };
+          await fsp.mkdir(sessionDir(workspaceId, session.sessionId), { recursive: true });
+          meta.sessions.push(session);
+          if (!meta.primarySessionId) meta.primarySessionId = session.sessionId;
+        }
+
+        meta.updatedAt = new Date().toISOString();
+        await fsp.mkdir(sessionsDir(workspaceId), { recursive: true });
+        await writeWorkspaceMetaAtomic(meta);
+        return meta;
+      });
     },
 
     loadWorkspace: readWorkspaceMeta,
@@ -386,15 +357,6 @@ export function createWorkspaceStore(
           updatedAt: new Date().toISOString(),
         };
         await writeWorkspaceMetaAtomic(next);
-        // workspacePath 변경 시 workspaces.json 매핑도 같은 락 안에서 갱신.
-        if (patch.workspacePath !== undefined && patch.workspacePath !== meta.workspacePath) {
-          const map = loadMap();
-          for (const [k, v] of Object.entries(map)) {
-            if (v === workspaceId) delete map[k];
-          }
-          map[patch.workspacePath] = workspaceId;
-          saveMap(map);
-        }
       });
     },
 
@@ -405,11 +367,6 @@ export function createWorkspaceStore(
     async deleteWorkspace(workspaceId) {
       return withWorkspaceLock(workspaceId, async () => {
         await fsp.rm(workspaceDir(workspaceId), { recursive: true, force: true });
-        const map = loadMap();
-        for (const [k, v] of Object.entries(map)) {
-          if (v === workspaceId) delete map[k];
-        }
-        saveMap(map);
       });
     },
 

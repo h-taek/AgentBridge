@@ -17,7 +17,10 @@ describe('TurnRecorder', () => {
   });
 
   afterEach(async () => {
-    await fs.rm(storagePath, { recursive: true, force: true });
+    // dispose()는 turn flush를 fire-and-forget으로 띄운다(onTurnFlushed → updateSessionMeta).
+    // V-12에서 그 갱신이 파일 락(.lock 디렉토리 생성/삭제)을 거치므로, 삭제 도중 새 항목이
+    // 생겨 ENOTEMPTY가 날 수 있다 — maxRetries로 흡수.
+    await fs.rm(storagePath, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   });
 
   it('constructs and disposes cleanly', () => {
