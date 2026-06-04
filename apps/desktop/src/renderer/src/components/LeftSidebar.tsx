@@ -1,5 +1,11 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import type { CliKind, EnvProbeResult, WorkspaceListEntry, WorkspaceMeta } from '@shared/ipc'
+import type {
+  CliKind,
+  EnvProbeResult,
+  SessionMeta,
+  WorkspaceListEntry,
+  WorkspaceMeta
+} from '@shared/ipc'
 import {
   ChevronRightIcon,
   FolderIcon,
@@ -337,17 +343,18 @@ export function LeftSidebar({
               const sessions = sortSessionsByLastChatted(sessionsRaw)
 
               const isEmpty = sessions.length === 0
-              const primarySession =
-                sessions.find((s) => s.sessionId === w.primarySessionId) ?? sessions[0] ?? null
-              const primaryIsShell = (primarySession?.kind ?? 'cli') === 'shell'
-              const cliPresent = primarySession
-                ? primaryIsShell ||
-                  env?.clis.find((c) => c.kind === primarySession.model)?.found === true
-                : false
-              // shell 세션은 매번 새 zsh spawn — modelSessionId 무관하게 resume 가능.
-              const canResume = primaryIsShell || primarySession?.modelSessionId != null
-              // 빈 워크스페이스는 세션 spawn 없이 우 사이드바 메타만 표시 — 항상 열기 가능.
-              const canOpen = !isOpen && !busy && (isEmpty || (cliPresent && canResume))
+              // resume 가능 여부는 main이 세션별로 계산해 내려준 집합으로 판정(대표 1개가 아니라
+              // 세션별). claude는 modelSessionId 없이 sessionId로 resume하므로 여기 포함된다.
+              const resumableSet = new Set(w.resumableSessionIds ?? [])
+              const sessionResumable = (s: SessionMeta): boolean =>
+                (s.kind ?? 'cli') === 'shell' || resumableSet.has(s.sessionId)
+              const sessionCliPresent = (s: SessionMeta): boolean =>
+                (s.kind ?? 'cli') === 'shell' ||
+                env?.clis.find((c) => c.kind === s.model)?.found === true
+              // 워크스페이스는 resume 가능한 세션이 하나라도 있으면 열 수 있다(대표가 막혀도
+              // 다른 세션으로 진입). 빈 워크스페이스는 항상 열기 가능(새 세션 추가용).
+              const anyResumable = sessions.some((s) => sessionResumable(s) && sessionCliPresent(s))
+              const canOpen = !isOpen && !busy && (isEmpty || anyResumable)
 
               return (
                 <li
@@ -403,13 +410,9 @@ export function LeftSidebar({
                         }}
                         disabled={!isOpen && !canOpen}
                         title={
-                          isEmpty
+                          isEmpty || anyResumable
                             ? w.workspacePath
-                            : !canResume
-                              ? '모델 native 세션 미영속화 — resume 불가'
-                              : !cliPresent
-                                ? `${primarySession?.model} CLI 미설치`
-                                : w.workspacePath
+                            : '이어갈 수 있는 세션이 없음 — 모든 세션이 native 미영속화/CLI 미설치'
                         }
                       >
                         {w.title}
@@ -503,10 +506,13 @@ export function LeftSidebar({
                         const isActive = isOpen && s.sessionId === openSessionId
                         const isClosed = s.closedAt !== null
                         const isShellSess = (s.kind ?? 'cli') === 'shell'
-                        // shell 세션은 어댑터 무관 — 워크스페이스 자체가 열릴 수 있으면 항상 활성화 가능.
+                        // 세션별 판정 — 이 세션이 실제로 resume 가능하고 CLI가 있어야 클릭 허용.
+                        // (대표 세션이 막혀도 이어갈 수 있는 다른 세션은 개별로 클릭 가능)
+                        const sResumable = sessionResumable(s)
+                        const sCliPresent = sessionCliPresent(s)
                         const sessDisabled = isShellSess
-                          ? busy || (!isOpen && !canResume)
-                          : busy || (!isOpen && (!cliPresent || !canResume))
+                          ? busy || (!isOpen && !sResumable)
+                          : busy || (!isOpen && (!sCliPresent || !sResumable))
                         const isEditing = editing === `sess:${s.sessionId}`
                         const displayName =
                           s.title?.trim() || (isShellSess ? '터미널' : MODEL_LABEL[s.model])
@@ -538,10 +544,10 @@ export function LeftSidebar({
                               isShellSess
                                 ? '내장 터미널 (zsh)'
                                 : !isOpen
-                                  ? !canResume
+                                  ? !sResumable
                                     ? '모델 native 세션 미영속화 — resume 불가'
-                                    : !cliPresent
-                                      ? `${primarySession ? MODEL_LABEL[primarySession.model] : ''} CLI 미설치`
+                                    : !sCliPresent
+                                      ? `${MODEL_LABEL[s.model]} CLI 미설치`
                                       : `워크스페이스 열기 + ${MODEL_LABEL[s.model]} 활성`
                                   : MODEL_LABEL[s.model]
                             }

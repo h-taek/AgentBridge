@@ -281,8 +281,9 @@ export async function listWorkspaces(): Promise<WorkspaceListEntry[]> {
   for (const e of entries) {
     try {
       const meta = await loadWorkspace(e.workspaceId)
-      // activeSessionCount는 sessionActive 모듈이 메모리 derive. 여기선 0 표시.
-      out.push({ ...meta, activeSessionCount: 0 })
+      // activeSessionCount / resumableSessionIds는 IPC 경계(handleWorkspacesList)에서 채운다.
+      // 여기선 placeholder.
+      out.push({ ...meta, activeSessionCount: 0, resumableSessionIds: [] })
     } catch {
       /* 깨진 메타는 무시 */
     }

@@ -260,7 +260,15 @@ function App(): React.JSX.Element {
       // 한 워크스페이스 = 한 윈도우 정책 — 다른 윈도우가 이미 잡고 있으면 그쪽 focus 후 자기는 무동작.
       const claim = await window.agentbridge.window.claimWorkspace({ workspaceId: w.workspaceId })
       if (claim.outcome === 'focused-other') return
-      const sessions = w.sessions
+      // 워크스페이스 열기 = active(닫히지 않은) 세션 + 사용자가 명시한 세션만 spawn.
+      // 닫힌 옛 세션까지 전부 spawn하면(마이그레이션으로 28개까지 누적) 멈추므로 탭바와 동일하게
+      // active만. resume 불가 세션은 제외 — 클릭이 막혀 있고 "새로 시작"시키지 않기 위함.
+      const resumableSet = new Set(w.resumableSessionIds ?? [])
+      const sessions = w.sessions.filter(
+        (s) =>
+          (s.closedAt === null || s.sessionId === targetSessionId) &&
+          ((s.kind ?? 'cli') === 'shell' || resumableSet.has(s.sessionId))
+      )
       if (sessions.length === 0) {
         // 빈 워크스페이스 — 자동 삭제하지 않고 (사용자가 + 로 세션 추가 가능),
         // 활성만 비워둠.

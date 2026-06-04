@@ -1,6 +1,7 @@
 import { ipcMain } from 'electron'
 import type { IpcMainInvokeEvent } from 'electron'
 import { promises as fs } from 'fs'
+import { homedir } from 'os'
 import * as path from 'path'
 import log from 'electron-log/main'
 import {
@@ -63,13 +64,66 @@ import {
 // L1: sessions:create/open이 PTY spawn까지 통합. 다중 active session 지원.
 // 기존 threads/handoff 핸들러는 그대로 — L 청크가 UI 전환 후 deprecate.
 
+// 세션을 resume할 native 대화 파일이 실재하는지 판정. claude는 sessionId 자체가 native id이므로
+// modelSessionId가 비어 있어도 jsonl만 있으면 resume 가능 — UI canResume이 modelSessionId만 보던
+// 버그(claude 워크스페이스 통째 잠김)의 근본 교정.
+async function claudeJsonlExists(sessionId: string): Promise<boolean> {
+  const root = path.join(homedir(), '.claude', 'projects')
+  let dirs: string[]
+  try {
+    dirs = await fs.readdir(root)
+  } catch {
+    return false
+  }
+  for (const d of dirs) {
+    try {
+      await fs.access(path.join(root, d, `${sessionId}.jsonl`))
+      return true
+    } catch {
+      /* 다음 project 디렉토리 */
+    }
+  }
+  return false
+}
+
+// claude의 resume 키는 jsonl이 실재하는 id. 두 규약을 다 본다:
+//   - 익스텐션/마이그레이션 세션: jsonl이 AgentBridge sessionId로 명명
+//   - 옛 데스크탑 세션: jsonl이 modelSessionId(claude가 발급한 uuid)로 명명
+// 우선순위는 sessionId(통일 규약) → modelSessionId. 둘 다 없으면 resume 불가.
+async function resolveClaudeResumeId(s: SessionMeta): Promise<string | null> {
+  if (await claudeJsonlExists(s.sessionId)) return s.sessionId
+  if (s.modelSessionId && (await claudeJsonlExists(s.modelSessionId))) return s.modelSessionId
+  return null
+}
+
+async function isSessionResumable(s: SessionMeta): Promise<boolean> {
+  if ((s.kind ?? 'cli') === 'shell') return true // 매번 새 zsh — 항상 열기 가능
+  if (s.model === 'claude') return (await resolveClaudeResumeId(s)) !== null
+  // codex/agy는 modelSessionId(=CLI native thread id)로만 resume — 캡처 안 됐으면 새로 시작뿐
+  return s.modelSessionId != null
+}
+
+async function computeResumableSessionIds(sessions: SessionMeta[]): Promise<string[]> {
+  const out: string[] = []
+  await Promise.all(
+    sessions.map(async (s) => {
+      if (await isSessionResumable(s)) out.push(s.sessionId)
+    })
+  )
+  return out
+}
+
 async function handleWorkspacesList(): Promise<WorkspaceListEntry[]> {
   const list = await listWorkspaces()
   // activeSessionCount는 메모리 derive — sessionActive 모듈에서 카운트.
-  return list.map((w) => ({
-    ...w,
-    activeSessionCount: listActiveSessionsInWorkspace(w.workspaceId).length
-  }))
+  // resumableSessionIds는 디스크 derive — 세션별 native 파일 실재 여부.
+  return Promise.all(
+    list.map(async (w) => ({
+      ...w,
+      activeSessionCount: listActiveSessionsInWorkspace(w.workspaceId).length,
+      resumableSessionIds: await computeResumableSessionIds(w.sessions)
+    }))
+  )
 }
 
 async function handleWorkspacesGet(_e: unknown, workspaceId: string): Promise<WorkspaceMeta> {
@@ -390,13 +444,21 @@ async function spawnAndAttachSession(
     await updateWorkspaceMeta(workspaceId, { codexHookTrust: 'pending' })
   }
 
+  // resume 키 결정. claude는 sessionId 자체가 native id(익스텐션/통일 규약)일 수도, modelSessionId
+  // (옛 데스크탑 규약)일 수도 있어 jsonl이 실재하는 쪽을 쓴다. 없으면 null → claude가 새 세션 발급.
+  // codex/agy는 modelSessionId(=CLI thread id)가 resume 키.
+  const adapterSessionId =
+    session.model === 'claude'
+      ? await resolveClaudeResumeId(session)
+      : session.modelSessionId
+
   // IR 주입은 hook 시스템 — argv 기반 spawn-time 주입은 폐기됨.
   // TurnRecorder는 spawn 직후 ptySessionId가 결정되면 등록 — onData 콜백 closure가 ptyIdRef로 lookup.
   const ptyIdRef: { current: string | null } = { current: null }
   const pty = await adapter.spawnInteractive(
     {
       workspaceId,
-      sessionId: session.modelSessionId,
+      sessionId: adapterSessionId,
       modelSessionId: session.modelSessionId ?? undefined,
       cwd: ws.workspacePath,
       cols: opts.cols,

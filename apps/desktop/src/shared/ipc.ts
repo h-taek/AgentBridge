@@ -169,6 +169,12 @@ export type WorkspaceCreateResult = {
 export type WorkspaceListEntry = WorkspaceMeta & {
   // 메모리 derive — 활성 PTY 보유한 sessions 수. 디스크 메타에 저장 안 함.
   activeSessionCount: number
+  // 디스크 derive — 모델 native 대화 파일이 실재해 resume 가능한 세션 id 집합.
+  //   claude: ~/.claude/projects/*/<sessionId>.jsonl 존재 (claude는 sessionId 자체가 native id)
+  //   codex/agy: modelSessionId 캡처됨 (없으면 resume 키가 없어 새로 시작뿐 — 막는다)
+  //   shell: 항상 포함 (매번 새 zsh)
+  // resume 불가 세션은 UI에서 클릭을 막아 "새로 시작" 오동작을 방지한다.
+  resumableSessionIds: string[]
 }
 
 // 워크스페이스 안 새 session(=탭) 추가 + PTY spawn (L1 청크에서 PTY 통합).
