@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as pty from 'node-pty';
 import { randomBytes } from 'crypto';
-import { chmodSync } from 'fs';
+import { chmodSync, createWriteStream, type WriteStream } from 'fs';
 import { join } from 'path';
 import * as output from '../log/output';
 import { TurnRecorder } from '../core/turnRecorder';
@@ -10,6 +10,7 @@ import { getSessions, renameSession, deleteSession, setModelSessionId, type Sess
 import { captureNewThreadId } from '../core/cliAdapter/codexSessionWatcher';
 import { watchForNewConversationUuid } from '../core/cliAdapter/agyResume';
 import * as workspaceStore from '../core/workspaceStore';
+import { acquireOwnership, updateOwnerSize, releaseOwnership } from '@agentbridge/core';
 import { CLI_DISPLAY_NAME, type CliKind } from '../shared/types';
 import { quoteCommandLine } from '../shared/shellQuote';
 import type { SpawnOptions } from '../pty/types';
@@ -42,6 +43,8 @@ export class ChatPanel {
     return f;
   })();
   private disposed = false;
+  private replayStream: WriteStream | null = null;
+  private ownerDir: string | null = null;
   private deletedExternally = false;
   private modelSessionWatchAbort: AbortController | null = null;
   private readonly opts: SpawnOptions;
@@ -133,6 +136,11 @@ export class ChatPanel {
           try {
             this.ptyProcess?.resize(msg.cols, msg.rows);
           } catch { /* pty may have exited */ }
+          if (this.ownerDir) {
+            void updateOwnerSize(this.ownerDir, msg.cols, msg.rows).catch(() => {
+              /* best-effort */
+            });
+          }
           break;
         case 'getSessions':
           this.handleGetSessions();
@@ -229,7 +237,24 @@ export class ChatPanel {
         );
       }
 
+      // replay.log + owner.json — 두 앱이 같은 세션 디렉토리(V-12 결정적 ID)를 공유하므로
+      // 데스크탑과 동일한 raw replay.log를 기록하고, 이 세션이 *익스텐션에서 라이브*임을 표시.
+      if (this.opts.workspaceId && this.opts.sessionId) {
+        this.ownerDir = workspaceStore.getSessionDir(this.opts.workspaceId, this.opts.sessionId);
+        const replayLogPath = join(this.ownerDir, 'replay.log');
+        this.replayStream = createWriteStream(replayLogPath, { flags: 'a', encoding: 'utf8' });
+        this.replayStream.on('error', (err) => output.warn(`replay.log write error: ${String(err)}`));
+        void acquireOwnership(this.ownerDir, { app: 'extension', cols, rows }).catch((err) =>
+          output.warn(`owner.json acquire 실패: ${String(err)}`),
+        );
+      }
+
       this.ptyProcess.onData((data) => {
+        // replay.log: RAW (필터 전 원본 — 데스크탑 ptySession과 동일 규약). 두 앱이 같은
+        // replay.log를 써야 어느 쪽 세션이든 상대가 미러링할 수 있다 (V-12 / Plan 2).
+        if (this.replayStream && !this.replayStream.destroyed) {
+          this.replayStream.write(data);
+        }
         const filtered = this.displayFilter.filter(data);
         this.recorder?.onAssistantData(filtered);
         if (!this.disposed && filtered) {
@@ -242,6 +267,15 @@ export class ChatPanel {
       this.ptyProcess.onExit(({ exitCode, signal }) => {
         output.log(`ChatPanel PTY exited: code=${exitCode} signal=${signal ?? 'none'}`);
         this.modelSessionWatchAbort?.abort();
+        if (this.replayStream && !this.replayStream.destroyed) {
+          this.replayStream.end();
+          this.replayStream = null;
+        }
+        if (this.ownerDir) {
+          void releaseOwnership(this.ownerDir).catch(() => {
+            /* best-effort */
+          });
+        }
         if (!this.disposed) {
           this.panel.webview.postMessage({
             type: 'output',
@@ -403,6 +437,17 @@ export class ChatPanel {
     this.modelSessionWatchAbort?.abort();
     this.recorder?.dispose();
     this.displayFilter.dispose();
+
+    if (this.replayStream && !this.replayStream.destroyed) {
+      this.replayStream.end();
+      this.replayStream = null;
+    }
+    if (this.ownerDir) {
+      void releaseOwnership(this.ownerDir).catch(() => {
+        /* best-effort */
+      });
+      this.ownerDir = null;
+    }
 
     if (this.ptyProcess) {
       try { this.ptyProcess.kill(); } catch { /* already exited */ }
