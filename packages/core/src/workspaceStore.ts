@@ -91,6 +91,7 @@ export interface WorkspaceStore {
   getGlobalStoragePath(): string;
   getOrCreateWorkspaceId(folderFsPath: string): string;
   getWorkspacePath(workspaceId: string): string;
+  getSessionDir(workspaceId: string, sessionId: string): string;
 
   // workspace 메타
   createWorkspace(args: { workspacePath: string; title?: string; initialModel?: CliKind; initialKind?: SessionKind }): Promise<WorkspaceMeta>;
@@ -296,6 +297,15 @@ export function createWorkspaceStore(opts: WorkspaceStoreOptions = {}): Workspac
 
     getWorkspacePath(workspaceId: string): string {
       return workspaceDir(workspaceId);
+    },
+
+    getSessionDir(workspaceId: string, sessionId: string): string {
+      // 호출처 제공 id는 path.join에 그대로 쓰이므로 UUID 형식 강제 — traversal 방어.
+      // (workspaceId는 sessionDir → workspaceDir에서 이미 검증)
+      if (!UUID_RE.test(sessionId)) {
+        throw new Error(`workspaceStore.getSessionDir: invalid sessionId "${sessionId}"`);
+      }
+      return sessionDir(workspaceId, sessionId);
     },
 
     // ── workspace 메타 ──

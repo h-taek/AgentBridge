@@ -16,3 +16,7 @@ export function getOrCreateWorkspaceId(folderFsPath: string): string {
 export function getWorkspacePath(workspaceId: string): string {
   return getWorkspaceStore().getWorkspacePath(workspaceId);
 }
+
+export function getSessionDir(workspaceId: string, sessionId: string): string {
+  return getWorkspaceStore().getSessionDir(workspaceId, sessionId);
+}
