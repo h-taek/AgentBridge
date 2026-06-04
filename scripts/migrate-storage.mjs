@@ -88,6 +88,45 @@ function listOldWorkspaces() {
 
 // ── 병합 유틸 ─────────────────────────────────────────────────────────────
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// 옛 익스텐션 분리 스키마(sessions.json)를 코어 SessionMeta 형태로 변환.
+// 코어 workspaceStore.ts의 tryReadLegacySessions와 동일한 매핑.
+function readLegacySessionsJson(dir) {
+  const p = path.join(dir, 'sessions.json');
+  if (!fs.existsSync(p)) return [];
+  let arr;
+  try {
+    arr = JSON.parse(fs.readFileSync(p, 'utf8'));
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(arr)) return [];
+  const now = new Date().toISOString();
+  const out = [];
+  for (const s of arr) {
+    if (!s || typeof s !== 'object') continue;
+    if (typeof s.sessionId !== 'string' || !UUID_RE.test(s.sessionId)) continue;
+    if (typeof s.model !== 'string') continue;
+    out.push({
+      sessionId: s.sessionId,
+      model: s.model,
+      modelSessionId: typeof s.modelSessionId === 'string' ? s.modelSessionId : null,
+      createdAt: typeof s.createdAt === 'string' ? s.createdAt : now,
+      closedAt:
+        s.active === false
+          ? typeof s.lastActiveAt === 'string'
+            ? s.lastActiveAt
+            : now
+          : null,
+      title: typeof s.name === 'string' ? s.name : undefined,
+      kind: 'cli',
+      lastChattedAt: typeof s.lastActiveAt === 'string' ? s.lastActiveAt : undefined,
+    });
+  }
+  return out;
+}
+
 function turnSortKey(line) {
   try {
     const obj = JSON.parse(line);
@@ -173,8 +212,31 @@ function main() {
       }
     }
 
-    // 3) workspace.json — sessions[] 병합 (sessionId 충돌 없음 — 전부 랜덤 UUID였음)
-    const allSessions = group.flatMap((g) => (Array.isArray(g.meta.sessions) ? g.meta.sessions : []));
+    // 3) workspace.json — sessions[] 병합. 세 소스를 sessionId 기준 dedup(먼저 본 것 우선):
+    //    (a) 기존 새 workspace.json sessions[] — 재실행 시 마이그레이션 이후 추가분 보존(멱등)
+    //    (b) 옛 workspace.json sessions[] — 정상 스키마(modelSessionId 보유), richest
+    //    (c) 옛 sessions.json — 분리 스키마. {}-워크스페이스(workspace.json={})는 세션이
+    //        여기에만 있어 (b)가 비므로, 이걸 병합해야 세션이 살아난다. 런타임 repair는
+    //        workspace.json이 {}일 때만 발동하므로 마이그레이션이 직접 흡수해야 함.
+    const seen = new Set();
+    const allSessions = [];
+    const pushUnique = (s) => {
+      if (s && typeof s.sessionId === 'string' && !seen.has(s.sessionId)) {
+        seen.add(s.sessionId);
+        allSessions.push(s);
+      }
+    };
+    const existingNewMeta = path.join(newDir, 'workspace.json');
+    if (fs.existsSync(existingNewMeta)) {
+      try {
+        const em = JSON.parse(fs.readFileSync(existingNewMeta, 'utf8'));
+        if (Array.isArray(em.sessions)) em.sessions.forEach(pushUnique);
+      } catch {
+        /* 손상 시 무시 — 아래 소스로 복원 */
+      }
+    }
+    for (const g of group) (Array.isArray(g.meta.sessions) ? g.meta.sessions : []).forEach(pushUnique);
+    for (const g of group) readLegacySessionsJson(g.dir).forEach(pushUnique);
     const newest = group.slice().sort((a, b) => ((a.meta.updatedAt ?? '') < (b.meta.updatedAt ?? '') ? 1 : -1))[0];
     const now = new Date().toISOString();
     const newMeta = {
@@ -191,17 +253,12 @@ function main() {
     fs.writeFileSync(path.join(newDir, 'workspace.json'), JSON.stringify(newMeta, null, 2), 'utf8');
 
     // 4) sessions/<sid>/ 디렉토리 + archive/ + settings/ 복사
+    // (sessions.json 자체는 복사하지 않는다 — 위 3)에서 sessions[]로 직접 병합했으므로
+    //  불필요하고, 옆에 남으면 혼동만 준다.)
     for (const g of group) {
       copyDirRecursive(path.join(g.dir, 'sessions'), path.join(newDir, 'sessions'));
       copyDirRecursive(path.join(g.dir, 'archive'), path.join(newDir, 'archive'));
       copyDirRecursive(path.join(g.dir, 'settings'), path.join(newDir, 'settings'));
-      // 옛 분리 스키마({}): sessions.json이 워크스페이스 루트에 있는 경우 복사.
-      // 런타임 readWorkspaceMeta의 repair fallback이 이걸 흡수해 세션까지 복구된다.
-      const oldSessionsJson = path.join(g.dir, 'sessions.json');
-      const newSessionsJson = path.join(newDir, 'sessions.json');
-      if (fs.existsSync(oldSessionsJson) && !fs.existsSync(newSessionsJson)) {
-        fs.copyFileSync(oldSessionsJson, newSessionsJson);
-      }
     }
     merged++;
   }
