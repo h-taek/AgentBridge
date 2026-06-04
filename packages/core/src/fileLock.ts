@@ -24,11 +24,14 @@ interface LockMeta {
   acquiredAt: number;
 }
 
-function isPidAlive(pid: number): boolean {
+export function isPidAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;
   } catch {
+    // ESRCH = 없는 pid. EPERM = pid는 존재하나 다른 uid 소유(signal 불가).
+    // 이 코드는 자기 pid만 기록하므로 EPERM은 사실상 발생 안 함 — 발생해도
+    // "우리 것이 아닌 살아있는 pid"이므로 소유 없음(false) 처리가 맞다.
     return false;
   }
 }
