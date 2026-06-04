@@ -28,6 +28,8 @@ export type SpawnInteractiveResult = CliSpawnInteractiveResult
 // 공개 IPC `cli:spawn-interactive`는 hooks 없이 호출되고, threads:* handler가 thread context를 묶는다.
 export type SpawnInteractiveHooks = {
   replayLogPath?: string
+  // 세션 디렉토리 절대 경로 — ptySession이 owner.json 수명주기에 사용 (Plan 2). 어댑터는 그대로 전달.
+  ownerDir?: string
   onData?: (data: string) => void
   // ptySessionId가 info에 포함됨 — handoff:commit이 같은 contextId에 새 PTY를 등록한 후 직전
   // PTY의 onExit 도착 race를 회피하려면 호출자가 *active 매핑이 자기 ptySessionId일 때만 clear*

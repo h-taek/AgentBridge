@@ -467,6 +467,7 @@ async function spawnAndAttachSession(
     event.sender,
     {
       replayLogPath: sessionPaths.replayLog,
+      ownerDir: sessionPaths.dir,
       onData: (data): void => {
         void touchWorkspace(workspaceId)
         if (ptyIdRef.current) onAssistantData(ptyIdRef.current, data)
@@ -613,6 +614,7 @@ async function spawnAndAttachShellSession(
     event.sender,
     {
       replayLogPath: sessionPaths.replayLog,
+      ownerDir: sessionPaths.dir,
       onData: (): void => {
         void touchWorkspace(workspaceId)
       },

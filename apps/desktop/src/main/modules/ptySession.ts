@@ -1,4 +1,5 @@
 import { spawn, IPty } from '@homebridge/node-pty-prebuilt-multiarch'
+import { acquireOwnership, updateOwnerSize, releaseOwnership } from '@agentbridge/core'
 import { randomUUID } from 'crypto'
 import { createWriteStream, type WriteStream } from 'fs'
 import type { WebContents } from 'electron'
@@ -20,6 +21,7 @@ type Session = {
   pty: IPty
   webContentsId: number
   replayStream: WriteStream | null
+  ownerDir: string | null
   onExit: ((info: PtyExitInfo) => void) | null
 }
 
@@ -31,6 +33,9 @@ const DEFAULT_ROWS = 30
 export type StartPtyHooks = {
   // 절대 경로. 있으면 PTY raw bytes를 append-only로 기록 (thread replay.log).
   replayLogPath?: string
+  // 절대 경로(세션 디렉토리). 있으면 spawn 시 owner.json 작성, resize 시 cols/rows 갱신,
+  // exit/kill 시 삭제 — 두 앱이 같은 세션을 동시에 라이브로 열지 못하게 하는 토대 (Plan 2).
+  ownerDir?: string
   // 매 chunk 도착 시 호출 — 외부 사이드 효과(예: thread updatedAt touch).
   onData?: (data: string) => void
   // 자연 종료 또는 kill 시 호출 — replay stream은 ptySession이 자체 close.
@@ -108,9 +113,19 @@ export function startPty(
     pty,
     webContentsId: sender.id,
     replayStream,
+    ownerDir: hooks.ownerDir ?? null,
     onExit: hooks.onExit ?? null
   }
   sessions.set(id, session)
+
+  // owner.json 작성 — 이 세션이 *데스크탑에서 라이브*임을 표시 (best-effort, fire-and-forget).
+  if (session.ownerDir) {
+    void acquireOwnership(session.ownerDir, {
+      app: 'desktop',
+      cols: req.cols ?? DEFAULT_COLS,
+      rows: req.rows ?? DEFAULT_ROWS
+    }).catch((err) => log.warn(`owner.json acquire 실패 (${id})`, err))
+  }
 
   pty.onData((data) => {
     dataByteCount += data.length
@@ -141,6 +156,11 @@ export function startPty(
     if (replayStream && !replayStream.destroyed) {
       replayStream.end()
     }
+    if (session.ownerDir) {
+      void releaseOwnership(session.ownerDir).catch((err) =>
+        log.warn(`owner.json release 실패 (${id})`, err)
+      )
+    }
     log.info('ptySession exit', {
       sessionId: id,
       exitCode,
@@ -169,7 +189,14 @@ export function writePty(sessionId: string, data: string): void {
 export function resizePty(sessionId: string, cols: number, rows: number): void {
   const s = sessions.get(sessionId)
   if (!s) return
-  s.pty.resize(Math.max(1, cols), Math.max(1, rows))
+  const safeCols = Math.max(1, cols)
+  const safeRows = Math.max(1, rows)
+  s.pty.resize(safeCols, safeRows)
+  if (s.ownerDir) {
+    void updateOwnerSize(s.ownerDir, safeCols, safeRows).catch(() => {
+      /* best-effort — 다음 resize에서 다시 시도됨 */
+    })
+  }
 }
 
 // architecture §7.4 — SIGTERM(grace 1초) → SIGKILL.
@@ -184,6 +211,11 @@ export function killPty(sessionId: string): void {
   sessions.delete(sessionId)
   if (s.replayStream && !s.replayStream.destroyed) {
     s.replayStream.end()
+  }
+  if (s.ownerDir) {
+    void releaseOwnership(s.ownerDir).catch((err) =>
+      log.warn(`owner.json release 실패 (${sessionId})`, err)
+    )
   }
   try {
     s.pty.kill('SIGTERM')
@@ -261,6 +293,11 @@ export function killAllForce(): void {
       } catch {
         /* noop */
       }
+    }
+    if (s.ownerDir) {
+      void releaseOwnership(s.ownerDir).catch(() => {
+        /* before-quit — best-effort, pid 사망으로 어차피 stale */
+      })
     }
     try {
       s.pty.kill('SIGKILL')
