@@ -10,7 +10,12 @@ import { getSessions, renameSession, deleteSession, setModelSessionId, type Sess
 import { captureNewThreadId } from '../core/cliAdapter/codexSessionWatcher';
 import { watchForNewConversationUuid } from '../core/cliAdapter/agyResume';
 import * as workspaceStore from '../core/workspaceStore';
-import { acquireOwnership, updateOwnerSize, releaseOwnership } from '@agentbridge/core';
+import {
+  acquireOwnership,
+  updateOwnerSize,
+  releaseOwnership,
+  readForeignOwner,
+} from '@agentbridge/core';
 import { CLI_DISPLAY_NAME, type CliKind } from '../shared/types';
 import { quoteCommandLine } from '../shared/shellQuote';
 import type { SpawnOptions } from '../pty/types';
@@ -120,7 +125,7 @@ export class ChatPanel {
     this.panel.webview.onDidReceiveMessage((msg) => {
       switch (msg.type) {
         case 'ready':
-          this.spawnPty(msg.cols ?? 120, msg.rows ?? 30);
+          void this.spawnPty(msg.cols ?? 120, msg.rows ?? 30);
           break;
         case 'log':
           output.log(`[webview] ${msg.data}`);
@@ -203,8 +208,25 @@ export class ChatPanel {
     this.panel.reveal(undefined, false);
   }
 
-  private spawnPty(cols: number, rows: number): void {
+  private async spawnPty(cols: number, rows: number): Promise<void> {
     const { command, args, cwd, env } = this.opts;
+
+    // 소유권 가드 (대화 분기 방지, core 공용) — 다른 프로세스(데스크탑/다른 호스트)가 이 세션을
+    // 라이브 소유 중이면 PTY를 띄우지 않는다. 상대가 닫으면 owner.json이 사라져 통과한다.
+    if (this.opts.workspaceId && this.opts.sessionId) {
+      const dir = workspaceStore.getSessionDir(this.opts.workspaceId, this.opts.sessionId);
+      const foreign = await readForeignOwner(dir);
+      if (foreign) {
+        const appName = foreign.app === 'desktop' ? '데스크탑' : '다른 익스텐션';
+        output.log(`ChatPanel PTY spawn 거부 — 외부 소유(${appName}, pid=${foreign.pid})`);
+        this.panel.webview.postMessage({
+          type: 'output',
+          data: `\r\n[AgentBridge] 이 세션은 ${appName}에서 사용 중입니다.\r\n상대 앱에서 세션을 닫은 뒤 이 탭을 닫았다 다시 여세요.\r\n`,
+        });
+        return;
+      }
+    }
+
     output.log(`ChatPanel PTY spawn: ${command} ${args.join(' ')} (${cols}x${rows})`);
 
     const ptyEnv = {

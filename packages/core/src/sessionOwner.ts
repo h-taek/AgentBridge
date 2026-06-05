@@ -106,6 +106,16 @@ export async function isSessionOwned(sessionDir: string): Promise<boolean> {
   return owner !== null && isPidAlive(owner.pid);
 }
 
+// *다른* 살아있는 프로세스가 이 세션을 라이브 소유 중이면 그 OwnerInfo, 아니면 null.
+// (owner.json 존재 + pid 생존 + pid≠우리 프로세스). 데스크탑·익스텐션 양쪽이 같은 판정으로
+// 외부 소유 세션 위에 PTY를 띄우는 것(대화 분기)을 막는 공용 가드. process.pid는 두 Node 호스트
+// 모두에서 자기 프로세스를 가리키므로 호스트 무관하게 동작한다.
+export async function readForeignOwner(sessionDir: string): Promise<OwnerInfo | null> {
+  const owner = await readOwnerUnlocked(sessionDir);
+  if (owner && isPidAlive(owner.pid) && owner.pid !== process.pid) return owner;
+  return null;
+}
+
 // ── 소유권 이전 파일 프리미티브 (핸드셰이크 로직은 2b) ──
 
 // 뷰어 → 소유 앱: "이 세션 넘겨줘" 요청 작성.
