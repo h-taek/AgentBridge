@@ -191,6 +191,11 @@ export type MirrorDataEvent = { sessionId: string; data: string }
 // mirror:ended — owner.json이 사라짐(소유 앱이 세션 종료/크래시). 배지 갱신 + 이어가기 가능(2b-2).
 export type MirrorEndedEvent = { sessionId: string }
 
+// transfer:request — 미러 뷰어가 "채팅 이어가기"를 누르면 호출. main이 transfer-request.json을
+// 작성해 라이브 소유 앱에 양보를 요청한다 (Plan 2b 이어가기). 소유 앱이 PTY를 정리해 owner.json이
+// 사라지면 뷰어는 기존 mirror:ended 신호로 감지해 resume-open한다.
+export type TransferRequestPayload = { workspaceId: string; sessionId: string }
+
 export type WorkspaceListEntry = WorkspaceMeta & {
   // 메모리 derive — 활성 PTY 보유한 sessions 수. 디스크 메타에 저장 안 함.
   activeSessionCount: number
@@ -703,7 +708,9 @@ export const IpcChannel = {
   // main → renderer: replay.log에 새로 append된 bytes.
   MirrorData: 'mirror:data',
   // main → renderer: owner.json 소멸(소유 앱 종료) 통보.
-  MirrorEnded: 'mirror:ended'
+  MirrorEnded: 'mirror:ended',
+  // renderer → main: "채팅 이어가기" — transfer-request.json 작성으로 소유 앱에 양보 요청.
+  TransferRequest: 'transfer:request'
 } as const
 
 export type IpcChannelName = (typeof IpcChannel)[keyof typeof IpcChannel]

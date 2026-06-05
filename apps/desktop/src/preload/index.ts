@@ -34,6 +34,7 @@ import type {
   MirrorStopRequest,
   MirrorDataEvent,
   MirrorEndedEvent,
+  TransferRequestPayload,
   IrLoadRequest,
   IrLoadResult,
   IrRefineRequest,
@@ -188,6 +189,11 @@ const agentbridge = {
         ipcRenderer.off(IpcChannel.MirrorEnded, handler)
       }
     }
+  },
+  transfer: {
+    // "채팅 이어가기" — 라이브 소유 앱에 양보 요청. owner.json 소멸은 mirror.onEnded로 감지.
+    request: (payload: TransferRequestPayload): Promise<void> =>
+      ipcRenderer.invoke(IpcChannel.TransferRequest, payload)
   },
   dialog: {
     pickWorkspace: (defaultPath?: string): Promise<string | null> =>
