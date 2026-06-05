@@ -1690,7 +1690,9 @@ details pre {
 }
 
 /* 읽기 전용 미러 배지 (Plan 2b) — 다른 프로세스가 소유한 세션을 미러로 볼 때 우상단 표시. */
-/* "다른 앱에서 사용 중" 플레이스홀더 — 외부 소유 세션은 PTY 없이 이 카드만 표시. */
+/* "다른 앱에서 사용 중" 플레이스홀더 — 외부 소유 세션은 PTY 없이 이 카드만 표시.
+ * .xterm-wrap은 스택에서 absolute로 겹쳐 쌓이고 비활성도 display 유지되므로(터미널 canvas의
+ * 불투명 배경에 의존), 이 카드는 직접 불투명 배경(#0c0c10)을 깔아 뒤 세션이 비치지 않게 한다. */
 .session-inuse {
   display: flex;
   flex-direction: column;
@@ -1700,6 +1702,7 @@ details pre {
   height: 100%;
   padding: 0 32px;
   text-align: center;
+  background: #0c0c10;
 }
 .session-inuse h2 {
   margin: 0;
