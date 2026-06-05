@@ -32,7 +32,9 @@ export * from './sessionRegistry';
 export * from './sessionOwner';
 export * from './fileTail';
 export * from './sessionMirror';
+export * from './sessionFileWatcher';
 export * from './ownerWatcher';
+export * from './transferWatcher';
 // attachmentStore는 데스크탑 미사용 (외부 경로 직접 입력 방식) — 2026-06-01 apps/extension/src/core/로 이전.
 // workspaceStore는 sessionRegistry/turnRecorder 통합과 함께 Phase 6에서 재정리 예정 (현재 데스크탑은
 // 자체 824줄 구현 중인데, 그 안 750줄이 sessionRegistry/lock/legacy 마이그레이션이고 진짜 본체는 ~50줄).
