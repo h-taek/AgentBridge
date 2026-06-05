@@ -518,8 +518,8 @@ export function LeftSidebar({
                         // (대표 세션이 막혀도 이어갈 수 있는 다른 세션은 개별로 클릭 가능)
                         const sResumable = sessionResumable(s)
                         const sCliPresent = sessionCliPresent(s)
-                        // 다른 프로세스가 라이브 소유 — 미러(읽기 전용)로 열린다. 클릭 가능.
-                        const isMirror = externallyOwned.has(s.sessionId)
+                        // 다른 프로세스가 라이브 소유 — "다른 앱에서 사용 중" 화면으로 열린다. 클릭 가능.
+                        const isExternallyOwned = externallyOwned.has(s.sessionId)
                         const sessDisabled = isShellSess
                           ? busy || (!isOpen && !sResumable)
                           : busy || (!isOpen && (!sCliPresent || !sResumable))
@@ -551,8 +551,8 @@ export function LeftSidebar({
                               }
                             }}
                             title={
-                              isMirror
-                                ? '다른 앱에서 사용 중 — 읽기 전용으로 열림'
+                              isExternallyOwned
+                                ? '다른 앱에서 사용 중'
                                 : isShellSess
                                   ? '내장 터미널 (zsh)'
                                   : !isOpen
@@ -591,13 +591,13 @@ export function LeftSidebar({
                             ) : (
                               <span className="ws-session-label">{displayName}</span>
                             )}
-                            {!isEditing && isMirror && (
+                            {!isEditing && isExternallyOwned && (
                               <span
                                 className="ws-session-mirror"
-                                title="다른 앱에서 사용 중 — 읽기 전용"
-                                aria-label="읽기 전용"
+                                title="다른 앱에서 사용 중"
+                                aria-label="다른 앱에서 사용 중"
                               >
-                                읽기 전용
+                                사용 중
                               </span>
                             )}
                             {isOpen && !isEditing && (

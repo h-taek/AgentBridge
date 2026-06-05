@@ -22,7 +22,6 @@ import {
   writePty
 } from './modules/ptySession'
 import { onUserInput, disposeAndFlushAll } from './modules/turnRecorder'
-import { stopAllMirrors } from './modules/mirrorWatcher'
 import { registerProbeDeps } from './modules/cliQuotaTracker'
 import { getCurrentUpdaterStatus, initAppUpdater, triggerManualCheck } from './modules/appUpdater'
 import {
@@ -41,11 +40,7 @@ import {
 } from './modules/sessionActive'
 import { registerIrHandlers } from './ipc/irHandlers'
 import { registerMemoryHandlers } from './ipc/memoryHandlers'
-import {
-  registerWorkspacesHandlers,
-  stopOwnerWatcher,
-  stopTransferWatcher
-} from './ipc/workspacesHandlers'
+import { registerWorkspacesHandlers, stopOwnerWatcher } from './ipc/workspacesHandlers'
 import { registerSettingsHandlers } from './ipc/settingsHandlers'
 import { registerAttachHandlers } from './ipc/attachHandlers'
 import { registerWindowHandlers } from './ipc/windowHandlers'
@@ -375,9 +370,7 @@ app.on('before-quit', (event) => {
     } catch (err) {
       log.warn('before-quit — recorder flush 실패 (non-fatal)', { err: String(err) })
     }
-    stopAllMirrors() // 읽기 전용 미러의 fs.watch 핸들·폴링 타이머 정리 (Plan 2b)
     stopOwnerWatcher() // 사이드바 동기화용 owner.json watcher 정리 (Plan 2b)
-    stopTransferWatcher() // 이어가기 양보용 transfer-request.json watcher 정리 (Plan 2b)
     killAllForce()
     app.quit() // isQuitting=true → 재진입 시 통과
   })()

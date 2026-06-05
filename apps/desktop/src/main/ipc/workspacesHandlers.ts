@@ -10,9 +10,6 @@ import {
   type HomeSubmitResult,
   type HookTrustEntry,
   type HookTrustSetRequest,
-  type MirrorStartRequest,
-  type MirrorStartResult,
-  type MirrorStopRequest,
   type SessionActivateResult,
   type SessionCloseRequest,
   type SessionCreateRequest,
@@ -21,8 +18,6 @@ import {
   type SessionOpenRequest,
   type SessionOwnerInfo,
   type SessionRenameRequest,
-  type TransferRequestPayload,
-  type TransferAbortPayload,
   type WorkspaceCreateRequest,
   type WorkspaceCreateResult,
   type WorkspaceListEntry,
@@ -34,23 +29,17 @@ import {
   readOwner,
   isOwnerAlive,
   createOwnerWatcher,
-  createTransferWatcher,
-  requestTransfer,
-  readTransferRequest,
-  clearTransferRequest,
   getStorageRoot,
-  type OwnerWatcher,
-  type TransferWatcher
+  type OwnerWatcher
 } from '@agentbridge/core'
 import { mkdirSync } from 'fs'
-import { startMirror, stopMirror } from '../modules/mirrorWatcher'
 import {
   broadcastToAll,
   closeWindowByWorkspaceId,
   refreshWindowTitle
 } from '../modules/windowManager'
 import { getAdapter } from '../modules/cliAdapter'
-import { killPty, killPtyAsync, listOwnedSessions, startPty, writePty } from '../modules/ptySession'
+import { killPty, killPtyAsync, startPty, writePty } from '../modules/ptySession'
 import { loadSettings, resolveDefaultBasePath } from '../modules/settings'
 import {
   addSessionToWorkspace,
@@ -197,64 +186,6 @@ export function stopOwnerWatcher(): void {
     ownerWatcher.stop()
     ownerWatcher = null
   }
-}
-
-// Plan 2b 이어가기(소유자측) — 다른 프로세스가 내 라이브 세션에 "이어가기"를 요청하면
-// transfer-request.json이 생긴다. 그 변화를 감시해, 내가 소유한 세션 중 요청 대상이 있으면
-// PTY를 정리(SIGTERM→SIGKILL)한다. onExit가 owner.json을 release하면 요청자는 mirror:ended로
-// 감지해 resume-open한다(자동 양보, §4.6 step 8).
-let transferWatcher: TransferWatcher | null = null
-
-async function yieldRequestedSessions(): Promise<void> {
-  for (const { sessionId, ownerDir } of listOwnedSessions()) {
-    let req
-    try {
-      req = await readTransferRequest(ownerDir)
-    } catch {
-      continue
-    }
-    // 내가 쓴 요청이 아니고(=다른 프로세스가 가져가려 함) 내 소유 세션이면 양보.
-    if (!req || req.pid === process.pid) continue
-    log.info('transfer 요청 수신 — 세션 양보', { sessionId, requestedBy: req.requestedBy })
-    // 먼저 요청 파일을 정리(debounce 재발화로 중복 kill 방지) 후 PTY 종료.
-    await clearTransferRequest(ownerDir).catch(() => {
-      /* best-effort */
-    })
-    killPty(sessionId) // onExit가 releaseOwnership → 요청자가 mirror:ended로 인수.
-  }
-}
-
-function startTransferWatcher(): void {
-  const root = getStorageRoot()
-  mkdirSync(root, { recursive: true })
-  transferWatcher = createTransferWatcher({
-    root,
-    onChange: () => {
-      void yieldRequestedSessions()
-    },
-    logger: log
-  })
-}
-
-export function stopTransferWatcher(): void {
-  if (transferWatcher) {
-    transferWatcher.stop()
-    transferWatcher = null
-  }
-}
-
-// transfer:request — 미러 뷰어(이 프로세스)가 "채팅 이어가기" 클릭. 라이브 소유 앱에 양보를
-// 요청하는 transfer-request.json을 작성한다. 소유 앱의 양보(owner.json 소멸)는 뷰어가
-// mirror:ended로 감지해 resume-open한다.
-async function handleTransferRequest(_e: unknown, req: TransferRequestPayload): Promise<void> {
-  const dir = getSessionPaths(req.workspaceId, req.sessionId).dir
-  await requestTransfer(dir, 'desktop')
-}
-
-// transfer:abort — 뷰어가 양보 대기 중 타임아웃/취소. 자기 transfer-request.json을 정리한다.
-async function handleTransferAbort(_e: unknown, req: TransferAbortPayload): Promise<void> {
-  const dir = getSessionPaths(req.workspaceId, req.sessionId).dir
-  await clearTransferRequest(dir)
 }
 
 async function handleWorkspacesCreate(
@@ -902,18 +833,6 @@ async function handleHooksTrustSet(_e: unknown, req: HookTrustSetRequest): Promi
   return { workspaceId: req.workspaceId, codex: next }
 }
 
-// mirror:start — 다른 프로세스가 소유한 세션의 읽기 전용 미러 시작 (replay 스냅샷 + 소유자 반환).
-async function handleMirrorStart(
-  event: IpcMainInvokeEvent,
-  req: MirrorStartRequest
-): Promise<MirrorStartResult> {
-  return startMirror(req.workspaceId, req.sessionId, event.sender)
-}
-
-function handleMirrorStop(_e: unknown, req: MirrorStopRequest): void {
-  stopMirror(req.workspaceId, req.sessionId)
-}
-
 export function registerWorkspacesHandlers(): void {
   ipcMain.handle(IpcChannel.WorkspacesList, handleWorkspacesList)
   ipcMain.handle(IpcChannel.WorkspacesGet, handleWorkspacesGet)
@@ -929,10 +848,5 @@ export function registerWorkspacesHandlers(): void {
   ipcMain.handle(IpcChannel.SessionsRename, handleSessionsRename)
   ipcMain.handle(IpcChannel.HooksTrustGet, handleHooksTrustGet)
   ipcMain.handle(IpcChannel.HooksTrustSet, handleHooksTrustSet)
-  ipcMain.handle(IpcChannel.MirrorStart, handleMirrorStart)
-  ipcMain.handle(IpcChannel.MirrorStop, handleMirrorStop)
-  ipcMain.handle(IpcChannel.TransferRequest, handleTransferRequest)
-  ipcMain.handle(IpcChannel.TransferAbort, handleTransferAbort)
   startOwnerWatcher()
-  startTransferWatcher()
 }

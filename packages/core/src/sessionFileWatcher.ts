@@ -2,8 +2,8 @@
 // 파일명(owner.json, transfer-request.json 등)의 변화만 골라 통지한다. replay.log append 등
 // 다른 파일 이벤트는 무시하고, 버스트(atomic write의 tmp→rename, 락 파일)는 debounce로 합친다.
 //
-// owner watcher / transfer watcher는 "어떤 파일을 보고 무엇을 할지"만 다르고 감시 메커니즘은
-// 동일하므로 이 공통 엔진을 공유한다 (createOwnerWatcher / createTransferWatcher 참고).
+// 파일명별 워처는 "어떤 파일을 보고 무엇을 할지"만 다르고 감시 메커니즘은 동일하므로
+// 이 공통 엔진을 공유한다 (createOwnerWatcher 참고).
 
 import { watch, type FSWatcher } from 'fs';
 

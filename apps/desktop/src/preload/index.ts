@@ -29,13 +29,6 @@ import type {
   MemoryPromoteArchiveResult,
   MemoryResetRequest,
   MemoryResetResult,
-  MirrorStartRequest,
-  MirrorStartResult,
-  MirrorStopRequest,
-  MirrorDataEvent,
-  MirrorEndedEvent,
-  TransferRequestPayload,
-  TransferAbortPayload,
   IrLoadRequest,
   IrLoadResult,
   IrRefineRequest,
@@ -168,37 +161,6 @@ const agentbridge = {
   },
   // Plan 2b — 다른 프로세스가 소유한 세션의 읽기 전용 미러. start가 replay 스냅샷+소유자를
   // 반환하고 이후 onData로 새 bytes를, onEnded로 소유 종료를 통보. PTY write/resize 없음.
-  mirror: {
-    start: (req: MirrorStartRequest): Promise<MirrorStartResult> =>
-      ipcRenderer.invoke(IpcChannel.MirrorStart, req),
-    stop: (req: MirrorStopRequest): Promise<void> => ipcRenderer.invoke(IpcChannel.MirrorStop, req),
-    onData: (sessionId: string, cb: (data: string) => void): Unsubscribe => {
-      const handler = (_: unknown, evt: MirrorDataEvent): void => {
-        if (evt.sessionId === sessionId) cb(evt.data)
-      }
-      ipcRenderer.on(IpcChannel.MirrorData, handler)
-      return () => {
-        ipcRenderer.off(IpcChannel.MirrorData, handler)
-      }
-    },
-    onEnded: (sessionId: string, cb: () => void): Unsubscribe => {
-      const handler = (_: unknown, evt: MirrorEndedEvent): void => {
-        if (evt.sessionId === sessionId) cb()
-      }
-      ipcRenderer.on(IpcChannel.MirrorEnded, handler)
-      return () => {
-        ipcRenderer.off(IpcChannel.MirrorEnded, handler)
-      }
-    }
-  },
-  transfer: {
-    // "채팅 이어가기" — 라이브 소유 앱에 양보 요청. owner.json 소멸은 mirror.onEnded로 감지.
-    request: (payload: TransferRequestPayload): Promise<void> =>
-      ipcRenderer.invoke(IpcChannel.TransferRequest, payload),
-    // 양보 대기 타임아웃/취소 — 자기 요청 정리.
-    abort: (payload: TransferAbortPayload): Promise<void> =>
-      ipcRenderer.invoke(IpcChannel.TransferAbort, payload)
-  },
   dialog: {
     pickWorkspace: (defaultPath?: string): Promise<string | null> =>
       ipcRenderer.invoke(IpcChannel.DialogPickWorkspace, defaultPath)

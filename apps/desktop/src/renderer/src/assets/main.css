@@ -1690,52 +1690,46 @@ details pre {
 }
 
 /* 읽기 전용 미러 배지 (Plan 2b) — 다른 프로세스가 소유한 세션을 미러로 볼 때 우상단 표시. */
-.xterm-readonly-badge {
-  position: absolute;
-  top: 8px;
-  right: 12px;
-  z-index: 5;
+/* "다른 앱에서 사용 중" 플레이스홀더 — 외부 소유 세션은 PTY 없이 이 카드만 표시. */
+.session-inuse {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 8px;
-  padding: 3px 6px 3px 10px;
-  border-radius: 999px;
-  font-size: 11px;
+  justify-content: center;
+  gap: 14px;
+  height: 100%;
+  padding: 0 32px;
+  text-align: center;
+}
+.session-inuse h2 {
+  margin: 0;
+  font-size: 18px;
   font-weight: 600;
   color: #c9d3ff;
-  background: rgba(122, 162, 247, 0.18);
-  border: 1px solid rgba(122, 162, 247, 0.4);
-  /* 컨테이너는 클릭 통과(터미널 영역 보호), 내부 버튼만 활성화. */
-  pointer-events: none;
 }
-.xterm-readonly-badge[data-ended='true'] {
-  color: #d7d7dd;
-  background: rgba(120, 120, 130, 0.18);
-  border-color: rgba(120, 120, 130, 0.4);
+.session-inuse p {
+  margin: 0;
+  max-width: 420px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #9aa0b4;
 }
-.xterm-resume-btn {
-  pointer-events: auto;
-  padding: 2px 10px;
-  border-radius: 999px;
-  font-size: 11px;
+.session-inuse-btn {
+  padding: 7px 18px;
+  border-radius: 8px;
+  font-size: 13px;
   font-weight: 600;
   color: #0b0e1a;
   background: #a9c0ff;
   border: none;
   cursor: pointer;
 }
-.xterm-resume-btn:hover:not(:disabled) {
+.session-inuse-btn:hover:not(:disabled) {
   background: #c2d2ff;
 }
-.xterm-resume-btn:disabled {
+.session-inuse-btn:disabled {
   opacity: 0.6;
   cursor: default;
-}
-.xterm-resume-error {
-  pointer-events: none;
-  max-width: 260px;
-  font-weight: 500;
-  color: #ffb4b4;
 }
 
 .xterm-loading {

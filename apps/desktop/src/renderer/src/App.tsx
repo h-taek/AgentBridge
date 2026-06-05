@@ -30,11 +30,11 @@ function App(): React.JSX.Element {
   const [openSessionId, setOpenSessionId] = useState<string | null>(null)
   const [openWorkspace, setOpenWorkspace] = useState<WorkspaceMeta | null>(null)
   const [attachments, setAttachments] = useState<Map<string, CliSpawnInteractiveResult>>(new Map())
-  // 다른 프로세스가 라이브 소유한 세션의 읽기 전용 미러(Plan 2b). attachments(라이브 PTY)와 배타적.
-  // sessionId → {소유 앱, 소유자 cols/rows, replay 스냅샷}. 미러는 spawn하지 않고 replay.log를 따라 그린다.
-  const [mirrors, setMirrors] = useState<
-    Map<string, { ownerApp: 'desktop' | 'extension'; cols: number; rows: number; replay: string }>
-  >(new Map())
+  // 다른 프로세스가 라이브 소유한 세션 — spawn하지 않고 "다른 앱에서 사용 중" 화면을 띄운다
+  // (대화 분기 방지). attachments(라이브 PTY)와 배타적. sessionId → 소유 앱.
+  const [ownedSessions, setOwnedSessions] = useState<Map<string, { ownerApp: 'desktop' | 'extension' }>>(
+    new Map()
+  )
   // 세션 spawn 시 hook 설치가 실패해 IR 주입이 비활성 상태로 진입한 경우 sessionId→reason.
   // SessionTabs가 이 set을 보고 해당 탭에 "메모리 비활성" 배지를 표시한다.
   // 워크스페이스 전환/세션 close 시 정리.
@@ -99,7 +99,7 @@ function App(): React.JSX.Element {
           removedWorkspaceId: evt.removedWorkspaceId
         })
         setAttachments(new Map())
-        setMirrors(new Map())
+        setOwnedSessions(new Map())
         setHookDisabledMap(new Map())
         setOpenWorkspaceId(null)
         setOpenSessionId(null)
@@ -287,7 +287,7 @@ function App(): React.JSX.Element {
           setAttachments(new Map())
           setHookDisabledMap(new Map())
         }
-        setMirrors(new Map())
+        setOwnedSessions(new Map())
         setOpenWorkspaceId(w.workspaceId)
         setOpenSessionId(null)
         try {
@@ -308,15 +308,12 @@ function App(): React.JSX.Element {
         if (openWorkspaceId && openWorkspaceId !== w.workspaceId) {
           await closeAllAttachments('workspace-switch')
           setAttachments(new Map())
-          setMirrors(new Map())
+          setOwnedSessions(new Map())
           setHookDisabledMap(new Map())
         }
         const newAttachments = new Map<string, CliSpawnInteractiveResult>()
         const ownedMap = new Map((w.externallyOwnedSessions ?? []).map((o) => [o.sessionId, o]))
-        const newMirrors = new Map<
-          string,
-          { ownerApp: 'desktop' | 'extension'; cols: number; rows: number; replay: string }
-        >()
+        const newOwned = new Map<string, { ownerApp: 'desktop' | 'extension' }>()
         let lastWorkspace: WorkspaceMeta | null = null
         const orphanIds: string[] = []
         // 세션별 try/catch — 한 세션 spawn 실패해도(예: 강제종료로 native 영속 안 된
@@ -324,21 +321,8 @@ function App(): React.JSX.Element {
         for (const s of sessions) {
           const owned = ownedMap.get(s.sessionId)
           if (owned) {
-            // 외부 프로세스가 라이브 소유 — 미러(읽기 전용)로 연다. spawn하지 않음(대화 분기 방지).
-            try {
-              const res = await window.agentbridge.mirror.start({
-                workspaceId: w.workspaceId,
-                sessionId: s.sessionId
-              })
-              newMirrors.set(s.sessionId, {
-                ownerApp: owned.app,
-                cols: owned.cols,
-                rows: owned.rows,
-                replay: res.replay
-              })
-            } catch (mErr) {
-              log.warn('mirror.start 실패', { sessionId: s.sessionId, err: String(mErr) })
-            }
+            // 외부 프로세스가 라이브 소유 — spawn하지 않고 "다른 앱에서 사용 중" 화면을 띄운다.
+            newOwned.set(s.sessionId, { ownerApp: owned.app })
             continue
           }
           try {
@@ -359,17 +343,17 @@ function App(): React.JSX.Element {
           }
         }
         setAttachments(newAttachments)
-        setMirrors(newMirrors)
+        setOwnedSessions(newOwned)
         setOpenWorkspaceId(w.workspaceId)
-        // focusSession이 orphan이면 첫 성공 session(라이브 또는 미러)으로 폴백
+        // focusSession이 orphan이면 첫 성공 session(라이브 또는 사용 중)으로 폴백
         const focusOk =
-          newAttachments.has(focusSession.sessionId) || newMirrors.has(focusSession.sessionId)
+          newAttachments.has(focusSession.sessionId) || newOwned.has(focusSession.sessionId)
         setOpenSessionId(
           focusOk
             ? focusSession.sessionId
-            : (Array.from(newAttachments.keys())[0] ?? Array.from(newMirrors.keys())[0] ?? null)
+            : (Array.from(newAttachments.keys())[0] ?? Array.from(newOwned.keys())[0] ?? null)
         )
-        // 전부 미러라 spawn된 라이브 세션이 없으면 lastWorkspace가 null — 메타를 직접 로드해
+        // 전부 외부 소유라 spawn된 라이브 세션이 없으면 lastWorkspace가 null — 메타를 직접 로드해
         // 터미널 스택이 가려지지 않게 한다(openWorkspace null이면 HomePane으로 떨어짐).
         if (lastWorkspace) {
           setOpenWorkspace(lastWorkspace)
@@ -433,7 +417,7 @@ function App(): React.JSX.Element {
       try {
         if (openWorkspaceId === w.workspaceId) {
           setAttachments(new Map())
-          setMirrors(new Map())
+          setOwnedSessions(new Map())
           setHookDisabledMap(new Map())
           setOpenWorkspaceId(null)
           setOpenSessionId(null)
@@ -552,8 +536,8 @@ function App(): React.JSX.Element {
 
   const handleSelectTab = useCallback(
     async (sessionId: string) => {
-      // 이미 attach된 라이브 세션 또는 열린 미러면 그냥 활성 전환(미러는 재spawn 금지 — 대화 분기 방지).
-      if (attachments.has(sessionId) || mirrors.has(sessionId)) {
+      // 이미 attach된 라이브 세션 또는 "사용 중" 세션이면 그냥 활성 전환(재spawn 금지 — 대화 분기 방지).
+      if (attachments.has(sessionId) || ownedSessions.has(sessionId)) {
         log.info('App.handleSelectTab — switch (already open)', {
           fromSessionId: openSessionId,
           toSessionId: sessionId
@@ -585,21 +569,39 @@ function App(): React.JSX.Element {
         setBusy(false)
       }
     },
-    [attachments, mirrors, openSessionId, openWorkspaceId, busy, reloadWorkspaces, applyHookStatus]
+    [attachments, ownedSessions, openSessionId, openWorkspaceId, busy, reloadWorkspaces, applyHookStatus]
   )
 
-  // 이어가기(Plan 2b) — 미러(읽기 전용)를 라이브로 인수. XtermView가 핸드셰이크(transfer.request +
-  // owner.json 소멸 대기)를 마친 뒤 호출한다. 여기선 mirror→attachment 전환 + resume-spawn만.
-  const handleResume = useCallback(
+  // "다시 열기" — 다른 앱에서 사용 중이던 세션을 라이브로 연다. 먼저 최신 소유 상태를 재확인해서,
+  // 상대가 아직 살아있으면 열지 않고(대화 분기 방지) "아직 사용 중" 안내만, 해제됐으면 sessions.open한다.
+  const handleReopen = useCallback(
     async (sessionId: string) => {
-      if (!openWorkspaceId) return
-      log.info('App.handleResume — 미러 인수', { sessionId })
+      if (!openWorkspaceId || busy) return
+      log.info('App.handleReopen', { sessionId })
+      setBusy(true)
       try {
+        const list = await window.agentbridge.workspaces.list()
+        setWorkspaces(list)
+        const wsEntry = list.find((w) => w.workspaceId === openWorkspaceId)
+        const stillOwned = (wsEntry?.externallyOwnedSessions ?? []).find(
+          (o) => o.sessionId === sessionId
+        )
+        if (stillOwned) {
+          // 아직 다른 앱에서 라이브 — 열지 않고 라벨만 갱신 + 안내.
+          setOwnedSessions((prev) => {
+            const next = new Map(prev)
+            next.set(sessionId, { ownerApp: stillOwned.app })
+            return next
+          })
+          setWorkspacesErr('아직 다른 앱에서 사용 중입니다. 상대 앱에서 세션을 닫은 뒤 다시 시도하세요.')
+          return
+        }
+        // 해제됨 — 라이브로 연다 (sessions.open = resume-spawn + owner.json 획득).
         const activated = await window.agentbridge.sessions.open({
           workspaceId: openWorkspaceId,
           sessionId
         })
-        setMirrors((prev) => {
+        setOwnedSessions((prev) => {
           const next = new Map(prev)
           next.delete(sessionId)
           return next
@@ -612,12 +614,14 @@ function App(): React.JSX.Element {
         applyHookStatus(activated.session.sessionId, activated.hookDisabledReason)
         setOpenSessionId(activated.session.sessionId)
         setOpenWorkspace(activated.workspace)
-        void reloadWorkspaces()
+        setWorkspacesErr(null)
       } catch (e) {
         setWorkspacesErr(String(e))
+      } finally {
+        setBusy(false)
       }
     },
-    [openWorkspaceId, reloadWorkspaces, applyHookStatus]
+    [openWorkspaceId, busy, applyHookStatus]
   )
 
   const handleRenameWorkspace = useCallback(
@@ -658,7 +662,7 @@ function App(): React.JSX.Element {
       // 자기 윈도우를 home 상태로 되돌림 — windowManager의 windowsByWorkspace 매핑 해제.
       await window.agentbridge.window.releaseWorkspace()
       setAttachments(new Map())
-      setMirrors(new Map())
+      setOwnedSessions(new Map())
       setHookDisabledMap(new Map())
       setOpenWorkspaceId(null)
       setOpenSessionId(null)
@@ -704,11 +708,13 @@ function App(): React.JSX.Element {
   const closeSession = useCallback(
     async (sessionId: string, permanent: boolean, source: SessionCloseSource) => {
       if (!openWorkspaceId || busy) return
-      // 미러(읽기 전용) 탭 닫기 — 공유 세션 메타를 건드리지 않고 로컬 미러만 정리(소유 앱에 무영향).
-      if (mirrors.has(sessionId)) {
-        log.info('App.closeSession — stop mirror', { workspaceId: openWorkspaceId, sessionId })
-        void window.agentbridge.mirror.stop({ workspaceId: openWorkspaceId, sessionId })
-        setMirrors((prev) => {
+      // "사용 중" 탭 닫기 — 공유 세션 메타를 건드리지 않고 로컬 표시만 정리(소유 앱에 무영향).
+      if (ownedSessions.has(sessionId)) {
+        log.info('App.closeSession — drop owned placeholder', {
+          workspaceId: openWorkspaceId,
+          sessionId
+        })
+        setOwnedSessions((prev) => {
           const next = new Map(prev)
           next.delete(sessionId)
           return next
@@ -716,7 +722,7 @@ function App(): React.JSX.Element {
         if (openSessionId === sessionId) {
           const remaining = [
             ...Array.from(attachments.keys()),
-            ...Array.from(mirrors.keys()).filter((sid) => sid !== sessionId)
+            ...Array.from(ownedSessions.keys()).filter((sid) => sid !== sessionId)
           ]
           setOpenSessionId(remaining[0] ?? null)
         }
@@ -755,7 +761,7 @@ function App(): React.JSX.Element {
         setBusy(false)
       }
     },
-    [openWorkspaceId, openSessionId, busy, attachments, mirrors, reloadWorkspaces, applyHookStatus]
+    [openWorkspaceId, openSessionId, busy, attachments, ownedSessions, reloadWorkspaces, applyHookStatus]
   )
 
   const handleDeleteSession = useCallback(
@@ -848,30 +854,29 @@ function App(): React.JSX.Element {
                   </div>
                 )
               })}
-              {Array.from(mirrors.entries()).map(([sid, m]) => {
+              {Array.from(ownedSessions.entries()).map(([sid, o]) => {
                 const isActive = sid === openSessionId
-                const sessionMeta = openWorkspace.sessions.find((s) => s.sessionId === sid)
-                const model: CliKind = sessionMeta?.model ?? 'claude'
                 return (
                   <div key={sid} className={`xterm-wrap${isActive ? ' xterm-host-active' : ''}`}>
-                    <XtermView
-                      attach={{ sessionId: sid, pid: 0, replay: m.replay }}
-                      model={model}
-                      kind={sessionMeta?.kind ?? 'cli'}
-                      workspaceId={openWorkspaceId}
-                      sessionId={sid}
-                      isActive={isActive}
-                      mirror={{
-                        ownerApp: m.ownerApp,
-                        cols: m.cols,
-                        rows: m.rows,
-                        onResume: () => handleResume(sid)
-                      }}
-                    />
+                    <div className="session-inuse">
+                      <h2>{o.ownerApp === 'extension' ? '익스텐션' : '데스크탑'}에서 사용 중</h2>
+                      <p>
+                        이 세션은 다른 앱에서 라이브로 열려 있습니다. 충돌을 막기 위해 여기서는
+                        열지 않습니다. 상대 앱에서 세션을 닫은 뒤 아래 버튼으로 이어서 여세요.
+                      </p>
+                      <button
+                        type="button"
+                        className="session-inuse-btn"
+                        disabled={busy}
+                        onClick={() => void handleReopen(sid)}
+                      >
+                        다시 열기
+                      </button>
+                    </div>
                   </div>
                 )
               })}
-              {attachments.size === 0 && mirrors.size === 0 && (
+              {attachments.size === 0 && ownedSessions.size === 0 && (
                 <div className="center-empty">
                   <h2>활성 세션 없음</h2>
                   <p>

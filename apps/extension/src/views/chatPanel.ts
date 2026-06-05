@@ -10,15 +10,7 @@ import { getSessions, renameSession, deleteSession, setModelSessionId, type Sess
 import { captureNewThreadId } from '../core/cliAdapter/codexSessionWatcher';
 import { watchForNewConversationUuid } from '../core/cliAdapter/agyResume';
 import * as workspaceStore from '../core/workspaceStore';
-import {
-  acquireOwnership,
-  updateOwnerSize,
-  releaseOwnership,
-  createTransferWatcher,
-  readTransferRequest,
-  clearTransferRequest,
-  type TransferWatcher,
-} from '@agentbridge/core';
+import { acquireOwnership, updateOwnerSize, releaseOwnership } from '@agentbridge/core';
 import { CLI_DISPLAY_NAME, type CliKind } from '../shared/types';
 import { quoteCommandLine } from '../shared/shellQuote';
 import type { SpawnOptions } from '../pty/types';
@@ -53,8 +45,6 @@ export class ChatPanel {
   private disposed = false;
   private replayStream: WriteStream | null = null;
   private ownerDir: string | null = null;
-  // Plan 2b 이어가기 — 다른 앱이 이 세션을 "이어가기" 요청하면 transfer-request.json이 생긴다.
-  private transferWatcher: TransferWatcher | null = null;
   private deletedExternally = false;
   private modelSessionWatchAbort: AbortController | null = null;
   private readonly opts: SpawnOptions;
@@ -257,15 +247,6 @@ export class ChatPanel {
         void acquireOwnership(this.ownerDir, { app: 'extension', cols, rows }).catch((err) =>
           output.warn(`owner.json acquire 실패: ${String(err)}`),
         );
-        // 다른 앱(데스크탑)이 "채팅 이어가기"를 누르면 이 세션 디렉토리에 transfer-request.json이
-        // 생긴다. 감지하면 자동 양보(§4.6 step 8) — PTY를 종료해 onExit가 owner.json을 release하면
-        // 요청자가 mirror:ended로 인수한다.
-        this.transferWatcher = createTransferWatcher({
-          root: this.ownerDir,
-          onChange: () => {
-            void this.yieldIfRequested();
-          },
-        });
       }
 
       this.ptyProcess.onData((data) => {
@@ -299,8 +280,6 @@ export class ChatPanel {
             /* best-effort */
           });
         }
-        this.transferWatcher?.stop();
-        this.transferWatcher = null;
         if (!this.disposed) {
           this.panel.webview.postMessage({
             type: 'output',
@@ -453,41 +432,12 @@ export class ChatPanel {
     if (activePanel === this) this.panel.dispose();
   }
 
-  // Plan 2b 이어가기(소유자측) — 다른 앱이 이 세션에 양보를 요청하면(transfer-request.json,
-  // 요청 pid≠내 pid) PTY를 종료한다. release는 onExit가 담당하므로(프로세스 종료 후 owner.json
-  // 소멸) 요청자가 살아있는 CLI로 resume하는 분기 위험이 없다. 패널은 onExit 메시지 표시 후 유지.
-  private async yieldIfRequested(): Promise<void> {
-    if (this.disposed || !this.ownerDir) return;
-    let req;
-    try {
-      req = await readTransferRequest(this.ownerDir);
-    } catch {
-      return;
-    }
-    if (!req || req.pid === process.pid) return;
-    output.log(`transfer 요청 수신 — 세션 양보 (requestedBy=${req.requestedBy})`);
-    await clearTransferRequest(this.ownerDir).catch(() => {
-      /* best-effort */
-    });
-    this.transferWatcher?.stop();
-    this.transferWatcher = null;
-    if (this.ptyProcess) {
-      try {
-        this.ptyProcess.kill();
-      } catch {
-        /* already exited */
-      }
-    }
-  }
-
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
 
     if (this.opts.sessionId) activePanels.delete(this.opts.sessionId);
 
-    this.transferWatcher?.stop();
-    this.transferWatcher = null;
     this.modelSessionWatchAbort?.abort();
     this.recorder?.dispose();
     this.displayFilter.dispose();

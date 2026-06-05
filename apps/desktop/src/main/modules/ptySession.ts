@@ -186,16 +186,6 @@ export function writePty(sessionId: string, data: string): void {
   s.pty.write(data)
 }
 
-// 이 데스크탑이 라이브로 소유 중인 세션 목록 (owner.json을 작성한 세션). 이어가기 양보(Plan 2b)에서
-// transfer-request.json이 가리키는 세션이 내 소유인지 매칭하는 데 쓴다.
-export function listOwnedSessions(): { sessionId: string; ownerDir: string }[] {
-  const out: { sessionId: string; ownerDir: string }[] = []
-  for (const s of sessions.values()) {
-    if (s.ownerDir) out.push({ sessionId: s.id, ownerDir: s.ownerDir })
-  }
-  return out
-}
-
 export function resizePty(sessionId: string, cols: number, rows: number): void {
   const s = sessions.get(sessionId)
   if (!s) return
