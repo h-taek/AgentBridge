@@ -32,17 +32,20 @@ LOCK_CACHE="$BUILD_DIR/.last-pnpm-lock"
 echo "[external-build] repo root  = $REPO_ROOT"
 echo "[external-build] build dir  = $BUILD_DIR"
 
-# 1) source sync — 모노레포 전체를 tar로 복사 (tar는 xattr를 옮기지 않음).
+# 1) source sync — 모노레포 전체를 rsync --delete로 복사.
+#    rsync -a는 기본적으로 xattr(com.apple.provenance)를 옮기지 않으므로(-X 미지정) tar와 동일한
+#    codesign 우회 효과를 유지하면서, --delete로 *소스에서 삭제된 파일*도 BUILD_DIR에서 제거한다
+#    (tar 덮어쓰기는 stale 파일을 남겨 삭제된 모듈이 빌드 에러를 일으켰음). 제외 항목은 --delete
+#    대상에서 보호되어 node_modules는 보존된다.
 echo "[external-build] sync source → $BUILD_DIR"
 mkdir -p "$BUILD_DIR"
-tar -cf - \
+rsync -a --delete \
   --exclude=node_modules \
   --exclude=dist \
   --exclude=out \
   --exclude=.git \
   --exclude=.DS_Store \
-  -C "$REPO_ROOT" . \
-  | tar -xf - -C "$BUILD_DIR"
+  "$REPO_ROOT"/ "$BUILD_DIR"/
 
 # 2) pnpm install — pnpm-lock 변경 감지 시만. desktop postinstall이 네이티브 모듈을
 #    electron ABI로 rebuild한다(electron-builder install-app-deps).
