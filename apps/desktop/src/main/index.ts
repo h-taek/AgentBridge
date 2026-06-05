@@ -22,6 +22,7 @@ import {
   writePty
 } from './modules/ptySession'
 import { onUserInput, disposeAndFlushAll } from './modules/turnRecorder'
+import { stopAllMirrors } from './modules/mirrorWatcher'
 import { registerProbeDeps } from './modules/cliQuotaTracker'
 import { getCurrentUpdaterStatus, initAppUpdater, triggerManualCheck } from './modules/appUpdater'
 import {
@@ -370,6 +371,7 @@ app.on('before-quit', (event) => {
     } catch (err) {
       log.warn('before-quit — recorder flush 실패 (non-fatal)', { err: String(err) })
     }
+    stopAllMirrors() // 읽기 전용 미러의 fs.watch 핸들·폴링 타이머 정리 (Plan 2b)
     killAllForce()
     app.quit() // isQuitting=true → 재진입 시 통과
   })()

@@ -10,12 +10,16 @@ import {
   type HomeSubmitResult,
   type HookTrustEntry,
   type HookTrustSetRequest,
+  type MirrorStartRequest,
+  type MirrorStartResult,
+  type MirrorStopRequest,
   type SessionActivateResult,
   type SessionCloseRequest,
   type SessionCreateRequest,
   type SessionMeta,
   type SessionModelSessionCapturedEvent,
   type SessionOpenRequest,
+  type SessionOwnerInfo,
   type SessionRenameRequest,
   type WorkspaceCreateRequest,
   type WorkspaceCreateResult,
@@ -24,6 +28,8 @@ import {
   type WorkspaceRenameRequest,
   type WorkspacesChangedEvent
 } from '@shared/ipc'
+import { readOwner, isOwnerAlive } from '@agentbridge/core'
+import { startMirror, stopMirror } from '../modules/mirrorWatcher'
 import {
   broadcastToAll,
   closeWindowByWorkspaceId,
@@ -113,15 +119,36 @@ async function computeResumableSessionIds(sessions: SessionMeta[]): Promise<stri
   return out
 }
 
+// 다른 프로세스가 라이브로 소유한 세션 — owner.json 존재 + pid 생존 + pid≠우리 main.
+// 데스크탑은 한 워크스페이스=한 윈도우라 같은 데스크탑의 다른 윈도우가 같은 세션을 동시에 열 수
+// 없으므로, "외부 소유"는 pid 비교로 충분히 판별된다(익스텐션/다른 데스크탑 인스턴스).
+async function computeExternallyOwnedSessions(
+  workspaceId: string,
+  sessions: SessionMeta[]
+): Promise<SessionOwnerInfo[]> {
+  const out: SessionOwnerInfo[] = []
+  await Promise.all(
+    sessions.map(async (s) => {
+      const owner = await readOwner(getSessionPaths(workspaceId, s.sessionId).dir)
+      if (owner && isOwnerAlive(owner) && owner.pid !== process.pid) {
+        out.push({ sessionId: s.sessionId, app: owner.app, cols: owner.cols, rows: owner.rows })
+      }
+    })
+  )
+  return out
+}
+
 async function handleWorkspacesList(): Promise<WorkspaceListEntry[]> {
   const list = await listWorkspaces()
   // activeSessionCount는 메모리 derive — sessionActive 모듈에서 카운트.
   // resumableSessionIds는 디스크 derive — 세션별 native 파일 실재 여부.
+  // externallyOwnedSessions는 디스크 derive — 다른 프로세스가 라이브 소유한 세션(미러 대상).
   return Promise.all(
     list.map(async (w) => ({
       ...w,
       activeSessionCount: listActiveSessionsInWorkspace(w.workspaceId).length,
-      resumableSessionIds: await computeResumableSessionIds(w.sessions)
+      resumableSessionIds: await computeResumableSessionIds(w.sessions),
+      externallyOwnedSessions: await computeExternallyOwnedSessions(w.workspaceId, w.sessions)
     }))
   )
 }
@@ -781,6 +808,18 @@ async function handleHooksTrustSet(_e: unknown, req: HookTrustSetRequest): Promi
   return { workspaceId: req.workspaceId, codex: next }
 }
 
+// mirror:start — 다른 프로세스가 소유한 세션의 읽기 전용 미러 시작 (replay 스냅샷 + 소유자 반환).
+async function handleMirrorStart(
+  event: IpcMainInvokeEvent,
+  req: MirrorStartRequest
+): Promise<MirrorStartResult> {
+  return startMirror(req.workspaceId, req.sessionId, event.sender)
+}
+
+function handleMirrorStop(_e: unknown, req: MirrorStopRequest): void {
+  stopMirror(req.workspaceId, req.sessionId)
+}
+
 export function registerWorkspacesHandlers(): void {
   ipcMain.handle(IpcChannel.WorkspacesList, handleWorkspacesList)
   ipcMain.handle(IpcChannel.WorkspacesGet, handleWorkspacesGet)
@@ -796,4 +835,6 @@ export function registerWorkspacesHandlers(): void {
   ipcMain.handle(IpcChannel.SessionsRename, handleSessionsRename)
   ipcMain.handle(IpcChannel.HooksTrustGet, handleHooksTrustGet)
   ipcMain.handle(IpcChannel.HooksTrustSet, handleHooksTrustSet)
+  ipcMain.handle(IpcChannel.MirrorStart, handleMirrorStart)
+  ipcMain.handle(IpcChannel.MirrorStop, handleMirrorStop)
 }

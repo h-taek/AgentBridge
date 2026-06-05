@@ -283,7 +283,12 @@ export async function listWorkspaces(): Promise<WorkspaceListEntry[]> {
       const meta = await loadWorkspace(e.workspaceId)
       // activeSessionCount / resumableSessionIds / externallyOwnedSessions는
       // IPC 경계(handleWorkspacesList)에서 채운다. 여기선 placeholder.
-      out.push({ ...meta, activeSessionCount: 0, resumableSessionIds: [], externallyOwnedSessions: [] })
+      out.push({
+        ...meta,
+        activeSessionCount: 0,
+        resumableSessionIds: [],
+        externallyOwnedSessions: []
+      })
     } catch {
       /* 깨진 메타는 무시 */
     }
