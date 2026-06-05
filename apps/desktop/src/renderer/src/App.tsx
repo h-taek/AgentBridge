@@ -28,7 +28,14 @@ function App(): React.JSX.Element {
   const [workspacesErr, setWorkspacesErr] = useState<string | null>(null)
   const [openWorkspaceId, setOpenWorkspaceId] = useState<string | null>(null)
   const [openSessionId, setOpenSessionId] = useState<string | null>(null)
-  const [openWorkspace, setOpenWorkspace] = useState<WorkspaceMeta | null>(null)
+  // 단일 소스 — 열린 워크스페이스 메타는 별도 state로 들지 않고 workspaces 리스트에서 파생한다.
+  // 이렇게 하면 외부 앱이 워크스페이스를 바꿔 reloadWorkspaces가 리스트를 갱신할 때 사이드바·탭이
+  // 자동으로 따라간다(스냅샷 별도 동기화 불필요 — 동기화 누락 버그 클래스 원천 차단).
+  const openWorkspace = useMemo<WorkspaceMeta | null>(
+    () =>
+      openWorkspaceId ? (workspaces.find((w) => w.workspaceId === openWorkspaceId) ?? null) : null,
+    [workspaces, openWorkspaceId]
+  )
   const [attachments, setAttachments] = useState<Map<string, CliSpawnInteractiveResult>>(new Map())
   // 다른 프로세스가 라이브 소유한 세션 — spawn하지 않고 "다른 앱에서 사용 중" 화면을 띄운다
   // (대화 분기 방지). attachments(라이브 PTY)와 배타적. sessionId → 소유 앱.
@@ -69,6 +76,24 @@ function App(): React.JSX.Element {
     }
   }, [])
 
+  // 로컬 액션(생성/열기/이름변경 등)이 갱신된 워크스페이스 메타를 받으면 즉시 리스트에 반영한다
+  // (reloadWorkspaces IPC 왕복을 기다리지 않는 optimistic 갱신). 파생 openWorkspace가 이를 따라간다.
+  // 기존 항목의 derive fields(activeSessionCount/resumable/externallyOwned)는 보존하고 메타만 덮어쓴다.
+  const upsertWorkspace = useCallback((meta: WorkspaceMeta) => {
+    setWorkspaces((prev) => {
+      const idx = prev.findIndex((w) => w.workspaceId === meta.workspaceId)
+      if (idx === -1) {
+        return [
+          { ...meta, activeSessionCount: 0, resumableSessionIds: [], externallyOwnedSessions: [] },
+          ...prev
+        ]
+      }
+      const next = [...prev]
+      next[idx] = { ...next[idx], ...meta }
+      return next
+    })
+  }, [])
+
   // 부팅 시 workspaces.list — bootstrap 처리는 handleOpenCard 정의 뒤의 별도 useEffect에서.
   useEffect(() => {
     let cancelled = false
@@ -103,18 +128,10 @@ function App(): React.JSX.Element {
         setHookDisabledMap(new Map())
         setOpenWorkspaceId(null)
         setOpenSessionId(null)
-        setOpenWorkspace(null)
-      } else if (openWorkspaceId) {
-        // 사이드바는 *열린* 워크스페이스의 세션 목록을 openWorkspace.sessions(스냅샷)로 그린다.
-        // 다른 앱이 이 워크스페이스에 세션을 추가/삭제/이름변경하면 그 스냅샷도 새로 읽어야
-        // 사이드바에 반영된다(workspaces 리스트만 갱신하면 열린 워크스페이스는 안 바뀜).
-        void window.agentbridge.workspaces
-          .get(openWorkspaceId)
-          .then(setOpenWorkspace)
-          .catch(() => {
-            /* 워크스페이스가 막 삭제됐을 수 있음 — reloadWorkspaces가 정리 */
-          })
+        // openWorkspace는 workspaces에서 파생 — openWorkspaceId=null이면 자동으로 null.
       }
+      // 그 외(열린 워크스페이스가 외부에서 바뀐 경우)는 위 reloadWorkspaces가 리스트를 갱신하면
+      // 파생 openWorkspace가 자동으로 따라가므로 별도 처리 불필요.
     })
     return off
   }, [openWorkspaceId, reloadWorkspaces])
@@ -130,7 +147,7 @@ function App(): React.JSX.Element {
         void window.agentbridge.workspaces
           .get(evt.workspaceId)
           .then((ws) => {
-            const apply = (): void => setOpenWorkspace(ws)
+            const apply = (): void => upsertWorkspace(ws)
             const doc = document as Document & {
               startViewTransition?: (cb: () => void) => unknown
             }
@@ -163,7 +180,7 @@ function App(): React.JSX.Element {
       if (openWorkspaceId === evt.workspaceId) {
         void window.agentbridge.workspaces
           .get(evt.workspaceId)
-          .then((ws) => setOpenWorkspace(ws))
+          .then((ws) => upsertWorkspace(ws))
           .catch(() => undefined)
       }
     })
@@ -246,7 +263,7 @@ function App(): React.JSX.Element {
       applyHookStatus(activated.session.sessionId, activated.hookDisabledReason)
       setOpenWorkspaceId(created.workspace.workspaceId)
       setOpenSessionId(activated.session.sessionId)
-      setOpenWorkspace(activated.workspace)
+      upsertWorkspace(activated.workspace)
       setWorkspaceNameDraft('')
       void reloadWorkspaces()
     } catch (e) {
@@ -302,7 +319,7 @@ function App(): React.JSX.Element {
         setOpenSessionId(null)
         try {
           const ws = await window.agentbridge.workspaces.get(w.workspaceId)
-          setOpenWorkspace(ws)
+          upsertWorkspace(ws)
         } catch {
           /* noop */
         }
@@ -372,10 +389,10 @@ function App(): React.JSX.Element {
         // 전부 외부 소유라 spawn된 라이브 세션이 없으면 lastWorkspace가 null — 메타를 직접 로드해
         // 터미널 스택이 가려지지 않게 한다(openWorkspace null이면 HomePane으로 떨어짐).
         if (lastWorkspace) {
-          setOpenWorkspace(lastWorkspace)
+          upsertWorkspace(lastWorkspace)
         } else {
           try {
-            setOpenWorkspace(await window.agentbridge.workspaces.get(w.workspaceId))
+            upsertWorkspace(await window.agentbridge.workspaces.get(w.workspaceId))
           } catch {
             /* noop */
           }
@@ -437,7 +454,6 @@ function App(): React.JSX.Element {
           setHookDisabledMap(new Map())
           setOpenWorkspaceId(null)
           setOpenSessionId(null)
-          setOpenWorkspace(null)
         }
         await window.agentbridge.workspaces.delete(w.workspaceId)
         void reloadWorkspaces()
@@ -478,7 +494,7 @@ function App(): React.JSX.Element {
         })
         applyHookStatus(activated.session.sessionId, activated.hookDisabledReason)
         setOpenSessionId(activated.session.sessionId)
-        setOpenWorkspace(activated.workspace)
+        upsertWorkspace(activated.workspace)
         void reloadWorkspaces()
       } catch (e) {
         setWorkspacesErr(String(e))
@@ -539,7 +555,7 @@ function App(): React.JSX.Element {
         applyHookStatus(created.session.sessionId, created.hookDisabledReason)
         setOpenWorkspaceId(w.workspaceId)
         setOpenSessionId(created.session.sessionId)
-        setOpenWorkspace(created.workspace)
+        upsertWorkspace(created.workspace)
         void reloadWorkspaces()
       } catch (e) {
         setWorkspacesErr(String(e))
@@ -602,7 +618,7 @@ function App(): React.JSX.Element {
         })
         applyHookStatus(activated.session.sessionId, activated.hookDisabledReason)
         setOpenSessionId(sessionId)
-        setOpenWorkspace(activated.workspace)
+        upsertWorkspace(activated.workspace)
         void reloadWorkspaces()
       } catch (e) {
         // main 소유권 가드가 막은 경우 — placeholder로 폴백(분기 방지).
@@ -670,7 +686,7 @@ function App(): React.JSX.Element {
         })
         applyHookStatus(activated.session.sessionId, activated.hookDisabledReason)
         setOpenSessionId(activated.session.sessionId)
-        setOpenWorkspace(activated.workspace)
+        upsertWorkspace(activated.workspace)
         setWorkspacesErr(null)
       } catch (e) {
         // main 소유권 가드가 막은 경우(리스트 캐시 지연 등) — placeholder 유지 + 안내.
@@ -691,7 +707,7 @@ function App(): React.JSX.Element {
     async (workspaceId: string, title: string) => {
       try {
         const updated = await window.agentbridge.workspaces.rename({ workspaceId, title })
-        if (openWorkspaceId === workspaceId) setOpenWorkspace(updated)
+        if (openWorkspaceId === workspaceId) upsertWorkspace(updated)
         void reloadWorkspaces()
       } catch (e) {
         setWorkspacesErr(String(e))
@@ -706,7 +722,7 @@ function App(): React.JSX.Element {
         await window.agentbridge.sessions.rename({ workspaceId, sessionId, title })
         if (openWorkspaceId === workspaceId) {
           const ws = await window.agentbridge.workspaces.get(workspaceId)
-          setOpenWorkspace(ws)
+          upsertWorkspace(ws)
         }
         void reloadWorkspaces()
       } catch (e) {
@@ -729,7 +745,6 @@ function App(): React.JSX.Element {
       setHookDisabledMap(new Map())
       setOpenWorkspaceId(null)
       setOpenSessionId(null)
-      setOpenWorkspace(null)
       void reloadWorkspaces()
     } finally {
       setBusy(false)
@@ -754,7 +769,7 @@ function App(): React.JSX.Element {
         applyHookStatus(result.session.sessionId, result.hookDisabledReason)
         setOpenWorkspaceId(result.workspace.workspaceId)
         setOpenSessionId(result.session.sessionId)
-        setOpenWorkspace(result.workspace)
+        upsertWorkspace(result.workspace)
         void reloadWorkspaces()
       } catch (e) {
         setWorkspacesErr(String(e))
@@ -816,7 +831,7 @@ function App(): React.JSX.Element {
           setOpenSessionId(remaining[0] ?? null)
         }
         const ws = await window.agentbridge.workspaces.get(openWorkspaceId)
-        setOpenWorkspace(ws)
+        upsertWorkspace(ws)
         void reloadWorkspaces()
       } catch (e) {
         setWorkspacesErr(String(e))
