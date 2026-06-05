@@ -588,6 +588,38 @@ function App(): React.JSX.Element {
     [attachments, mirrors, openSessionId, openWorkspaceId, busy, reloadWorkspaces, applyHookStatus]
   )
 
+  // 이어가기(Plan 2b) — 미러(읽기 전용)를 라이브로 인수. XtermView가 핸드셰이크(transfer.request +
+  // owner.json 소멸 대기)를 마친 뒤 호출한다. 여기선 mirror→attachment 전환 + resume-spawn만.
+  const handleResume = useCallback(
+    async (sessionId: string) => {
+      if (!openWorkspaceId) return
+      log.info('App.handleResume — 미러 인수', { sessionId })
+      try {
+        const activated = await window.agentbridge.sessions.open({
+          workspaceId: openWorkspaceId,
+          sessionId
+        })
+        setMirrors((prev) => {
+          const next = new Map(prev)
+          next.delete(sessionId)
+          return next
+        })
+        setAttachments((prev) => {
+          const next = new Map(prev)
+          next.set(activated.session.sessionId, activated.pty)
+          return next
+        })
+        applyHookStatus(activated.session.sessionId, activated.hookDisabledReason)
+        setOpenSessionId(activated.session.sessionId)
+        setOpenWorkspace(activated.workspace)
+        void reloadWorkspaces()
+      } catch (e) {
+        setWorkspacesErr(String(e))
+      }
+    },
+    [openWorkspaceId, reloadWorkspaces, applyHookStatus]
+  )
+
   const handleRenameWorkspace = useCallback(
     async (workspaceId: string, title: string) => {
       try {
@@ -829,7 +861,12 @@ function App(): React.JSX.Element {
                       workspaceId={openWorkspaceId}
                       sessionId={sid}
                       isActive={isActive}
-                      mirror={{ ownerApp: m.ownerApp, cols: m.cols, rows: m.rows }}
+                      mirror={{
+                        ownerApp: m.ownerApp,
+                        cols: m.cols,
+                        rows: m.rows,
+                        onResume: () => handleResume(sid)
+                      }}
                     />
                   </div>
                 )

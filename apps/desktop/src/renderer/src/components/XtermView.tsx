@@ -54,6 +54,10 @@ type Props = {
     rows: number
     // 소유 종료(owner.json 소멸) 감지 콜백 — 배지를 "세션 종료됨"으로 바꾸기 위함.
     onEnded?: () => void
+    // [채팅 이어가기] 인수 트리거 — App이 mirror stop + sessions.open(resume) + mirrors→attachments 전환.
+    // 라이브 소유자면 transfer.request 후 owner.json 소멸(onEnded)을 기다렸다가 호출되고,
+    // 이미 종료된 경우 즉시 호출된다.
+    onResume?: () => void | Promise<void>
   }
 }
 
@@ -91,6 +95,17 @@ export function XtermView({
   const [dropping, setDropping] = useState(false)
   const [dropError, setDropError] = useState<string | null>(null)
   const dndEnabled = !!(workspaceId && sessionId)
+  // 이어가기(소유권 인수) 대기 상태 — transfer.request 후 owner.json 소멸을 기다리는 동안 true.
+  const [resuming, setResuming] = useState(false)
+  const [resumeError, setResumeError] = useState<string | null>(null)
+  // onEnded 핸들러(메인 effect 클로저)에서 참조 — render state 대신 ref로 최신값 전달.
+  const resumingRef = useRef(false)
+  const resumeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => {
+    return () => {
+      if (resumeTimerRef.current) clearTimeout(resumeTimerRef.current)
+    }
+  }, [])
 
   // 의존성은 sessionId만 — attach 객체 reference나 replay/pid 변화로
   // Terminal을 재생성하면 안 됨. 부모(App.tsx)는 매 render마다 새 객체로 attach를
@@ -169,6 +184,16 @@ export function XtermView({
         log.info('XtermView mirror ended', { sessionId: sid })
         setStatus('exited')
         mirror.onEnded?.()
+        // 이어가기 대기 중이었다면 — owner.json 소멸 = 소유 앱 양보 완료. 인수를 트리거한다.
+        if (resumingRef.current) {
+          if (resumeTimerRef.current) {
+            clearTimeout(resumeTimerRef.current)
+            resumeTimerRef.current = null
+          }
+          resumingRef.current = false
+          setResuming(false)
+          void mirrorRef.current?.onResume?.()
+        }
       })
       // 입력 차단: term.onData를 PTY로 보내는 구독 자체를 안 건다. 커서 깜빡임도 끔.
       term.options.cursorBlink = false
@@ -429,6 +454,43 @@ export function XtermView({
       .finally(() => setDropping(false))
   }
 
+  // [채팅 이어가기] — 소유권 인수. 라이브 소유자면 양보를 요청하고 owner.json 소멸(mirror:ended)을
+  // 기다린다(5초 타임아웃). 이미 종료된 미러면 핸드셰이크 없이 즉시 인수.
+  const RESUME_TIMEOUT_MS = 5000
+  function handleResumeClick(): void {
+    if (resuming) return
+    setResumeError(null)
+    // owner.json이 이미 사라진 상태(세션 종료됨) → 핸드셰이크 불필요, 바로 인수.
+    if (status === 'exited') {
+      void mirror?.onResume?.()
+      return
+    }
+    if (!workspaceId) return
+    setResuming(true)
+    resumingRef.current = true
+    window.agentbridge.transfer
+      .request({ workspaceId, sessionId: attach.sessionId })
+      .then(() => {
+        // 요청 resolve 전에 이미 양보 완료(onEnded)로 인수가 시작됐으면 타이머를 걸지 않는다.
+        if (!resumingRef.current) return
+        // 5초 안에 owner.json이 안 사라지면(상대 무응답) 중단하고 자기 요청을 정리.
+        resumeTimerRef.current = setTimeout(() => {
+          resumeTimerRef.current = null
+          resumingRef.current = false
+          setResuming(false)
+          setResumeError('상대 앱이 응답하지 않습니다. 상대 앱에서 세션을 닫은 뒤 다시 시도하세요.')
+          if (workspaceId) {
+            void window.agentbridge.transfer.abort({ workspaceId, sessionId: attach.sessionId })
+          }
+        }, RESUME_TIMEOUT_MS)
+      })
+      .catch((e) => {
+        resumingRef.current = false
+        setResuming(false)
+        setResumeError(String(e))
+      })
+  }
+
   return (
     <div
       className="xterm-host"
@@ -442,9 +504,20 @@ export function XtermView({
       <div className="xterm-container" ref={containerRef} />
       {mirror && (
         <div className="xterm-readonly-badge" data-ended={status === 'exited' ? 'true' : 'false'}>
-          {status === 'exited'
-            ? '세션 종료됨 — 읽기 전용'
-            : `${mirror.ownerApp === 'extension' ? '익스텐션' : '데스크탑'}에서 사용 중 — 읽기 전용`}
+          <span className="xterm-readonly-label">
+            {status === 'exited'
+              ? '세션 종료됨 — 읽기 전용'
+              : `${mirror.ownerApp === 'extension' ? '익스텐션' : '데스크탑'}에서 사용 중 — 읽기 전용`}
+          </span>
+          <button
+            type="button"
+            className="xterm-resume-btn"
+            onClick={handleResumeClick}
+            disabled={resuming}
+          >
+            {resuming ? '이어받는 중…' : '채팅 이어가기'}
+          </button>
+          {resumeError && <span className="xterm-resume-error">{resumeError}</span>}
         </div>
       )}
       {dndEnabled && dragDepth > 0 && (

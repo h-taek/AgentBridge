@@ -22,6 +22,7 @@ import {
   type SessionOwnerInfo,
   type SessionRenameRequest,
   type TransferRequestPayload,
+  type TransferAbortPayload,
   type WorkspaceCreateRequest,
   type WorkspaceCreateResult,
   type WorkspaceListEntry,
@@ -248,6 +249,12 @@ export function stopTransferWatcher(): void {
 async function handleTransferRequest(_e: unknown, req: TransferRequestPayload): Promise<void> {
   const dir = getSessionPaths(req.workspaceId, req.sessionId).dir
   await requestTransfer(dir, 'desktop')
+}
+
+// transfer:abort — 뷰어가 양보 대기 중 타임아웃/취소. 자기 transfer-request.json을 정리한다.
+async function handleTransferAbort(_e: unknown, req: TransferAbortPayload): Promise<void> {
+  const dir = getSessionPaths(req.workspaceId, req.sessionId).dir
+  await clearTransferRequest(dir)
 }
 
 async function handleWorkspacesCreate(
@@ -925,6 +932,7 @@ export function registerWorkspacesHandlers(): void {
   ipcMain.handle(IpcChannel.MirrorStart, handleMirrorStart)
   ipcMain.handle(IpcChannel.MirrorStop, handleMirrorStop)
   ipcMain.handle(IpcChannel.TransferRequest, handleTransferRequest)
+  ipcMain.handle(IpcChannel.TransferAbort, handleTransferAbort)
   startOwnerWatcher()
   startTransferWatcher()
 }
