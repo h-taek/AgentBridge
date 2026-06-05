@@ -339,6 +339,12 @@ function App(): React.JSX.Element {
               orphanIds.push(s.sessionId)
               continue
             }
+            // 캐시된 externallyOwnedSessions가 지연돼 owned 분기를 놓쳤지만 main 가드가 막은 경우 —
+            // "사용 중"으로 표시(대화 분기 방지).
+            if (msg.includes('EXTERNALLY_OWNED')) {
+              newOwned.set(s.sessionId, { ownerApp: 'extension' })
+              continue
+            }
             throw sessErr
           }
         }
@@ -534,6 +540,22 @@ function App(): React.JSX.Element {
     [busy, openWorkspaceId, attachments, closeAllAttachments, reloadWorkspaces, applyHookStatus]
   )
 
+  // 세션을 "다른 앱에서 사용 중" placeholder로 표시 + 활성 전환. ownerApp은 최신 list에서 추론.
+  const markSessionOwned = useCallback(
+    (sessionId: string, fallbackApp: 'desktop' | 'extension' = 'extension') => {
+      const info = workspaces
+        .find((w) => w.workspaceId === openWorkspaceId)
+        ?.externallyOwnedSessions?.find((o) => o.sessionId === sessionId)
+      setOwnedSessions((prev) => {
+        const next = new Map(prev)
+        next.set(sessionId, { ownerApp: info?.app ?? fallbackApp })
+        return next
+      })
+      setOpenSessionId(sessionId)
+    },
+    [workspaces, openWorkspaceId]
+  )
+
   const handleSelectTab = useCallback(
     async (sessionId: string) => {
       // 이미 attach된 라이브 세션 또는 "사용 중" 세션이면 그냥 활성 전환(재spawn 금지 — 대화 분기 방지).
@@ -545,8 +567,17 @@ function App(): React.JSX.Element {
         setOpenSessionId(sessionId)
         return
       }
-      // 닫힌(soft-close된) 세션 — 재오픈 = sessions.open으로 PTY 재spawn
       if (!openWorkspaceId || busy) return
+      // 다른 앱이 라이브 소유 중인 세션이면 spawn하지 않고 "사용 중" 화면으로 (대화 분기 방지).
+      const ownedNow = workspaces
+        .find((w) => w.workspaceId === openWorkspaceId)
+        ?.externallyOwnedSessions?.some((o) => o.sessionId === sessionId)
+      if (ownedNow) {
+        log.info('App.handleSelectTab — externally owned, show placeholder', { sessionId })
+        markSessionOwned(sessionId)
+        return
+      }
+      // 닫힌(soft-close된) 세션 — 재오픈 = sessions.open으로 PTY 재spawn
       log.info('App.handleSelectTab — reopen (soft-closed)', { sessionId })
       setBusy(true)
       try {
@@ -564,12 +595,28 @@ function App(): React.JSX.Element {
         setOpenWorkspace(activated.workspace)
         void reloadWorkspaces()
       } catch (e) {
-        setWorkspacesErr(String(e))
+        // main 소유권 가드가 막은 경우 — placeholder로 폴백(분기 방지).
+        if (String(e).includes('EXTERNALLY_OWNED')) {
+          markSessionOwned(sessionId)
+          setWorkspacesErr('다른 앱에서 사용 중입니다.')
+        } else {
+          setWorkspacesErr(String(e))
+        }
       } finally {
         setBusy(false)
       }
     },
-    [attachments, ownedSessions, openSessionId, openWorkspaceId, busy, reloadWorkspaces, applyHookStatus]
+    [
+      attachments,
+      ownedSessions,
+      openSessionId,
+      openWorkspaceId,
+      busy,
+      workspaces,
+      markSessionOwned,
+      reloadWorkspaces,
+      applyHookStatus
+    ]
   )
 
   // "다시 열기" — 다른 앱에서 사용 중이던 세션을 라이브로 연다. 먼저 최신 소유 상태를 재확인해서,
@@ -616,12 +663,18 @@ function App(): React.JSX.Element {
         setOpenWorkspace(activated.workspace)
         setWorkspacesErr(null)
       } catch (e) {
-        setWorkspacesErr(String(e))
+        // main 소유권 가드가 막은 경우(리스트 캐시 지연 등) — placeholder 유지 + 안내.
+        if (String(e).includes('EXTERNALLY_OWNED')) {
+          markSessionOwned(sessionId)
+          setWorkspacesErr('아직 다른 앱에서 사용 중입니다. 상대 앱에서 세션을 닫은 뒤 다시 시도하세요.')
+        } else {
+          setWorkspacesErr(String(e))
+        }
       } finally {
         setBusy(false)
       }
     },
-    [openWorkspaceId, busy, applyHookStatus]
+    [openWorkspaceId, busy, markSessionOwned, applyHookStatus]
   )
 
   const handleRenameWorkspace = useCallback(

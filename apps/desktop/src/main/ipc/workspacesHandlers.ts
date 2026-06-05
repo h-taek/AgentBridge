@@ -314,6 +314,19 @@ async function handleSessionsOpen(
       replay
     }
   }
+  // 소유권 가드 (대화 분기 방지의 최종 방어선) — 다른 프로세스가 라이브로 소유한 세션이면
+  // 절대 spawn하지 않는다. 렌더러 가드는 racy(워크스페이스 list 캐시 지연)하므로 main에서 막는다.
+  // 상대가 종료해 owner.json이 사라지거나 pid가 죽으면 통과 → 정상 resume.
+  const owner = await readOwner(getSessionPaths(req.workspaceId, req.sessionId).dir)
+  if (owner && isOwnerAlive(owner) && owner.pid !== process.pid) {
+    log.info('sessions:open 거부 — 외부 소유 세션', {
+      workspaceId: req.workspaceId,
+      sessionId: req.sessionId,
+      ownerApp: owner.app,
+      ownerPid: owner.pid
+    })
+    throw new Error(`EXTERNALLY_OWNED: ${req.sessionId}`)
+  }
   // closedAt mark null
   const reopened =
     session.closedAt === null
