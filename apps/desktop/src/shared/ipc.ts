@@ -166,6 +166,31 @@ export type WorkspaceCreateResult = {
   firstSession: SessionMeta
 }
 
+// 세션 소유 정보 — owner.json이 실재하고 소유 pid가 살아있으며 *다른 프로세스*가 소유한 세션.
+// 데스크탑은 이 세션을 새로 spawn하지 않고 읽기 전용 미러로 연다 (대화 분기 방지, Plan 2b).
+export type SessionOwnerInfo = {
+  sessionId: string
+  app: 'desktop' | 'extension'
+  // 소유자 터미널 크기 — 뷰어가 같은 cols/rows로 렌더해 화면이 어긋나지 않게.
+  cols: number
+  rows: number
+}
+
+// mirror:start — 읽기 전용 미러 시작. replay.log 스냅샷 + 현재 소유자 정보 반환 후 tail 시작.
+export type MirrorStartRequest = { workspaceId: string; sessionId: string }
+export type MirrorStartResult = {
+  // replay.log 전체 스냅샷 — mount 직후 1회 term.write. 없으면 빈 문자열.
+  replay: string
+  // 시작 시점 owner.json. 이미 종료됐으면 null.
+  owner: SessionOwnerInfo | null
+}
+export type MirrorStopRequest = { workspaceId: string; sessionId: string }
+
+// mirror:data — 소유 앱이 replay.log에 새로 append한 bytes (tail). renderer가 term.write.
+export type MirrorDataEvent = { sessionId: string; data: string }
+// mirror:ended — owner.json이 사라짐(소유 앱이 세션 종료/크래시). 배지 갱신 + 이어가기 가능(2b-2).
+export type MirrorEndedEvent = { sessionId: string }
+
 export type WorkspaceListEntry = WorkspaceMeta & {
   // 메모리 derive — 활성 PTY 보유한 sessions 수. 디스크 메타에 저장 안 함.
   activeSessionCount: number
@@ -175,6 +200,9 @@ export type WorkspaceListEntry = WorkspaceMeta & {
   //   shell: 항상 포함 (매번 새 zsh)
   // resume 불가 세션은 UI에서 클릭을 막아 "새로 시작" 오동작을 방지한다.
   resumableSessionIds: string[]
+  // 디스크 derive — *다른 프로세스*가 라이브로 소유한 세션(owner.json + pid 생존 + pid≠우리 main).
+  // 이 세션들은 새로 spawn하지 않고 읽기 전용 미러로 연다 (Plan 2b).
+  externallyOwnedSessions: SessionOwnerInfo[]
 }
 
 // 워크스페이스 안 새 session(=탭) 추가 + PTY spawn (L1 청크에서 PTY 통합).
@@ -667,7 +695,15 @@ export const IpcChannel = {
   AppUpdaterGet: 'appUpdater:get',
   // main → renderer broadcast. autoUpdater 이벤트(checking / available / downloading / downloaded / error)를
   // 통합 status payload로 전달.
-  AppUpdaterStatus: 'appUpdater:status'
+  AppUpdaterStatus: 'appUpdater:status',
+  // ─── Plan 2b — 세션 읽기 전용 미러 ───
+  // 다른 프로세스가 소유한 세션을 CLI 없이 replay.log로 따라 그린다.
+  MirrorStart: 'mirror:start',
+  MirrorStop: 'mirror:stop',
+  // main → renderer: replay.log에 새로 append된 bytes.
+  MirrorData: 'mirror:data',
+  // main → renderer: owner.json 소멸(소유 앱 종료) 통보.
+  MirrorEnded: 'mirror:ended'
 } as const
 
 export type IpcChannelName = (typeof IpcChannel)[keyof typeof IpcChannel]
