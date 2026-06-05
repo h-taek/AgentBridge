@@ -104,6 +104,16 @@ function App(): React.JSX.Element {
         setOpenWorkspaceId(null)
         setOpenSessionId(null)
         setOpenWorkspace(null)
+      } else if (openWorkspaceId) {
+        // 사이드바는 *열린* 워크스페이스의 세션 목록을 openWorkspace.sessions(스냅샷)로 그린다.
+        // 다른 앱이 이 워크스페이스에 세션을 추가/삭제/이름변경하면 그 스냅샷도 새로 읽어야
+        // 사이드바에 반영된다(workspaces 리스트만 갱신하면 열린 워크스페이스는 안 바뀜).
+        void window.agentbridge.workspaces
+          .get(openWorkspaceId)
+          .then(setOpenWorkspace)
+          .catch(() => {
+            /* 워크스페이스가 막 삭제됐을 수 있음 — reloadWorkspaces가 정리 */
+          })
       }
     })
     return off
