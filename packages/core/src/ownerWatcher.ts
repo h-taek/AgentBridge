@@ -14,5 +14,5 @@ export interface OwnerWatcherOptions {
 }
 
 export function createOwnerWatcher(opts: OwnerWatcherOptions): OwnerWatcher {
-  return createSessionFileWatcher({ ...opts, filename: 'owner.json' });
+  return createSessionFileWatcher({ ...opts, filenames: ['owner.json'] });
 }

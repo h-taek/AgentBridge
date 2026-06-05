@@ -27,9 +27,9 @@ import {
 } from '@shared/ipc'
 import {
   readForeignOwner,
-  createOwnerWatcher,
+  createSessionFileWatcher,
   getStorageRoot,
-  type OwnerWatcher
+  type SessionFileWatcher as StorageWatcher
 } from '@agentbridge/core'
 import { mkdirSync } from 'fs'
 import {
@@ -165,25 +165,35 @@ function broadcastWorkspacesChanged(removedWorkspaceId: string | null = null): v
   broadcastToAll(IpcChannel.WorkspacesChanged, evt)
 }
 
-// Plan 2b — 외부 프로세스(익스텐션/다른 데스크탑)가 세션을 acquire/release하면 owner.json이 바뀐다.
-// 그 변화를 감시해 좌 사이드바의 외부 소유 배지(externallyOwnedSessions)를 실시간 갱신한다.
-// owner.json 변화 → WorkspacesChanged broadcast → 렌더러 reloadWorkspaces(재 derive).
-let ownerWatcher: OwnerWatcher | null = null
+// 다른 프로세스(익스텐션/다른 데스크탑)가 공유 저장소를 바꾸면 좌 사이드바를 실시간 동기화한다.
+//   - workspace.json: 세션 목록(추가/삭제/이름/정렬) — sessions[]가 여기 통합 저장됨.
+//   - owner.json: 외부 소유 배지(acquire/release/resize).
+// 변화 → WorkspacesChanged broadcast → 렌더러 reloadWorkspaces(목록+배지 재 derive).
+// fs.watch는 즉시성, 폴링은 패키지 앱 등에서 watch가 누락될 때의 안전망(수렴 보장).
+let storageWatcher: StorageWatcher | null = null
+let storagePoll: ReturnType<typeof setInterval> | null = null
+const STORAGE_POLL_MS = 4000
 
-function startOwnerWatcher(): void {
+function startStorageWatcher(): void {
   const root = getStorageRoot()
   mkdirSync(root, { recursive: true }) // 최초 실행 등 루트 미존재 시 watch 실패 방지.
-  ownerWatcher = createOwnerWatcher({
+  storageWatcher = createSessionFileWatcher({
     root,
+    filenames: ['workspace.json', 'owner.json'],
     onChange: () => broadcastWorkspacesChanged(),
     logger: log
   })
+  storagePoll = setInterval(() => broadcastWorkspacesChanged(), STORAGE_POLL_MS)
 }
 
-export function stopOwnerWatcher(): void {
-  if (ownerWatcher) {
-    ownerWatcher.stop()
-    ownerWatcher = null
+export function stopStorageWatcher(): void {
+  if (storageWatcher) {
+    storageWatcher.stop()
+    storageWatcher = null
+  }
+  if (storagePoll) {
+    clearInterval(storagePoll)
+    storagePoll = null
   }
 }
 
@@ -860,5 +870,5 @@ export function registerWorkspacesHandlers(): void {
   ipcMain.handle(IpcChannel.SessionsRename, handleSessionsRename)
   ipcMain.handle(IpcChannel.HooksTrustGet, handleHooksTrustGet)
   ipcMain.handle(IpcChannel.HooksTrustSet, handleHooksTrustSet)
-  startOwnerWatcher()
+  startStorageWatcher()
 }

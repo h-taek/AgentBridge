@@ -40,7 +40,7 @@ import {
 } from './modules/sessionActive'
 import { registerIrHandlers } from './ipc/irHandlers'
 import { registerMemoryHandlers } from './ipc/memoryHandlers'
-import { registerWorkspacesHandlers, stopOwnerWatcher } from './ipc/workspacesHandlers'
+import { registerWorkspacesHandlers, stopStorageWatcher } from './ipc/workspacesHandlers'
 import { registerSettingsHandlers } from './ipc/settingsHandlers'
 import { registerAttachHandlers } from './ipc/attachHandlers'
 import { registerWindowHandlers } from './ipc/windowHandlers'
@@ -370,7 +370,7 @@ app.on('before-quit', (event) => {
     } catch (err) {
       log.warn('before-quit — recorder flush 실패 (non-fatal)', { err: String(err) })
     }
-    stopOwnerWatcher() // 사이드바 동기화용 owner.json watcher 정리 (Plan 2b)
+    stopStorageWatcher() // 사이드바 실시간 동기화용 watcher + 폴링 정리
     killAllForce()
     app.quit() // isQuitting=true → 재진입 시 통과
   })()

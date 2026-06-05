@@ -13,8 +13,8 @@ export interface SessionFileWatcher {
 
 export interface SessionFileWatcherOptions {
   root: string;
-  // 감시 대상 파일명 (root 이하 어느 깊이든 이 이름으로 끝나는 경로만 매칭).
-  filename: string;
+  // 감시 대상 파일명들 (root 이하 어느 깊이든 이 이름들 중 하나로 끝나는 경로만 매칭).
+  filenames: string[];
   onChange(): void;
   debounceMs?: number;
   logger?: { warn(message: string, err?: unknown): void };
@@ -41,13 +41,13 @@ export function createSessionFileWatcher(opts: SessionFileWatcherOptions): Sessi
       if (!eventPath) return;
       // eventPath는 root 기준 상대경로. atomic write의 tmp(.../owner.json.<pid>.<ts>.tmp)는
       // .tmp로 끝나 제외되고, 최종 rename 대상(filename)과 rm만 매칭된다.
-      if (eventPath.endsWith(opts.filename)) schedule();
+      if (opts.filenames.some((f) => eventPath.endsWith(f))) schedule();
     });
     watcher.on('error', (err) => {
-      opts.logger?.warn(`sessionFileWatcher fs.watch error (${opts.root}/${opts.filename})`, err);
+      opts.logger?.warn(`sessionFileWatcher fs.watch error (${opts.root})`, err);
     });
   } catch (err) {
-    opts.logger?.warn(`sessionFileWatcher fs.watch 미지원 (${opts.root}/${opts.filename})`, err);
+    opts.logger?.warn(`sessionFileWatcher fs.watch 미지원 (${opts.root})`, err);
   }
 
   return {
