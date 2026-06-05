@@ -29,6 +29,11 @@ import type {
   MemoryPromoteArchiveResult,
   MemoryResetRequest,
   MemoryResetResult,
+  MirrorStartRequest,
+  MirrorStartResult,
+  MirrorStopRequest,
+  MirrorDataEvent,
+  MirrorEndedEvent,
   IrLoadRequest,
   IrLoadResult,
   IrRefineRequest,
@@ -158,6 +163,31 @@ const agentbridge = {
     kill: (sessionId: string): Promise<void> => ipcRenderer.invoke(IpcChannel.PtyKill, sessionId),
     onData: subscribeData,
     onExit: subscribeExit
+  },
+  // Plan 2b — 다른 프로세스가 소유한 세션의 읽기 전용 미러. start가 replay 스냅샷+소유자를
+  // 반환하고 이후 onData로 새 bytes를, onEnded로 소유 종료를 통보. PTY write/resize 없음.
+  mirror: {
+    start: (req: MirrorStartRequest): Promise<MirrorStartResult> =>
+      ipcRenderer.invoke(IpcChannel.MirrorStart, req),
+    stop: (req: MirrorStopRequest): Promise<void> => ipcRenderer.invoke(IpcChannel.MirrorStop, req),
+    onData: (sessionId: string, cb: (data: string) => void): Unsubscribe => {
+      const handler = (_: unknown, evt: MirrorDataEvent): void => {
+        if (evt.sessionId === sessionId) cb(evt.data)
+      }
+      ipcRenderer.on(IpcChannel.MirrorData, handler)
+      return () => {
+        ipcRenderer.off(IpcChannel.MirrorData, handler)
+      }
+    },
+    onEnded: (sessionId: string, cb: () => void): Unsubscribe => {
+      const handler = (_: unknown, evt: MirrorEndedEvent): void => {
+        if (evt.sessionId === sessionId) cb()
+      }
+      ipcRenderer.on(IpcChannel.MirrorEnded, handler)
+      return () => {
+        ipcRenderer.off(IpcChannel.MirrorEnded, handler)
+      }
+    }
   },
   dialog: {
     pickWorkspace: (defaultPath?: string): Promise<string | null> =>
