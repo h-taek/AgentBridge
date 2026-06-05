@@ -4,7 +4,7 @@ import * as claudeAdapter from './core/cliAdapter/claudeAdapter';
 import * as codexAdapter from './core/cliAdapter/codexAdapter';
 import * as agyAdapter from './core/cliAdapter/agyAdapter';
 import * as workspaceStore from './core/workspaceStore';
-import { installHelperToCanonicalPath } from '@agentbridge/core';
+import { installHelperToCanonicalPath, createSessionFileWatcher, getStorageRoot } from '@agentbridge/core';
 import { initializeCore, getBundledHelperPath, getWorkspaceStore, getLogger } from './core/coreInstances';
 import * as output from './log/output';
 import { MemoryPanelProvider } from './views/memoryPanel';
@@ -136,6 +136,23 @@ export function activate(context: vscode.ExtensionContext) {
     }
   });
   context.subscriptions.push(treeView);
+
+  // 공유 저장소 실시간 동기화 — 다른 앱(데스크탑/다른 호스트)이 workspace.json(세션 목록) 또는
+  // owner.json(소유)을 바꾸면 세션 트리를 다시 그린다. 데스크탑과 같은 core 워처를 끌어 쓴다.
+  // fs.watch는 즉시성, 폴링(4s)은 패키지/원격 환경에서 watch 누락 시의 안전망.
+  const storageWatcher = createSessionFileWatcher({
+    root: getStorageRoot(),
+    filenames: ['workspace.json', 'owner.json'],
+    onChange: () => sessionTree.refresh(),
+    logger: { warn: (m, e) => output.warn(`${m} ${e ? String(e) : ''}`) },
+  });
+  const storagePoll = setInterval(() => sessionTree.refresh(), 4000);
+  context.subscriptions.push({
+    dispose: () => {
+      storageWatcher.stop();
+      clearInterval(storagePoll);
+    },
+  });
 
   // --- Helper: open chat panel for a session ---
   function openChatPanel(opts: SpawnOptions, workspaceId: string): void {
