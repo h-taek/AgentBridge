@@ -28,7 +28,14 @@ import {
   type WorkspaceRenameRequest,
   type WorkspacesChangedEvent
 } from '@shared/ipc'
-import { readOwner, isOwnerAlive } from '@agentbridge/core'
+import {
+  readOwner,
+  isOwnerAlive,
+  createOwnerWatcher,
+  getStorageRoot,
+  type OwnerWatcher
+} from '@agentbridge/core'
+import { mkdirSync } from 'fs'
 import { startMirror, stopMirror } from '../modules/mirrorWatcher'
 import {
   broadcastToAll,
@@ -161,6 +168,28 @@ async function handleWorkspacesGet(_e: unknown, workspaceId: string): Promise<Wo
 function broadcastWorkspacesChanged(removedWorkspaceId: string | null = null): void {
   const evt: WorkspacesChangedEvent = { removedWorkspaceId }
   broadcastToAll(IpcChannel.WorkspacesChanged, evt)
+}
+
+// Plan 2b — 외부 프로세스(익스텐션/다른 데스크탑)가 세션을 acquire/release하면 owner.json이 바뀐다.
+// 그 변화를 감시해 좌 사이드바의 외부 소유 배지(externallyOwnedSessions)를 실시간 갱신한다.
+// owner.json 변화 → WorkspacesChanged broadcast → 렌더러 reloadWorkspaces(재 derive).
+let ownerWatcher: OwnerWatcher | null = null
+
+function startOwnerWatcher(): void {
+  const root = getStorageRoot()
+  mkdirSync(root, { recursive: true }) // 최초 실행 등 루트 미존재 시 watch 실패 방지.
+  ownerWatcher = createOwnerWatcher({
+    root,
+    onChange: () => broadcastWorkspacesChanged(),
+    logger: log
+  })
+}
+
+export function stopOwnerWatcher(): void {
+  if (ownerWatcher) {
+    ownerWatcher.stop()
+    ownerWatcher = null
+  }
 }
 
 async function handleWorkspacesCreate(
@@ -837,4 +866,5 @@ export function registerWorkspacesHandlers(): void {
   ipcMain.handle(IpcChannel.HooksTrustSet, handleHooksTrustSet)
   ipcMain.handle(IpcChannel.MirrorStart, handleMirrorStart)
   ipcMain.handle(IpcChannel.MirrorStop, handleMirrorStop)
+  startOwnerWatcher()
 }
