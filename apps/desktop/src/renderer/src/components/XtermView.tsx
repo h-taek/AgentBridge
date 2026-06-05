@@ -46,6 +46,15 @@ type Props = {
   // 호출해도 PTY에 잘못된 cols/rows 전달할 수 있어 active 시점에만 fit 재호출.
   isActive?: boolean
   onExit?: (info: { exitCode: number | null; signal: number | null }) => void
+  // 읽기 전용 미러 모드 — 다른 프로세스가 소유한 세션. PTY 없이 replay만 그리고 입력을 막는다.
+  // mirror가 지정되면 attach.replay를 초기 화면으로, mirror.onData로 tail을 이어 그린다(Plan 2b).
+  mirror?: {
+    ownerApp: 'desktop' | 'extension'
+    cols: number
+    rows: number
+    // 소유 종료(owner.json 소멸) 감지 콜백 — 배지를 "세션 종료됨"으로 바꾸기 위함.
+    onEnded?: () => void
+  }
 }
 
 export function XtermView({
@@ -55,7 +64,8 @@ export function XtermView({
   workspaceId,
   sessionId,
   isActive = true,
-  onExit
+  onExit,
+  mirror
 }: Props): React.JSX.Element {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
@@ -65,6 +75,11 @@ export function XtermView({
   useEffect(() => {
     onExitRef.current = onExit
   }, [onExit])
+  // 미러 여부를 active-rAF effect에서 참조 — 매 render 새 mirror 객체로 effect 재실행되지 않도록 ref.
+  const mirrorRef = useRef(mirror)
+  useEffect(() => {
+    mirrorRef.current = mirror
+  }, [mirror])
   const [status, setStatus] = useState<'running' | 'exited' | 'error'>('running')
   // 마우스 호버 시 보여줄 전체 식별자 — 화면엔 상태 dot/줄 없음, 호버 title만 노출.
   const [statusTitle, setStatusTitle] = useState<string>('')
@@ -125,6 +140,49 @@ export function XtermView({
     setStatus('running')
     setHasRendered(false)
 
+    // ── 읽기 전용 미러 모드 ── 다른 프로세스가 소유한 세션. PTY 구독/입력 없이 replay만 그린다.
+    // 자체 cleanup을 return하므로 아래 라이브 PTY 경로(ResizeObserver/입력/Shift+Enter)는 타지 않는다.
+    if (mirror) {
+      let mirrorRendered = false
+      // 1) replay 스냅샷 전체를 그린다 (소유자 화면 복원).
+      if (replay && replay.length > 0) {
+        term.write(replay)
+        mirrorRendered = true
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setHasRendered(true)
+      }
+      // 2) 소유자 cols/rows로 고정 — fit 대신 소유자 화면 크기를 따른다(화면 어긋남 방지).
+      try {
+        term.resize(Math.max(1, mirror.cols), Math.max(1, mirror.rows))
+      } catch {
+        /* noop */
+      }
+      // 3) tail 구독 — 소유 앱이 출력한 새 bytes를 이어 그린다.
+      const offData = window.agentbridge.mirror.onData(sid, (data) => {
+        term.write(data)
+        if (!mirrorRendered) {
+          mirrorRendered = true
+          setHasRendered(true)
+        }
+      })
+      const offEnded = window.agentbridge.mirror.onEnded(sid, () => {
+        log.info('XtermView mirror ended', { sessionId: sid })
+        setStatus('exited')
+        mirror.onEnded?.()
+      })
+      // 입력 차단: term.onData를 PTY로 보내는 구독 자체를 안 건다. 커서 깜빡임도 끔.
+      term.options.cursorBlink = false
+      return () => {
+        log.info('XtermView mirror unmount', { sessionId: sid })
+        offData()
+        offEnded()
+        term.dispose()
+        fitRef.current = null
+        termRef.current = null
+        if (workspaceId) void window.agentbridge.mirror.stop({ workspaceId, sessionId: sid })
+      }
+    }
+
     // 이전 세션 replay 적용 정책 — kind로 분기.
     //
     // cli (claude/codex/gemini): **replay skip**. 이전 PTY viewport cols/rows와 새 viewport가
@@ -136,7 +194,7 @@ export function XtermView({
     //   shell 출력은 alt-screen 미사용이라 cols mismatch만 영향 (wrap 어긋남, 깨짐은 적음).
     if (kind === 'shell' && replay && replay.length > 0) {
       term.write(replay)
-      // eslint-disable-next-line react-hooks/set-state-in-effect
+
       setHasRendered(true)
     }
 
@@ -285,6 +343,11 @@ export function XtermView({
     if (!fit || !term) return
     const id = requestAnimationFrame(() => {
       try {
+        // 미러 모드: 소유자 cols/rows를 따르므로 fit/resize 안 함 — viewport 재그리기만.
+        if (mirrorRef.current) {
+          term.refresh(0, term.rows - 1)
+          return
+        }
         fit.fit()
         log.info('XtermView active-rAF — fit + resize + refresh', {
           sessionId: attach.sessionId,
@@ -377,6 +440,13 @@ export function XtermView({
       onDrop={onDrop}
     >
       <div className="xterm-container" ref={containerRef} />
+      {mirror && (
+        <div className="xterm-readonly-badge" data-ended={status === 'exited' ? 'true' : 'false'}>
+          {status === 'exited'
+            ? '세션 종료됨 — 읽기 전용'
+            : `${mirror.ownerApp === 'extension' ? '익스텐션' : '데스크탑'}에서 사용 중 — 읽기 전용`}
+        </div>
+      )}
       {dndEnabled && dragDepth > 0 && (
         <div className="xterm-dropzone" aria-hidden="true">
           <div className="xterm-dropzone-inner">

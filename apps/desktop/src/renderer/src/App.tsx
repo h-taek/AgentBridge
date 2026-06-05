@@ -30,6 +30,11 @@ function App(): React.JSX.Element {
   const [openSessionId, setOpenSessionId] = useState<string | null>(null)
   const [openWorkspace, setOpenWorkspace] = useState<WorkspaceMeta | null>(null)
   const [attachments, setAttachments] = useState<Map<string, CliSpawnInteractiveResult>>(new Map())
+  // 다른 프로세스가 라이브 소유한 세션의 읽기 전용 미러(Plan 2b). attachments(라이브 PTY)와 배타적.
+  // sessionId → {소유 앱, 소유자 cols/rows, replay 스냅샷}. 미러는 spawn하지 않고 replay.log를 따라 그린다.
+  const [mirrors, setMirrors] = useState<
+    Map<string, { ownerApp: 'desktop' | 'extension'; cols: number; rows: number; replay: string }>
+  >(new Map())
   // 세션 spawn 시 hook 설치가 실패해 IR 주입이 비활성 상태로 진입한 경우 sessionId→reason.
   // SessionTabs가 이 set을 보고 해당 탭에 "메모리 비활성" 배지를 표시한다.
   // 워크스페이스 전환/세션 close 시 정리.
@@ -94,6 +99,7 @@ function App(): React.JSX.Element {
           removedWorkspaceId: evt.removedWorkspaceId
         })
         setAttachments(new Map())
+        setMirrors(new Map())
         setHookDisabledMap(new Map())
         setOpenWorkspaceId(null)
         setOpenSessionId(null)
@@ -264,10 +270,14 @@ function App(): React.JSX.Element {
       // 닫힌 옛 세션까지 전부 spawn하면(마이그레이션으로 28개까지 누적) 멈추므로 탭바와 동일하게
       // active만. resume 불가 세션은 제외 — 클릭이 막혀 있고 "새로 시작"시키지 않기 위함.
       const resumableSet = new Set(w.resumableSessionIds ?? [])
+      const ownedSet = new Set((w.externallyOwnedSessions ?? []).map((o) => o.sessionId))
       const sessions = w.sessions.filter(
         (s) =>
           (s.closedAt === null || s.sessionId === targetSessionId) &&
-          ((s.kind ?? 'cli') === 'shell' || resumableSet.has(s.sessionId))
+          // 외부 소유 세션은 resume 판정과 무관하게 미러로 열 수 있어야 하므로 면제.
+          ((s.kind ?? 'cli') === 'shell' ||
+            resumableSet.has(s.sessionId) ||
+            ownedSet.has(s.sessionId))
       )
       if (sessions.length === 0) {
         // 빈 워크스페이스 — 자동 삭제하지 않고 (사용자가 + 로 세션 추가 가능),
@@ -277,6 +287,7 @@ function App(): React.JSX.Element {
           setAttachments(new Map())
           setHookDisabledMap(new Map())
         }
+        setMirrors(new Map())
         setOpenWorkspaceId(w.workspaceId)
         setOpenSessionId(null)
         try {
@@ -297,14 +308,39 @@ function App(): React.JSX.Element {
         if (openWorkspaceId && openWorkspaceId !== w.workspaceId) {
           await closeAllAttachments('workspace-switch')
           setAttachments(new Map())
+          setMirrors(new Map())
           setHookDisabledMap(new Map())
         }
         const newAttachments = new Map<string, CliSpawnInteractiveResult>()
+        const ownedMap = new Map((w.externallyOwnedSessions ?? []).map((o) => [o.sessionId, o]))
+        const newMirrors = new Map<
+          string,
+          { ownerApp: 'desktop' | 'extension'; cols: number; rows: number; replay: string }
+        >()
         let lastWorkspace: WorkspaceMeta | null = null
         const orphanIds: string[] = []
         // 세션별 try/catch — 한 세션 spawn 실패해도(예: 강제종료로 native 영속 안 된
         // 빈 세션) 다른 세션은 계속 열기.
         for (const s of sessions) {
+          const owned = ownedMap.get(s.sessionId)
+          if (owned) {
+            // 외부 프로세스가 라이브 소유 — 미러(읽기 전용)로 연다. spawn하지 않음(대화 분기 방지).
+            try {
+              const res = await window.agentbridge.mirror.start({
+                workspaceId: w.workspaceId,
+                sessionId: s.sessionId
+              })
+              newMirrors.set(s.sessionId, {
+                ownerApp: owned.app,
+                cols: owned.cols,
+                rows: owned.rows,
+                replay: res.replay
+              })
+            } catch (mErr) {
+              log.warn('mirror.start 실패', { sessionId: s.sessionId, err: String(mErr) })
+            }
+            continue
+          }
           try {
             const activated = await window.agentbridge.sessions.open({
               workspaceId: w.workspaceId,
@@ -323,13 +359,27 @@ function App(): React.JSX.Element {
           }
         }
         setAttachments(newAttachments)
+        setMirrors(newMirrors)
         setOpenWorkspaceId(w.workspaceId)
-        // focusSession이 orphan이면 첫 성공 session으로 폴백
-        const focusOk = newAttachments.has(focusSession.sessionId)
+        // focusSession이 orphan이면 첫 성공 session(라이브 또는 미러)으로 폴백
+        const focusOk =
+          newAttachments.has(focusSession.sessionId) || newMirrors.has(focusSession.sessionId)
         setOpenSessionId(
-          focusOk ? focusSession.sessionId : (Array.from(newAttachments.keys())[0] ?? null)
+          focusOk
+            ? focusSession.sessionId
+            : (Array.from(newAttachments.keys())[0] ?? Array.from(newMirrors.keys())[0] ?? null)
         )
-        setOpenWorkspace(lastWorkspace)
+        // 전부 미러라 spawn된 라이브 세션이 없으면 lastWorkspace가 null — 메타를 직접 로드해
+        // 터미널 스택이 가려지지 않게 한다(openWorkspace null이면 HomePane으로 떨어짐).
+        if (lastWorkspace) {
+          setOpenWorkspace(lastWorkspace)
+        } else {
+          try {
+            setOpenWorkspace(await window.agentbridge.workspaces.get(w.workspaceId))
+          } catch {
+            /* noop */
+          }
+        }
         if (orphanIds.length > 0) {
           setWorkspacesErr(
             `빈 세션 ${orphanIds.length}개가 강제 종료로 native 영속화되지 않아 자동 정리되었습니다.`
@@ -383,6 +433,7 @@ function App(): React.JSX.Element {
       try {
         if (openWorkspaceId === w.workspaceId) {
           setAttachments(new Map())
+          setMirrors(new Map())
           setHookDisabledMap(new Map())
           setOpenWorkspaceId(null)
           setOpenSessionId(null)
@@ -501,9 +552,9 @@ function App(): React.JSX.Element {
 
   const handleSelectTab = useCallback(
     async (sessionId: string) => {
-      // 이미 attach된 세션이면 그냥 활성 전환
-      if (attachments.has(sessionId)) {
-        log.info('App.handleSelectTab — switch (already attached)', {
+      // 이미 attach된 라이브 세션 또는 열린 미러면 그냥 활성 전환(미러는 재spawn 금지 — 대화 분기 방지).
+      if (attachments.has(sessionId) || mirrors.has(sessionId)) {
+        log.info('App.handleSelectTab — switch (already open)', {
           fromSessionId: openSessionId,
           toSessionId: sessionId
         })
@@ -534,7 +585,7 @@ function App(): React.JSX.Element {
         setBusy(false)
       }
     },
-    [attachments, openSessionId, openWorkspaceId, busy, reloadWorkspaces, applyHookStatus]
+    [attachments, mirrors, openSessionId, openWorkspaceId, busy, reloadWorkspaces, applyHookStatus]
   )
 
   const handleRenameWorkspace = useCallback(
@@ -575,6 +626,7 @@ function App(): React.JSX.Element {
       // 자기 윈도우를 home 상태로 되돌림 — windowManager의 windowsByWorkspace 매핑 해제.
       await window.agentbridge.window.releaseWorkspace()
       setAttachments(new Map())
+      setMirrors(new Map())
       setHookDisabledMap(new Map())
       setOpenWorkspaceId(null)
       setOpenSessionId(null)
@@ -620,6 +672,24 @@ function App(): React.JSX.Element {
   const closeSession = useCallback(
     async (sessionId: string, permanent: boolean, source: SessionCloseSource) => {
       if (!openWorkspaceId || busy) return
+      // 미러(읽기 전용) 탭 닫기 — 공유 세션 메타를 건드리지 않고 로컬 미러만 정리(소유 앱에 무영향).
+      if (mirrors.has(sessionId)) {
+        log.info('App.closeSession — stop mirror', { workspaceId: openWorkspaceId, sessionId })
+        void window.agentbridge.mirror.stop({ workspaceId: openWorkspaceId, sessionId })
+        setMirrors((prev) => {
+          const next = new Map(prev)
+          next.delete(sessionId)
+          return next
+        })
+        if (openSessionId === sessionId) {
+          const remaining = [
+            ...Array.from(attachments.keys()),
+            ...Array.from(mirrors.keys()).filter((sid) => sid !== sessionId)
+          ]
+          setOpenSessionId(remaining[0] ?? null)
+        }
+        return
+      }
       log.info('App.closeSession', {
         workspaceId: openWorkspaceId,
         sessionId,
@@ -653,7 +723,7 @@ function App(): React.JSX.Element {
         setBusy(false)
       }
     },
-    [openWorkspaceId, openSessionId, busy, attachments, reloadWorkspaces, applyHookStatus]
+    [openWorkspaceId, openSessionId, busy, attachments, mirrors, reloadWorkspaces, applyHookStatus]
   )
 
   const handleDeleteSession = useCallback(
@@ -746,7 +816,25 @@ function App(): React.JSX.Element {
                   </div>
                 )
               })}
-              {attachments.size === 0 && (
+              {Array.from(mirrors.entries()).map(([sid, m]) => {
+                const isActive = sid === openSessionId
+                const sessionMeta = openWorkspace.sessions.find((s) => s.sessionId === sid)
+                const model: CliKind = sessionMeta?.model ?? 'claude'
+                return (
+                  <div key={sid} className={`xterm-wrap${isActive ? ' xterm-host-active' : ''}`}>
+                    <XtermView
+                      attach={{ sessionId: sid, pid: 0, replay: m.replay }}
+                      model={model}
+                      kind={sessionMeta?.kind ?? 'cli'}
+                      workspaceId={openWorkspaceId}
+                      sessionId={sid}
+                      isActive={isActive}
+                      mirror={{ ownerApp: m.ownerApp, cols: m.cols, rows: m.rows }}
+                    />
+                  </div>
+                )
+              })}
+              {attachments.size === 0 && mirrors.size === 0 && (
                 <div className="center-empty">
                   <h2>활성 세션 없음</h2>
                   <p>

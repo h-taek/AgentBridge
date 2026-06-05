@@ -683,6 +683,19 @@
   cursor: not-allowed;
 }
 
+/* 미러(읽기 전용) 세션 표식 (Plan 2b) — 라벨 옆 작은 칩. */
+.ws-session-mirror {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+  color: #c9d3ff;
+  background: rgba(122, 162, 247, 0.16);
+  border: 1px solid rgba(122, 162, 247, 0.35);
+}
+
 /* 세션 row 우측 action 버튼 — 호버 시만 노출. pencil이 우측 끝 그룹의 시작점이 되도록
    margin-left:auto는 pencil에 적용 — close는 그 옆에 자연스럽게 붙음 (gap만 0~2px). */
 .ws-session-close {
@@ -1674,6 +1687,27 @@ details pre {
 
 .xterm-host {
   position: relative;
+}
+
+/* 읽기 전용 미러 배지 (Plan 2b) — 다른 프로세스가 소유한 세션을 미러로 볼 때 우상단 표시. */
+.xterm-readonly-badge {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  z-index: 5;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #c9d3ff;
+  background: rgba(122, 162, 247, 0.18);
+  border: 1px solid rgba(122, 162, 247, 0.4);
+  pointer-events: none;
+}
+.xterm-readonly-badge[data-ended='true'] {
+  color: #d7d7dd;
+  background: rgba(120, 120, 130, 0.18);
+  border-color: rgba(120, 120, 130, 0.4);
 }
 
 .xterm-loading {

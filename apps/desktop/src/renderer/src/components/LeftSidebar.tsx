@@ -346,10 +346,18 @@ export function LeftSidebar({
               // resume 가능 여부는 main이 세션별로 계산해 내려준 집합으로 판정(대표 1개가 아니라
               // 세션별). claude는 modelSessionId 없이 sessionId로 resume하므로 여기 포함된다.
               const resumableSet = new Set(w.resumableSessionIds ?? [])
+              // 다른 프로세스가 라이브 소유한 세션 — 미러(읽기 전용)로 열 수 있다(Plan 2b).
+              // resume/CLI 설치 판정과 무관하게 열기 가능해야 하므로 두 헬퍼에서 면제한다.
+              const externallyOwned = new Set(
+                (w.externallyOwnedSessions ?? []).map((o) => o.sessionId)
+              )
               const sessionResumable = (s: SessionMeta): boolean =>
-                (s.kind ?? 'cli') === 'shell' || resumableSet.has(s.sessionId)
+                (s.kind ?? 'cli') === 'shell' ||
+                resumableSet.has(s.sessionId) ||
+                externallyOwned.has(s.sessionId)
               const sessionCliPresent = (s: SessionMeta): boolean =>
                 (s.kind ?? 'cli') === 'shell' ||
+                externallyOwned.has(s.sessionId) ||
                 env?.clis.find((c) => c.kind === s.model)?.found === true
               // 워크스페이스는 resume 가능한 세션이 하나라도 있으면 열 수 있다(대표가 막혀도
               // 다른 세션으로 진입). 빈 워크스페이스는 항상 열기 가능(새 세션 추가용).
@@ -510,6 +518,8 @@ export function LeftSidebar({
                         // (대표 세션이 막혀도 이어갈 수 있는 다른 세션은 개별로 클릭 가능)
                         const sResumable = sessionResumable(s)
                         const sCliPresent = sessionCliPresent(s)
+                        // 다른 프로세스가 라이브 소유 — 미러(읽기 전용)로 열린다. 클릭 가능.
+                        const isMirror = externallyOwned.has(s.sessionId)
                         const sessDisabled = isShellSess
                           ? busy || (!isOpen && !sResumable)
                           : busy || (!isOpen && (!sCliPresent || !sResumable))
@@ -541,15 +551,17 @@ export function LeftSidebar({
                               }
                             }}
                             title={
-                              isShellSess
-                                ? '내장 터미널 (zsh)'
-                                : !isOpen
-                                  ? !sResumable
-                                    ? '모델 native 세션 미영속화 — resume 불가'
-                                    : !sCliPresent
-                                      ? `${MODEL_LABEL[s.model]} CLI 미설치`
-                                      : `워크스페이스 열기 + ${MODEL_LABEL[s.model]} 활성`
-                                  : MODEL_LABEL[s.model]
+                              isMirror
+                                ? '다른 앱에서 사용 중 — 읽기 전용으로 열림'
+                                : isShellSess
+                                  ? '내장 터미널 (zsh)'
+                                  : !isOpen
+                                    ? !sResumable
+                                      ? '모델 native 세션 미영속화 — resume 불가'
+                                      : !sCliPresent
+                                        ? `${MODEL_LABEL[s.model]} CLI 미설치`
+                                        : `워크스페이스 열기 + ${MODEL_LABEL[s.model]} 활성`
+                                    : MODEL_LABEL[s.model]
                             }
                           >
                             {isShellSess ? (
@@ -578,6 +590,15 @@ export function LeftSidebar({
                               />
                             ) : (
                               <span className="ws-session-label">{displayName}</span>
+                            )}
+                            {!isEditing && isMirror && (
+                              <span
+                                className="ws-session-mirror"
+                                title="다른 앱에서 사용 중 — 읽기 전용"
+                                aria-label="읽기 전용"
+                              >
+                                읽기 전용
+                              </span>
                             )}
                             {isOpen && !isEditing && (
                               <div className="ws-session-actions">
