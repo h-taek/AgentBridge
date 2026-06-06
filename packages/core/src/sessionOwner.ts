@@ -8,6 +8,7 @@
 
 import { promises as fsp } from 'fs';
 import { join } from 'path';
+import { execFile } from 'child_process';
 import { withFileLock, isPidAlive } from './fileLock';
 
 export type OwnerApp = 'desktop' | 'extension';
@@ -100,19 +101,50 @@ export function isOwnerAlive(owner: OwnerInfo): boolean {
   return isPidAlive(owner.pid);
 }
 
-// 세션이 현재 라이브 소유 중인가 — owner.json 존재 + 소유 pid 생존.
+// 살아있는 pid의 프로세스 시작 시각(epoch ms). 못 구하면 null.
+// macOS ps는 etimes 미지원 → lstart(절대 시각)를 LC_ALL=C로 받아 Date.parse.
+function processStartTime(pid: number): Promise<number | null> {
+  return new Promise((resolve) => {
+    execFile(
+      '/bin/ps',
+      ['-o', 'lstart=', '-p', String(pid)],
+      { env: { ...process.env, LC_ALL: 'C' } },
+      (err, stdout) => {
+        if (err) return resolve(null);
+        const ms = Date.parse(stdout.trim());
+        resolve(Number.isNaN(ms) ? null : ms);
+      },
+    );
+  });
+}
+
+// pid 재사용 견고화 — pid 생존 + 프로세스 시작 시각 ≤ acquiredAt.
+// 비정상 종료로 owner.json이 stale로 남고 OS가 그 pid를 다른 프로세스에 재배정하면,
+// 재배정 프로세스는 acquiredAt 이후에 시작되므로 stale로 걸러낸다. (정상 소유자는 프로세스가
+// 먼저 떠야 소유를 잡으므로 시작 시각 ≤ acquiredAt이 항상 성립. lstart 초 절삭/클럭 지터 여유로
+// tolerance.) 시작 시각을 못 구하거나 구 스키마(acquiredAt 없음)면 pid-only로 폴백 — 기존 동작 보존.
+const START_TIME_TOLERANCE_MS = 2000;
+async function isOwnerLive(owner: OwnerInfo): Promise<boolean> {
+  if (!isPidAlive(owner.pid)) return false;
+  if (typeof owner.acquiredAt !== 'number') return true;
+  const startedAt = await processStartTime(owner.pid);
+  if (startedAt === null) return true;
+  return startedAt <= owner.acquiredAt + START_TIME_TOLERANCE_MS;
+}
+
+// 세션이 현재 라이브 소유 중인가 — owner.json 존재 + 소유 프로세스 생존(pid 재사용 가드 포함).
 export async function isSessionOwned(sessionDir: string): Promise<boolean> {
   const owner = await readOwnerUnlocked(sessionDir);
-  return owner !== null && isPidAlive(owner.pid);
+  return owner !== null && (await isOwnerLive(owner));
 }
 
 // *다른* 살아있는 프로세스가 이 세션을 라이브 소유 중이면 그 OwnerInfo, 아니면 null.
-// (owner.json 존재 + pid 생존 + pid≠우리 프로세스). 데스크탑·익스텐션 양쪽이 같은 판정으로
-// 외부 소유 세션 위에 PTY를 띄우는 것(대화 분기)을 막는 공용 가드. process.pid는 두 Node 호스트
-// 모두에서 자기 프로세스를 가리키므로 호스트 무관하게 동작한다.
+// (owner.json 존재 + 소유 프로세스 생존 + pid≠우리 프로세스). 데스크탑·익스텐션 양쪽이 같은
+// 판정으로 외부 소유 세션 위에 PTY를 띄우는 것(대화 분기)을 막는 공용 가드. process.pid는 두
+// Node 호스트 모두에서 자기 프로세스를 가리키므로 호스트 무관하게 동작한다.
 export async function readForeignOwner(sessionDir: string): Promise<OwnerInfo | null> {
   const owner = await readOwnerUnlocked(sessionDir);
-  if (owner && isPidAlive(owner.pid) && owner.pid !== process.pid) return owner;
+  if (owner && owner.pid !== process.pid && (await isOwnerLive(owner))) return owner;
   return null;
 }
 
