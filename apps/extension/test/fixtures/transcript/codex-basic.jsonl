@@ -1,0 +1,7 @@
+{"type":"response_item","timestamp":"2026-06-07T00:00:00.000Z","payload":{"type":"message","role":"developer","content":[{"type":"input_text","text":"<permissions instructions>..."}]}}
+{"type":"response_item","timestamp":"2026-06-07T00:00:00.100Z","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context>\n cwd ..."}]}}
+{"type":"response_item","timestamp":"2026-06-07T00:00:01.000Z","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"실제 질문"}]}}
+{"type":"response_item","timestamp":"2026-06-07T00:00:02.000Z","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"답변"}]}}
+{"type":"response_item","timestamp":"2026-06-07T00:00:03.000Z","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"ls\"}","call_id":"c1"}}
+{"type":"response_item","timestamp":"2026-06-07T00:00:04.000Z","payload":{"type":"function_call_output","call_id":"c1","output":"파일 목록"}}
+{"type":"response_item","timestamp":"2026-06-07T00:00:05.000Z","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"둘째 질문"}]}}
