@@ -31,6 +31,8 @@ export * from './hookStatusStore';
 export * from './sessionRegistry';
 export * from './sessionOwner';
 export * from './fileTail';
+export * from './transcriptReader/types';
+export * from './transcriptReader/util';
 export * from './sessionFileWatcher';
 export * from './ownerWatcher';
 // attachmentStore는 데스크탑 미사용 (외부 경로 직접 입력 방식) — 2026-06-01 apps/extension/src/core/로 이전.
