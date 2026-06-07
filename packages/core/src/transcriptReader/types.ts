@@ -33,6 +33,10 @@ export const EMPTY_CARRY: Carry = { open: null, turnIndex: 0 };
 export interface ConsumeResult {
   turns: TurnRecord[];
   carry: Carry;
+  // 이 consume에서 "완료로 확정된 턴들"까지의 records 인덱스(= 미완 열린 턴의 첫 레코드 인덱스).
+  // 열린 턴이 없으면 records.length. manager의 atomic-read가 이 위치까지만 cursor를 전진하고
+  // 나머지(미완 꼬리)는 다음 tick에 다시 읽는다. carry.open이 들고 있는 턴이 곧 그 미완 꼬리.
+  consumed: number;
 }
 
 export type { TurnRecord, TurnToolCall, CliKind };

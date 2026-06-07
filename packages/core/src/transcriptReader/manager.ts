@@ -11,7 +11,7 @@ import type { CliKind } from '../shared/cli';
 import type { TurnRecord, TurnsAssistantDetail } from '../shared/turns';
 import type { Logger } from '../interfaces';
 import { noopLogger } from '../interfaces';
-import { EMPTY_CARRY, type Carry, type ReaderCtx } from './types';
+import { EMPTY_CARRY, type ConsumeResult, type ReaderCtx } from './types';
 import { claudeConsume } from './claudeReader';
 import { codexConsume } from './codexReader';
 import { agyConsume } from './agyReader';
@@ -68,8 +68,11 @@ async function saveCursor(workspaceRoot: string, sessionId: string, cursor: numb
 
 export class CaptureSession {
   // 3 CLI 모두 jsonl transcript(claude/codex/agy transcript.jsonl) → byte-offset 증분 읽기로 통일.
-  private cursor: number | null = null; // lazy (byte offset)
-  private carry: Carry = EMPTY_CARRY;
+  // atomic-read(cursor-hold): cursor는 "완료로 확정된 마지막 턴의 끝"에만 머문다. 미완(완료 태그 없는)
+  // 꼬리 턴은 cursor를 안 옮기고 다음 tick에 그 위치부터 통째로 다시 읽는다 → 메모리 carry 비의존,
+  // 앱이 턴 도중 꺼져도 재시작 후 그 턴을 처음부터 온전히 잡는다.
+  private cursor: number | null = null; // lazy (byte offset; 미완 꼬리 시작에 머묾)
+  private lastEof = -1; // 마지막으로 처리한 완전-라인 EOF. 파일이 안 자랐으면 재처리 skip.
   private seenIds: Set<string> | null = null; // lazy: 기존 turns.jsonl id (dedup)
   private readonly log: Logger;
 
@@ -95,40 +98,43 @@ export class CaptureSession {
     return { workspaceId: this.opts.workspaceId, sessionId: this.opts.sessionId, detail: this.opts.getDetail() };
   }
 
-  private runReader(input: unknown[], carry: Carry): { turns: TurnRecord[]; carry: Carry } {
+  // 매 tick EMPTY_CARRY로 호출(atomic-read는 cursor부터 통째로 다시 읽으므로 메모리 carry 불필요).
+  private runReader(input: unknown[]): ConsumeResult {
     const ctx = this.ctx();
     switch (this.opts.model) {
       case 'codex':
-        return codexConsume(input, carry, ctx);
+        return codexConsume(input, EMPTY_CARRY, ctx);
       case 'agy':
-        return agyConsume(input, carry, ctx);
+        return agyConsume(input, EMPTY_CARRY, ctx);
       default:
-        return claudeConsume(input, carry, ctx);
+        return claudeConsume(input, EMPTY_CARRY, ctx);
     }
   }
 
-  // 증분 1회 처리: 새 transcript 내용을 읽어 닫힌 턴을 append.
+  // 증분 1회 처리(atomic-read): cursor(미완 꼬리 시작)부터 EOF까지 읽어, 완료로 확정된 턴만 append하고
+  // cursor를 그 끝까지만 전진한다. 완료 태그 없는 꼬리는 cursor 유지 → 다음 tick에 다시 읽는다.
   async tick(): Promise<void> {
     await this.ensureLoaded();
     const cursor = this.cursor as number;
 
-    let input: unknown[];
-    let newCursor = cursor;
+    let inc;
     try {
-      const inc = await readJsonlIncrement(this.opts.transcriptPath, cursor);
-      input = inc.records;
-      newCursor = inc.offset;
+      inc = await readJsonlIncrement(this.opts.transcriptPath, cursor);
     } catch (err) {
       this.log.warn(`CaptureSession tick read 실패 (${this.opts.model}): ${String(err)}`);
       return;
     }
 
-    if (newCursor === cursor && input.length === 0) return;
+    if (inc.records.length === 0) return; // 완전한 새 라인 없음 — cursor 유지
+    if (inc.offset === this.lastEof) return; // 파일이 안 자람 — 같은 미완 꼬리 재처리 방지
+    this.lastEof = inc.offset;
 
-    const { turns, carry } = this.runReader(input, this.carry);
-    this.carry = carry;
+    const { turns, consumed } = this.runReader(inc.records);
     await this.emit(turns);
 
+    // 완료된 턴 끝까지만 cursor 전진. 미완 꼬리(consumed..)는 다음 tick에 그 시작부터 다시 읽는다.
+    const newCursor = consumed < inc.records.length ? inc.recordOffsets[consumed] : inc.offset;
+    if (newCursor === cursor) return; // 전진 없음(전부 미완) — 저장 불필요
     this.cursor = newCursor;
     try {
       await saveCursor(this.opts.workspaceRoot, this.opts.sessionId, newCursor);
@@ -137,12 +143,20 @@ export class CaptureSession {
     }
   }
 
-  // 세션 종료/완료 신호 시: carry에 남은 마지막 열린 턴을 flush.
+  // 세션 종료 신호 시(규칙 3): cursor부터 다시 읽어 완료 턴 + 남은 미완 꼬리(내용 있으면)를 모두 flush.
   async finalize(): Promise<void> {
     await this.ensureLoaded();
-    const last = finalizeCarry(this.carry, this.opts.model, this.ctx());
-    this.carry = EMPTY_CARRY;
-    if (last) await this.emit([last]);
+    let inc;
+    try {
+      inc = await readJsonlIncrement(this.opts.transcriptPath, this.cursor as number);
+    } catch (err) {
+      this.log.warn(`CaptureSession finalize read 실패 (${this.opts.model}): ${String(err)}`);
+      return;
+    }
+    const { turns, carry } = this.runReader(inc.records);
+    const tail = finalizeCarry(carry, this.opts.model, this.ctx()); // 내용 없으면 null(빈-턴 skip)
+    const all = tail ? [...turns, tail] : turns;
+    if (all.length) await this.emit(all);
   }
 
   // 턴 배열을 dedup 후 append + 하류 트리거.

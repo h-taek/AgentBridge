@@ -87,6 +87,40 @@ describe('CaptureManager', () => {
     assert.equal(turns[0].user, '유일');
   });
 
+  it('atomic-read 규칙1: 완료 태그 없으면 기록 안 하고, 태그 오면 미완 부분까지 통째로 기록(cursor-hold)', async () => {
+    const { root, transcript } = await setup();
+    const mgr = new CaptureManager({ resolve: async () => transcript });
+    // 미완 턴: 부분 답변 + stop=tool_use(end_turn 아님) → 완료 태그 없음
+    await fs.writeFile(transcript, [U('q1', 'u1'), A('부분답변', 'a1', 'tool_use')].join('\n') + '\n');
+    mgr.register(baseOpts(root, fakeScheduler()));
+    await delay(60);
+    assert.equal((await readAllTurns(root)).length, 0); // 완료 태그 없어 기록 안 됨(cursor 유지)
+    // 완료 태그 도착(end_turn + text)
+    await fs.appendFile(transcript, A('최종답변', 'a2', 'end_turn') + '\n');
+    await until(async () => (await readAllTurns(root)).length === 1);
+    const t = (await readAllTurns(root))[0];
+    // cursor가 안 옮겨졌으므로 재읽기가 '부분답변'까지 포함 → 통째로 기록
+    assert.ok(t.assistantBody.includes('부분답변'), `부분답변 누락: ${t.assistantBody}`);
+    assert.ok(t.assistantBody.includes('최종답변'), `최종답변 누락: ${t.assistantBody}`);
+    await mgr.disposeAll();
+  });
+
+  it('atomic-read 규칙2: 완료 태그 없이 다음 user가 오면 직전 미완 내용을 강제 기록', async () => {
+    const { root, transcript } = await setup();
+    const mgr = new CaptureManager({ resolve: async () => transcript });
+    await fs.writeFile(transcript, [U('q1', 'u1'), A('부분답변', 'a1', 'tool_use')].join('\n') + '\n');
+    mgr.register(baseOpts(root, fakeScheduler()));
+    await delay(60);
+    assert.equal((await readAllTurns(root)).length, 0);
+    // 다음 user 도착 → 직전 미완 턴 강제 마감(내용 보존)
+    await fs.appendFile(transcript, U('q2', 'u2') + '\n');
+    await until(async () => (await readAllTurns(root)).length === 1);
+    const t = (await readAllTurns(root))[0];
+    assert.equal(t.user, 'q1');
+    assert.equal(t.assistantBody, '부분답변');
+    await mgr.disposeAll();
+  });
+
   it('재시작 멱등성: 새 매니저 같은 root → 중복 append 없음', async () => {
     const { root, transcript } = await setup();
     await fs.writeFile(transcript, [U('q1', 'u1'), A('a1', 'a1'), U('q2', 'u2')].join('\n') + '\n');

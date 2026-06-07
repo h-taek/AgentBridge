@@ -66,9 +66,15 @@ export function finalizeTurn(open: OpenTurn, model: CliKind, ctx: ReaderCtx): Tu
   };
 }
 
-// 세션 종료/완료 신호 시 carry에 열린 채 남은 마지막 턴을 emit. 열린 턴 없으면 null.
+// 턴에 실질 내용이 있는지 — 답변 text(공백 제외) 또는 도구 호출. 빈-턴 skip 규칙의 공통 판정.
+// 인터럽트로 답변 없이 끊긴 턴(생각만 있고 text 없음)을 turns.jsonl에 빈 채로 박지 않기 위함.
+export function hasTurnContent(open: OpenTurn): boolean {
+  return open.assistantParts.some((s) => s.trim().length > 0) || open.toolCalls.length > 0;
+}
+
+// 세션 종료/완료 신호 시 carry에 열린 채 남은 마지막 턴을 emit. 열린 턴 없거나 내용이 비면 null.
 // reader는 "다음 user"로만 턴을 닫으므로 단일/마지막 턴은 carry에 갇힌다 — M2 watcher가
 // 세션 종료·완료 신호 시점에 이 헬퍼로 flush(결정적 id라 재호출/중복 append는 하류에서 dedup).
 export function finalizeCarry(carry: Carry, model: CliKind, ctx: ReaderCtx): TurnRecord | null {
-  return carry.open ? finalizeTurn(carry.open, model, ctx) : null;
+  return carry.open && hasTurnContent(carry.open) ? finalizeTurn(carry.open, model, ctx) : null;
 }

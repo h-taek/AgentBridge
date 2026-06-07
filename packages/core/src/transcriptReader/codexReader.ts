@@ -1,7 +1,7 @@
 // codex jsonl(response_item) → TurnRecord[]. 순수 함수. 단일 스트림.
 import type { TurnRecord } from '../shared/turns';
 import type { Carry, ConsumeResult, ReaderCtx } from './types';
-import { finalizeTurn, toolArgString } from './util';
+import { finalizeTurn, hasTurnContent, toolArgString } from './util';
 
 interface CodexRecord {
   type?: string;
@@ -37,15 +37,18 @@ export function codexConsume(
   const turns: TurnRecord[] = [];
   let open = carry.open;
   let turnIndex = carry.turnIndex;
+  let openStart = carry.open ? 0 : records.length; // 미완 열린 턴 첫 레코드 인덱스(atomic-read cursor-hold)
 
-  for (const raw of records as CodexRecord[]) {
+  const list = records as CodexRecord[];
+  for (let i = 0; i < list.length; i++) {
+    const raw = list[i];
     const p = raw.payload;
     if (!p) continue;
 
     // 턴 끝 신호: event_msg/task_complete → 에이전트 응답 종료. 다음 user 안 기다리고 즉시 마감.
     if (raw.type === 'event_msg' && p.type === 'task_complete') {
       if (open) {
-        turns.push(finalizeTurn(open, 'codex', ctx));
+        if (hasTurnContent(open)) turns.push(finalizeTurn(open, 'codex', ctx));
         turnIndex++;
         open = null;
       }
@@ -54,11 +57,14 @@ export function codexConsume(
 
     if (isRealUser(p)) {
       if (open) {
-        turns.push(finalizeTurn(open, 'codex', ctx));
+        // 끊긴 턴 — 내용 있으면 보존, 빈 채면 skip(빈-턴 규칙).
+        if (hasTurnContent(open)) turns.push(finalizeTurn(open, 'codex', ctx));
         turnIndex++;
       }
       open = {
-        sourceKey: `${ctx.sessionId}#${turnIndex}`,
+        // codex user 레코드엔 고유 id가 없어 timestamp를 턴 키로(cursor-hold 재읽기 시 id 재현용).
+        // timestamp 없는 합성 입력은 turnIndex로 폴백.
+        sourceKey: `${ctx.sessionId}#${raw.timestamp ?? turnIndex}`,
         user: messageText(p),
         startedAt: raw.timestamp ?? '',
         lastAt: raw.timestamp ?? '',
@@ -66,6 +72,7 @@ export function codexConsume(
         toolCalls: [],
         toolCallById: {},
       };
+      openStart = i; // 이 user 레코드가 새 턴(미완) 시작
       continue;
     }
     if (!open) continue;
@@ -87,5 +94,5 @@ export function codexConsume(
     }
   }
 
-  return { turns, carry: { open, turnIndex } };
+  return { turns, carry: { open, turnIndex }, consumed: open ? openStart : list.length };
 }

@@ -8,7 +8,7 @@
 //   - 턴 끝(즉시 flush): type=PLANNER_RESPONSE + content 있음 + tool_calls 없음 = 사용자에게 보내는 최종 답변.
 //     (라이브 검증: 중간 스텝은 content 없거나 tool_calls 있음 → 오탐 0. thinking은 별도 필드라 content에 안 섞임.)
 import type { Carry, ConsumeResult, ReaderCtx, TurnRecord } from './types';
-import { finalizeTurn, toolArgString } from './util';
+import { finalizeTurn, hasTurnContent, toolArgString } from './util';
 
 interface AgyRecord {
   step_index?: number;
@@ -38,11 +38,15 @@ export function agyConsume(records: unknown[], carry: Carry, ctx: ReaderCtx): Co
   const turns: TurnRecord[] = [];
   let open = carry.open;
   let turnIndex = carry.turnIndex;
+  let openStart = carry.open ? 0 : records.length; // 미완 열린 턴 첫 레코드 인덱스(atomic-read cursor-hold)
 
-  for (const raw of records as AgyRecord[]) {
+  const list = records as AgyRecord[];
+  for (let i = 0; i < list.length; i++) {
+    const raw = list[i];
     if (isRealUser(raw)) {
       if (open) {
-        turns.push(finalizeTurn(open, 'agy', ctx));
+        // 끊긴 턴 — 내용 있으면 보존, 빈 채면 skip(빈-턴 규칙).
+        if (hasTurnContent(open)) turns.push(finalizeTurn(open, 'agy', ctx));
         turnIndex++;
       }
       open = {
@@ -53,6 +57,7 @@ export function agyConsume(records: unknown[], carry: Carry, ctx: ReaderCtx): Co
         assistantParts: [],
         toolCalls: [],
       };
+      openStart = i; // 이 USER_INPUT 레코드가 새 턴(미완) 시작
       continue;
     }
     if (raw.source === 'SYSTEM') continue; // 주입(CONVERSATION_HISTORY 등) 무시
@@ -83,5 +88,5 @@ export function agyConsume(records: unknown[], carry: Carry, ctx: ReaderCtx): Co
     }
   }
 
-  return { turns, carry: { open, turnIndex } };
+  return { turns, carry: { open, turnIndex }, consumed: open ? openStart : list.length };
 }

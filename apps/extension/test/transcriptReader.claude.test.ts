@@ -49,6 +49,30 @@ describe('claudeReader', () => {
     assert.equal(carry.open, null); // carry 비어 finalize 재flush 안 함
   });
 
+  it('thinking 레코드가 end_turn을 먼저 달고 와도 뒤따르는 답변 text를 잃지 않는다 (빈-body 버그 재현)', () => {
+    // 실데이터 구조: claude는 한 메시지를 블록별 레코드(thinking/text)로 쪼개 쓰고 stop_reason을 복제.
+    // thinking 레코드가 end_turn을 달고 text보다 먼저 온다 → 옛 로직은 여기서 빈 채로 마감해 답변 유실.
+    const records = [
+      { type: 'user', promptSource: 'typed', uuid: 'u1', timestamp: '2026-06-07T00:00:00.000Z', message: { role: 'user', content: '질문' } },
+      { type: 'assistant', uuid: 'a1', message: { role: 'assistant', stop_reason: 'end_turn', content: [{ type: 'thinking', thinking: '생각...' }] } },
+      { type: 'assistant', uuid: 'a2', timestamp: '2026-06-07T00:00:02.000Z', message: { role: 'assistant', stop_reason: 'end_turn', content: [{ type: 'text', text: '진짜 답변' }] } },
+    ];
+    const { turns, carry } = claudeConsume(records, EMPTY_CARRY, CTX);
+    assert.equal(turns.length, 1);
+    assert.equal(turns[0].assistantBody, '진짜 답변'); // 빈 채로 마감되지 않음
+    assert.equal(carry.open, null);
+  });
+
+  it('답변 없이 끊긴 턴(생각만)은 다음 user 경계에서 skip한다 (빈-턴 규칙)', () => {
+    const records = [
+      { type: 'user', promptSource: 'typed', uuid: 'u1', message: { role: 'user', content: '첫 질문' } },
+      { type: 'assistant', uuid: 'a1', message: { role: 'assistant', stop_reason: 'tool_use', content: [{ type: 'thinking', thinking: '생각만 하다 끊김' }] } },
+      { type: 'user', promptSource: 'typed', uuid: 'u2', message: { role: 'user', content: '둘째 질문' } },
+    ];
+    const { turns } = claudeConsume(records, EMPTY_CARRY, CTX);
+    assert.equal(turns.length, 0); // 내용 없는 첫 턴은 안 박힘
+  });
+
   it('end_turn 전 tool_use 단계(stop=tool_use)는 마감하지 않는다', () => {
     const records = [
       { type: 'user', promptSource: 'typed', uuid: 'u1', message: { role: 'user', content: 'q' } },

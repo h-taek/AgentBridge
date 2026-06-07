@@ -23,7 +23,7 @@ describe('codexReader', () => {
     assert.equal(t.toolCalls[0].tool, 'exec_command');
     assert.equal(t.toolCalls[0].arg, '{"cmd":"ls"}');
     assert.equal(t.toolCalls[0].summary, '파일 목록');
-    assert.equal(t.id, 'codex:s1#0');
+    assert.equal(t.id, 'codex:s1#2026-06-07T00:00:01.000Z'); // codex 턴 키 = user timestamp(고유 id 없음)
   });
 
   it('event_msg/task_complete면 다음 user 없이도 즉시 마감한다 (실시간 flush)', () => {

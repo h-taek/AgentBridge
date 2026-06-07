@@ -7,30 +7,38 @@ import { readAppendedBytes } from '../fileTail';
 
 export interface JsonlIncrement {
   records: unknown[];
-  offset: number;
+  // records[i]가 나온 라인의 시작 byte 위치(절대). atomic-read cursor-hold가 "미완 턴 시작"으로
+  // cursor를 되돌릴 때 사용 — 완료된 턴 끝까지만 전진하고 미완 꼬리는 그 위치부터 다시 읽는다.
+  recordOffsets: number[];
+  offset: number; // 마지막 완전한 라인 다음(절대 byte). 전부 소비 시 cursor 후보.
 }
 
 export async function readJsonlIncrement(filePath: string, fromOffset: number): Promise<JsonlIncrement> {
   const { data } = await readAppendedBytes(filePath, fromOffset);
-  if (!data) return { records: [], offset: fromOffset };
+  if (!data) return { records: [], recordOffsets: [], offset: fromOffset };
 
   const lastNl = data.lastIndexOf('\n');
   if (lastNl < 0) {
     // 완전한 라인 없음 — 보류(offset 미전진).
-    return { records: [], offset: fromOffset };
+    return { records: [], recordOffsets: [], offset: fromOffset };
   }
 
   const completeStr = data.slice(0, lastNl + 1); // 마지막 개행 포함까지만 소비
   const consumedBytes = Buffer.byteLength(completeStr, 'utf8');
   const records: unknown[] = [];
+  const recordOffsets: number[] = [];
+  let pos = fromOffset; // 현재 라인 시작 byte(절대)
   for (const line of completeStr.split('\n')) {
+    const lineStart = pos;
+    pos += Buffer.byteLength(line, 'utf8') + 1; // +1 = '\n'
     const t = line.trim();
     if (!t) continue;
     try {
       records.push(JSON.parse(t));
+      recordOffsets.push(lineStart);
     } catch {
       // 깨진 라인 skip (design §F — 하나가 깨져도 전체는 계속)
     }
   }
-  return { records, offset: fromOffset + consumedBytes };
+  return { records, recordOffsets, offset: fromOffset + consumedBytes };
 }
