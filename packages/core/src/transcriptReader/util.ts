@@ -2,7 +2,7 @@
 import type { CliKind } from '../shared/cli';
 import type { TurnRecord, TurnsAssistantDetail } from '../shared/turns';
 import { TURN_CAP, TURNS_ASSISTANT_DETAIL_CAP } from '../shared/turns';
-import type { OpenTurn, ReaderCtx } from './types';
+import type { Carry, OpenTurn, ReaderCtx } from './types';
 
 // 플랫폼 중립 UTF-8 byte length (Buffer/TextEncoder 비의존).
 export function utf8ByteLength(s: string): number {
@@ -64,4 +64,11 @@ export function finalizeTurn(open: OpenTurn, model: CliKind, ctx: ReaderCtx): Tu
     assistantBodyBytes: utf8ByteLength(assistantBody),
     toolCalls: open.toolCalls,
   };
+}
+
+// 세션 종료/완료 신호 시 carry에 열린 채 남은 마지막 턴을 emit. 열린 턴 없으면 null.
+// reader는 "다음 user"로만 턴을 닫으므로 단일/마지막 턴은 carry에 갇힌다 — M2 watcher가
+// 세션 종료·완료 신호 시점에 이 헬퍼로 flush(결정적 id라 재호출/중복 append는 하류에서 dedup).
+export function finalizeCarry(carry: Carry, model: CliKind, ctx: ReaderCtx): TurnRecord | null {
+  return carry.open ? finalizeTurn(carry.open, model, ctx) : null;
 }
