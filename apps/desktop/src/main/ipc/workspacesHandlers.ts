@@ -57,10 +57,9 @@ import {
 } from '../modules/workspaceStore'
 import { getCoreHookStatusStore } from '../modules/cliAdapter/coreCliAdapters'
 import {
-  onAssistantData,
-  registerRecorder,
-  setRecorderModelSessionId,
-  unregisterRecorder
+  registerCapture,
+  setCaptureModelSessionId,
+  unregisterCapture
 } from '../modules/turnRecorder'
 import { registerDisplayFilter, unregisterDisplayFilter } from '../modules/ptyDisplayFilter'
 import { ensureConversationDirs } from '../modules/conversationStore'
@@ -532,8 +531,6 @@ async function spawnAndAttachSession(
       : session.modelSessionId
 
   // IR 주입은 hook 시스템 — argv 기반 spawn-time 주입은 폐기됨.
-  // TurnRecorder는 spawn 직후 ptySessionId가 결정되면 등록 — onData 콜백 closure가 ptyIdRef로 lookup.
-  const ptyIdRef: { current: string | null } = { current: null }
   const pty = await adapter.spawnInteractive(
     {
       workspaceId,
@@ -547,14 +544,13 @@ async function spawnAndAttachSession(
     {
       replayLogPath: sessionPaths.replayLog,
       ownerDir: sessionPaths.dir,
-      onData: (data): void => {
+      onData: (): void => {
         void touchWorkspace(workspaceId)
-        if (ptyIdRef.current) onAssistantData(ptyIdRef.current, data)
       },
       onExit: (info): void => {
         // 같은 (workspace, session)에 이후 새 spawn이 등록됐으면 race 방지로 match일 때만 clear.
         clearActiveSessionIfMatches(workspaceId, session.sessionId, info.ptySessionId)
-        unregisterRecorder(info.ptySessionId)
+        unregisterCapture(info.ptySessionId)
         unregisterDisplayFilter(info.ptySessionId)
       },
       onModelSessionIdCaptured: (modelSessionId): void => {
@@ -569,7 +565,7 @@ async function spawnAndAttachSession(
             await updateSessionMeta(workspaceId, session.sessionId, { modelSessionId })
             updateActiveSessionModelId(workspaceId, session.sessionId, modelSessionId)
             // codex/agy 비동기 캡처 — 이제 modelSessionId를 알았으니 매니저가 transcript 캡처 시작.
-            setRecorderModelSessionId(session.sessionId, modelSessionId, ws.workspacePath)
+            setCaptureModelSessionId(session.sessionId, modelSessionId, ws.workspacePath)
             if (!event.sender.isDestroyed()) {
               const evt: SessionModelSessionCapturedEvent = {
                 workspaceId,
@@ -604,17 +600,15 @@ async function spawnAndAttachSession(
     modelSessionId: pty.modelSessionId,
     model: session.model
   })
-  // TurnRecorder + DisplayFilter 등록 — ptySessionId가 spawn 후 결정. onData 콜백은 ptyIdRef로 lookup.
-  // DisplayFilter는 ptySession이 직접 호출(같은 ptySessionId)하므로 별도 ref 불필요.
-  ptyIdRef.current = pty.sessionId
+  // 캡처 + DisplayFilter 등록 — ptySessionId는 spawn 후 결정.
   registerDisplayFilter(pty.sessionId)
-  registerRecorder({
+  registerCapture({
     workspaceId,
     sessionId: session.sessionId,
     ptySessionId: pty.sessionId,
     model: session.model,
     workspacePath: ws.workspacePath,
-    // claude/agy는 spawn 즉시 확보, codex는 null → onModelSessionIdCaptured에서 setRecorderModelSessionId.
+    // claude/agy는 spawn 즉시 확보, codex는 null → onModelSessionIdCaptured에서 setCaptureModelSessionId.
     modelSessionId: pty.modelSessionId
   })
 
@@ -645,10 +639,10 @@ async function spawnAndAttachSession(
 // ─── 내장 터미널 세션 spawn ─────────────────────────────────────────────
 //
 // `kind === 'shell'` 세션 — 사용자 cwd에서 일반 zsh/bash PTY를 spawn한다.
-// AgentBridge hook 주입, IR refine, TurnRecorder, quota probe 모두 *bypass* — 그저 터미널.
+// AgentBridge hook 주입, IR refine, 턴 캡처, quota probe 모두 *bypass* — 그저 터미널.
 //   - 어댑터 없음 (CLIAdapter 인터페이스는 cli 세션 전용)
 //   - hookInstaller 호출 안 함 (cwd 안 AI 지시 파일 / settings 격리 모두 불필요)
-//   - registerRecorder / registerDisplayFilter 호출 안 함 (모델 응답이 없어 의미 없음)
+//   - registerCapture / registerDisplayFilter 호출 안 함 (모델 응답이 없어 의미 없음)
 //   - modelSessionId는 항상 null (외부 `claude --resume` 등에 노출되지 않음 — 정책 1 자동 만족)
 //   - sessionActive 등록은 함 (workspace activeSessionCount, before-quit killAllForce 대상에 포함)
 async function spawnAndAttachShellSession(

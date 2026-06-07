@@ -19,7 +19,7 @@ export function utf8ByteLength(s: string): number {
   return n;
 }
 
-// detail 단계별 head+tail cap (결론부 보존). sliceAssistant의 cap 의미 그대로.
+// detail 단계별 head+tail cap (결론부 보존).
 export function applyDetailCap(body: string, detail: TurnsAssistantDetail): string {
   const { chars, headChars, tailChars } = TURNS_ASSISTANT_DETAIL_CAP[detail];
   if (body.length <= chars) return body;

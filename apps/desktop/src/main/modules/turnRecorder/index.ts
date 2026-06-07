@@ -8,10 +8,10 @@ import { getWorkspacePaths, updateSessionMeta } from '../workspaceStore'
 
 // 2026-06-07 M2-4: 턴 기록을 PTY 스크래핑 → transcript 읽기로 전환(설계 §E). 호스트는 CaptureManager에
 // 세션을 등록만 하고, 매니저가 각 CLI transcript 파일을 fs.watch/폴링으로 읽어 turns.jsonl을 쌓는다.
-// 표시는 PTY 유지 — onUserInput/onAssistantData는 더 이상 기록에 쓰이지 않아 no-op(호출부는 M2-6에서 정리).
+// 표시는 PTY가 별도 구동 — 입력/출력 PTY-feed는 기록에 쓰이지 않는다(전부 transcript 파일에서 읽음).
 // 호스트 책임:
 //   - ptySessionId ↔ sessionId 매핑(onExit는 ptySessionId만 줌, 매니저는 sessionId 키)
-//   - codex 비동기 modelSessionId 캡처 시 setRecorderModelSessionId로 매니저에 통지
+//   - codex 비동기 modelSessionId 캡처 시 setCaptureModelSessionId로 매니저에 통지
 //   - onTurnFlushed에서 updateSessionMeta(lastChattedAt) + broadcastTurnsUpdated
 
 // M3.6 C — workspaceId 매칭 윈도우에만 전송.
@@ -30,12 +30,12 @@ const manager = new CaptureManager({
 // onExit가 ptySessionId만 주므로 unregister를 위해 ptySessionId → sessionId 매핑 유지.
 const ptyToSession = new Map<string, string>()
 
-// codex 비동기 modelSessionId 캡처가 registerRecorder의 async 본문(scheduler await)보다 먼저 도착하면
+// codex 비동기 modelSessionId 캡처가 registerCapture의 async 본문(scheduler await)보다 먼저 도착하면
 // 매니저에 아직 세션이 없어 setModelSessionId가 무시될 수 있다 → 캡처가 영영 안 시작. pending에 담아두고
 // register 완료 직후 적용해 race를 닫는다.
 const pendingModelId = new Map<string, { modelSessionId: string; cwd: string }>()
 
-export function registerRecorder(args: {
+export function registerCapture(args: {
   workspaceId: string
   sessionId: string
   ptySessionId: string
@@ -97,7 +97,7 @@ export function registerRecorder(args: {
 }
 
 // codex/agy 비동기 modelSessionId 캡처 시 호출 — 매니저가 그때 경로를 해석해 캡처 시작.
-export function setRecorderModelSessionId(
+export function setCaptureModelSessionId(
   sessionId: string,
   modelSessionId: string,
   cwd: string
@@ -107,7 +107,7 @@ export function setRecorderModelSessionId(
   manager.setModelSessionId(sessionId, modelSessionId, cwd)
 }
 
-export function unregisterRecorder(ptySessionId: string): void {
+export function unregisterCapture(ptySessionId: string): void {
   const sessionId = ptyToSession.get(ptySessionId)
   if (!sessionId) return
   ptyToSession.delete(ptySessionId)
@@ -122,13 +122,4 @@ export async function disposeAndFlushAll(): Promise<void> {
   ptyToSession.clear()
   pendingModelId.clear()
   await manager.disposeAll()
-}
-
-// transcript 캡처 전환으로 PTY-feed 기록은 폐기 — 표시는 PTY가 별도 구동. (M2-6에서 호출부와 함께 제거.)
-export function onUserInput(_ptySessionId: string, _data: string): void {
-  /* no-op: 기록은 transcript 파일에서 읽음 */
-}
-
-export function onAssistantData(_ptySessionId: string, _data: string): void {
-  /* no-op: 기록은 transcript 파일에서 읽음 */
 }

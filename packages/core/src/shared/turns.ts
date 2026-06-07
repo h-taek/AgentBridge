@@ -24,7 +24,7 @@ export type TurnRecord = {
   completedAt: string; // ISO — PTY idle 후
   user: string; // pty:write buffer flush 정제 (paste/backspace)
   userBytes: number; // 정제 후 길이
-  // sliceAssistant 휴리스틱 결과:
+  // assistant 본문 정제 결과:
   //   1. ANSI strip
   //   2. 시스템 indicator 제거
   //   3. 도구 호출 박스 추출 → toolCalls[]

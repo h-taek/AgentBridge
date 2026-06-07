@@ -523,7 +523,7 @@ export type AppSettings = {
   // 홈 화면 새 워크스페이스 생성 시 사용할 베이스 경로. 비어있으면 main 프로세스가
   // `${homedir}/AgentBridge`를 fallback으로 사용. 사용자가 수정 가능.
   defaultBasePath: string
-  // turns.jsonl 안 assistantBody 보존 정도. sliceAssistant의 cap 단계 결정.
+  // turns.jsonl 안 assistantBody 보존 정도. detail 캡 단계 결정.
   turnsAssistantDetail: TurnsAssistantDetail
   // 보관할 compacted archive snapshot 최대 개수. 초과분은 오래된 것부터 자동 삭제.
   // 누적된 과거 IR snapshot이 컨텍스트로 새어들지 않도록 상한 — 토큰 절약 정책.

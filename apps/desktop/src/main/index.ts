@@ -21,7 +21,7 @@ import {
   startPty,
   writePty
 } from './modules/ptySession'
-import { onUserInput, disposeAndFlushAll } from './modules/turnRecorder'
+import { disposeAndFlushAll } from './modules/turnRecorder'
 import { registerProbeDeps } from './modules/cliQuotaTracker'
 import { getCurrentUpdaterStatus, initAppUpdater, triggerManualCheck } from './modules/appUpdater'
 import {
@@ -205,9 +205,6 @@ function registerIpcHandlers(userDataDir: string): void {
       log.warn('pty:write 거부 — sender 소유권 불일치', { sessionId })
       return
     }
-    // TurnRecorder는 PTY write *전*에 통지 — Enter/DEL/Ctrl-C는 PTY 도달 전 buffer에 반영해야
-    // 사용자 시점과 turns.jsonl이 일치한다 (race 무관, 단 통지 순서만 보장).
-    onUserInput(sessionId, data)
     writePty(sessionId, data)
   })
   ipcMain.handle(IpcChannel.PtyResize, (event, sessionId: string, cols: number, rows: number) => {
