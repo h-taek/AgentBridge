@@ -43,6 +43,17 @@ export function codexConsume(
     const p = raw.payload;
     if (!p) continue;
 
+    // 턴 끝 신호: event_msg/task_complete → 에이전트 응답 종료. 다음 user 안 기다리고 즉시 마감.
+    if (raw.type === 'event_msg' && p.type === 'task_complete') {
+      if (open) {
+        turns.push(finalizeTurn(open, 'codex', ctx));
+        turnIndex++;
+        open = null;
+        pendingTool.clear();
+      }
+      continue;
+    }
+
     if (isRealUser(p)) {
       if (open) {
         turns.push(finalizeTurn(open, 'codex', ctx));

@@ -72,6 +72,14 @@ export function claudeConsume(
         }
         // thinking 등 기타 블록 제외
       }
+      // 턴 끝 신호: stop_reason=end_turn → 다음 user를 안 기다리고 즉시 마감(실시간 flush).
+      // 결정적 id라 재읽기/재flush는 하류에서 dedup. 끊긴 턴(end_turn 없음)은 다음 user/finalize가 처리.
+      if (raw.message?.stop_reason === 'end_turn') {
+        turns.push(finalizeTurn(open, 'claude', ctx));
+        turnIndex++;
+        open = null;
+        pendingTool.clear();
+      }
     } else if (raw.type === 'user' && Array.isArray(raw.message?.content)) {
       // tool_result — 직전 toolCall에 summary 매칭
       if (raw.timestamp) open.lastAt = raw.timestamp;

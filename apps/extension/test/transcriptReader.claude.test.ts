@@ -37,6 +37,28 @@ describe('claudeReader', () => {
     assert.equal(carry.open, null);
   });
 
+  it('stop_reason=end_turn이면 다음 user 없이도 즉시 마감한다 (실시간 flush)', () => {
+    const records = [
+      { type: 'user', promptSource: 'typed', uuid: 'u1', timestamp: '2026-06-07T00:00:00.000Z', message: { role: 'user', content: '유일 질문' } },
+      { type: 'assistant', uuid: 'a1', timestamp: '2026-06-07T00:00:01.000Z', message: { role: 'assistant', stop_reason: 'end_turn', content: [{ type: 'text', text: '유일 답변' }] } },
+    ];
+    const { turns, carry } = claudeConsume(records, EMPTY_CARRY, CTX);
+    assert.equal(turns.length, 1); // 다음 user 없이도 end_turn에서 닫힘
+    assert.equal(turns[0].user, '유일 질문');
+    assert.equal(turns[0].assistantBody, '유일 답변');
+    assert.equal(carry.open, null); // carry 비어 finalize 재flush 안 함
+  });
+
+  it('end_turn 전 tool_use 단계(stop=tool_use)는 마감하지 않는다', () => {
+    const records = [
+      { type: 'user', promptSource: 'typed', uuid: 'u1', message: { role: 'user', content: 'q' } },
+      { type: 'assistant', uuid: 'a1', message: { role: 'assistant', stop_reason: 'tool_use', content: [{ type: 'tool_use', id: 't1', name: 'Read', input: { p: 1 } }] } },
+    ];
+    const { turns, carry } = claudeConsume(records, EMPTY_CARRY, CTX);
+    assert.equal(turns.length, 0); // tool_use는 중간 단계 — 안 닫힘
+    assert.ok(carry.open);
+  });
+
   it('carry로 턴이 이어진다(증분 호출)', async () => {
     const records = await loadRecords('claude-basic.jsonl');
     // 첫 호출: 앞 3줄만
