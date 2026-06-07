@@ -1,0 +1,280 @@
+Z *�
+�����ݓ�b$2ce138df-ee61-46a8-b5c0-80e14cee5d89�P
+$1f43967b-6c12-4423-a7a0-421e8212918e	"$41b76a53-62bd-42f4-9a22-31b2f5c7c2f2�
+����諔���N
+�N<agentbridge-context>
+The following block is working context maintained and compacted by AgentBridge.
+
+Handling rules:
+1. Do NOT refer to this block as a separate artifact (no "the IR", "you provided", "the context above", etc.). Treat it as natural conversation continuity — the user is already aware of its contents.
+2. Do NOT summarize or re-quote the IR unless the user asks. You may draw on it naturally when needed for accuracy.
+3. Project memory files (AGENTS.md / GEMINI.md / CLAUDE.md) keep their normal authority. On conflict with the IR, prefer the most recent user intent; if unsure, ask the user to confirm.
+4. **Respond in the same language the user uses in their question.** If the user writes Korean, reply in Korean. If English, reply in English. Mixed sessions follow the most recent user turn. This applies to the model reply only — IR data and structural enum values stay as recorded.
+
+## Memory (compacted — IR)
+
+### Intent
+goal: 3개 CLI(claude, codex, agy)의 transcript 캡처 전환을 위한 구현 설계 수립 및 단계별 승인 완료 후 전환 로직 구현하기
+
+### Decisions
+- 모듈 구조 및 책임 설계 (설계 1/6) → packages/core/src/transcriptReader 패키지 신설 및 IO와 파싱의 분리 설계
+  rationale: watcher가 증분 IO를 담당하고 Reader 모듈은 순수 함수로 데이터 파싱 및 carry 상태 처리를 전담하게 하여 테스트 용이성 극대화
+- 데이터 흐름 및 CLI별 턴 경계 판정 설계 (설계 2/6) → Claude/Codex/Agy 턴 경계 정의(Codex 단일 스트림 전환) 및 주입분 필터링 공통 반영
+  rationale: Codex를 response_item 단일 스트림으로 단순화하고, 화면 깨짐(B-005) 및 IR 오염 방지를 위해 주입분 필터링을 3개 reader의 공통 1급 책임으로 지정
+- agy step_type 매핑 확정 → 14=user, 15=assistant, 8=tool 실행으로 매핑 정의
+  rationale: agy protobuf step_payload를 raw wire-format 디코더로 분석하여 f1/f2/f3/f8/f31 등의 텍스트 필드 역할을 규명함
+- 세션 및 파일 연결 키 매핑 검증 → claude는 sessionId, codex는 rollout UUID, agy는 conversation UUID를 파일명으로 매핑 확인
+  rationale: 각 CLI의 세션 파일 구조 및 watcher 동작 방식을 분석하여 일치 여부 검증
+- 구현 우선순위 수립 → claude reader -> codex -> agy 순서로 순차적 구현
+  rationale: 가장 확실하고 정합성이 높은 claude reader를 먼저 end-to-end로 구현하여 위험 요소를 줄임
+
+### Files
+- [modified] HANDOFF.md — 스파이크 완료 사항 반영 및 구현 절차(plan/05 작성 및 구현 순서) 업데이트
+- [modified] docs/0.1.0/research/03_transcript_capture.md — agy 검증 결과 정정, 스파이크 완료 결과(CLI별 매핑 표, 추가 발견 사항) 반영 및 다음 단계 업데이트
+- [read] packages/core/src/turnsStore.ts — 데스크탑 turnsStore 인터페이스 정의 및 하류 계약(appendTurn, emit 등) 분석
+- [read] packages/core/src/cliAdapter/codexSessionWatcher.ts — 데스크탑 turnRecorder 모듈 래퍼 및 세션 캡처(codexSessionWatcher) 구현 구조 확인
+
+### Commands
+- `sqlite3 "$HOME/.gemini/antigravity-cli/conversations/41b76a53-62bd-42f4-9a22-31b2f5c7c2f2.db"` (exit 1) — agy db에서 tool 실행 결과가 메타데이터에 포함되어 있는지 검증하기 위한 쿼리 수행
+- `echo "=== research/03 잔여 '스파이크/미확인' 참조 점검 ==="...` (exit 0) — research/03 문서 내 미확인 및 스파이크 관련 잔여 참조 확인
+- `echo "=== 데스크탑 turnRecorder 모듈 래퍼 ==="` (exit 0) — 데스크탑 turnRecorder 및 codexSessionWatcher 모듈 래퍼 파일 확인
+
+### Tests
+(no test results)
+
+### Pending
+- 설계 섹션별 제시 및 승인 진행
+  next: ③ 감시·offset·resume(멱등성) 설계 제시 및 사용자 피드백 확인
+- 설계 문서 작성 및 커밋
+  next: 설계 섹션별 승인 완료 후 docs/0.1.0/design/ 내 설계 문서 작성 및 커밋
+- AgentBridge 내 transcript 전환 로직 구현
+  next: claude reader 구현을 시작으로 codex 및 agy 순차 개발 및 통합 테스트 진행
+
+## Recent conversation (raw, last 3 turns)
+[Turn 1 · claude · 2026-06-06T17:18:06.710Z]
+user: codex가 그렇게 쓰는게 맞는지 다시 재차 검증하고, 맞으면 하이브리드로 진행하고 아니면 다시 보고해
+assistant: 
+  ⎿  Next: 설계 문서 작성 및커밋
+
+·설 
+
+·중
+
+시 …
+
+계 시
+
+제 중
+
+·설계 제시 중… 
+
+중31
+
+⏺맞는 지적입니다 — 제 "하이브리드가 불가피하다"는 근거자체가부실할수있습니다.실제codex파일로그 주장을 직접 재검증하겠습니다.핵심검증
+  항목:
+
+(B
+  1. tool call이 정말 정식 대화록(response_item)에만 있고 화면이벤트(event_msg)엔 없나?
+
+2.*실사용자 메시지를 response_item 단독으로 깨끗이 분리할 수 있나?*(이게가능하면하이브리드는불필요,불가능하면하이브리드가정당)
+
+  (주입 텍스트 원문은 화면 깨짐 방지를 위해 출력하지 않고 분류·길이만 찍습니다.)
+
+  ⎿  Next: 설계 문서 작성 및커밋
+
+중9
+
+제 50
+
+⏺Bash(f="$HOME/.codex/sessions/2026/06/07/rollout-2026-06-07T01-46-45-019e9dd4-6d39-79a3-bbae-aaf5ad82db8f.jsonl"
+      echo "=== [검증1] tool call위치:response_itemvsevent…)
+  ⎿  Waiting…
+
+  ⎿  Next: 설계 문서 작성 및 커밋
+
+설계 제시 중…4
+
+(B
+
+설계 제시 중…
+
+·설계 제시 중…5
+
+설계 제시 중…8
+
+⏺
+=== [검증1]toolcall위치:response_itemvsevent_msg===
+response_itemfunction_call/output수:
+     … +16 lines (ctrl+o to expand)
+  ⎿  Allowed by auto mode classifier
+
+  ⎿  Next: 설계 문서 작성 및 커밋
+
+시 …
+
+설3
+
+·계
+
+계 시
+
+시중4
+
+제 중
+
+설 제
+
+ 시3
+
+계 시
+
+시 …
+
+·설계 제시 중… 
+
+10s · ↑ 3.5k tokens)
+
+⏺재검증 끝. 결론부터: 하이브리드는 불필요합니다. 제 이전 근거가 틀렸어요.정직하게보고합니다.
+
+실측 증거
+
+  검증1 — tool call 위치: ✅ 예상대로
+  -정식대화록(response_item):function_call2개있음
+  - 화면이벤트(event_msg): agent_message·user_message·task_complete·token_count뿐, tool 정보 0개
+- → tool 호출은 정식 대화록에만 있다. (이건 맞음)
+
+검증2—정식대화록단독으로실사용자분리가능한가:❌제주장이…
+
+[Turn 2 · claude · 2026-06-06T17:22:10.365Z]
+user: 너 codex도 틀린거 보니깐 나머지도 불안한데, claude, agy도 다시 검증해
+assistant: 
+  ⎿  Next: 설계 문서 작성 및커밋
+
+·계제
+
+설 제
+
+제 중
+
+시 …
+
+·설
+
+제 중
+
+·설계 제시 중… 
+
+⏺전적으로 맞는 의심입니다. codex에서 제가 틀렸으니 claude·agy도기억이아니라실제 파일로다시검증해야합니다.둘다실측합니다.
+
+(주입마커원문은출력안하고분류·길이만찍습니다.agydb가더생겼는지도확인.)
+
+  ⎿  Next: 설계 문서 작성 및 커밋
+
+ 시7209
+
+34ought for 1s)
+
+설34
+
+909)
+
+1.0k tokens)
+
+·제 
+
+⏺Bash(d="$HOME/.claude/projects/-Users-imhyeongtaeg-Library-Mobile-Documents-com-apple-CloudDocs-02-Personal-02-Project-01-AgentBridge"
+      f=$(ls -t "$d"/*.jsonl 2>/dev/…)
+  ⎿  Waiting…
+
+  ⎿  Next: 설계 문서 작성 및 커밋
+
+(B
+
+⏺
+=== CLAUDE검증:07593f87-150c-436b-9b0a-bfec53d57e85.jsonl===
+    [A] user 레코드: promptSource × contentType×주입여부(실사용자분리가능?)
+     … +219 lines (ctrl+o to expand)
+  ⎿  Allowed by auto mode classifier
+
+  ⎿  Next: 설계 문서 작성 및 커밋
+
+⏺Bash(echo "=== AGY 검증: conversations/db목록==="
+      ls -lat "$HOME/.gemini/antigravity-cli/conversations/"*.db2>/dev/null…)
+  ⎿  Waiting…
+
+  ⎿  Next: 설계 문서 작성 및 커밋
+
+(B
+설계  중…
+
+설계 제시 중…1
+
+설계 제시 중…8
+
+설계 제시 중…9
+
+·설계 제시 중…
+
+설계 제시 중…2
+
+⏺
+=== AGY 검증:conversations/db목록===
+-rw-r--r--@1imhyeongtaegstaff241664Jun701:46/Users/imhyeongtaeg/.gemini/antigravity-cli/conversations/41b76a53-62bd-42f4-9a22
+    -31b2f5c7c2f2.db
+     … +32 lines (ctrl+o to expand)
+  ⎿  Allowed by auto mode classifier
+
+  ⎿ …
+
+[Turn 3 · claude · 2026-06-06T17:23:34.212Z]
+user: agy 테스트 대화를 위한 인풋 텍스트 줘봐
+assistant: 
+  ⎿  Next: 설계 문서 작성 및커밋
+
+·제 중
+
+시 …
+
+계 시
+
+·설 제
+
+·설계 제시 중… 
+
+⏺agy로 새 대화 하나 열고, 아래 3개를 순서대로 보내주세요 (이 폴더에서).멀티턴+도구여러번+도구없는턴까지한번에잡으려는구성입니다.
+
+메시지 1(한턴에도구2번)
+
+(B
+테스트야.README.md랑HANDOFF.md두파일을읽고각각한줄로요약해줘.
+
+테스트야.README.md랑HANDOFF.md두파일을읽고각각한줄로요약해줘.
+
+메시지 2(다음턴+도구또)
+
+좋아.이번엔docs/0.1.0/PROGRESS.md도읽고,방금세문서중가장최근에갱신된게뭔지알려줘.
+  메시지 3 (도구 없는 순수 텍스트 턴)
+
+도구쓰지말고,방금까지내용기억나는대로3줄로정리해줘.
+
+이렇게하면검증되는것:
+
+  - step_type 14(user)가 3번 반복 → 멀티턴 경계 일반화 확인
+
+-step_type 8(tool)이한턴에여러개+여러턴에걸쳐반복→도구매핑일반화
+
+-메시지 3은도구0개→step_type15가순수assistant텍스트로만나오는케이스확인
+
+-step_type 14(user)가3번반복→멀티턴경계일반화확인
+8(tool)이 한 턴에 여러 개 + 여러 턴에 걸쳐 반복→도구매핑일반화
+메시지 3은 도구 0개→ step_type 15가 순수 assistant 텍스트로만 나오는케이스확인
+
+끝나면알려주세요.새로생긴db를까서매핑이일반화되는지바로확정하겠습니다.
+
+  ⎿  Next: 설계 문서 작성 및 커밋
+
+설계 제시 중…
+
+  ⏵⏵ auto mode on (shift+tab to cycle) · ctrl+t to show tasks · ← for agents
+
+</agentbridge-context>
