@@ -177,9 +177,8 @@ export class CaptureManager {
     await entry.session.tick();
   }
 
-  // 즉시성용 best-effort fs.watch(jsonl). 미생성·미지원·오류면 폴링이 안전망(설계 §D).
+  // 즉시성용 best-effort fs.watch(jsonl, 3 CLI 공통). 미생성·미지원·오류면 폴링이 안전망(설계 §D).
   private attachWatch(entry: Entry, path: string): void {
-    if (entry.opts.model === 'agy') return; // sqlite는 바이트 tail 불가 → 폴링만.
     if (entry.watcher) return;
     try {
       entry.watcher = watch(path, () => {

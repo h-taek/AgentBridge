@@ -43,16 +43,18 @@ export async function resolveTranscriptPath(
     return join(homedir(), '.claude', 'projects', encodeClaudeProjectDir(cwd), `${modelSessionId}.jsonl`);
   }
   if (model === 'agy') {
-    const dir = join(homedir(), '.gemini', 'antigravity-cli', 'conversations');
-    for (const ext of ['.db', '.pb']) {
-      const p = join(dir, `${modelSessionId}${ext}`);
-      try {
-        if ((await fs.stat(p)).isFile()) return p;
-      } catch {
-        /* 다음 후보 */
-      }
-    }
-    return join(dir, `${modelSessionId}.db`); // 기본(아직 생성 전일 수 있음)
+    // agy는 대화별 brain 디렉토리에 평문 jsonl transcript를 쓴다(modelSessionId = 대화 UUID = 디렉토리명).
+    // 구 sqlite(.db)/protobuf 대신 이 파일을 읽는다(M2-8: node:sqlite 제거).
+    return join(
+      homedir(),
+      '.gemini',
+      'antigravity-cli',
+      'brain',
+      modelSessionId,
+      '.system_generated',
+      'logs',
+      'transcript.jsonl',
+    );
   }
   // codex
   return findCodexRollout(modelSessionId);

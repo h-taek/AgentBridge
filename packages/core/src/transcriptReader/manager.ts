@@ -14,9 +14,8 @@ import { noopLogger } from '../interfaces';
 import { EMPTY_CARRY, type Carry, type ReaderCtx } from './types';
 import { claudeConsume } from './claudeReader';
 import { codexConsume } from './codexReader';
-import { agyConsume, type AgyStepRow } from './agyReader';
+import { agyConsume } from './agyReader';
 import { readJsonlIncrement } from './watcher';
-import { readAgySteps } from './agySteps';
 import { finalizeCarry } from './util';
 
 // scheduler 최소 인터페이스 — 기존 CompactionScheduler가 만족(테스트는 fake 주입).
@@ -68,25 +67,20 @@ async function saveCursor(workspaceRoot: string, sessionId: string, cursor: numb
 }
 
 export class CaptureSession {
-  private readonly sourceKind: 'jsonl' | 'sqlite';
-  private cursor: number | null = null; // lazy
+  // 3 CLI 모두 jsonl transcript(claude/codex/agy transcript.jsonl) → byte-offset 증분 읽기로 통일.
+  private cursor: number | null = null; // lazy (byte offset)
   private carry: Carry = EMPTY_CARRY;
   private seenIds: Set<string> | null = null; // lazy: 기존 turns.jsonl id (dedup)
   private readonly log: Logger;
 
   constructor(private readonly opts: CaptureSessionOptions) {
-    this.sourceKind = opts.model === 'agy' ? 'sqlite' : 'jsonl';
     this.log = opts.logger ?? noopLogger;
-  }
-
-  private get defaultCursor(): number {
-    return this.sourceKind === 'sqlite' ? -1 : 0;
   }
 
   private async ensureLoaded(): Promise<void> {
     if (this.cursor === null) {
       const all = await loadCursors(this.opts.workspaceRoot);
-      this.cursor = all[this.opts.sessionId] ?? this.defaultCursor;
+      this.cursor = all[this.opts.sessionId] ?? 0;
     }
     if (this.seenIds === null) {
       try {
@@ -101,15 +95,15 @@ export class CaptureSession {
     return { workspaceId: this.opts.workspaceId, sessionId: this.opts.sessionId, detail: this.opts.getDetail() };
   }
 
-  private runReader(input: unknown[] | AgyStepRow[], carry: Carry): { turns: TurnRecord[]; carry: Carry } {
+  private runReader(input: unknown[], carry: Carry): { turns: TurnRecord[]; carry: Carry } {
     const ctx = this.ctx();
     switch (this.opts.model) {
       case 'codex':
-        return codexConsume(input as unknown[], carry, ctx);
+        return codexConsume(input, carry, ctx);
       case 'agy':
-        return agyConsume(input as AgyStepRow[], carry, ctx);
+        return agyConsume(input, carry, ctx);
       default:
-        return claudeConsume(input as unknown[], carry, ctx);
+        return claudeConsume(input, carry, ctx);
     }
   }
 
@@ -118,18 +112,12 @@ export class CaptureSession {
     await this.ensureLoaded();
     const cursor = this.cursor as number;
 
-    let input: unknown[] | AgyStepRow[];
+    let input: unknown[];
     let newCursor = cursor;
     try {
-      if (this.sourceKind === 'jsonl') {
-        const inc = await readJsonlIncrement(this.opts.transcriptPath, cursor);
-        input = inc.records;
-        newCursor = inc.offset;
-      } else {
-        const rows = readAgySteps(this.opts.transcriptPath, cursor);
-        input = rows;
-        newCursor = rows.length ? rows[rows.length - 1].idx : cursor;
-      }
+      const inc = await readJsonlIncrement(this.opts.transcriptPath, cursor);
+      input = inc.records;
+      newCursor = inc.offset;
     } catch (err) {
       this.log.warn(`CaptureSession tick read 실패 (${this.opts.model}): ${String(err)}`);
       return;

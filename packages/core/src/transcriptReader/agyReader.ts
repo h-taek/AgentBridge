@@ -1,110 +1,85 @@
-// agy step 행(protobuf payload) → TurnRecord[]. 순수 함수.
-//
-// agy step_payload는 평문 protobuf이며 내용이 래퍼 메시지 안에 중첩돼 있다(실측):
-//   step_type 14 (user)         : f19 → f2  (사용자 텍스트)
-//   step_type 15 (assistant)    : f20 → f1  (텍스트)  또는  f20 → f7 → {f1=호출id, f2=도구명, f3=인자} (도구 호출)
-//   도구 실행/결과 (8, 21, …)    : f5 → f4 → f1 (호출id),  f5 → f31 (요약)
-//   step_type 90/101/98/23      : 주입 컨텍스트·시스템 알림·마커 → 필터
-// 도구 실행 step_type은 도구마다 달라(8=view_file, 21=run_command, …) 열거하지 않고
-// 호출 id(f1)로 step_type 15의 도구 호출과 페어링한다. (design §C, 실측 검증)
-
-import type { TurnToolCall } from '../shared/turns';
-import type { Carry, ConsumeResult, OpenTurn, ReaderCtx, TurnRecord } from './types';
+// agy transcript.jsonl 레코드 → TurnRecord[]. 순수 함수. claude/codex와 동일한 jsonl reader 인터페이스.
+// 소스: ~/.gemini/antigravity-cli/brain/<convUUID>/.system_generated/logs/transcript.jsonl
+//   - 각 스텝 "완료" 시 한 줄씩 append (status는 항상 DONE — 라이브 검증).
+//   - user 턴:  type=USER_INPUT + source=USER_EXPLICIT (content는 <USER_REQUEST>…</USER_REQUEST>로 감싸짐).
+//   - 주입:     source=SYSTEM(CONVERSATION_HISTORY 등) → 무시.
+//   - 도구 호출: type=PLANNER_RESPONSE + tool_calls 있음 (content 없음).
+//   - 도구 결과: 도구별 type(LIST_DIRECTORY/VIEW_FILE 등) + content → 직전 도구 호출 summary.
+//   - 턴 끝(즉시 flush): type=PLANNER_RESPONSE + content 있음 + tool_calls 없음 = 사용자에게 보내는 최종 답변.
+//     (라이브 검증: 중간 스텝은 content 없거나 tool_calls 있음 → 오탐 0. thinking은 별도 필드라 content에 안 섞임.)
+import type { Carry, ConsumeResult, ReaderCtx, TurnRecord } from './types';
 import { finalizeTurn, toolArgString } from './util';
-import { decodeProtobuf, topLevelString } from './protobuf';
 
-export interface AgyStepRow {
-  idx: number;
-  stepType: number;
-  payload: Buffer;
+interface AgyRecord {
+  step_index?: number;
+  type?: string;
+  source?: string;
+  status?: string;
+  content?: string | null;
+  thinking?: string | null;
+  tool_calls?: Array<{ name?: string; args?: unknown }> | null;
 }
 
-const FILTER_TYPES = new Set([90, 101, 98, 23]);
-const USER_TYPE = 14;
-const ASSISTANT_TYPE = 15;
-
-// 첫 번째 length-delimited 필드(중첩 메시지)의 바이트를 반환.
-function subMessage(payload: Buffer, field: number): Buffer | null {
-  for (const f of decodeProtobuf(payload)) {
-    if (f.field === field && f.kind === 'bytes') return f.value as Buffer;
-  }
-  return null;
+// <USER_REQUEST>…</USER_REQUEST>로 감싼 실제 질문만 추출(메타데이터 블록 제외). 태그 없으면 원문 trim.
+function extractUserRequest(content: string): string {
+  const m = content.match(/<USER_REQUEST>\s*([\s\S]*?)\s*<\/USER_REQUEST>/);
+  return (m ? m[1] : content).trim();
 }
 
-function userText(payload: Buffer): string {
-  const m = subMessage(payload, 19);
-  return (m && topLevelString(m, 2)) || '';
+function isRealUser(r: AgyRecord): boolean {
+  return r.type === 'USER_INPUT' && r.source === 'USER_EXPLICIT';
 }
 
-// step_type 15 → 도구 호출이면 {tool, callId}, 텍스트면 {text}. 둘 다 없으면 null.
-function parseAssistantStep(
-  payload: Buffer,
-): { tool: TurnToolCall; callId: string | null } | { text: string } | null {
-  const m = subMessage(payload, 20);
-  if (!m) return null;
-  const tool = subMessage(m, 7);
-  if (tool) {
-    const name = topLevelString(tool, 2);
-    if (!name) return null;
-    const tc: TurnToolCall = { tool: name, arg: toolArgString(topLevelString(tool, 3) ?? '') };
-    return { tool: tc, callId: topLevelString(tool, 1) };
-  }
-  const text = topLevelString(m, 1) ?? topLevelString(m, 8);
-  return text ? { text } : null;
+function hasText(s: string | null | undefined): s is string {
+  return typeof s === 'string' && s.trim().length > 0;
 }
 
-// 도구 실행/결과 step → 호출 id(f5→f4→f1)와 요약(f5→f31).
-function parseExecStep(payload: Buffer): { callId: string | null; summary: string | null } {
-  const m = subMessage(payload, 5);
-  if (!m) return { callId: null, summary: null };
-  const meta = subMessage(m, 4);
-  const callId = meta ? topLevelString(meta, 1) : null;
-  return { callId, summary: topLevelString(m, 31) };
-}
-
-export function agyConsume(rows: AgyStepRow[], carry: Carry, ctx: ReaderCtx): ConsumeResult {
+export function agyConsume(records: unknown[], carry: Carry, ctx: ReaderCtx): ConsumeResult {
   const turns: TurnRecord[] = [];
-  let open: OpenTurn | null = carry.open;
+  let open = carry.open;
   let turnIndex = carry.turnIndex;
-  const pendingTool = new Map<string, TurnToolCall>();
 
-  for (const row of rows) {
-    if (FILTER_TYPES.has(row.stepType)) continue;
-
-    if (row.stepType === USER_TYPE) {
+  for (const raw of records as AgyRecord[]) {
+    if (isRealUser(raw)) {
       if (open) {
         turns.push(finalizeTurn(open, 'agy', ctx));
         turnIndex++;
       }
       open = {
-        sourceKey: `${ctx.sessionId}#${row.idx}`,
-        user: userText(row.payload),
+        sourceKey: `${ctx.sessionId}#${raw.step_index ?? turnIndex}`,
+        user: extractUserRequest(raw.content ?? ''),
         startedAt: '',
         lastAt: '',
         assistantParts: [],
         toolCalls: [],
       };
-      pendingTool.clear();
       continue;
     }
+    if (raw.source === 'SYSTEM') continue; // 주입(CONVERSATION_HISTORY 등) 무시
     if (!open) continue;
 
-    if (row.stepType === ASSISTANT_TYPE) {
-      const parsed = parseAssistantStep(row.payload);
-      if (!parsed) continue;
-      if ('tool' in parsed) {
-        open.toolCalls.push(parsed.tool);
-        if (parsed.callId) pendingTool.set(parsed.callId, parsed.tool);
-      } else {
-        open.assistantParts.push(parsed.text);
+    if (raw.type === 'PLANNER_RESPONSE') {
+      const tools = raw.tool_calls ?? [];
+      if (tools.length > 0) {
+        // 중간 스텝: 도구 호출 (content는 보통 null, thinking은 무시)
+        for (const tc of tools) {
+          open.toolCalls.push({ tool: String(tc.name ?? 'tool'), arg: toolArgString(tc.args) });
+        }
+      } else if (hasText(raw.content)) {
+        // 최종 답변(도구 없음 + content 있음) = 턴 끝 → 즉시 flush. thinking은 제외.
+        open.assistantParts.push(raw.content);
+        turns.push(finalizeTurn(open, 'agy', ctx));
+        turnIndex++;
+        open = null;
       }
-    } else {
-      // 도구 실행/결과 step (8, 21, …) — 호출 id로 summary 보강
-      const { callId, summary } = parseExecStep(row.payload);
-      if (callId && summary) {
-        const tc = pendingTool.get(callId);
-        if (tc) tc.summary = summary.slice(0, 200);
-      }
+      // content/tool_calls 둘 다 없으면(생각만) skip
+      continue;
+    }
+
+    // 도구 결과 레코드(LIST_DIRECTORY/VIEW_FILE 등): content를 직전 도구 호출 summary로.
+    if (raw.source === 'MODEL' && hasText(raw.content)) {
+      const last = open.toolCalls[open.toolCalls.length - 1];
+      if (last && last.summary === undefined) last.summary = raw.content.slice(0, 200);
     }
   }
 

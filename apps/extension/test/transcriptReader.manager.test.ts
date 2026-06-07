@@ -54,9 +54,10 @@ describe('CaptureSession', () => {
   it('finalize: carry에 남은 마지막 턴을 flush', async () => {
     const { root, transcript } = await setup();
     const s = newSession(root, transcript, fakeScheduler());
-    await fs.writeFile(transcript, [U('유일 질문', 'u1'), A('유일 답변', 'a1')].join('\n') + '\n');
+    // stop=tool_use → end_turn 즉시 flush 안 됨 → carry에 열린 채 남음 (finalize 대상).
+    await fs.writeFile(transcript, [U('유일 질문', 'u1'), A('유일 답변', 'a1', 'tool_use')].join('\n') + '\n');
     await s.tick();
-    assert.equal((await readAllTurns(root)).length, 0); // 안 닫힘
+    assert.equal((await readAllTurns(root)).length, 0); // end_turn 없어 안 닫힘
     await s.finalize();
     const turns = await readAllTurns(root);
     assert.equal(turns.length, 1);

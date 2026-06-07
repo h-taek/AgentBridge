@@ -17,8 +17,8 @@ function fakeScheduler() {
 
 const U = (text: string, uuid: string) =>
   JSON.stringify({ type: 'user', promptSource: 'typed', uuid, timestamp: '2026-06-07T00:00:00.000Z', message: { role: 'user', content: text } });
-const A = (text: string, uuid: string) =>
-  JSON.stringify({ type: 'assistant', uuid, timestamp: '2026-06-07T00:00:01.000Z', message: { role: 'assistant', stop_reason: 'end_turn', content: [{ type: 'text', text }] } });
+const A = (text: string, uuid: string, stop = 'end_turn') =>
+  JSON.stringify({ type: 'assistant', uuid, timestamp: '2026-06-07T00:00:01.000Z', message: { role: 'assistant', stop_reason: stop, content: [{ type: 'text', text }] } });
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 async function until(fn: () => Promise<boolean>, timeout = 1500, step = 10): Promise<void> {
@@ -76,9 +76,10 @@ describe('CaptureManager', () => {
   it('unregister: carry의 마지막 열린 턴을 flush', async () => {
     const { root, transcript } = await setup();
     const mgr = new CaptureManager({ resolve: async () => transcript });
-    await fs.writeFile(transcript, [U('유일', 'u1'), A('답', 'a1')].join('\n') + '\n');
+    // stop=tool_use → end_turn 즉시 flush 안 됨 → carry에 열린 채 → unregister가 finalize로 flush.
+    await fs.writeFile(transcript, [U('유일', 'u1'), A('답', 'a1', 'tool_use')].join('\n') + '\n');
     mgr.register(baseOpts(root, fakeScheduler()));
-    await delay(50); // poll 몇 번 — 닫힌 턴 없음
+    await delay(50); // poll 몇 번 — end_turn 없어 닫힌 턴 없음
     assert.equal((await readAllTurns(root)).length, 0);
     await mgr.unregister('s1');
     const turns = await readAllTurns(root);

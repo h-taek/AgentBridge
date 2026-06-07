@@ -19,9 +19,12 @@ describe('resolveTranscriptPath', () => {
     assert.equal(p, join(homedir(), '.claude', 'projects', '-x-y', 'abc-123.jsonl'));
   });
 
-  it('agy: 없으면 conversations/<id>.db 기본 경로', async () => {
-    const p = await resolveTranscriptPath('agy', 'nonexistent-uuid', '/x');
-    assert.equal(p, join(homedir(), '.gemini', 'antigravity-cli', 'conversations', 'nonexistent-uuid.db'));
+  it('agy: brain/<id>/.system_generated/logs/transcript.jsonl', async () => {
+    const p = await resolveTranscriptPath('agy', 'conv-uuid', '/x');
+    assert.equal(
+      p,
+      join(homedir(), '.gemini', 'antigravity-cli', 'brain', 'conv-uuid', '.system_generated', 'logs', 'transcript.jsonl'),
+    );
   });
 
   it('codex: 실제 rollout 파일을 modelSessionId로 찾는다 (있을 때만)', async function () {

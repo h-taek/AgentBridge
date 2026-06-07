@@ -1,94 +1,62 @@
 // apps/extension/test/transcriptReader.agy.test.ts
+// agy transcript.jsonl 기반 reader. (구 sqlite/protobuf 리더는 M2-8에서 제거됨.)
 import { strict as assert } from 'assert';
 import { promises as fs } from 'fs';
 import { join } from 'path';
-import { agyConsume, EMPTY_CARRY, type ReaderCtx, type AgyStepRow } from '@agentbridge/core';
+import { agyConsume, EMPTY_CARRY, type ReaderCtx } from '@agentbridge/core';
 
 const CTX: ReaderCtx = { workspaceId: 'w1', sessionId: 's1', detail: 'full' };
-const DIR = join(__dirname, 'fixtures/transcript/agy-steps');
 
-async function loadSteps(): Promise<AgyStepRow[]> {
-  const files = (await fs.readdir(DIR)).filter((f) => f.endsWith('.bin'));
-  const rows = await Promise.all(
-    files.map(async (f) => {
-      const [idx, stepType] = f.replace('.bin', '').split('_').map(Number);
-      return { idx, stepType, payload: await fs.readFile(join(DIR, f)) };
-    }),
-  );
-  return rows.sort((a, b) => a.idx - b.idx);
+async function loadRecords(name: string): Promise<unknown[]> {
+  const raw = await fs.readFile(join(__dirname, 'fixtures/transcript', name), 'utf8');
+  return raw.split('\n').filter((l) => l.trim()).map((l) => JSON.parse(l));
 }
 
-describe('agyReader (real fixture)', () => {
-  it('멀티턴: step_type 14마다 user 턴, 도구는 호출-id로 페어링, 90/101 필터', async () => {
-    const steps = await loadSteps();
-    const { turns, carry } = agyConsume(steps, EMPTY_CARRY, CTX);
-    // 4개 user 턴 중 마지막은 carry로 열려 있을 수 있음 → 최소 3개 닫힘
-    assert.ok(turns.length >= 3, `expected >=3 turns, got ${turns.length}`);
-    // 사용자 텍스트가 주입분이 아니어야 함
-    for (const t of turns) {
-      assert.ok(!t.user.includes('agentbridge-context'));
-      assert.ok(t.user.length > 0);
-    }
-    // 적어도 한 턴은 view_file 또는 run_command 도구를 가짐
-    const allTools = turns.flatMap((t) => t.toolCalls.map((c) => c.tool));
-    assert.ok(allTools.some((n) => n === 'view_file' || n === 'run_command'), `tools: ${allTools}`);
-    // 도구 결과 요약이 호출-id 페어링으로 채워짐
-    const withSummary = turns.flatMap((t) => t.toolCalls).filter((c) => c.summary);
-    assert.ok(withSummary.length > 0, 'expected at least one tool call with a paired summary');
-    void carry;
-  });
-});
+describe('agyReader (transcript.jsonl)', () => {
+  it('USER_EXPLICIT 턴 분리 + <USER_REQUEST> 추출 + 도구·요약 + thinking 제외 + 즉시 flush', async () => {
+    const records = await loadRecords('agy-transcript.jsonl');
+    const { turns, carry } = agyConsume(records, EMPTY_CARRY, CTX);
+    // 두 턴 모두 최종 답변(content+도구없음)에서 즉시 flush → 2개
+    assert.equal(turns.length, 2);
 
-// step_type별 실제 래퍼 필드(f19/f20/f5)를 손으로 인코딩한 db 비의존 안전망.
-function varint(n: number): Buffer {
-  const bytes: number[] = [];
-  while (n > 0x7f) {
-    bytes.push((n & 0x7f) | 0x80);
-    n >>>= 7;
-  }
-  bytes.push(n);
-  return Buffer.from(bytes);
-}
-function pbStr(field: number, text: string): Buffer {
-  const body = Buffer.from(text, 'utf8');
-  return Buffer.concat([varint((field << 3) | 2), varint(body.length), body]);
-}
-function pbMsg(field: number, inner: Buffer): Buffer {
-  return Buffer.concat([varint((field << 3) | 2), varint(inner.length), inner]);
-}
+    const t1 = turns[0];
+    assert.equal(t1.user, '이 폴더 파일 목록 보여줘'); // <USER_REQUEST>만, 메타데이터 제외
+    assert.equal(t1.assistantBody, '이 폴더에는 a.txt, b.txt, README.md 가 있습니다.'); // thinking 제외
+    assert.equal(t1.id, 'agy:s1#0'); // 결정적 id = sessionId#step_index
+    assert.equal(t1.toolCalls.length, 1);
+    assert.equal(t1.toolCalls[0].tool, 'list_dir');
+    assert.equal(t1.toolCalls[0].arg, '{"DirectoryPath":"/proj"}');
+    assert.equal(t1.toolCalls[0].summary, 'a.txt\nb.txt\nREADME.md');
 
-describe('agyReader (synthetic)', () => {
-  it('step_type 14=user(f19.f2), 15=assistant(f20.f1) 텍스트, 90=주입 필터', () => {
-    const steps = [
-      { idx: 0, stepType: 14, payload: pbMsg(19, pbStr(2, '합성 질문')) },
-      { idx: 1, stepType: 90, payload: pbMsg(103, pbStr(1, '<agentbridge-context> 주입')) },
-      { idx: 2, stepType: 15, payload: pbMsg(20, pbStr(1, '합성 답변')) },
-      { idx: 3, stepType: 14, payload: pbMsg(19, pbStr(2, '둘째 질문')) },
-    ];
-    const { turns } = agyConsume(steps, EMPTY_CARRY, CTX);
-    assert.equal(turns.length, 1);
-    assert.equal(turns[0].user, '합성 질문');
-    assert.equal(turns[0].assistantBody, '합성 답변');
-    assert.equal(turns[0].id, 'agy:s1#0');
+    const t2 = turns[1];
+    assert.equal(t2.user, '고마워');
+    assert.equal(t2.assistantBody, '천만에요!');
+    assert.equal(t2.toolCalls.length, 0);
+
+    assert.equal(carry.open, null); // 마지막 턴까지 즉시 flush → carry 비어 finalize 재flush 없음
   });
 
-  it('도구 호출(f20.f7) + 실행 step(f5.f4.f1 call-id, f5.f31 summary) 페어링', () => {
-    const toolCall = pbMsg(
-      20,
-      pbMsg(7, Buffer.concat([pbStr(1, 'call1'), pbStr(2, 'view_file'), pbStr(3, '{"AbsolutePath":"/x"}')])),
-    );
-    const execStep = pbMsg(5, Buffer.concat([pbMsg(4, pbStr(1, 'call1')), pbStr(31, 'Viewing x file')]));
-    const steps = [
-      { idx: 0, stepType: 14, payload: pbMsg(19, pbStr(2, '질문')) },
-      { idx: 1, stepType: 15, payload: toolCall },
-      { idx: 2, stepType: 8, payload: execStep },
-      { idx: 3, stepType: 14, payload: pbMsg(19, pbStr(2, '다음 질문')) },
+  it('주입(source=SYSTEM)은 user로도 본문으로도 안 들어간다', () => {
+    const records = [
+      { step_index: 0, type: 'USER_INPUT', source: 'USER_EXPLICIT', content: '<USER_REQUEST>질문</USER_REQUEST>' },
+      { step_index: 1, type: 'CONVERSATION_HISTORY', source: 'SYSTEM', content: '<agentbridge-context>주입</agentbridge-context>' },
+      { step_index: 2, type: 'PLANNER_RESPONSE', source: 'MODEL', content: '답' },
     ];
-    const { turns } = agyConsume(steps, EMPTY_CARRY, CTX);
+    const { turns } = agyConsume(records, EMPTY_CARRY, CTX);
     assert.equal(turns.length, 1);
-    assert.equal(turns[0].toolCalls.length, 1);
-    assert.equal(turns[0].toolCalls[0].tool, 'view_file');
-    assert.equal(turns[0].toolCalls[0].arg, '{"AbsolutePath":"/x"}');
-    assert.equal(turns[0].toolCalls[0].summary, 'Viewing x file');
+    assert.equal(turns[0].user, '질문');
+    assert.equal(turns[0].assistantBody, '답');
+    assert.ok(!turns[0].assistantBody.includes('주입'));
+  });
+
+  it('carry로 턴이 이어진다(증분 호출): 도구 호출까지 본 뒤 다음 호출에서 최종답변→flush', async () => {
+    const records = await loadRecords('agy-transcript.jsonl');
+    const r1 = agyConsume(records.slice(0, 4), EMPTY_CARRY, CTX); // user~LIST_DIRECTORY까지
+    assert.equal(r1.turns.length, 0); // 아직 최종답변 안 옴
+    assert.ok(r1.carry.open);
+    assert.equal(r1.carry.open!.toolCalls.length, 1);
+    const r2 = agyConsume(records.slice(4), r1.carry, CTX); // 최종답변 + 둘째 턴
+    assert.equal(r2.turns.length, 2);
+    assert.equal(r2.turns[0].assistantBody, '이 폴더에는 a.txt, b.txt, README.md 가 있습니다.');
   });
 });

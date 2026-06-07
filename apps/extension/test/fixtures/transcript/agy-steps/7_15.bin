@@ -1,273 +1,0 @@
- *�
-˝���轟2͝��༬�:ԝ�����ABԝ�����AJN����0B!
-	sessionID-3750763034362895579H�P�ZzE4kaurGCbrH2roP8uefiA8X�b$2a486cab-3250-482f-b146-9155603b5de8j��P
-$1f43967b-6c12-4423-a7a0-421e8212918e"$41b76a53-62bd-42f4-9a22-31b2f5c7c2f2��#
-͝��؃��
-ԝ�����A�ԝ�����A���
-�F실험을 위해 `view_file` 도구를 사용하여 프로젝트 루트 폴더에 있는 [HANDOFF.md](file:///Users/imhyeongtaeg/Library/Mobile%20Documents/com~apple~CloudDocs/02_Personal/02_Project/01_AgentBridge/HANDOFF.md) 파일을 읽었습니다. 
-
-요청하신 장문의 테스트 출력으로 읽어온 파일의 전체 내용을 아래에 출력합니다.
-
----
-
-```markdown
-# HANDOFF
-
-> 작업 재개 시 이 문서부터 읽는다. **앞으로 할 일만** 적는다 — 완료된 이력은 PROGRESS로 내린다.
-> 참조로 끌어올 수 있는 내용은 여기 적지 않는다.
-
-## 참조 (source of truth)
-
-- 진행 이력 / 완료된 작업 → [docs/0.1.0/PROGRESS.md](docs/0.1.0/PROGRESS.md)
-- 사용자 facing 변경 내역 → [apps/desktop/CHANGELOG.md](apps/desktop/CHANGELOG.md), [apps/extension/CHANGELOG.md](apps/extension/CHANGELOG.md)
-- 문서/사이클/CHANGELOG 규칙 → [docs/RULES.md](docs/RULES.md)
-- 제품 정의 / 기능 스펙 → [docs/spec/](docs/spec/) · 아키텍처 → [docs/spec/07_architecture.md](docs/spec/07_architecture.md)
-- 배포 운영 (채널/릴리즈 절차/체크리스트) → [docs/0.1.0/plan/01_release_ops.md](docs/0.1.0/plan/01_release_ops.md)
-- gc-tree 정찰 보고서 → [docs/0.1.0/research/02_gc_tree_survey.md](docs/0.1.0/research/02_gc_tree_survey.md)
-- transcript 기반 턴 캡처 정찰 → [docs/0.1.0/research/03_transcript_capture.md](docs/0.1.0/research/03_transcript_capture.md)
-
-> 완료: 0.1.0 사이클 전부 / 0.2.0 로드맵 ①(에디터 그룹 잠금) / ②(공유 저장소 통일 + 세션 공유 UX — "사용 중" 화면 + 다시 열기 + 양방향 소유권 가드 + 실시간 세션 동기화) / ② 잔여(owner pid 재사용 견고화 — 프로세스 시작 시각 대조, commit db66135 / codex·agy hook 단일 등록 확인). 이력·커밋은 PROGRESS 참조.
-
----
-
-## 앞으로 할 일
-
-### ★ 최우선 — transcript 기반 턴 캡처 전환
-
-현재 턴 기록은 PTY 출력에서 ANSI를 긁고 1.5초 idle로 턴 경계를 추측하는 취약한 방식. 발견: **claude/codex/agy가 이미 구조화 대화 기록을 디스크에 쓴다**(claude·codex JSONL, agy sqlite). transcript를 읽으면 ANSI 스크래핑·idle 휴리스틱 없이 깔끔·정확한 데이터를 얻는다(실측: claude assistant 텍스트 ANSI 0). **표시는 PTY 유지, 기록만 transcript로.** 세션↔파일 연결 키는 이미 저장하는 `modelSessionId`(=claude 기록 파일명, 검증됨).
-
-- 상세 정찰·트레이드오프·스파이크 단계 → [research/03_transcript_capture.md](docs/0.1.0/research/03_transcript_capture.md)
-- 영향 파일: `turnRecorder/{index.ts,sliceAssistant.ts}`(축소/제거), 하류 `turnsStore`/`compactionScheduler`는 무변경.
-- 절차: `plan/05_transcript_capture.md` 작성 → 스파이크(agy `.db` 위치·스키마 → codex 매핑 → 파일 감시 offset) → 구현.
-- **gc-tree(③)보다 선행** — IR 품질 토대를 먼저 정리해야 gc-tree 검색·자동제안이 그 위에서 정확해짐.
-
-### ③ gc-tree 글로벌 컨텍스트 (장기 기억) — **transcript 전환 뒤로 보류**
-
-> 위 transcript 전환 완료 후 재개. 설계 초안은 [plan/04_gc_tree_import.md](docs/0.1.0/plan/04_gc_tree_import.md)에 §A(저장)·§B(주입)까지 작성됨. 용어: gc-tree "branch"→**"프로필"** 확정.
-
-AgentBridge에 "repo를 넘는 영구 지식"(사용자 정체성/팀 용어/repo 관계) 레이어 추가. 단기 기억(IR, 자동) + 장기 기억(글로벌 컨텍스트, 수동/반자동) 조합으로 제품 완성. 상세 분석은 [survey](docs/0.1.0/research/02_gc_tree_survey.md) §4.
-
-AgentBridge에 "repo를 넘는 영구 지식"(사용자 정체성/팀 용어/repo 관계) 레이어 추가. 단기 기억(IR, 자동) + 장기 기억(글로벌 컨텍스트, 수동/반자동) 조합으로 제품 완성. 상세 분석은 [survey](docs/0.1.0/research/02_gc_tree_survey.md) §4.
-
-- **전제:** ②의 통일 저장소 + lockfile 위에 구현 (별도 저장 레이어를 만들지 않음)
-- 가져올 기능 (gc-tree, 전부 MIT — 이식 시 NOTICE/CREDITS에 출처 표기):
-  - 글로벌 컨텍스트 저장 구조 (survey §5 "defer" — ② 완료로 전제 충족됨)
-  - 4-1 한국어 토크나이저 + 검색 스코어러 (코드 직접 이식, ~40-60줄)
-  - 4-2 repo→컨텍스트 스코프 매핑 (개념 차용, repo 키 = 워크스페이스 UUID)
-  - 4-7 온보딩 인터뷰 (프롬프트 설계 사상만 차용)
-  - 4-5 슬래시 명령 표면 (claude/codex만 — agy는 명령 메커니즘 없음, 사전 스파이크 필요)
-  - 세부 범위는 plan 작성 시 확정
-- 절차: `docs/0.1.0/plan/04_gc_tree_import.md` 작성 → 타당성 검토(plan-eng-review 또는 codex challenge) → 구현
-- **코드 가져오기 전 사용자 명시 신호 필수.**
-
-### ④ 0.2.0 릴리즈
-
-- 버전 정책 (확정): 데스크탑·익스텐션 **`0.2.0` 동시 bump**. 데스크탑 `0.0.X → 0.2.0` 점프 사유는 release notes 첫 줄에 명시("모노레포 통합 + 버전 트랙 일원화").
-- 절차/순서: [release-ops §3](docs/0.1.0/plan/01_release_ops.md) — repo 공개 전 점검 → 모노레포 public 전환 → 버전 bump → 데스크탑 릴리즈(자동 업데이트 채널 복구) → 익스텐션 vsce publish → 옛 repo 비공개.
-- 사전 체크리스트: [release-ops §4](docs/0.1.0/plan/01_release_ops.md) — `apps/extension/LICENSE` 추가, vsce PAT 확인 등.
-
-### 백로그 (0.2.0 중 시간 나면 / 다음 사이클)
-
-- IR 품질 게이트 — IR `files[].path` 실재 검증 린트 (gc-tree survey 4-3, effort low — 독립 작업 가능)
-- 검증 라운드 잔여: B-005(필터가 대화 중 태그 언급도 잡음) 근본 대응 / agy .db 삭제 시 .db-shm·wal 동반 삭제 / 데스크탑 `agyResume.ts` 데드코드 제거
-- 정제 품질 eval 하니스 (gc-tree survey 4-6 — 비용 커서 후순위)
-- 마크다운 마커 블록 유틸 (gc-tree survey 4-4 — 사용처 확정 시)
-
----
-
-## 빌드 절차 (재현용)
-
-### 베타 빌드
-
-```bash
-# 일반 macOS 환경 (작업 디렉토리가 iCloud 영역 밖)
-npm --prefix apps/desktop run build:mac
-
-# 작업 디렉토리가 iCloud Drive 영역 안 (현재 본 프로젝트)
-npm --prefix apps/desktop run build:mac:external
-```
-
-`build:mac:external`은 `~/.agentbridge-build/`로 source sync(`rsync --delete`) 후 빌드, 산출물 회수.
-
-### VSIX 빌드 / 설치
-
-```bash
-cd apps/extension && npm run package   # → agentbridge-<ver>.vsix
-# IDE에 설치 (리로드 필요. 진행 중 Claude 세션은 자동 resume됨)
-"/Applications/Antigravity IDE.app/Contents/Resources/app/bin/antigravity-ide" --install-extension <vsix> --force
-```
-
-### 릴리즈 발행
-
-```bash
-git tag v0.2.0 -m "AgentBridge v0.2.0 — <짧은 설명>"
-git push origin v0.2.0
-
-gh release create v0.2.0 \
-  apps/desktop/dist/agentbridge-0.2.0.dmg \
-  apps/desktop/dist/agentbridge-0.2.0.dmg.blockmap \
-  apps/desktop/dist/AgentBridge-0.2.0-arm64-mac.zip \
-  apps/desktop/dist/AgentBridge-0.2.0-arm64-mac.zip.blockmap \
-  apps/desktop/dist/latest-mac.yml \
-  --title "v0.2.0 — <짧은 설명>" \
-  --notes "$(cat release-notes.md)"
-```
-
-release notes는 `apps/desktop/CHANGELOG.md [0.2.0]` 섹션을 다듬어 사용.
-
-### codesign (현재 ad-hoc)
-
-- `mac.identity: '-'` + `hardenedRuntime: true` + `notarize: false`
-- entitlements: `allow-jit` / `allow-unsigned-executable-memory` / `allow-dyld-environment-variables` / `disable-library-validation`(Sequoia ad-hoc Team ID mismatch 우회)
-- 주의: iCloud 영역으로 회수된 `dist/mac-arm64/*.app` 사본은 codesign이 깨져 보임(provenance xattr) — 정상. 배포 산출물(DMG/ZIP)은 영향 없음.
-- 정식 노타리 빌드(향후): Apple Developer Program → Developer ID Application 인증서 → `electron-builder.yml` `identity`+`notarize: true` → `APPLE_ID`/`APPLE_APP_SPECIFIC_PASSWORD`/`APPLE_TEAM_ID` env.
-
----
-
-## 운영 리마인더 (얇게)
-
-- **코드 커밋·푸시 ≠ 빌드 trigger.** 빌드(`build:mac:external`) + 릴리즈(`gh release create`)는 사용자 명시 신호("배포해/빌드해/릴리즈해") 받고만.
-- **한 빌드에 여러 fix 누적 후 한 번에 발행.** CHANGELOG/`version` 필드는 다음 빌드 대상 버전으로 미리 bump.
-- **CHANGELOG는 이전 버전 코드 대비 사용자 facing 변경점만.** 같은 사이클 회귀를 같은 사이클에서 fix한 항목은 제외.
-- **main 프로세스 코드 변경 시 dev 서버 재시작 필요** (HMR 미적용).
-- **`ELECTRON_RUN_AS_NODE=1` quirk** — Electron GUI 명령에 `unset ELECTRON_RUN_AS_NODE` 프리픽스 필수.
-- **prettier 무시** — `*.md` / `docs/` / `probe/`.
-- **채팅 응답에 hook 컨텍스트 태그 원문 금지** — PTY 필터가 잡아 화면이 끊김 (B-005). 우회 표현으로 지칭.
-- 그 외 제품·아키텍처·보안 정책 전반은 [docs/spec/04_feature_spec.md](docs/spec/04_feature_spec.md) 및 코드 주석이 SSOT.
-```2(bot-7a001c1f-cb86-431a-897a-af56dabc2175B�F실험을 위해 `view_file` 도구를 사용하여 프로젝트 루트 폴더에 있는 [HANDOFF.md](file:///Users/imhyeongtaeg/Library/Mobile%20Documents/com~apple~CloudDocs/02_Personal/02_Project/01_AgentBridge/HANDOFF.md) 파일을 읽었습니다. 
-
-요청하신 장문의 테스트 출력으로 읽어온 파일의 전체 내용을 아래에 출력합니다.
-
----
-
-```markdown
-# HANDOFF
-
-> 작업 재개 시 이 문서부터 읽는다. **앞으로 할 일만** 적는다 — 완료된 이력은 PROGRESS로 내린다.
-> 참조로 끌어올 수 있는 내용은 여기 적지 않는다.
-
-## 참조 (source of truth)
-
-- 진행 이력 / 완료된 작업 → [docs/0.1.0/PROGRESS.md](docs/0.1.0/PROGRESS.md)
-- 사용자 facing 변경 내역 → [apps/desktop/CHANGELOG.md](apps/desktop/CHANGELOG.md), [apps/extension/CHANGELOG.md](apps/extension/CHANGELOG.md)
-- 문서/사이클/CHANGELOG 규칙 → [docs/RULES.md](docs/RULES.md)
-- 제품 정의 / 기능 스펙 → [docs/spec/](docs/spec/) · 아키텍처 → [docs/spec/07_architecture.md](docs/spec/07_architecture.md)
-- 배포 운영 (채널/릴리즈 절차/체크리스트) → [docs/0.1.0/plan/01_release_ops.md](docs/0.1.0/plan/01_release_ops.md)
-- gc-tree 정찰 보고서 → [docs/0.1.0/research/02_gc_tree_survey.md](docs/0.1.0/research/02_gc_tree_survey.md)
-- transcript 기반 턴 캡처 정찰 → [docs/0.1.0/research/03_transcript_capture.md](docs/0.1.0/research/03_transcript_capture.md)
-
-> 완료: 0.1.0 사이클 전부 / 0.2.0 로드맵 ①(에디터 그룹 잠금) / ②(공유 저장소 통일 + 세션 공유 UX — "사용 중" 화면 + 다시 열기 + 양방향 소유권 가드 + 실시간 세션 동기화) / ② 잔여(owner pid 재사용 견고화 — 프로세스 시작 시각 대조, commit db66135 / codex·agy hook 단일 등록 확인). 이력·커밋은 PROGRESS 참조.
-
----
-
-## 앞으로 할 일
-
-### ★ 최우선 — transcript 기반 턴 캡처 전환
-
-현재 턴 기록은 PTY 출력에서 ANSI를 긁고 1.5초 idle로 턴 경계를 추측하는 취약한 방식. 발견: **claude/codex/agy가 이미 구조화 대화 기록을 디스크에 쓴다**(claude·codex JSONL, agy sqlite). transcript를 읽으면 ANSI 스크래핑·idle 휴리스틱 없이 깔끔·정확한 데이터를 얻는다(실측: claude assistant 텍스트 ANSI 0). **표시는 PTY 유지, 기록만 transcript로.** 세션↔파일 연결 키는 이미 저장하는 `modelSessionId`(=claude 기록 파일명, 검증됨).
-
-- 상세 정찰·트레이드오프·스파이크 단계 → [research/03_transcript_capture.md](docs/0.1.0/research/03_transcript_capture.md)
-- 영향 파일: `turnRecorder/{index.ts,sliceAssistant.ts}`(축소/제거), 하류 `turnsStore`/`compactionScheduler`는 무변경.
-- 절차: `plan/05_transcript_capture.md` 작성 → 스파이크(agy `.db` 위치·스키마 → codex 매핑 → 파일 감시 offset) → 구현.
-- **gc-tree(③)보다 선행** — IR 품질 토대를 먼저 정리해야 gc-tree 검색·자동제안이 그 위에서 정확해짐.
-
-### ③ gc-tree 글로벌 컨텍스트 (장기 기억) — **transcript 전환 뒤로 보류**
-
-> 위 transcript 전환 완료 후 재개. 설계 초안은 [plan/04_gc_tree_import.md](docs/0.1.0/plan/04_gc_tree_import.md)에 §A(저장)·§B(주입)까지 작성됨. 용어: gc-tree "branch"→**"프로필"** 확정.
-
-AgentBridge에 "repo를 넘는 영구 지식"(사용자 정체성/팀 용어/repo 관계) 레이어 추가. 단기 기억(IR, 자동) + 장기 기억(글로벌 컨텍스트, 수동/반자동) 조합으로 제품 완성. 상세 분석은 [survey](docs/0.1.0/research/02_gc_tree_survey.md) §4.
-
-AgentBridge에 "repo를 넘는 영구 지식"(사용자 정체성/팀 용어/repo 관계) 레이어 추가. 단기 기억(IR, 자동) + 장기 기억(글로벌 컨텍스트, 수동/반자동) 조합으로 제품 완성. 상세 분석은 [survey](docs/0.1.0/research/02_gc_tree_survey.md) §4.
-
-- **전제:** ②의 통일 저장소 + lockfile 위에 구현 (별도 저장 레이어를 만들지 않음)
-- 가져올 기능 (gc-tree, 전부 MIT — 이식 시 NOTICE/CREDITS에 출처 표기):
-  - 글로벌 컨텍스트 저장 구조 (survey §5 "defer" — ② 완료로 전제 충족됨)
-  - 4-1 한국어 토크나이저 + 검색 스코어러 (코드 직접 이식, ~40-60줄)
-  - 4-2 repo→컨텍스트 스코프 매핑 (개념 차용, repo 키 = 워크스페이스 UUID)
-  - 4-7 온보딩 인터뷰 (프롬프트 설계 사상만 차용)
-  - 4-5 슬래시 명령 표면 (claude/codex만 — agy는 명령 메커니즘 없음, 사전 스파이크 필요)
-  - 세부 범위는 plan 작성 시 확정
-- 절차: `docs/0.1.0/plan/04_gc_tree_import.md` 작성 → 타당성 검토(plan-eng-review 또는 codex challenge) → 구현
-- **코드 가져오기 전 사용자 명시 신호 필수.**
-
-### ④ 0.2.0 릴리즈
-
-- 버전 정책 (확정): 데스크탑·익스텐션 **`0.2.0` 동시 bump**. 데스크탑 `0.0.X → 0.2.0` 점프 사유는 release notes 첫 줄에 명시("모노레포 통합 + 버전 트랙 일원화").
-- 절차/순서: [release-ops §3](docs/0.1.0/plan/01_release_ops.md) — repo 공개 전 점검 → 모노레포 public 전환 → 버전 bump → 데스크탑 릴리즈(자동 업데이트 채널 복구) → 익스텐션 vsce publish → 옛 repo 비공개.
-- 사전 체크리스트: [release-ops §4](docs/0.1.0/plan/01_release_ops.md) — `apps/extension/LICENSE` 추가, vsce PAT 확인 등.
-
-### 백로그 (0.2.0 중 시간 나면 / 다음 사이클)
-
-- IR 품질 게이트 — IR `files[].path` 실재 검증 린트 (gc-tree survey 4-3, effort low — 독립 작업 가능)
-- 검증 라운드 잔여: B-005(필터가 대화 중 태그 언급도 잡음) 근본 대응 / agy .db 삭제 시 .db-shm·wal 동반 삭제 / 데스크탑 `agyResume.ts` 데드코드 제거
-- 정제 품질 eval 하니스 (gc-tree survey 4-6 — 비용 커서 후순위)
-- 마크다운 마커 블록 유틸 (gc-tree survey 4-4 — 사용처 확정 시)
-
----
-
-## 빌드 절차 (재현용)
-
-### 베타 빌드
-
-```bash
-# 일반 macOS 환경 (작업 디렉토리가 iCloud 영역 밖)
-npm --prefix apps/desktop run build:mac
-
-# 작업 디렉토리가 iCloud Drive 영역 안 (현재 본 프로젝트)
-npm --prefix apps/desktop run build:mac:external
-```
-
-`build:mac:external`은 `~/.agentbridge-build/`로 source sync(`rsync --delete`) 후 빌드, 산출물 회수.
-
-### VSIX 빌드 / 설치
-
-```bash
-cd apps/extension && npm run package   # → agentbridge-<ver>.vsix
-# IDE에 설치 (리로드 필요. 진행 중 Claude 세션은 자동 resume됨)
-"/Applications/Antigravity IDE.app/Contents/Resources/app/bin/antigravity-ide" --install-extension <vsix> --force
-```
-
-### 릴리즈 발행
-
-```bash
-git tag v0.2.0 -m "AgentBridge v0.2.0 — <짧은 설명>"
-git push origin v0.2.0
-
-gh release create v0.2.0 \
-  apps/desktop/dist/agentbridge-0.2.0.dmg \
-  apps/desktop/dist/agentbridge-0.2.0.dmg.blockmap \
-  apps/desktop/dist/AgentBridge-0.2.0-arm64-mac.zip \
-  apps/desktop/dist/AgentBridge-0.2.0-arm64-mac.zip.blockmap \
-  apps/desktop/dist/latest-mac.yml \
-  --title "v0.2.0 — <짧은 설명>" \
-  --notes "$(cat release-notes.md)"
-```
-
-release notes는 `apps/desktop/CHANGELOG.md [0.2.0]` 섹션을 다듬어 사용.
-
-### codesign (현재 ad-hoc)
-
-- `mac.identity: '-'` + `hardenedRuntime: true` + `notarize: false`
-- entitlements: `allow-jit` / `allow-unsigned-executable-memory` / `allow-dyld-environment-variables` / `disable-library-validation`(Sequoia ad-hoc Team ID mismatch 우회)
-- 주의: iCloud 영역으로 회수된 `dist/mac-arm64/*.app` 사본은 codesign이 깨져 보임(provenance xattr) — 정상. 배포 산출물(DMG/ZIP)은 영향 없음.
-- 정식 노타리 빌드(향후): Apple Developer Program → Developer ID Application 인증서 → `electron-builder.yml` `identity`+`notarize: true` → `APPLE_ID`/`APPLE_APP_SPECIFIC_PASSWORD`/`APPLE_TEAM_ID` env.
-
----
-
-## 운영 리마인더 (얇게)
-
-- **코드 커밋·푸시 ≠ 빌드 trigger.** 빌드(`build:mac:external`) + 릴리즈(`gh release create`)는 사용자 명시 신호("배포해/빌드해/릴리즈해") 받고만.
-- **한 빌드에 여러 fix 누적 후 한 번에 발행.** CHANGELOG/`version` 필드는 다음 빌드 대상 버전으로 미리 bump.
-- **CHANGELOG는 이전 버전 코드 대비 사용자 facing 변경점만.** 같은 사이클 회귀를 같은 사이클에서 fix한 항목은 제외.
-- **main 프로세스 코드 변경 시 dev 서버 재시작 필요** (HMR 미적용).
-- **`ELECTRON_RUN_AS_NODE=1` quirk** — Electron GUI 명령에 `unset ELECTRON_RUN_AS_NODE` 프리픽스 필수.
-- **prettier 무시** — `*.md` / `docs/` / `probe/`.
-- **채팅 응답에 hook 컨텍스트 태그 원문 금지** — PTY 필터가 잡아 화면이 끊김 (B-005). 우회 표현으로 지칭.
-- 그 외 제품·아키텍처·보안 정책 전반은 [docs/spec/04_feature_spec.md](docs/spec/04_feature_spec.md) 및 코드 주석이 SSOT.
-````r��
-�9��EO�`����LF�-�I���N,aL3��B1�Zr&�U�?�v�O{	cZ�6Z�+�45�-�2�SJ�6)�`�"�s`��=�����㕭$c�,��S����@��)�g�C�VXV7��~�7r�b� �0Q11{Y"���s�5�Ҳ���527Pı5�@g}�:	OśO#�RG�M5��`���jTK��"��;��EC��A;�it�!�A�Me�O����-͆�|�)�#�=(7�~�t��zL򲤂���[~(H�/�;�U�Ӊ�g��
--?�T��iۙ�����D���{��^�^��5iy	5�n2MH�{%�}~�q5�c��/G�ł��57��j���~���~^@uE�K�[��f%���R��,EO������qT?K%͖Q��h#6�6
-��7�.o՛����ތ�O��s����.��U�4]�ޕ��ެ�/b9bZ�䬍4}_|��H$���j�J���b�P�?9�T�Қr��eX{$&�і�4:�s0��'wo�����ʵ�|,#^�Ѻ��}� �=h���"��7�.�a�`r���Ml�J} ���\��x�Xքk���zՖ�_�vU�7Jh�t�����^�"�Z����ǩ�Ko�����-�u�֔N}�Ya&�&ZUj�c�cE
-:߽O�2�l�Z��3�*����>����������
-�u����Pȅu�+lPO���績�0b/�ǥ��*I����OZ1+��b��'��\�Yz�R���=S��Bym��=�|{D������4՘Mo��q����y�	�9Ī�(�A�z#6�h̖`ٔ����7`�%�Ao�<����!Ai�	�]���IpÀ䉸q���t_B�54o/a@.�֋y\r����v�P�ja��i���vb�HL�� *�!��9����ϊ���dflXeEnQ�5�._û4���J�.�	�~��ߧ����_r=���N�ᕄ��#�ћG{ D9����j�-�m5�����p�n�<*~���7vĈ��q���u����Ƭ�Km��<A�O����A��|�7�*��������K�(����|fJ[��G������oK[��܁�W���gBu���D�.��v���O��+����-\G���I�t�G���葘H)�K�j)�T&�*E�,;n����s� �vS��f��a�K�0³}�:s�V+��Cc�{Ū�`н�LA��@��F3�+R��AP����\6{"h@f��٩S~@t�2����L�8�~B�t�����t�b%9�o��T֚<�k�YP"6�,�A���!6n2���I0Pg�t��Үm�����ɽ���c��A�t1m�C9m���qt����5�u��Z�]��ħ�1��I�n����t�`�;�����f+����[�-\��T}i�8xr��ழL�و�}m<BT�dȍ��� '���i]�n���OiO{!�5K��N�%�ńǶ�ng��Us�#��b��[�Y��<������(Fт��׺�ƅRjK�OW�ȻGd`&-�n�|K��{�c�v(�ʙ7)�o�g(����ް��GJ�i��ʐf/+"�:Hd8���!���A]��E4�/շ8�c�1G1��s^�^�ƒ��y5�y`�Qۻ)�S	]wj�)P�,P@��X� �J�3ys������\��:CTf�L��Y��{bqY��3l����U�G����r�y��˿�mM���+ϥVF�9&�,�V��u����4G�w�Ȁ�:��F'��.�J|c���4j��l@��V�NR���,qr��Txve����4�Ne�
-��G�X�'��-�v��`?[���\�?Xd��RG��9 ��[SZ�B J��S���ʚ���7��{U��Cb����̢�;��>����4T$�Knl�|�,�d�t
