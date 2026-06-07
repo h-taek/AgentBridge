@@ -1,0 +1,59 @@
+// modelSessionId + cwd → CLI transcript 파일 경로. 호스트 배선이 CaptureSession.transcriptPath로 주입.
+//   claude: ~/.claude/projects/<enc-cwd>/<modelSessionId>.jsonl   (enc-cwd = 비영숫자 → '-')
+//   codex:  ~/.codex/sessions/Y/M/D/rollout-*-<modelSessionId>.jsonl  (glob, 최신)
+//   agy:    ~/.gemini/antigravity-cli/conversations/<modelSessionId>.db (없으면 .pb)
+import { promises as fs } from 'fs';
+import { homedir } from 'os';
+import { join } from 'path';
+import type { CliKind } from '../shared/cli';
+
+// claude project 디렉토리 인코딩: cwd의 비영숫자 문자를 전부 '-'로. (실측 검증)
+export function encodeClaudeProjectDir(cwd: string): string {
+  return cwd.replace(/[^a-zA-Z0-9]/g, '-');
+}
+
+async function findCodexRollout(modelSessionId: string): Promise<string | null> {
+  const base = join(homedir(), '.codex', 'sessions');
+  let best: string | null = null;
+  async function walk(dir: string): Promise<void> {
+    let entries: import('fs').Dirent[];
+    try {
+      entries = await fs.readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const full = join(dir, e.name);
+      if (e.isDirectory()) await walk(full);
+      else if (e.isFile() && e.name.startsWith('rollout-') && e.name.endsWith(`${modelSessionId}.jsonl`)) {
+        best = full; // 동일 id는 유일 — 첫 매치로 충분
+      }
+    }
+  }
+  await walk(base);
+  return best;
+}
+
+export async function resolveTranscriptPath(
+  model: CliKind,
+  modelSessionId: string,
+  cwd: string,
+): Promise<string | null> {
+  if (model === 'claude') {
+    return join(homedir(), '.claude', 'projects', encodeClaudeProjectDir(cwd), `${modelSessionId}.jsonl`);
+  }
+  if (model === 'agy') {
+    const dir = join(homedir(), '.gemini', 'antigravity-cli', 'conversations');
+    for (const ext of ['.db', '.pb']) {
+      const p = join(dir, `${modelSessionId}${ext}`);
+      try {
+        if ((await fs.stat(p)).isFile()) return p;
+      } catch {
+        /* 다음 후보 */
+      }
+    }
+    return join(dir, `${modelSessionId}.db`); // 기본(아직 생성 전일 수 있음)
+  }
+  // codex
+  return findCodexRollout(modelSessionId);
+}
