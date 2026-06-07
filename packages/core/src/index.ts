@@ -37,6 +37,7 @@ export * from './transcriptReader/protobuf';
 export * from './transcriptReader/claudeReader';
 export * from './transcriptReader/codexReader';
 export * from './transcriptReader/agyReader';
+export * from './transcriptReader/agySteps';
 export * from './sessionFileWatcher';
 export * from './ownerWatcher';
 // attachmentStore는 데스크탑 미사용 (외부 경로 직접 입력 방식) — 2026-06-01 apps/extension/src/core/로 이전.
