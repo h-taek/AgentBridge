@@ -4,7 +4,7 @@ import { randomBytes } from 'crypto';
 import { chmodSync, createWriteStream, type WriteStream } from 'fs';
 import { join } from 'path';
 import * as output from '../log/output';
-import { TurnRecorder } from '../core/turnRecorder';
+import { registerCapture, setCaptureModelSessionId, unregisterCapture } from '../core/turnRecorder';
 import { PtyDisplayFilter } from '../core/ptyDisplayFilter';
 import { getSessions, renameSession, deleteSession, setModelSessionId, type SessionMeta } from '../core/sessionRegistry';
 import { captureNewThreadId } from '../core/cliAdapter/codexSessionWatcher';
@@ -37,7 +37,7 @@ export function getAllPanels(): ChatPanel[] {
 export class ChatPanel {
   private panel: vscode.WebviewPanel;
   private ptyProcess: pty.IPty | null = null;
-  private recorder: TurnRecorder | null = null;
+  private captureRegistered = false;
   private displayFilter = (() => {
     const f = new PtyDisplayFilter();
     f.setForceUnblockHandler(() => {
@@ -134,7 +134,7 @@ export class ChatPanel {
           void this.handleAttachSave(msg.reqId, msg.name, msg.base64);
           break;
         case 'input':
-          this.recorder?.onUserInput(msg.data);
+          // 기록은 transcript 파일에서 읽음(M2-5) — 입력은 PTY로만. CLI가 자기 transcript에 기록.
           this.ptyProcess?.write(msg.data);
           break;
         case 'resize':
@@ -251,12 +251,20 @@ export class ChatPanel {
       output.log(`ChatPanel PTY pid=${this.ptyProcess.pid}`);
 
       if (this.opts.model && this.opts.workspaceId && this.opts.sessionId) {
-        this.recorder = new TurnRecorder(
-          this.opts.workspaceId,
-          this.opts.sessionId,
-          this.opts.model,
-          this.opts.cwd,
-        );
+        // claude는 sessionId가 곧 jsonl 파일명(통일 규약). codex/agy는 native id를 비동기 캡처
+        // (startModelSessionIdWatcher → setCaptureModelSessionId) — 여기선 modelSessionId가 있으면(resume) 전달.
+        const captureModelSessionId =
+          this.opts.model === 'claude'
+            ? (this.opts.modelSessionId ?? this.opts.sessionId)
+            : (this.opts.modelSessionId ?? null);
+        registerCapture({
+          workspaceId: this.opts.workspaceId,
+          sessionId: this.opts.sessionId,
+          model: this.opts.model,
+          workspacePath: this.opts.cwd,
+          modelSessionId: captureModelSessionId,
+        });
+        this.captureRegistered = true;
       }
 
       // replay.log + owner.json — 두 앱이 같은 세션 디렉토리(V-12 결정적 ID)를 공유하므로
@@ -278,7 +286,7 @@ export class ChatPanel {
           this.replayStream.write(data);
         }
         const filtered = this.displayFilter.filter(data);
-        this.recorder?.onAssistantData(filtered);
+        // 기록은 transcript 파일에서 읽음(M2-5) — 여기선 표시만(webview output). replay.log는 위에서 RAW 기록.
         if (!this.disposed && filtered) {
           this.panel.webview.postMessage({ type: 'output', data: filtered });
         }
@@ -331,6 +339,8 @@ export class ChatPanel {
       void setModelSessionId(workspaceId, sessionId, modelSessionId).catch((err) => {
         output.warn(`ChatPanel: setModelSessionId 실패 — ${String(err)}`);
       });
+      // 매니저에 native id를 알려 transcript 캡처 시작 (codex/agy).
+      if (cwd) setCaptureModelSessionId(sessionId, modelSessionId, cwd);
     };
 
     if (model === 'codex' && codexSessionSnapshot) {
@@ -461,7 +471,7 @@ export class ChatPanel {
     if (this.opts.sessionId) activePanels.delete(this.opts.sessionId);
 
     this.modelSessionWatchAbort?.abort();
-    this.recorder?.dispose();
+    void this.flushCapture(); // fire-and-forget finalize (마지막 턴 flush 보장은 disposeAndFlush).
     this.displayFilter.dispose();
 
     if (this.replayStream && !this.replayStream.destroyed) {
@@ -490,15 +500,22 @@ export class ChatPanel {
   }
 
   // 앱/익스텐션 종료(deactivate) 시 — 진행 중 turn을 flush 완료까지 await한 뒤 dispose (V-07).
-  // 일반 dispose()는 recorder.dispose()를 fire-and-forget으로 호출해 마지막 턴이 유실될 수 있음.
+  // 일반 dispose()는 flushCapture()를 fire-and-forget으로 호출해 마지막 턴이 유실될 수 있음.
   async disposeAndFlush(): Promise<void> {
     if (this.disposed) return;
     try {
-      await this.recorder?.disposeAndFlush();
+      await this.flushCapture();
     } catch {
       /* noop — flush 실패해도 종료는 진행 */
     }
     this.dispose();
+  }
+
+  // 캡처 세션 종료 + 마지막 열린 턴 flush. dispose/disposeAndFlush 양쪽에서 호출되나 1회만 수행.
+  private async flushCapture(): Promise<void> {
+    if (!this.captureRegistered || !this.opts.sessionId) return;
+    this.captureRegistered = false;
+    await unregisterCapture(this.opts.sessionId);
   }
 
   private buildHtml(): string {
