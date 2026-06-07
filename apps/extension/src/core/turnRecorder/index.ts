@@ -56,9 +56,3 @@ export function setCaptureModelSessionId(sessionId: string, modelSessionId: stri
 export function unregisterCapture(sessionId: string): Promise<void> {
   return manager.unregister(sessionId);
 }
-
-// host handoff-flush — IR refine(메모리 갱신) 직전 호출. 세션은 유지한 채 모든 세션의 열린 마지막 턴을
-// flush해 직전 대화가 IR에 빠지지 않게 한다(즉시 flush 신호와 watch tick 사이 <1s 갭 보강).
-export function flushAllCaptureOpen(): Promise<void> {
-  return manager.flushAllOpen();
-}

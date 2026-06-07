@@ -11,7 +11,6 @@ import {
 import { runManualCompaction } from '../modules/compactionScheduler'
 import { broadcastIrUpdated } from '../modules/irBroadcast'
 import { getWorkspacePaths, loadWorkspaceIR } from '../modules/workspaceStore'
-import { flushAllRecorderOpen } from '../modules/turnRecorder'
 
 // ir:refine — 사용자 명시 trigger ("메모리 갱신" 버튼). O 청크 이후 turns.jsonl 기반.
 // architecture §15.3~15.6.
@@ -30,12 +29,6 @@ export async function runIrRefine(args: {
   timeoutMs?: number
 }): Promise<IrRefineResult> {
   log.info('runIrRefine 시작 (turns 기반)', { workspaceId: args.workspaceId })
-  // host handoff-flush: turns.jsonl 읽기 직전, 열린 마지막 턴을 확정해 직전 대화가 IR에 빠지지 않게 한다.
-  try {
-    await flushAllRecorderOpen()
-  } catch (err) {
-    log.warn('runIrRefine — flushAllRecorderOpen 실패 (non-fatal)', { err: String(err) })
-  }
   const result = await runManualCompaction({
     workspaceId: args.workspaceId,
     timeoutMs: args.timeoutMs

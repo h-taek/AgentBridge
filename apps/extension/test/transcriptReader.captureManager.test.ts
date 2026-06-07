@@ -87,24 +87,6 @@ describe('CaptureManager', () => {
     assert.equal(turns[0].user, '유일');
   });
 
-  it('flushOpen: 세션 유지한 채 열린 마지막 턴을 flush (host handoff-flush)', async () => {
-    const { root, transcript } = await setup();
-    const mgr = new CaptureManager({ resolve: async () => transcript });
-    // end_turn 없는 열린 턴 (즉시 flush 신호 못 받은 상태)
-    await fs.writeFile(transcript, [U('유일', 'u1'), A('답', 'a1', 'tool_use')].join('\n') + '\n');
-    mgr.register(baseOpts(root, fakeScheduler()));
-    await delay(50);
-    assert.equal((await readAllTurns(root)).length, 0); // 아직 안 닫힘
-    await mgr.flushOpen('s1'); // 핸드오프 순간 강제 flush (unregister 아님)
-    const turns = await readAllTurns(root);
-    assert.equal(turns.length, 1);
-    assert.equal(turns[0].user, '유일');
-    // 세션은 여전히 살아있어 이후 새 턴도 잡힌다
-    await fs.appendFile(transcript, [U('둘째', 'u2'), A('답2', 'a2')].join('\n') + '\n');
-    await until(async () => (await readAllTurns(root)).length === 2);
-    await mgr.disposeAll();
-  });
-
   it('재시작 멱등성: 새 매니저 같은 root → 중복 append 없음', async () => {
     const { root, transcript } = await setup();
     await fs.writeFile(transcript, [U('q1', 'u1'), A('a1', 'a1'), U('q2', 'u2')].join('\n') + '\n');

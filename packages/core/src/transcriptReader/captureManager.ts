@@ -112,34 +112,6 @@ export class CaptureManager {
     await Promise.allSettled(Array.from(this.entries.keys()).map((id) => this.unregister(id)));
   }
 
-  // host handoff-flush — 모델전환/IR 생성 직전 호출. 세션은 유지한 채 최신 레코드를 읽고(tick) 열린
-  // 마지막 턴을 flush(finalize). 즉시 flush 신호를 놓친 끊긴 턴이나, 막 끝나 아직 안 읽힌 턴까지
-  // 핸드오프 순간에 확정 → 직전 턴 누락 0. finalize는 carry를 비우므로 이후 tick은 fresh로 이어진다.
-  async flushOpen(sessionId: string): Promise<void> {
-    const entry = this.entries.get(sessionId);
-    if (!entry || entry.disposed || !entry.session) return;
-    if (entry.inflight) {
-      try {
-        await entry.inflight;
-      } catch {
-        /* tick 오류는 삼킴 */
-      }
-    }
-    await this.tick(entry); // 막 쓰인 최종 답변까지 읽어 가능한 한 instant-flush
-    if (entry.session) {
-      try {
-        await entry.session.finalize(); // 그래도 남은 열린 턴 flush
-      } catch (err) {
-        this.log.warn(`CaptureManager flushOpen 실패 (${sessionId}): ${String(err)}`);
-      }
-    }
-  }
-
-  // 워크스페이스 단위 핸드오프(IR refine 등) 직전 — 모든 등록 세션의 열린 턴을 flush.
-  async flushAllOpen(): Promise<void> {
-    await Promise.allSettled(Array.from(this.entries.keys()).map((id) => this.flushOpen(id)));
-  }
-
   private startPoll(entry: Entry): void {
     if (entry.poll) return;
     const ms = entry.opts.pollMs ?? DEFAULT_POLL_MS;

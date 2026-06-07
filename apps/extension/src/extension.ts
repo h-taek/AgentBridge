@@ -11,7 +11,6 @@ import { MemoryPanelProvider } from './views/memoryPanel';
 import { SessionTreeProvider, SessionItem } from './views/sessionTreeView';
 import { ChatPanel, getActivePanel, getAllPanels, chatPanelEvents } from './views/chatPanel';
 import { compactionEvents } from './core/compactionScheduler';
-import { flushAllCaptureOpen } from './core/turnRecorder';
 import { registerSession, markSessionClosed, markSessionActive, renameSession, deleteSession } from './core/sessionRegistry';
 import { registerConfigWatcher } from './settings/config';
 import * as notifications from './core/notifications';
@@ -251,12 +250,6 @@ export function activate(context: vscode.ExtensionContext) {
   });
 
   const refineCmd = vscode.commands.registerCommand('agentbridge.refineMemory', async () => {
-    // host handoff-flush: refine(turns 읽기) 직전, 열린 마지막 턴을 확정해 직전 대화가 IR에 빠지지 않게 한다.
-    try {
-      await flushAllCaptureOpen();
-    } catch {
-      /* non-fatal */
-    }
     await memoryProvider.runRefine();
   });
 
