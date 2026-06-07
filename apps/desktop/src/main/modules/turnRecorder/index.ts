@@ -1,15 +1,18 @@
 import log from 'electron-log/main'
 import { IpcChannel, type CliKind, type TurnsUpdatedEvent } from '@shared/ipc'
-import { TurnRecorder as CoreTurnRecorder, type TurnsAssistantDetail } from '@agentbridge/core'
+import { CaptureManager, type TurnsAssistantDetail } from '@agentbridge/core'
 import { sendToWorkspaceWindow } from '../windowManager'
 import { getCoreCompactionScheduler } from '../compactionScheduler'
 import { getCachedSettings } from '../settings'
 import { getWorkspacePaths, updateSessionMeta } from '../workspaceStore'
 
-// 2026-06-01 Phase 6.7: 코어 TurnRecorder 인스턴스로 전환.
-// 옛 470줄(자체 RecorderState + ANSI skip + flush 로직)을 코어로 위임. 호스트 책임:
-//   - ptySessionId → CoreTurnRecorder 인스턴스 매핑
-//   - onTurnFlushed 콜백에서 updateSessionMeta(lastChattedAt) + broadcastTurnsUpdated
+// 2026-06-07 M2-4: 턴 기록을 PTY 스크래핑 → transcript 읽기로 전환(설계 §E). 호스트는 CaptureManager에
+// 세션을 등록만 하고, 매니저가 각 CLI transcript 파일을 fs.watch/폴링으로 읽어 turns.jsonl을 쌓는다.
+// 표시는 PTY 유지 — onUserInput/onAssistantData는 더 이상 기록에 쓰이지 않아 no-op(호출부는 M2-6에서 정리).
+// 호스트 책임:
+//   - ptySessionId ↔ sessionId 매핑(onExit는 ptySessionId만 줌, 매니저는 sessionId 키)
+//   - codex 비동기 modelSessionId 캡처 시 setRecorderModelSessionId로 매니저에 통지
+//   - onTurnFlushed에서 updateSessionMeta(lastChattedAt) + broadcastTurnsUpdated
 
 // M3.6 C — workspaceId 매칭 윈도우에만 전송.
 export function broadcastTurnsUpdated(workspaceId: string): void {
@@ -17,15 +20,20 @@ export function broadcastTurnsUpdated(workspaceId: string): void {
   sendToWorkspaceWindow(workspaceId, IpcChannel.TurnsUpdated, evt)
 }
 
-const recorders = new Map<string, CoreTurnRecorder>()
+const manager = new CaptureManager({
+  logger: {
+    log: (m) => log.info(m),
+    warn: (m) => log.warn(m)
+  }
+})
 
-// V-08: registerRecorder는 scheduler/settings를 await한 뒤에야 recorder를 set한다. 그 사이 도착한
-// 입력/출력을 drop하지 않고 ptySessionId별 버퍼에 모았다가, recorder 준비되면 도착 순서대로 재생.
-// 등록 실패/취소 시 버퍼는 폐기. 비정상적으로 등록이 안 끝나는 경우 대비 버퍼 상한(메모리 보호).
-type PendingEvent = { type: 'user' | 'assistant'; data: string }
-const pendingEvents = new Map<string, PendingEvent[]>()
-const PENDING_BUFFER_MAX_BYTES = 512 * 1024
-const pendingBytes = new Map<string, number>()
+// onExit가 ptySessionId만 주므로 unregister를 위해 ptySessionId → sessionId 매핑 유지.
+const ptyToSession = new Map<string, string>()
+
+// codex 비동기 modelSessionId 캡처가 registerRecorder의 async 본문(scheduler await)보다 먼저 도착하면
+// 매니저에 아직 세션이 없어 setModelSessionId가 무시될 수 있다 → 캡처가 영영 안 시작. pending에 담아두고
+// register 완료 직후 적용해 race를 닫는다.
+const pendingModelId = new Map<string, { modelSessionId: string; cwd: string }>()
 
 export function registerRecorder(args: {
   workspaceId: string
@@ -33,64 +41,54 @@ export function registerRecorder(args: {
   ptySessionId: string
   model: CliKind
   workspacePath: string
+  modelSessionId?: string | null
 }): void {
-  // 코어 TurnRecorder 인스턴스 생성. workspaceRoot는 workspaceStore에서 lookup.
   const workspaceRoot = getWorkspacePaths(args.workspaceId).dir
-  // 등록 완료 전 도착하는 입력/출력을 버퍼링하도록 즉시(동기) 표시 (V-08).
-  pendingEvents.set(args.ptySessionId, [])
-  pendingBytes.set(args.ptySessionId, 0)
-  void (async () => {
+  ptyToSession.set(args.ptySessionId, args.sessionId)
+  void (async (): Promise<void> => {
     try {
-      // getCoreCompactionScheduler가 내부에서 loadSettings를 await하므로 이 시점엔 settings cache가
-      // 채워져 있다. 콜백은 매 flush마다 getCachedSettings로 *현재* 설정을 읽는다 (V-11).
+      // getCoreCompactionScheduler가 내부에서 loadSettings를 await — 이 시점에 settings cache가 채워짐.
+      // 약간 늦게 register돼도 매니저는 transcript를 offset 0부터 읽어 그동안 쌓인 턴까지 잡으므로 유실 없음.
       const scheduler = await getCoreCompactionScheduler()
-      const recorder = new CoreTurnRecorder({
+      manager.register({
         workspaceId: args.workspaceId,
         workspaceRoot,
         workspacePath: args.workspacePath,
         sessionId: args.sessionId,
         model: args.model,
-        getAssistantDetail: () => getCachedSettings().turnsAssistantDetail as TurnsAssistantDetail,
+        modelSessionId: args.modelSessionId ?? null,
+        cwd: args.workspacePath,
+        getDetail: () => getCachedSettings().turnsAssistantDetail as TurnsAssistantDetail,
         scheduler,
         onTurnFlushed: async ({ workspaceId, sessionId, flushedAt }) => {
           try {
             await updateSessionMeta(workspaceId, sessionId, { lastChattedAt: flushedAt })
           } catch (err) {
-            log.warn('TurnRecorder lastChattedAt 갱신 실패 (non-fatal)', {
+            log.warn('CaptureManager lastChattedAt 갱신 실패 (non-fatal)', {
               workspaceId,
               sessionId,
               err: String(err)
             })
           }
           broadcastTurnsUpdated(workspaceId)
-        },
-        logger: {
-          log: (m) => log.info(m),
-          warn: (m) => log.warn(m)
         }
       })
-      recorders.set(args.ptySessionId, recorder)
-      // 등록 전 버퍼링된 입력/출력을 도착 순서대로 재생 (V-08).
-      const buffered = pendingEvents.get(args.ptySessionId)
-      pendingEvents.delete(args.ptySessionId)
-      pendingBytes.delete(args.ptySessionId)
-      if (buffered) {
-        for (const e of buffered) {
-          if (e.type === 'user') recorder.onUserInput(e.data)
-          else recorder.onAssistantData(e.data)
-        }
+      // register 전에 도착한 modelSessionId 캡처가 있으면 지금 적용 (codex race 가드).
+      const pending = pendingModelId.get(args.sessionId)
+      if (pending) {
+        pendingModelId.delete(args.sessionId)
+        manager.setModelSessionId(args.sessionId, pending.modelSessionId, pending.cwd)
       }
-      log.info('TurnRecorder registered', {
+      log.info('CaptureManager registered', {
         workspaceId: args.workspaceId,
         sessionId: args.sessionId,
         ptySessionId: args.ptySessionId,
         model: args.model,
-        replayed: buffered?.length ?? 0
+        modelSessionId: args.modelSessionId ?? null
       })
     } catch (err) {
-      pendingEvents.delete(args.ptySessionId)
-      pendingBytes.delete(args.ptySessionId)
-      log.warn('TurnRecorder register 실패', {
+      ptyToSession.delete(args.ptySessionId)
+      log.warn('CaptureManager register 실패', {
         ptySessionId: args.ptySessionId,
         err: String(err)
       })
@@ -98,59 +96,39 @@ export function registerRecorder(args: {
   })()
 }
 
+// codex/agy 비동기 modelSessionId 캡처 시 호출 — 매니저가 그때 경로를 해석해 캡처 시작.
+export function setRecorderModelSessionId(
+  sessionId: string,
+  modelSessionId: string,
+  cwd: string
+): void {
+  // register가 이미 끝났으면 즉시 적용, 아직이면 pending에 담아 register 완료 시 적용(둘 다 호출 — 멱등).
+  pendingModelId.set(sessionId, { modelSessionId, cwd })
+  manager.setModelSessionId(sessionId, modelSessionId, cwd)
+}
+
 export function unregisterRecorder(ptySessionId: string): void {
-  // recorder 준비 전에 unregister된 경우 대비 — 버퍼도 폐기.
-  pendingEvents.delete(ptySessionId)
-  pendingBytes.delete(ptySessionId)
-  const r = recorders.get(ptySessionId)
-  if (!r) return
-  void r.disposeAndFlush().catch((err) => {
-    log.warn('TurnRecorder unregister flush 실패', { ptySessionId, err: String(err) })
+  const sessionId = ptyToSession.get(ptySessionId)
+  if (!sessionId) return
+  ptyToSession.delete(ptySessionId)
+  pendingModelId.delete(sessionId)
+  void manager.unregister(sessionId).catch((err) => {
+    log.warn('CaptureManager unregister 실패', { ptySessionId, sessionId, err: String(err) })
   })
-  recorders.delete(ptySessionId)
 }
 
-// 등록 전이면 도착 이벤트를 버퍼에 모은다(상한 내). 버퍼링/상한초과 처리 시 true,
-// pending도 아니면 false(진짜 미등록 → 호출자가 drop 로그).
-function bufferIfPending(ptySessionId: string, type: 'user' | 'assistant', data: string): boolean {
-  const buf = pendingEvents.get(ptySessionId)
-  if (!buf) return false
-  const used = pendingBytes.get(ptySessionId) ?? 0
-  if (used + data.length > PENDING_BUFFER_MAX_BYTES) {
-    log.warn('TurnRecorder pending 버퍼 상한 초과 — 이후 이벤트 drop', { ptySessionId })
-    return true
-  }
-  buf.push({ type, data })
-  pendingBytes.set(ptySessionId, used + data.length)
-  return true
-}
-
-// 앱 종료(before-quit) 시 모든 활성 recorder의 진행 중 turn을 flush 완료까지 await (V-07).
-// 호출자가 await한 뒤 종료해야 마지막 턴이 turns.jsonl에 남는다.
+// 앱 종료(before-quit) 시 모든 세션의 마지막 열린 턴을 flush 완료까지 await (V-07 동작 보존).
 export async function disposeAndFlushAll(): Promise<void> {
-  const all = Array.from(recorders.values())
-  recorders.clear()
-  await Promise.allSettled(all.map((r) => r.disposeAndFlush()))
+  ptyToSession.clear()
+  pendingModelId.clear()
+  await manager.disposeAll()
 }
 
-export function onUserInput(ptySessionId: string, data: string): void {
-  const r = recorders.get(ptySessionId)
-  if (r) {
-    r.onUserInput(data)
-    return
-  }
-  if (bufferIfPending(ptySessionId, 'user', data)) return
-  log.debug('TurnRecorder.onUserInput — recorder 미등록 (drop)', {
-    ptySessionId,
-    dataLen: data.length
-  })
+// transcript 캡처 전환으로 PTY-feed 기록은 폐기 — 표시는 PTY가 별도 구동. (M2-6에서 호출부와 함께 제거.)
+export function onUserInput(_ptySessionId: string, _data: string): void {
+  /* no-op: 기록은 transcript 파일에서 읽음 */
 }
 
-export function onAssistantData(ptySessionId: string, data: string): void {
-  const r = recorders.get(ptySessionId)
-  if (r) {
-    r.onAssistantData(data)
-    return
-  }
-  bufferIfPending(ptySessionId, 'assistant', data)
+export function onAssistantData(_ptySessionId: string, _data: string): void {
+  /* no-op: 기록은 transcript 파일에서 읽음 */
 }

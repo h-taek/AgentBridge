@@ -56,7 +56,12 @@ import {
   updateWorkspaceMeta
 } from '../modules/workspaceStore'
 import { getCoreHookStatusStore } from '../modules/cliAdapter/coreCliAdapters'
-import { onAssistantData, registerRecorder, unregisterRecorder } from '../modules/turnRecorder'
+import {
+  onAssistantData,
+  registerRecorder,
+  setRecorderModelSessionId,
+  unregisterRecorder
+} from '../modules/turnRecorder'
 import { registerDisplayFilter, unregisterDisplayFilter } from '../modules/ptyDisplayFilter'
 import { ensureConversationDirs } from '../modules/conversationStore'
 import {
@@ -563,6 +568,8 @@ async function spawnAndAttachSession(
             })
             await updateSessionMeta(workspaceId, session.sessionId, { modelSessionId })
             updateActiveSessionModelId(workspaceId, session.sessionId, modelSessionId)
+            // codex/agy 비동기 캡처 — 이제 modelSessionId를 알았으니 매니저가 transcript 캡처 시작.
+            setRecorderModelSessionId(session.sessionId, modelSessionId, ws.workspacePath)
             if (!event.sender.isDestroyed()) {
               const evt: SessionModelSessionCapturedEvent = {
                 workspaceId,
@@ -606,7 +613,9 @@ async function spawnAndAttachSession(
     sessionId: session.sessionId,
     ptySessionId: pty.sessionId,
     model: session.model,
-    workspacePath: ws.workspacePath
+    workspacePath: ws.workspacePath,
+    // claude/agy는 spawn 즉시 확보, codex는 null → onModelSessionIdCaptured에서 setRecorderModelSessionId.
+    modelSessionId: pty.modelSessionId
   })
 
   // primarySessionId가 null인 워크스페이스(손상 마이그레이션 잔재)는 첫 활성 세션으로 채움.
