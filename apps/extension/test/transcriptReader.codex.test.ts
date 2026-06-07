@@ -59,4 +59,23 @@ describe('codexReader', () => {
     );
     assert.equal(r2.carry.open!.toolCalls[0].summary, '파일 목록'); // tick 경계 넘어 매칭 ✓
   });
+
+  it('인터럽트 시 codex가 남기는 <turn_aborted> user 메시지는 실사용자 턴이 아니다 (phantom 턴 방지)', () => {
+    // 실데이터 구조: 인터럽트하면 codex가 user role로 "<turn_aborted>..."를 주입한 뒤 다음 진짜 질문이 온다.
+    // 필터 없으면 <turn_aborted>를 user로 착각해 가짜 턴이 열리고, 그 뒤 출력이 거기 붙어 새 나간다.
+    const records = [
+      { type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: '진짜 질문' }] } },
+      { type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: '부분 답변' }] } },
+      { type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: '<turn_aborted>\nThe user interrupted the previous turn.' }] } },
+      { type: 'event_msg', payload: { type: 'turn_aborted' } },
+      { type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: '뒤따라온 출력' }] } },
+      { type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: '다음 질문' }] } },
+    ];
+    const { turns } = codexConsume(records, EMPTY_CARRY, CTX);
+    // <turn_aborted>는 턴 시작이 아님 → 그 뒤 출력은 진짜 첫 턴에 붙고, '다음 질문' 경계에서 1턴으로 닫힌다.
+    assert.equal(turns.length, 1);
+    assert.equal(turns[0].user, '진짜 질문');
+    assert.equal(turns[0].assistantBody, '부분 답변\n뒤따라온 출력');
+    assert.ok(!turns.some((t) => t.user.startsWith('<turn_aborted>')), 'phantom 턴 생성됨');
+  });
 });

@@ -17,7 +17,11 @@ interface CodexRecord {
   };
 }
 
-const INJECT_MARKERS = ['<environment_context>', '<agentbridge-context>'];
+// 실사용자 턴이 아닌 user-role 메시지 prefix. 주입 컨텍스트 + codex가 인터럽트 시 남기는
+// "<turn_aborted>…" 센티넬. 안 거르면 인터럽트 때 user="<turn_aborted>…"인 가짜 턴이 생긴다
+// (보통 빈-턴 skip이 막지만, 그 뒤에 내용이 붙으면 새므로 명시적으로 차단). 인터럽트 자체는
+// 턴을 닫는 신호로 쓰지 않는다 — 미완 턴은 다음 user/finalize가 처리(설계).
+const NON_USER_PREFIXES = ['<environment_context>', '<agentbridge-context>', '<turn_aborted>'];
 
 function messageText(p: NonNullable<CodexRecord['payload']>): string {
   return (p.content ?? []).map((c) => c.text ?? '').join('');
@@ -26,7 +30,7 @@ function messageText(p: NonNullable<CodexRecord['payload']>): string {
 function isRealUser(p: NonNullable<CodexRecord['payload']>): boolean {
   if (p.type !== 'message' || p.role !== 'user') return false;
   const t = messageText(p).trimStart();
-  return !INJECT_MARKERS.some((m) => t.startsWith(m));
+  return !NON_USER_PREFIXES.some((m) => t.startsWith(m));
 }
 
 export function codexConsume(
