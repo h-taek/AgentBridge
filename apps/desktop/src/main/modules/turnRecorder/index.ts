@@ -124,6 +124,12 @@ export async function disposeAndFlushAll(): Promise<void> {
   await manager.disposeAll()
 }
 
+// host handoff-flush — IR refine 등 핸드오프 직전 호출. 세션은 유지한 채 모든 세션의 열린 마지막 턴을
+// flush해 직전 턴이 turns.jsonl에 반영된 상태로 IR을 만든다(즉시 flush 신호와 watch tick 사이 <1s 갭 보강).
+export async function flushAllRecorderOpen(): Promise<void> {
+  await manager.flushAllOpen()
+}
+
 // transcript 캡처 전환으로 PTY-feed 기록은 폐기 — 표시는 PTY가 별도 구동. (M2-6에서 호출부와 함께 제거.)
 export function onUserInput(_ptySessionId: string, _data: string): void {
   /* no-op: 기록은 transcript 파일에서 읽음 */
