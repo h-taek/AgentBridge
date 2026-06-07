@@ -1,5 +1,5 @@
 // codex jsonl(response_item) → TurnRecord[]. 순수 함수. 단일 스트림.
-import type { TurnRecord, TurnToolCall } from '../shared/turns';
+import type { TurnRecord } from '../shared/turns';
 import type { Carry, ConsumeResult, ReaderCtx } from './types';
 import { finalizeTurn, toolArgString } from './util';
 
@@ -37,7 +37,6 @@ export function codexConsume(
   const turns: TurnRecord[] = [];
   let open = carry.open;
   let turnIndex = carry.turnIndex;
-  const pendingTool = new Map<string, TurnToolCall>();
 
   for (const raw of records as CodexRecord[]) {
     const p = raw.payload;
@@ -49,7 +48,6 @@ export function codexConsume(
         turns.push(finalizeTurn(open, 'codex', ctx));
         turnIndex++;
         open = null;
-        pendingTool.clear();
       }
       continue;
     }
@@ -66,8 +64,8 @@ export function codexConsume(
         lastAt: raw.timestamp ?? '',
         assistantParts: [],
         toolCalls: [],
+        toolCallById: {},
       };
-      pendingTool.clear();
       continue;
     }
     if (!open) continue;
@@ -80,15 +78,12 @@ export function codexConsume(
         .join('');
       if (text) open.assistantParts.push(text);
     } else if (p.type === 'function_call') {
-      const tc: TurnToolCall = {
-        tool: String(p.name ?? 'tool'),
-        arg: toolArgString(p.arguments ?? ''),
-      };
-      open.toolCalls.push(tc);
-      if (p.call_id) pendingTool.set(p.call_id, tc);
-    } else if (p.type === 'function_call_output' && p.call_id) {
-      const tc = pendingTool.get(p.call_id);
-      if (tc && typeof p.output === 'string') tc.summary = p.output.slice(0, 200);
+      open.toolCalls.push({ tool: String(p.name ?? 'tool'), arg: toolArgString(p.arguments ?? '') });
+      // call_id → 방금 push한 인덱스. carry에 영속돼 다음 consume의 결과와도 매칭(증분 tick 경계 생존).
+      if (p.call_id) (open.toolCallById ??= {})[p.call_id] = open.toolCalls.length - 1;
+    } else if (p.type === 'function_call_output' && p.call_id && typeof p.output === 'string') {
+      const idx = open.toolCallById?.[p.call_id];
+      if (idx !== undefined && open.toolCalls[idx]) open.toolCalls[idx].summary = p.output.slice(0, 200);
     }
   }
 

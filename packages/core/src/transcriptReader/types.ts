@@ -17,6 +17,9 @@ export interface OpenTurn {
   lastAt: string;           // 관측된 마지막 활동 시각 ISO; completedAt 후보
   assistantParts: string[]; // text 블록 누적
   toolCalls: TurnToolCall[];
+  // call_id → toolCalls 인덱스. tool 호출과 결과가 증분 읽기로 다른 consume에 걸려도 summary를
+  // 매칭하도록 carry에 영속(로컬 Map은 호출마다 비워짐). finalizeTurn은 안 읽음(turns.jsonl 미노출).
+  toolCallById?: Record<string, number>;
 }
 
 // reader가 다음 consume으로 넘기는 상태. turnIndex는 결정적 id용(append-only 가정).

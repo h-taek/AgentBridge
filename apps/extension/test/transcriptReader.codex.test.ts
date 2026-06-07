@@ -38,4 +38,25 @@ describe('codexReader', () => {
     assert.equal(turns[0].assistantBody, '유일 답변');
     assert.equal(carry.open, null);
   });
+
+  it('도구 호출과 결과가 다른 consume(증분 tick)에 걸려도 summary가 매칭된다', () => {
+    // tick #1: user + function_call (call_id=c1) — 아직 결과 안 옴
+    const r1 = codexConsume(
+      [
+        { type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'q' }] } },
+        { type: 'response_item', payload: { type: 'function_call', name: 'exec_command', arguments: '{"cmd":"ls"}', call_id: 'c1' } },
+      ],
+      EMPTY_CARRY,
+      CTX,
+    );
+    assert.equal(r1.turns.length, 0);
+    assert.equal(r1.carry.open!.toolCalls[0].summary, undefined); // 아직 결과 전
+    // tick #2: function_call_output (call_id=c1) — 새 consume인데도 carry의 매핑으로 summary 붙어야 함
+    const r2 = codexConsume(
+      [{ type: 'response_item', payload: { type: 'function_call_output', call_id: 'c1', output: '파일 목록' } }],
+      r1.carry,
+      CTX,
+    );
+    assert.equal(r2.carry.open!.toolCalls[0].summary, '파일 목록'); // tick 경계 넘어 매칭 ✓
+  });
 });
