@@ -51,15 +51,32 @@ describe('compactionScheduler locks', () => {
     await releaseDiskLock(wid);
   });
 
-  it('returns false when lock is already held by another (simulated) pid', async () => {
+  it('returns false when a live holder pid holds a fresh lock', async () => {
     const lockPath = join(workspaceStore.getWorkspacePath(wid), 'workspace.json');
+    // process.pid는 isPidAlive가 alive로 판정하는 유일한 pid(자기 자신).
+    await fs.writeFile(
+      lockPath,
+      JSON.stringify(
+        baseMeta({ compactionInProgress: { pid: process.pid, startedAt: Date.now() } }),
+      ),
+      'utf8',
+    );
+    const ok = await acquireDiskLock(wid);
+    assert.equal(ok, false);
+  });
+
+  it('overrides a fresh lock whose holder pid is dead', async () => {
+    const lockPath = join(workspaceStore.getWorkspacePath(wid), 'workspace.json');
+    // 999999 = 존재하지 않는 pid. startedAt은 방금(=시간상 stale 아님)이지만 holder가
+    // 죽었으므로 즉시 takeover해야 한다 (stale-lock 버그 회귀 방지).
     await fs.writeFile(
       lockPath,
       JSON.stringify(baseMeta({ compactionInProgress: { pid: 999999, startedAt: Date.now() } })),
       'utf8',
     );
     const ok = await acquireDiskLock(wid);
-    assert.equal(ok, false);
+    assert.equal(ok, true);
+    await releaseDiskLock(wid);
   });
 
   it('overrides stale lock (>5 min old)', async () => {

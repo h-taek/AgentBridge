@@ -35,6 +35,7 @@ import type { EnvProbe } from './envProbe';
 import type { Logger } from './interfaces';
 import { noopLogger } from './interfaces';
 import type { WorkspaceStore } from './workspaceStore';
+import { isPidAlive } from './fileLock';
 
 const COMPACTION_TIMEOUT_MS = 60_000;
 const LOCK_STALE_MS = 5 * 60 * 1000;
@@ -130,9 +131,12 @@ export function createCompactionScheduler(
       const existing = meta.compactionInProgress;
       if (existing) {
         const age = Date.now() - existing.startedAt;
-        if (age < LOCK_STALE_MS) return false;
+        const holderAlive = isPidAlive(existing.pid);
+        // 죽은 holder는 즉시 takeover. 살아있는 holder만 5분 타임아웃까지 존중한다.
+        // (예전엔 시간만 봐서, 정제 도중 앱이 죽으면 그 pid의 락이 5분간 정제를 막았다.)
+        if (holderAlive && age < LOCK_STALE_MS) return false;
         log.warn(
-          `compaction: stale lock detected (age=${age}ms, pid=${existing.pid}) — overriding`,
+          `compaction: overriding lock (pid=${existing.pid}, age=${age}ms, holderAlive=${holderAlive})`,
         );
       }
       await workspaceStore.updateWorkspaceMeta(workspaceId, {
