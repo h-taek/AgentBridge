@@ -1,0 +1,17 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "entry": [
+    "resources/bin/agentbridge-memory.js",
+    "test/**/*.test.ts",
+    "test/stubs/vscode.ts"
+  ],
+  "project": ["src/**/*.ts", "test/**/*.ts"],
+  "ignoreDependencies": [
+    "@xterm/xterm",
+    "@xterm/addon-fit",
+    "@xterm/addon-webgl",
+    "@xterm/addon-unicode11",
+    "@types/mocha"
+  ],
+  "ignoreBinaries": ["vsce"]
+}

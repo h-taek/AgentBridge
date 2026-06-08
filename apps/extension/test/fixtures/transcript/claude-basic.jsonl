@@ -1,0 +1,8 @@
+{"type":"user","promptSource":"typed","uuid":"u1","timestamp":"2026-06-07T00:00:00.000Z","message":{"role":"user","content":"첫 질문"}}
+{"type":"assistant","uuid":"a1","timestamp":"2026-06-07T00:00:01.000Z","message":{"role":"assistant","stop_reason":"tool_use","content":[{"type":"thinking","thinking":"생각"}]}}
+{"type":"assistant","uuid":"a2","timestamp":"2026-06-07T00:00:02.000Z","message":{"role":"assistant","stop_reason":"tool_use","content":[{"type":"text","text":"답변 앞부분"}]}}
+{"type":"assistant","uuid":"a3","timestamp":"2026-06-07T00:00:03.000Z","message":{"role":"assistant","stop_reason":"tool_use","content":[{"type":"tool_use","id":"t1","name":"Read","input":{"file_path":"/x.md"}}]}}
+{"type":"user","uuid":"u2","timestamp":"2026-06-07T00:00:04.000Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"파일 내용"}]}}
+{"type":"assistant","uuid":"a4","timestamp":"2026-06-07T00:00:05.000Z","message":{"role":"assistant","stop_reason":"end_turn","content":[{"type":"text","text":"답변 마무리"}]}}
+{"type":"user","promptSource":"typed","uuid":"u3","timestamp":"2026-06-07T00:00:06.000Z","message":{"role":"user","content":"둘째 질문"}}
+{"type":"user","uuid":"x1","timestamp":"2026-06-07T00:00:07.000Z","message":{"role":"user","content":[{"type":"text","text":"<command-message>slash body</command-message>"}]}}

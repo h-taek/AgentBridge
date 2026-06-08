@@ -1,0 +1,44 @@
+appId: com.htaek.agentbridge
+productName: AgentBridge
+directories:
+  buildResources: build
+files:
+  - '!**/.vscode/*'
+  - '!src/*'
+  - '!electron.vite.config.{js,ts,mjs,cjs}'
+  - '!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}'
+  - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
+  - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
+  - '!{HANDOFF.md,PROGRESS.md,RULES.md,CLAUDE.md}'
+  - '!docs/**/*'
+  - '!probe/**/*'
+asarUnpack:
+  - resources/**
+  # node-pty native binary는 ASAR 안에서 동작 안 함 — unpack 필수
+  - node_modules/@homebridge/node-pty-prebuilt-multiarch/**
+mac:
+  target:
+    - dmg
+    - zip
+  # entitlements — Electron 노타리 권장 기본 (allow-jit / allow-unsigned-executable-memory /
+  # allow-dyld-environment-variables). hardenedRuntime이 true일 때 적용된다.
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  # hardenedRuntime — 노타리 통과 필수. 인증서 확보 후 true 유지.
+  hardenedRuntime: true
+  # gatekeeperAssess — local 빌드에서 macOS Gatekeeper 검사 비활성. CI / 노타리 흐름과 분리.
+  gatekeeperAssess: false
+  # identity — ad-hoc 서명('-'). 베타 빌드용. 정식 배포(v0.1.0) 직전 Developer ID Application
+  # 인증서 확보 후 식별자로 교체.
+  #   iCloud Drive 작업 디렉토리는 com.apple.provenance attribute로 codesign이 거부 →
+  #   `npm run build:mac:external`로 ~/.agentbridge-build (iCloud 밖) 에서 빌드 필수.
+  identity: '-'
+  # notarize — Apple Developer 인증서 + APPLE_ID/APPLE_APP_SPECIFIC_PASSWORD 환경변수 설정 후 true.
+  notarize: false
+dmg:
+  artifactName: ${name}-${version}.${ext}
+npmRebuild: false
+publish:
+  provider: github
+  owner: h-taek
+  repo: AgentBridge
