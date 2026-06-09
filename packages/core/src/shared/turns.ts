@@ -48,23 +48,25 @@ export type TurnsAssistantDetail = 'full' | 'compact' | 'minimal';
 
 // 사용자 설정의 turnsAssistantDetail 단계별 assistantBody char cap.
 //   - full:    raw에 가깝게 보존. 시스템 안정성 위해 hard cap만 적용.
-//   - compact: 기본값. 약 500자(앞 400 + 뒤 100) 요약 — IR refine에 균형 잡힌 양.
-//   - minimal: 약 200자 — 디스크 가벼움. 디테일 손실.
+//   - compact: 기본값. 약 5,000자(앞 4,000 + 뒤 1,000) — 정상 turn 한 개를 거의 통째로 담는 양.
+//   - minimal: 약 1,000자(앞 800 + 뒤 200) — 디스크 가벼움. 요지 위주, 디테일 일부 손실.
 export const TURNS_ASSISTANT_DETAIL_CAP: Record<
   TurnsAssistantDetail,
   { chars: number; headChars: number; tailChars: number }
 > = {
   full: { chars: 50_000, headChars: 49_000, tailChars: 1_000 },
-  compact: { chars: 500, headChars: 400, tailChars: 100 },
-  minimal: { chars: 200, headChars: 150, tailChars: 50 },
+  compact: { chars: 5_000, headChars: 4_000, tailChars: 1_000 },
+  minimal: { chars: 1_000, headChars: 800, tailChars: 200 },
 };
 
 // Compaction trigger:
-//   uncompacted count >= 6  OR  sum(userBytes + assistantBodyBytes) >= 12K
+//   uncompacted count >= 6  OR  sum(userBytes + assistantBodyBytes) >= 192K
 // 의도: 최근 `keepRecent`개 raw 보존, oldest 청크를 1개의 IR로 흡수.
+// bytesThreshold는 평상시엔 거의 안 켜지는 안전망 — keepRecent개 turn 합보다 충분히 커야
+//   매 턴 압축을 피한다(가장 무거운 full 모드 기준으로도 여유). 카운트 6이 평소 배치 주기를 담당.
 export const COMPACTION_TRIGGER = {
   countThreshold: 6,
-  bytesThreshold: 12 * 1024,
+  bytesThreshold: 192 * 1024,
   keepRecent: 3,
 } as const;
 
