@@ -114,16 +114,10 @@ export function createHookInstaller(opts: HookInstallerOptions): HookInstaller {
     await fsp.mkdir(settingsDir, { recursive: true });
     const settingsFile = join(settingsDir, 'claude-settings.json');
 
+    // SessionStart는 등록하지 않는다 — 세션 첫 턴에서 UserPromptSubmit와 같은 IR을 이중 주입하기 때문.
+    // 첫 프롬프트의 UserPromptSubmit가 어차피 IR을 넣고, 이후 매 턴 최신 IR로 갱신한다.
     const config: ClaudeHookConfig = {
       hooks: {
-        SessionStart: [
-          {
-            matcher: '*',
-            hooks: [
-              { type: 'command', command: buildHookCommand('claude', 'SessionStart', workspaceId) },
-            ],
-          },
-        ],
         UserPromptSubmit: [
           {
             hooks: [
@@ -162,6 +156,17 @@ export function createHookInstaller(opts: HookInstallerOptions): HookInstaller {
     const hooksMap = isObject(existing.hooks)
       ? { ...(existing.hooks as Record<string, CodexHookEntry[]>) }
       : ({} as Record<string, CodexHookEntry[]>);
+
+    // 우리가 더 이상 관리하지 않는 이벤트에 남은 managed 항목을 청소한다 (예: 폐기된 SessionStart).
+    // 안 하면 과거 버전이 심은 managed 훅이 hooks.json에 영영 남아 이중 주입이 계속된다.
+    // 불변식: managed codex 훅 == 정확히 ourEntries.
+    for (const eventName of Object.keys(hooksMap)) {
+      if (eventName in ourEntries) continue;
+      const arr = Array.isArray(hooksMap[eventName]) ? hooksMap[eventName] : [];
+      const userOnly = arr.filter((e) => !(isObject(e) && e._agentbridge_managed === true));
+      if (userOnly.length > 0) hooksMap[eventName] = userOnly;
+      else delete hooksMap[eventName];
+    }
 
     for (const [eventName, ourEntry] of Object.entries(ourEntries)) {
       const current = Array.isArray(hooksMap[eventName]) ? hooksMap[eventName] : [];
@@ -244,11 +249,9 @@ export function createHookInstaller(opts: HookInstallerOptions): HookInstaller {
       }
     }
 
+    // SessionStart는 등록하지 않는다 (claude와 동일한 이유 — 첫 턴 IR 이중 주입 제거).
+    // mergeCodexHooks가 과거 버전이 심은 managed SessionStart 항목을 청소한다.
     const merged = mergeCodexHooks(existing, {
-      SessionStart: {
-        matcher: '^(start|startup|clear|resume)$',
-        hooks: [{ type: 'command', command: buildHookCommand('codex', 'SessionStart', workspaceId) }],
-      },
       UserPromptSubmit: {
         hooks: [
           { type: 'command', command: buildHookCommand('codex', 'UserPromptSubmit', workspaceId) },

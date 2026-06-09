@@ -36,8 +36,8 @@ describe('adapter integration (M16 await chain regression guard)', () => {
     const settingsFile = join(storagePath, 'workspaces', wid, 'settings', 'claude-settings.json');
     assert.ok(existsSync(settingsFile), `expected ${settingsFile} to exist after buildSpawnOptions`);
     const json = JSON.parse(await fs.readFile(settingsFile, 'utf8'));
-    assert.ok(json.hooks?.SessionStart);
     assert.ok(json.hooks?.UserPromptSubmit);
+    assert.equal(json.hooks?.SessionStart, undefined);
     // SpawnOptions shape
     assert.equal(opts.model, 'claude');
     assert.equal(opts.workspaceId, wid);
@@ -53,8 +53,8 @@ describe('adapter integration (M16 await chain regression guard)', () => {
     assert.ok(existsSync(tomlPath), `expected ${tomlPath}`);
 
     const hooks = JSON.parse(await fs.readFile(hooksPath, 'utf8'));
-    assert.ok(hooks.hooks?.SessionStart);
     assert.ok(hooks.hooks?.UserPromptSubmit);
+    assert.equal(hooks.hooks?.SessionStart, undefined);
 
     const toml = await fs.readFile(tomlPath, 'utf8');
     assert.match(toml, /# AgentBridge BEGIN[\s\S]*\[features\][\s\S]*hooks = true[\s\S]*# AgentBridge END/);
@@ -91,13 +91,13 @@ describe('adapter integration (M16 await chain regression guard)', () => {
     await claudeAdapter.buildSpawnOptions(workspaceCwd, wid);
     const settingsFile = join(storagePath, 'workspaces', wid, 'settings', 'claude-settings.json');
     const json = JSON.parse(await fs.readFile(settingsFile, 'utf8'));
-    const cmd: string = json.hooks.SessionStart[0].hooks[0].command;
+    const cmd: string = json.hooks.UserPromptSubmit[0].hooks[0].command;
     // Command should be parseable by /bin/sh -c
     assert.match(cmd, /^node /);
     assert.match(cmd, /agentbridge-memory\.js/);
     assert.match(cmd, /--workspace /);
     assert.match(cmd, /--agent claude/);
-    assert.match(cmd, /--event SessionStart/);
+    assert.match(cmd, /--event UserPromptSubmit/);
     // No unescaped single-quote breakage — the quote helper should produce balanced quoting.
     const singleQuotes = (cmd.match(/'/g) ?? []).length;
     assert.equal(singleQuotes % 2, 0, `unbalanced single quotes in: ${cmd}`);
