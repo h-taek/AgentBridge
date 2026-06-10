@@ -53,6 +53,7 @@ export * from './hookInstaller';
 export * from './refineHeadless';
 export * from './refineDispatcher';
 export * from './refineCliArgs';
+export * from './refineHome';
 
 // compaction
 export * from './compactionScheduler';

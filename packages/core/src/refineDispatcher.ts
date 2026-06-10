@@ -8,6 +8,7 @@ import type { EnvProbe } from './envProbe';
 import type { Logger } from './interfaces';
 import { noopLogger } from './interfaces';
 import { buildRefineSpawnRequest } from './refineCliArgs';
+import { ensureRefineHome } from './refineHome';
 import { looksLikeQuotaError } from './quotaTracker';
 import { cleanupAgyArtifactsForCwd, rmIsolatedCwd } from './cliAdapter/agyResume';
 
@@ -114,8 +115,10 @@ async function tryRefine(
   const command = probe.resolvedPath;
   const env = args.envProbe.getShellEnv();
   const log = args.logger ?? noopLogger;
+  // darwin에선 격리 HOME 박스 env를 spawn env에 병합 — non-darwin은 빈 env라 현행 동작 유지.
+  const iso = ensureRefineHome(cli, { binPath: command });
 
-  const req = buildRefineSpawnRequest(cli, args.prompt, args.cwd);
+  const req = buildRefineSpawnRequest(cli, args.prompt, { cwd: args.cwd });
   let assistantText = '';
   // agy의 경우 라인을 줄바꿈으로 연결하는 누적 패턴 유지.
   const accumulate = cli === 'agy'
@@ -127,7 +130,7 @@ async function tryRefine(
       command,
       args: req.args,
       cwd: req.cwd,
-      env,
+      env: { ...env, ...iso.env },
       stdinPayload: req.stdinPayload,
       onLine: (line) => req.onLine(line, accumulate),
       timeoutMs,

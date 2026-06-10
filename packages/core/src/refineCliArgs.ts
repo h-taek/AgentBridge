@@ -88,27 +88,43 @@ export function buildCodexRefineSpawn(prompt: string, cwd?: string): CliRefineSp
 // **잔재 청소**: agy는 spawn마다 9곳(tmpdir, last_conversations.json, conversations/.pb,
 // brain/, implicit/, log/, config/projects/, history/, settings.json trustedWorkspaces)에
 // 흔적을 남김. 호스트가 isolatedCwd를 받아 spawn 종료 시점에 청소해야 함.
-export function buildAgyRefineSpawn(prompt: string): CliRefineSpawnArgs {
+export function buildAgyRefineSpawn(
+  prompt: string,
+  platform: NodeJS.Platform = process.platform,
+): CliRefineSpawnArgs {
+  const onLine: CliRefineSpawnArgs['onLine'] = (line, accumulate) => {
+    // agy print 모드는 plain text — accumulator는 줄바꿈으로 연결.
+    accumulate(line);
+  };
+  const spawnArgs = ['-p', prompt, '--dangerously-skip-permissions'];
+  if (platform === 'darwin') {
+    // darwin은 격리 HOME 박스(ensureRefineHome)가 격리를 담당 — agy는 세션 데이터를
+    // cwd가 아닌 격리 HOME에 기록하므로 per-run 디렉토리·9종 청소가 불필요.
+    // cwd는 공유 os 임시 루트로 두고 isolatedCwd는 미설정(finally 청소 자동 스킵).
+    return { args: spawnArgs, cwd: tmpdir(), onLine };
+  }
   const isolatedCwd = join(tmpdir(), `agentbridge-refine-${Date.now()}-${process.pid}`);
   mkdirSync(isolatedCwd, { recursive: true });
   return {
-    args: ['-p', prompt, '--dangerously-skip-permissions'],
+    args: spawnArgs,
     cwd: isolatedCwd,
     isolatedCwd,
-    onLine: (line, accumulate) => {
-      // agy print 모드는 plain text — accumulator는 줄바꿈으로 연결.
-      accumulate(line);
-    },
+    onLine,
   };
 }
 
-export function buildRefineSpawnRequest(cli: CliKind, prompt: string, cwd?: string): CliRefineSpawnArgs {
+export function buildRefineSpawnRequest(
+  cli: CliKind,
+  prompt: string,
+  opts?: { cwd?: string; platform?: NodeJS.Platform },
+): CliRefineSpawnArgs {
   switch (cli) {
     case 'claude':
-      return buildClaudeRefineSpawn(prompt, cwd);
+      return buildClaudeRefineSpawn(prompt, opts?.cwd);
     case 'codex':
-      return buildCodexRefineSpawn(prompt, cwd);
+      return buildCodexRefineSpawn(prompt, opts?.cwd);
     case 'agy':
-      return buildAgyRefineSpawn(prompt);
+      // platform은 agy의 darwin isolatedCwd 게이트만 좌우 — claude/codex에선 무시됨.
+      return buildAgyRefineSpawn(prompt, opts?.platform);
   }
 }

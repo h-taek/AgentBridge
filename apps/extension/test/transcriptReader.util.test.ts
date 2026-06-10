@@ -5,6 +5,7 @@ import {
   applyDetailCap,
   deterministicTurnId,
   toolArgString,
+  TURNS_ASSISTANT_DETAIL_CAP,
 } from '@agentbridge/core';
 
 describe('transcriptReader/util', () => {
@@ -15,7 +16,8 @@ describe('transcriptReader/util', () => {
   });
 
   it('applyDetailCap compact: 긴 본문을 head+tail로 자른다', () => {
-    const body = 'x'.repeat(1000);
+    // cap(SSOT)을 초과하도록 본문 길이를 cap에서 파생 — 하드코딩 매직넘버 대신.
+    const body = 'x'.repeat(TURNS_ASSISTANT_DETAIL_CAP.compact.chars + 500);
     const out = applyDetailCap(body, 'compact');
     assert.ok(out.length < body.length);
     assert.ok(out.includes('…[truncated]…'));
