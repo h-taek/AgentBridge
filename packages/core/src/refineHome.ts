@@ -1,8 +1,9 @@
 // refine 서브프로세스(agy/codex CLI)를 격리된 HOME 박스에서 실행하기 위한 환경 변수 조립.
 // darwin 전용 — 다른 플랫폼은 현행 동작(실제 HOME) 유지.
 
+import { mkdirSync, symlinkSync, lstatSync } from 'fs';
 import { homedir } from 'os';
-import { join } from 'path';
+import { join, dirname } from 'path';
 import type { CliKind } from './shared/cli';
 
 export type EnsureRefineHomeOptions = {
@@ -28,5 +29,19 @@ export function ensureRefineHome(cli: CliKind, opts: EnsureRefineHomeOptions = {
   return _exhaustive;
 }
 
-// 임시 스텁 — Task 2-4에서 실제 부트스트랩 구현 예정.
-function bootstrapIfNeeded(_cli: CliKind, _box: string, _realHome: string, _binPath?: string): void {}
+// linkPath가 이미 존재(dangling 심링크 포함)하면 스킵 — 재실행 시 EEXIST 방지.
+function linkOnce(target: string, linkPath: string): void {
+  try { lstatSync(linkPath); return; }                       // already exists (incl. dangling) → reuse
+  catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; }  // ENOENT → create below
+  mkdirSync(dirname(linkPath), { recursive: true });
+  symlinkSync(target, linkPath);
+}
+
+function bootstrapIfNeeded(cli: CliKind, box: string, realHome: string, _binPath?: string): void {
+  mkdirSync(box, { recursive: true });
+  if (cli === 'agy') {
+    linkOnce(join(realHome, 'Library/Keychains'), join(box, 'Library/Keychains'));
+    linkOnce(join(realHome, 'Library/Caches'), join(box, 'Library/Caches'));
+    linkOnce(join(realHome, '.gemini/antigravity-cli/bin'), join(box, '.gemini/antigravity-cli/bin'));
+  }
+}
