@@ -43,6 +43,12 @@ function linkOnce(target: string, linkPath: string): void {
   symlinkSync(target, linkPath);
 }
 
+// target이 실제 존재할 때만 심링크 생성 — dangling 링크로 codex를 혼란시키지 않음.
+function linkIfTargetExists(target: string, linkPath: string): void {
+  try { lstatSync(target); } catch { return; }  // real target absent → skip (codex will clone locally)
+  linkOnce(target, linkPath);
+}
+
 // plugins 항목을 일부러 넣지 않는다 — config에 [plugins."..."]가 있으면 codex가
 // 첫 부팅 때 ~69MB 플러그인 마켓플레이스를 .tmp에 git clone한다. refine는 플러그인이
 // 불필요하므로 최소 config로 박스를 ~6MB로 유지. (real ~/.codex/config.toml 복사 금지)
@@ -64,6 +70,8 @@ function bootstrapIfNeeded(cli: CliKind, box: string, realHome: string, binPath?
     linkOnce(join(realHome, '.codex/auth.json'), join(box, 'auth.json'));
     const cfg = join(box, 'config.toml');
     if (!existsSync(cfg)) writeFileSync(cfg, CODEX_MIN_CONFIG);
+    linkIfTargetExists(join(realHome, '.codex/.tmp/plugins'), join(box, '.tmp/plugins'));
+    linkIfTargetExists(join(realHome, '.codex/.tmp/plugins.sha'), join(box, '.tmp/plugins.sha'));
   }
   if (stale) writeFileSync(verFile, token);
 }

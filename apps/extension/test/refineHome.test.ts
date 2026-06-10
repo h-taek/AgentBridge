@@ -56,6 +56,33 @@ describe('refineHome', () => {
     }
   });
 
+  it('codex: 실 .tmp/plugins 있으면 마켓플레이스 심링크로 공유(재clone 방지)', async () => {
+    const rootDir = await fs.mkdtemp(join(tmpdir(), 'abtest-'));
+    const realHome = await fs.mkdtemp(join(tmpdir(), 'abreal-'));
+    try {
+      await fs.mkdir(join(realHome, '.codex/.tmp/plugins'), { recursive: true });
+      await fs.writeFile(join(realHome, '.codex/.tmp/plugins.sha'), 'abc');
+      ensureRefineHome('codex', { platform: 'darwin', rootDir, realHome });
+      const box = join(rootDir, 'codex');
+      assert.equal(await fs.readlink(join(box, '.tmp/plugins')), join(realHome, '.codex/.tmp/plugins'));
+      assert.equal(await fs.readlink(join(box, '.tmp/plugins.sha')), join(realHome, '.codex/.tmp/plugins.sha'));
+    } finally {
+      await fs.rm(rootDir, { recursive: true, force: true });
+      await fs.rm(realHome, { recursive: true, force: true });
+    }
+  });
+
+  it('codex: 실 .tmp/plugins 없으면 심링크 안 만듦(dangling 방지)', async () => {
+    const rootDir = await fs.mkdtemp(join(tmpdir(), 'abtest-'));
+    try {
+      ensureRefineHome('codex', { platform: 'darwin', rootDir, realHome: '/fake/home' });
+      const box = join(rootDir, 'codex');
+      await assert.rejects(fs.lstat(join(box, '.tmp/plugins')), '실 target 없으면 심링크 미생성');
+    } finally {
+      await fs.rm(rootDir, { recursive: true, force: true });
+    }
+  });
+
   it('버전 토큰 불일치 시 박스 폐기 후 재부팅', async () => {
     const rootDir = await fs.mkdtemp(join(tmpdir(), 'abtest-'));
     try {
