@@ -8,8 +8,9 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ### Changed
 
-- Apple Silicon only — the extension is now published for Apple Silicon (arm64) Macs only; Intel Macs are no longer supported.
+- Apple Silicon only — the extension is published for Apple Silicon (arm64) Macs only.
 - Less aggressive memory compaction — the size threshold for compaction was too low, so conversation turns were being summarized (compacted) almost every turn. The threshold and the per-turn detail caps were raised so that a normal turn is now preserved nearly in full, and your conversation history keeps much more detail before any compaction kicks in.
+- Hardened IR isolation — IR (memory) refinement for agy and codex now runs only in an isolated environment. If that environment can't be prepared, the refinement is skipped instead of falling back to a non-isolated run, so it never leaves stray files in your real CLI config directories.
 
 ### Fixed
 

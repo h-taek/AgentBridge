@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="../../LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-green.svg"></a>
-  <img alt="Desktop" src="https://img.shields.io/badge/desktop-macOS-lightgrey.svg">
+  <img alt="Desktop" src="https://img.shields.io/badge/desktop-Apple Silicon-lightgrey.svg">
 </p>
 
 <p align="center"><a href="README.ko.md">한국어</a></p>
