@@ -7,13 +7,13 @@
 
 # AgentBridge
 
-> A tool that automatically carries your working context across multiple AI coding agents (Claude · Codex · Antigravity). Available as a macOS Desktop app and an IDE extension.
+> A tool that automatically carries your working context across multiple AI coding agents (Claude · Codex · Antigravity). Available on macOS as a Desktop app and an IDE extension.
 
 <p align="center">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-green.svg"></a>
   <img alt="Version" src="https://img.shields.io/badge/version-0.2.x-orange.svg">
   <img alt="Desktop" src="https://img.shields.io/badge/desktop-macOS-lightgrey.svg">
-  <img alt="Extension" src="https://img.shields.io/badge/extension-IDE-007ACC.svg">
+  <img alt="Extension" src="https://img.shields.io/badge/extension-macOS-007ACC.svg">
 </p>
 
 <p align="center"><a href="README.ko.md">한국어</a></p>
@@ -65,7 +65,7 @@ All three CLIs must be on your PATH. It works even if only some are installed, b
 ## Available as
 
 - macOS Desktop app — [install & usage](apps/desktop/README.md)
-- IDE extension — Works in VS Code · Cursor · Antigravity IDE and other VS Code-family IDEs. [install & usage](apps/extension/README.md)
+- macOS IDE extension — Works in VS Code · Cursor · Antigravity IDE and other VS Code-family IDEs. [install & usage](apps/extension/README.md)
 
 ## Privacy
 
