@@ -17,9 +17,12 @@ asarUnpack:
   # node-pty native binary는 ASAR 안에서 동작 안 함 — unpack 필수
   - node_modules/@homebridge/node-pty-prebuilt-multiarch/**
 mac:
+  # Apple Silicon(arm64) 전용 — Intel(x64) 미지원.
   target:
-    - dmg
-    - zip
+    - target: dmg
+      arch: arm64
+    - target: zip
+      arch: arm64
   # entitlements — Electron 노타리 권장 기본 (allow-jit / allow-unsigned-executable-memory /
   # allow-dyld-environment-variables). hardenedRuntime이 true일 때 적용된다.
   entitlements: build/entitlements.mac.plist

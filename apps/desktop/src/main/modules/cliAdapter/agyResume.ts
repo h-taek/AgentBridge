@@ -23,114 +23,8 @@ function getConversationsDir(): string {
   return path.join(AGY_BASE_DIR, 'conversations')
 }
 
-// implicit/ — agy가 last_conversations.json 매핑 없이도 spawn 시점에 자동으로 만드는
-// 익명 conversation 파일들. 메시지 한 번도 안 보낸 probe 스폰도 여기 .pb 1개씩 떨궈서
-// snapshot diff로 제거해야 한다 (라이브 검증 2026-05-21).
-function getImplicitDir(): string {
-  return path.join(AGY_BASE_DIR, 'implicit')
-}
-
-function getLogDir(): string {
-  return path.join(AGY_BASE_DIR, 'log')
-}
-
-function getLastConversationsCachePath(): string {
-  return path.join(AGY_BASE_DIR, 'cache', 'last_conversations.json')
-}
-
 function getConversationFilePath(uuid: string): string {
   return path.join(getConversationsDir(), `${uuid}.pb`)
-}
-
-// 스냅샷 — implicit/ 안 .pb 파일 절대경로 set. probe 시작 전 호출 후, probe 종료 시
-// deleteAgyImplicitDelta(before)로 신규 항목 일괄 unlink.
-export async function snapshotAgyImplicit(): Promise<Set<string>> {
-  const out = new Set<string>()
-  try {
-    const entries = await fs.readdir(getImplicitDir())
-    for (const e of entries) {
-      if (e.endsWith('.pb')) out.add(path.join(getImplicitDir(), e))
-    }
-  } catch {
-    /* dir 없으면 빈 set */
-  }
-  return out
-}
-
-// 스냅샷 이후 새로 생긴 implicit/ .pb를 모두 삭제. 같이 떨어진 cli-*.log도 진단용이라
-// 같은 시간대 진행 중인 사용자 세션과 겹치지 않게 *스냅샷에 없던 파일만* 삭제 정책.
-export async function deleteAgyImplicitDelta(before: Set<string>): Promise<void> {
-  let entries: string[] = []
-  try {
-    entries = await fs.readdir(getImplicitDir())
-  } catch {
-    return
-  }
-  for (const e of entries) {
-    if (!e.endsWith('.pb')) continue
-    const abs = path.join(getImplicitDir(), e)
-    if (before.has(abs)) continue
-    try {
-      await fs.unlink(abs)
-      log.info('agy implicit .pb 삭제 (probe delta)', { file: abs })
-    } catch (err) {
-      const code = (err as NodeJS.ErrnoException).code
-      if (code !== 'ENOENT') {
-        log.warn('agy implicit .pb 삭제 실패', { file: abs, err: String(err) })
-      }
-    }
-  }
-}
-
-// 스냅샷 시점 이후 새로 생긴 cli-*.log 파일 삭제. probe가 새 spawn마다 1개씩 떨궈
-// 누적되므로 cleanup 시 정리.
-export async function snapshotAgyLogs(): Promise<Set<string>> {
-  const out = new Set<string>()
-  try {
-    const entries = await fs.readdir(getLogDir())
-    for (const e of entries) {
-      if (e.startsWith('cli-') && e.endsWith('.log')) out.add(path.join(getLogDir(), e))
-    }
-  } catch {
-    /* noop */
-  }
-  return out
-}
-
-export async function deleteAgyLogDelta(before: Set<string>): Promise<void> {
-  let entries: string[] = []
-  try {
-    entries = await fs.readdir(getLogDir())
-  } catch {
-    return
-  }
-  for (const e of entries) {
-    if (!e.startsWith('cli-') || !e.endsWith('.log')) continue
-    const abs = path.join(getLogDir(), e)
-    if (before.has(abs)) continue
-    try {
-      await fs.unlink(abs)
-      log.info('agy cli log 삭제 (probe delta)', { file: abs })
-    } catch (err) {
-      const code = (err as NodeJS.ErrnoException).code
-      if (code !== 'ENOENT') {
-        log.warn('agy cli log 삭제 실패', { file: abs, err: String(err) })
-      }
-    }
-  }
-}
-
-// cwd → UUID 매핑 캐시 읽기. 형태: { "<cwd-absolute-path>": "<UUID>" }
-export async function readLastConversationForCwd(cwd: string): Promise<string | null> {
-  try {
-    const raw = await fs.readFile(getLastConversationsCachePath(), 'utf8')
-    const parsed = JSON.parse(raw) as Record<string, string>
-    const uuid = parsed[cwd]
-    if (typeof uuid === 'string' && uuid.length > 0) return uuid
-    return null
-  } catch {
-    return null
-  }
 }
 
 // 디스크에 agy native conversation 파일(.pb)이 존재하는지 + 비어있지 않은지.
@@ -145,9 +39,8 @@ export async function hasAgyConversationFile(modelSessionId: string): Promise<bo
   }
 }
 
-// 9종 잔재 청소(cleanupAgyArtifactsForCwd / rmIsolatedCwd 등)는 2026-06-01 코어
-// (@agentbridge/core cliAdapter/agyResume)로 이동 — 양 호스트 공용. 데스크탑에는 PTY/probe 전용
-// snapshot delta 함수와 resume 변종만 남김.
+// 잔재 청소·probe snapshot 함수는 모두 제거됨 — agy/codex probe는 격리 박스에서만 실행하므로
+// native 청소가 불필요하다(비격리 실행·청소는 claude 전용). 데스크탑에는 resume 변종만 남김.
 
 export type ResumeResolveOptions = {
   // 우리가 캡처해둔 modelSessionId(full UUID). 없으면 fallback으로 `--continue` 사용.
@@ -176,4 +69,3 @@ export async function resolveResumeArgs(opts: ResumeResolveOptions): Promise<str
 // FS 스캔 + spawn 전 스냅샷)로 일원화 (V-17). 과거 데스크탑 전용
 // watchForNewConversationUuidViaCache(last_conversations.json cwd-키 폴링)는 macOS
 // /var↔/private/var 불일치로 캡처가 빗나가는 문제가 있어 제거.
-// (readLastConversationForCwd는 cliQuotaTracker probe 경로에서 계속 사용하므로 유지.)

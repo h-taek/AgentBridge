@@ -23,12 +23,39 @@ describe('hookInstaller', () => {
     await fs.rm(workspaceCwd, { recursive: true, force: true });
   });
 
-  it('installClaudeHooks writes a settings json with SessionStart + UserPromptSubmit', async () => {
+  it('installClaudeHooks writes a settings json with UserPromptSubmit only (no SessionStart)', async () => {
     const settingsFile = await installClaudeHooks(wid);
     const json = JSON.parse(await fs.readFile(settingsFile, 'utf8'));
     assert.ok(json.hooks);
-    assert.ok(Array.isArray(json.hooks.SessionStart));
     assert.ok(Array.isArray(json.hooks.UserPromptSubmit));
+    // SessionStart는 첫 턴 IR 이중 주입을 피하려고 등록하지 않는다.
+    assert.equal(json.hooks.SessionStart, undefined);
+  });
+
+  it('installCodexHooks installs UserPromptSubmit and removes a stale managed SessionStart entry', async () => {
+    const codexDir = join(workspaceCwd, '.codex');
+    await fs.mkdir(codexDir, { recursive: true });
+    // 과거 버전이 남긴 managed SessionStart + 사용자 자신의 SessionStart 훅을 함께 둔다.
+    await fs.writeFile(
+      join(codexDir, 'hooks.json'),
+      JSON.stringify({
+        hooks: {
+          SessionStart: [
+            { hooks: [{ type: 'command', command: 'user-own-hook' }] },
+            { hooks: [{ type: 'command', command: 'old-agentbridge' }], _agentbridge_managed: true },
+          ],
+        },
+      }),
+      'utf8',
+    );
+
+    const { hooksJsonPath } = await installCodexHooks(workspaceCwd, wid);
+    const json = JSON.parse(await fs.readFile(hooksJsonPath, 'utf8'));
+    // managed UserPromptSubmit가 설치된다.
+    assert.ok(Array.isArray(json.hooks.UserPromptSubmit));
+    // 사용자 SessionStart 훅은 보존되고, managed SessionStart 고아는 제거된다.
+    assert.equal(json.hooks.SessionStart.length, 1);
+    assert.equal(json.hooks.SessionStart[0].hooks[0].command, 'user-own-hook');
   });
 
   it('installCodexHooks merges a marker block into config.toml while preserving user content', async () => {

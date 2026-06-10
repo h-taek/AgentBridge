@@ -75,8 +75,8 @@ const TURNS_DETAIL_LABEL: Record<TurnsAssistantDetail, string> = {
 }
 const TURNS_DETAIL_DESC: Record<TurnsAssistantDetail, string> = {
   full: '응답 원본 그대로 저장 (최대 50KB).',
-  compact: '응답의 앞 400자 + 뒤 100자만 저장 (기본값).',
-  minimal: '응답의 앞 150자 + 뒤 50자만 저장.'
+  compact: '응답의 앞 4,000자 + 뒤 1,000자만 저장 (기본값).',
+  minimal: '응답의 앞 800자 + 뒤 200자만 저장.'
 }
 
 type SubPage = 'main' | 'cli' | 'shortcuts' | 'help' | 'license'

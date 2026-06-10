@@ -2,7 +2,7 @@
   "name": "agentbridge",
   "displayName": "AgentBridge",
   "description": "Bridge multiple AI CLI agents with shared context in your IDE",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "publisher": "h-taek",
   "license": "MIT",
   "repository": {
@@ -217,8 +217,8 @@
           "default": "compact",
           "enumDescriptions": [
             "Up to 50KB of assistant response",
-            "~500 characters (head + tail)",
-            "~200 characters (head only)"
+            "~5,000 characters (head 4,000 + tail 1,000)",
+            "~1,000 characters (head 800 + tail 200)"
           ],
           "description": "How much assistant response to keep in turns.jsonl"
         },
@@ -239,7 +239,7 @@
     "typecheck": "tsc -p . --noEmit",
     "test": "mocha",
     "vscode:prepublish": "npm run typecheck && node ../../scripts/sync-helper.mjs && node esbuild.mjs --production",
-    "package": "npx vsce package --no-dependencies",
+    "package": "npx vsce package --no-dependencies --target darwin-arm64",
     "lint": "eslint src",
     "lint:fix": "eslint src --fix",
     "knip": "knip",

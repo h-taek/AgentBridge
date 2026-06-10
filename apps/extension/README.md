@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="https://github.com/h-taek/AgentBridge/blob/main/LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-green.svg"></a>
-  <img alt="Extension" src="https://img.shields.io/badge/extension-IDE-007ACC.svg">
+  <img alt="Extension" src="https://img.shields.io/badge/extension-Apple%20Silicon-007ACC.svg">
 </p>
 
 <p align="center"><a href="README.ko.md">한국어</a></p>

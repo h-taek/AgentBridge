@@ -2,8 +2,6 @@
 // 단일 위치 SSOT. 응답 파싱(onLine 콜백)도 함께 정의해 호스트 간 차이 없게 한다.
 
 import { tmpdir } from 'os';
-import { join } from 'path';
-import { mkdirSync } from 'fs';
 import type { CliKind } from './shared/cli';
 
 export const REFINE_MODEL_HINT: Record<CliKind, string | null> = {
@@ -19,11 +17,8 @@ export type CliRefineSpawnArgs = {
   args: string[];
   // codex처럼 stdin으로 prompt 전달하는 경우. null이면 stdin close.
   stdinPayload?: string | null;
-  // claude/agy는 spawn cwd 전달 가능. agy는 격리 cwd 사용(아래 isolatedCwd 참조).
+  // claude/agy는 spawn cwd 전달 가능.
   cwd?: string;
-  // agy 등 격리 tmpdir에서 실행하는 CLI는 spawn 후 호스트가 청소할 수 있도록 cwd를 노출.
-  // 호스트는 spawn 종료 시점에 cwd + 매핑된 UUID 기반으로 9종 잔재 정리.
-  isolatedCwd?: string;
   // 라인별 응답 파서 — accumulator에 assistantText를 누적.
   onLine: (line: string, accumulate: AssistantTextAccumulator) => void;
 };
@@ -84,30 +79,27 @@ export function buildCodexRefineSpawn(prompt: string, cwd?: string): CliRefineSp
   };
 }
 
-// agy는 다른 대화에 join되지 않도록 격리 cwd(임시 디렉토리)에서 실행.
-// **잔재 청소**: agy는 spawn마다 9곳(tmpdir, last_conversations.json, conversations/.pb,
-// brain/, implicit/, log/, config/projects/, history/, settings.json trustedWorkspaces)에
-// 흔적을 남김. 호스트가 isolatedCwd를 받아 spawn 종료 시점에 청소해야 함.
+// agy는 다른 대화에 join되지 않도록 공유 임시 루트(tmpdir)에서 실행. 격리 HOME 박스
+// (ensureRefineHome)가 세션 데이터를 cwd가 아닌 박스에 기록하므로 per-run 디렉토리·청소가 불필요.
 export function buildAgyRefineSpawn(prompt: string): CliRefineSpawnArgs {
-  const isolatedCwd = join(tmpdir(), `agentbridge-refine-${Date.now()}-${process.pid}`);
-  mkdirSync(isolatedCwd, { recursive: true });
-  return {
-    args: ['-p', prompt, '--dangerously-skip-permissions'],
-    cwd: isolatedCwd,
-    isolatedCwd,
-    onLine: (line, accumulate) => {
-      // agy print 모드는 plain text — accumulator는 줄바꿈으로 연결.
-      accumulate(line);
-    },
+  const onLine: CliRefineSpawnArgs['onLine'] = (line, accumulate) => {
+    // agy print 모드는 plain text — accumulator는 줄바꿈으로 연결.
+    accumulate(line);
   };
+  const spawnArgs = ['-p', prompt, '--dangerously-skip-permissions'];
+  return { args: spawnArgs, cwd: tmpdir(), onLine };
 }
 
-export function buildRefineSpawnRequest(cli: CliKind, prompt: string, cwd?: string): CliRefineSpawnArgs {
+export function buildRefineSpawnRequest(
+  cli: CliKind,
+  prompt: string,
+  opts?: { cwd?: string },
+): CliRefineSpawnArgs {
   switch (cli) {
     case 'claude':
-      return buildClaudeRefineSpawn(prompt, cwd);
+      return buildClaudeRefineSpawn(prompt, opts?.cwd);
     case 'codex':
-      return buildCodexRefineSpawn(prompt, cwd);
+      return buildCodexRefineSpawn(prompt, opts?.cwd);
     case 'agy':
       return buildAgyRefineSpawn(prompt);
   }
