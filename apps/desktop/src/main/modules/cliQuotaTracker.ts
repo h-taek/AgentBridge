@@ -6,7 +6,6 @@ import * as path from 'path'
 import log from 'electron-log/main'
 import { IpcChannel, type CliKind } from '@shared/ipc'
 import {
-  cleanupAgyArtifactsForCwd,
   createQuotaTracker,
   ensureRefineHome,
   parseQuotaFile,
@@ -19,14 +18,6 @@ import {
   type QuotaTracker
 } from '@agentbridge/core'
 import { broadcastToAll } from './windowManager'
-import {
-  deleteAgyImplicitDelta,
-  deleteAgyLogDelta,
-  readLastConversationForCwd,
-  snapshotAgyImplicit,
-  snapshotAgyLogs
-} from './cliAdapter/agyResume'
-import { captureNewThreadId, snapshotCodexSessions } from './cliAdapter/codexSessionWatcher'
 
 // CliQuotaTracker — Phase 2 (2026-05-21 재설계).
 //
@@ -39,11 +30,11 @@ import { captureNewThreadId, snapshotCodexSessions } from './cliAdapter/codexSes
 //   codex:  `/status`  응답에 "5h limit: ... N% left" (N = 남은 %)
 //   claude: `/usage`   응답에 "Current session ... N% used" (N = 사용된 %)
 //
-// 정리 흐름 (per CLI):
-//   agy:    spawn 직후 cwd → ~/.gemini/antigravity-cli/cache/last_conversations.json 매핑 polling
-//           → 코어 cleanupAgyArtifactsForCwd가 UUID 기반 9종 일괄 정리
-//   codex:  spawn 직전 ~/.codex/sessions 스냅샷 → captureNewThreadId → 파일명 매칭 unlink
-//   claude: 사전 발급한 UUID로 `--session-id <uuid>` spawn → ~/.claude/projects/*/${uuid}.jsonl 삭제
+// 정리 흐름:
+//   agy/codex: 격리 박스에서만 실행 — session 파일이 박스 안에 떨어지므로 native 청소 불필요.
+//              격리 부트스트랩 실패 시 이번 사이클을 스킵(비격리 폴백 없음).
+//   claude:    격리 미지원 → 비격리 실행. 사전 발급 UUID로 `--session-id <uuid>` spawn 후
+//              ~/.claude/projects/*/${uuid}.jsonl 삭제 (유일한 native 청소 경로).
 //
 // 영속 위치: `~/Library/Application Support/AgentBridge/cli_quota.json` (이전 agy_quota.json /
 // gemini_quota.json은 첫 read 시 자동 migration).
@@ -243,6 +234,8 @@ type InputStep = {
 }
 
 // CLI별 probe 사양 (spawn args / 입력 시퀀스 / cleanup).
+// 비격리 실행(claude)만 native 세션 파일을 남기므로 capture/cleanup은 선택 필드 — agy/codex는
+// 격리 박스에서만 실행해 박스가 청소를 책임지므로 미지정.
 type ProbeSpec = {
   // spawn args (CLI 실행 파일 제외). 격리 cwd에서 호출됨.
   argsFor(opts: { cwd: string; sessionId: string }): string[]
@@ -250,19 +243,14 @@ type ProbeSpec = {
   steps: InputStep[]
   // 마지막 step 후 응답 누적 대기.
   responseDelayMs: number
-  // spawn 전 사전 작업 (디렉토리 snapshot 등 — agy implicit/, log/ 추적용).
-  // 반환값은 cleanupExtras에 전달.
-  beforeSpawn?(): Promise<Record<string, unknown>>
-  // spawn 완료 후 modelSessionId 캡처 (cleanup용). null이면 캡처 실패 — cleanup은 cwd rm만.
-  captureModelSessionId(opts: {
+  // (비격리 전용) spawn 완료 후 modelSessionId 캡처. null이면 캡처 실패 — cleanup은 cwd rm만.
+  captureModelSessionId?(opts: {
     cwd: string
     preSpawnSessionId: string
     signal: AbortSignal
   }): Promise<string | null>
-  // native 세션 파일 삭제 (modelSessionId 있으면).
-  cleanupNativeSession(modelSessionId: string | null): Promise<void>
-  // beforeSpawn 결과를 받아 추가 cleanup. probeCwd도 같이 전달 — agy 9종 잔재 정리에 사용.
-  cleanupExtras?(ctx: Record<string, unknown>, probeCwd: string): Promise<void>
+  // (비격리 전용) native 세션 파일 삭제 (modelSessionId 있으면).
+  cleanupNativeSession?(modelSessionId: string | null): Promise<void>
 }
 
 function makeSpec(cli: CliKind): ProbeSpec {
@@ -274,6 +262,7 @@ function makeSpec(cli: CliKind): ProbeSpec {
       //   3) ~2s 대기 → /usage 텍스트 입력
       //   4) 200ms 대기 → Enter 송신 (텍스트 등록 시간 확보)
       //   5) 5s 응답 대기
+      // 격리 박스(HOME override)에서만 실행 — session 파일이 박스 안에 떨어져 native 청소 불필요.
       return {
         argsFor: (): string[] => ['--dangerously-skip-permissions'],
         steps: [
@@ -281,28 +270,7 @@ function makeSpec(cli: CliKind): ProbeSpec {
           { delayBeforeMs: 3_000, write: '/usage', label: 'slash text' },
           { delayBeforeMs: 250, write: '\r', label: 'slash submit' }
         ],
-        responseDelayMs: 6_000,
-        // implicit/<UUID>.pb + log/cli-*.log는 모든 agy spawn마다 새로 생성됨. snapshot diff로
-        // probe 동안 새로 생긴 파일만 cleanup (사용자 다른 agy 세션에 영향 X).
-        beforeSpawn: async () => ({
-          implicitBefore: await snapshotAgyImplicit(),
-          logsBefore: await snapshotAgyLogs()
-        }),
-        captureModelSessionId: async ({ cwd }) => readLastConversationForCwd(cwd),
-        cleanupNativeSession: async () => {
-          // 9종 통합 청소가 cleanupExtras에서 conversation 파일까지 처리하므로 여기서는 no-op.
-        },
-        cleanupExtras: async (ctx, probeCwd) => {
-          // (1)(2)(3)(4)(5)(7)(8)(9) — tmpdir rm은 cleanup 마지막 단계에서 별도 호출.
-          await cleanupAgyArtifactsForCwd(probeCwd, coreLogger)
-          // (6) log delta — snapshot 기반 (probe는 spawn 전 snapshot 가능).
-          const logsBefore = ctx.logsBefore as Set<string> | undefined
-          if (logsBefore) await deleteAgyLogDelta(logsBefore)
-          // implicit delta는 보존 — UUID 기반이 cleanupAgyArtifactsForCwd에서 처리됨.
-          // 단 cache에 매핑이 없는 경우(예: probe가 짧아 cache write 전 종료) 대비:
-          const implicitBefore = ctx.implicitBefore as Set<string> | undefined
-          if (implicitBefore) await deleteAgyImplicitDelta(implicitBefore)
-        }
+        responseDelayMs: 6_000
       }
     case 'codex': {
       // codex 부팅 흐름:
@@ -311,7 +279,7 @@ function makeSpec(cli: CliKind): ProbeSpec {
       //   3) ~7s 대기 (MCP server 부팅) → /status 텍스트 입력
       //   4) 200ms 대기 → Enter 송신
       //   5) 5s 응답 대기
-      let snapshotPromise: Promise<{ files: Set<string> }> | null = null
+      // 격리 박스(CODEX_HOME)에서만 실행 — session 파일이 박스 안에 떨어져 native 청소 불필요.
       return {
         argsFor: (): string[] => [],
         steps: [
@@ -319,71 +287,7 @@ function makeSpec(cli: CliKind): ProbeSpec {
           { delayBeforeMs: 8_000, write: '/status', label: 'slash text' },
           { delayBeforeMs: 250, write: '\r', label: 'slash submit' }
         ],
-        responseDelayMs: 6_000,
-        captureModelSessionId: async ({ signal }) => {
-          if (!snapshotPromise) snapshotPromise = snapshotCodexSessions()
-          const snap = await snapshotPromise
-          try {
-            return await captureNewThreadId(snap, { signal, timeoutMs: PROBE_TIMEOUT_MS })
-          } catch (err) {
-            // /status 단독으로는 codex가 native jsonl을 만들지 않아 capture가
-            // cleanup의 abort에 의해 중단되는 것이 정상 경로. info로 강등.
-            log.info('codex probe — thread_id 캡처 종료 (정상: /status는 native 미생성)', {
-              err: String(err)
-            })
-            return null
-          }
-        },
-        cleanupNativeSession: async (threadId) => {
-          if (!threadId) return
-          const root = path.join(os.homedir(), '.codex', 'sessions')
-          const target = `-${threadId.toLowerCase()}.jsonl`
-          let years: string[] = []
-          try {
-            years = await fs.readdir(root)
-          } catch {
-            return
-          }
-          for (const y of years) {
-            const yDir = path.join(root, y)
-            let months: string[] = []
-            try {
-              months = await fs.readdir(yDir)
-            } catch {
-              continue
-            }
-            for (const m of months) {
-              const mDir = path.join(yDir, m)
-              let days: string[] = []
-              try {
-                days = await fs.readdir(mDir)
-              } catch {
-                continue
-              }
-              for (const d of days) {
-                const dDir = path.join(mDir, d)
-                let files: string[] = []
-                try {
-                  files = await fs.readdir(dDir)
-                } catch {
-                  continue
-                }
-                for (const f of files) {
-                  if (!f.toLowerCase().endsWith(target)) continue
-                  try {
-                    await fs.unlink(path.join(dDir, f))
-                    log.info('codex probe — native session 삭제', { file: f })
-                  } catch (err) {
-                    const code = (err as NodeJS.ErrnoException).code
-                    if (code !== 'ENOENT') {
-                      log.warn('codex probe — native session 삭제 실패', { err: String(err) })
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
+        responseDelayMs: 6_000
       }
     }
     case 'claude':
@@ -459,15 +363,21 @@ export async function probeQuotaInBackground(cli: CliKind): Promise<ProbeResult>
       durationMs: Date.now() - startedAt
     }
   }
-  // refine과 동일하게 — darwin agy/codex는 영속 격리 박스에서 probe 실행 (session 파일이
-  // 실제 HOME 대신 박스로 떨어짐). env가 비어있지 않으면(=격리 활성) legacy 9종 per-artifact
-  // 청소를 건너뛴다 — 박스가 격리를 책임짐. claude(deferred)·non-darwin은 빈 env → 현행 유지.
-  let isoEnv: Record<string, string> = {}
+  // agy/codex는 격리 박스에서만 probe 실행 — session 파일이 박스 안에 떨어진다. 격리 부트스트랩이
+  // 실패하면 비격리로 폴백하지 않고 이번 사이클을 스킵(quota stale 유지) → 실 HOME 오염 0.
+  // claude는 격리 미지원이라 빈 env를 받아 비격리로 실행되며, 이게 유일한 native 청소 경로다.
+  let isoEnv: Record<string, string>
   try {
     isoEnv = ensureRefineHome(cli, { binPath: cliPath }).env
   } catch (err) {
-    log.warn(`${cli} probe — 격리 HOME 부트스트랩 실패, 비격리로 폴백`, { err: String(err) })
-    isoEnv = {}
+    log.warn(`${cli} probe — 격리 HOME 부트스트랩 실패, 이번 사이클 스킵`, { err: String(err) })
+    return {
+      ok: false,
+      cli,
+      reason: 'isolation bootstrap failed',
+      snapshot: await getQuotaSnapshot(cli),
+      durationMs: Date.now() - startedAt
+    }
   }
   const isolatedHome = Object.keys(isoEnv).length > 0
 
@@ -487,10 +397,6 @@ export async function probeQuotaInBackground(cli: CliKind): Promise<ProbeResult>
   await fs.mkdir(probeCwd, { recursive: true })
   const preSpawnSessionId = randomUUID()
   const spec = makeSpec(cli)
-  // spec.beforeSpawn (있다면) 실행 — agy의 implicit/, log/ 스냅샷 등.
-  // 격리 박스에서는 결과(스냅샷)가 cleanupExtras에만 쓰이고 그 청소를 건너뛰므로 함께 생략.
-  const beforeCtx: Record<string, unknown> =
-    !isolatedHome && spec.beforeSpawn ? await spec.beforeSpawn() : {}
 
   // codex는 spawn 직전 snapshot이 필요하므로 spec.captureModelSessionId 안에 lazy 진입.
   // claude/agy는 spec.argsFor에 sessionId만 흘려보내면 됨.
@@ -516,15 +422,12 @@ export async function probeQuotaInBackground(cli: CliKind): Promise<ProbeResult>
           /* noop */
         }
       }
-      // 격리 박스 모드(darwin agy/codex)에서는 session 파일이 박스 안에 떨어지고 박스가
-      // rm -rf/재사용으로 격리를 책임지므로 legacy per-artifact 청소를 전부 건너뛴다.
-      // probeCwd rm은 항상 수행.
-      if (!isolatedHome) {
+      // 비격리 실행(claude)만 native 세션 파일을 남긴다 — 그 경로에서만 청소. agy/codex는 격리
+      // 박스가 책임지므로 건너뛴다. probeCwd rm은 항상 수행.
+      if (!isolatedHome && spec.cleanupNativeSession) {
         try {
-          // capturePromise는 captureCtrl.abort 후 즉시 reject되어야 하나, 일부 spec(파일 watch
-          // 폴링 등)이 abort 신호를 늦게 받으면 cleanup이 무한 대기할 수 있다. 2초 race로 가드 —
-          // 캡처 실패해도 native cleanup은 modelSessionId=null로 진행(파일 흔적은 cleanupExtras가
-          // 디렉토리 단위로 정리).
+          // capturePromise는 captureCtrl.abort 후 즉시 reject되어야 하나, abort 신호를 늦게 받으면
+          // cleanup이 무한 대기할 수 있다. 2초 race로 가드 — 캡처 실패해도 modelSessionId=null로 진행.
           const modelSessionId = capturePromise
             ? await Promise.race([
                 capturePromise,
@@ -534,13 +437,6 @@ export async function probeQuotaInBackground(cli: CliKind): Promise<ProbeResult>
           await spec.cleanupNativeSession(modelSessionId)
         } catch (err) {
           log.warn(`${cli} probe — native cleanup 실패`, { err: String(err) })
-        }
-        if (spec.cleanupExtras) {
-          try {
-            await spec.cleanupExtras(beforeCtx, probeCwd)
-          } catch (err) {
-            log.warn(`${cli} probe — cleanupExtras 실패`, { err: String(err) })
-          }
         }
       }
       await fs.rm(probeCwd, { recursive: true, force: true }).catch(() => undefined)
@@ -570,16 +466,16 @@ export async function probeQuotaInBackground(cli: CliKind): Promise<ProbeResult>
 
     log.info(`quota probe — ${cli} background spawn`, { cwd: probeCwd })
     try {
-      // captureModelSessionId는 spawn 직후 즉시 시작 — codex는 internal snapshot 캡처가 필요해
-      // spawn 전에 dispatch (snapshot이 spec 안에서 lazy하게 잡힘).
-      // 격리 박스 모드에서는 capture가 cleanup에만 쓰이고 그 청소를 건너뛰므로 dispatch 생략.
-      capturePromise = isolatedHome
-        ? null
-        : spec.captureModelSessionId({
-            cwd: probeCwd,
-            preSpawnSessionId,
-            signal: captureCtrl.signal
-          })
+      // captureModelSessionId는 비격리(claude) 경로에서만 필요 — native 세션 파일 청소용.
+      // 격리 박스 모드(agy/codex)에서는 청소가 없으므로 dispatch 생략.
+      capturePromise =
+        !isolatedHome && spec.captureModelSessionId
+          ? spec.captureModelSessionId({
+              cwd: probeCwd,
+              preSpawnSessionId,
+              signal: captureCtrl.signal
+            })
+          : null
 
       const { sessionId } = depsCache!.startPty(
         {

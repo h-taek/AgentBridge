@@ -10,7 +10,6 @@ import { noopLogger } from './interfaces';
 import { buildRefineSpawnRequest } from './refineCliArgs';
 import { ensureRefineHome } from './refineHome';
 import { looksLikeQuotaError } from './quotaTracker';
-import { cleanupAgyArtifactsForCwd, rmIsolatedCwd } from './cliAdapter/agyResume';
 
 export type RefineModelChoice = {
   spawnedModel: CliKind;
@@ -75,7 +74,6 @@ export function resolveRefineDecisionFromConfig(
 
 // 호스트가 각 CLI 시도 결과를 관찰해 부가 효과(예: quota 추적, probe 트리거)를
 // 실행할 수 있게 콜백을 노출. 코어는 콜백 실패를 swallow — 부가 효과 오류로 정제 흐름을 막지 않음.
-// agy 격리 tmpdir 잔재(9종)는 코어가 attempt 종료 시점에 직접 청소 — 호스트 책임 아님 (tryRefine 참조).
 export type RefineAttemptEvent =
   | { cli: CliKind; status: 'success'; result: SpawnRefineResult }
   | { cli: CliKind; status: 'quota'; result: SpawnRefineResult }
@@ -115,7 +113,7 @@ async function tryRefine(
   const command = probe.resolvedPath;
   const env = args.envProbe.getShellEnv();
   const log = args.logger ?? noopLogger;
-  // darwin에선 격리 HOME 박스 env를 spawn env에 병합 — non-darwin은 빈 env라 현행 동작 유지.
+  // 격리 HOME 박스 env를 spawn env에 병합 (claude는 빈 env).
   const iso = ensureRefineHome(cli, { binPath: command });
 
   const req = buildRefineSpawnRequest(cli, args.prompt, { cwd: args.cwd });
@@ -125,32 +123,17 @@ async function tryRefine(
     ? (text: string) => { assistantText += (assistantText ? '\n' : '') + text; }
     : (text: string) => { assistantText += text; };
 
-  try {
-    const base = await runRefineSpawn({
-      command,
-      args: req.args,
-      cwd: req.cwd,
-      env: { ...env, ...iso.env },
-      stdinPayload: req.stdinPayload,
-      onLine: (line) => req.onLine(line, accumulate),
-      timeoutMs,
-      logger: log,
-    });
-    return { result: { assistantText, ...base } };
-  } finally {
-    // agy는 격리 tmpdir에서 실행됨 — spawn 종료(성공/실패 무관) 후 코어가 직접 잔재 청소.
-    // 만든 쪽(buildAgyRefineSpawn)이 치우는 걸로 일원화. 이전엔 호스트 onAttempt hook 책임이었으나
-    // 익스텐션/compaction 경로 누락으로 잔재가 누수됐음 (2026-06-01).
-    // 청소 함수가 last_conversations.json 등을 atomic rewrite하므로 await 직렬 처리.
-    if (req.isolatedCwd) {
-      try {
-        await cleanupAgyArtifactsForCwd(req.isolatedCwd, log);
-        await rmIsolatedCwd(req.isolatedCwd, log);
-      } catch (err) {
-        log.warn(`refineDispatcher: agy 잔재 청소 실패 — ${String(err)}`);
-      }
-    }
-  }
+  const base = await runRefineSpawn({
+    command,
+    args: req.args,
+    cwd: req.cwd,
+    env: { ...env, ...iso.env },
+    stdinPayload: req.stdinPayload,
+    onLine: (line) => req.onLine(line, accumulate),
+    timeoutMs,
+    logger: log,
+  });
+  return { result: { assistantText, ...base } };
 }
 
 export async function runRefine(args: RunRefineArgs): Promise<RefineModelChoice> {
