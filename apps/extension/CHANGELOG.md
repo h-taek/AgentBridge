@@ -8,6 +8,7 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ### Changed
 
+- Apple Silicon only — the extension is now published for Apple Silicon (arm64) Macs only; Intel Macs are no longer supported.
 - Less aggressive memory compaction — the size threshold for compaction was too low, so conversation turns were being summarized (compacted) almost every turn. The threshold and the per-turn detail caps were raised so that a normal turn is now preserved nearly in full, and your conversation history keeps much more detail before any compaction kicks in.
 
 ### Fixed

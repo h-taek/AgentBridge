@@ -8,6 +8,7 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ### Changed
 
+- Apple Silicon only — AgentBridge is now distributed for Apple Silicon (arm64) Macs only; Intel Macs are no longer supported.
 - Less aggressive memory compaction — the size threshold for compaction was too low, so conversation turns were being summarized (compacted) almost every turn. The threshold and the per-turn detail caps were raised so that a normal turn is now preserved nearly in full, and your conversation history keeps much more detail before any compaction kicks in.
 - Hardened background usage checks — background usage (quota) checks for agy and codex now run only in an isolated environment. If that environment can't be prepared (a rare setup failure), the check is skipped for that cycle instead of falling back to a non-isolated run, so background checks never leave stray files in your real CLI config directories.
 
