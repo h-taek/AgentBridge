@@ -8,6 +8,7 @@ import { IpcChannel, type CliKind } from '@shared/ipc'
 import {
   cleanupAgyArtifactsForCwd,
   createQuotaTracker,
+  ensureRefineHome,
   parseQuotaFile,
   extractQuotaPercent as coreExtractQuotaPercent,
   looksLikeQuotaError as coreLooksLikeQuotaError,
@@ -458,6 +459,18 @@ export async function probeQuotaInBackground(cli: CliKind): Promise<ProbeResult>
       durationMs: Date.now() - startedAt
     }
   }
+  // refine과 동일하게 — darwin agy/codex는 영속 격리 박스에서 probe 실행 (session 파일이
+  // 실제 HOME 대신 박스로 떨어짐). env가 비어있지 않으면(=격리 활성) legacy 9종 per-artifact
+  // 청소를 건너뛴다 — 박스가 격리를 책임짐. claude(deferred)·non-darwin은 빈 env → 현행 유지.
+  let isoEnv: Record<string, string> = {}
+  try {
+    isoEnv = ensureRefineHome(cli, { binPath: cliPath }).env
+  } catch (err) {
+    log.warn(`${cli} probe — 격리 HOME 부트스트랩 실패, 비격리로 폴백`, { err: String(err) })
+    isoEnv = {}
+  }
+  const isolatedHome = Object.keys(isoEnv).length > 0
+
   const sender = pickAnyWebContents()
   if (!sender) {
     return {
@@ -475,7 +488,9 @@ export async function probeQuotaInBackground(cli: CliKind): Promise<ProbeResult>
   const preSpawnSessionId = randomUUID()
   const spec = makeSpec(cli)
   // spec.beforeSpawn (있다면) 실행 — agy의 implicit/, log/ 스냅샷 등.
-  const beforeCtx: Record<string, unknown> = spec.beforeSpawn ? await spec.beforeSpawn() : {}
+  // 격리 박스에서는 결과(스냅샷)가 cleanupExtras에만 쓰이고 그 청소를 건너뛰므로 함께 생략.
+  const beforeCtx: Record<string, unknown> =
+    !isolatedHome && spec.beforeSpawn ? await spec.beforeSpawn() : {}
 
   // codex는 spawn 직전 snapshot이 필요하므로 spec.captureModelSessionId 안에 lazy 진입.
   // claude/agy는 spec.argsFor에 sessionId만 흘려보내면 됨.
@@ -501,26 +516,31 @@ export async function probeQuotaInBackground(cli: CliKind): Promise<ProbeResult>
           /* noop */
         }
       }
-      try {
-        // capturePromise는 captureCtrl.abort 후 즉시 reject되어야 하나, 일부 spec(파일 watch
-        // 폴링 등)이 abort 신호를 늦게 받으면 cleanup이 무한 대기할 수 있다. 2초 race로 가드 —
-        // 캡처 실패해도 native cleanup은 modelSessionId=null로 진행(파일 흔적은 cleanupExtras가
-        // 디렉토리 단위로 정리).
-        const modelSessionId = capturePromise
-          ? await Promise.race([
-              capturePromise,
-              new Promise<null>((res) => setTimeout(() => res(null), 2_000))
-            ])
-          : null
-        await spec.cleanupNativeSession(modelSessionId)
-      } catch (err) {
-        log.warn(`${cli} probe — native cleanup 실패`, { err: String(err) })
-      }
-      if (spec.cleanupExtras) {
+      // 격리 박스 모드(darwin agy/codex)에서는 session 파일이 박스 안에 떨어지고 박스가
+      // rm -rf/재사용으로 격리를 책임지므로 legacy per-artifact 청소를 전부 건너뛴다.
+      // probeCwd rm은 항상 수행.
+      if (!isolatedHome) {
         try {
-          await spec.cleanupExtras(beforeCtx, probeCwd)
+          // capturePromise는 captureCtrl.abort 후 즉시 reject되어야 하나, 일부 spec(파일 watch
+          // 폴링 등)이 abort 신호를 늦게 받으면 cleanup이 무한 대기할 수 있다. 2초 race로 가드 —
+          // 캡처 실패해도 native cleanup은 modelSessionId=null로 진행(파일 흔적은 cleanupExtras가
+          // 디렉토리 단위로 정리).
+          const modelSessionId = capturePromise
+            ? await Promise.race([
+                capturePromise,
+                new Promise<null>((res) => setTimeout(() => res(null), 2_000))
+              ])
+            : null
+          await spec.cleanupNativeSession(modelSessionId)
         } catch (err) {
-          log.warn(`${cli} probe — cleanupExtras 실패`, { err: String(err) })
+          log.warn(`${cli} probe — native cleanup 실패`, { err: String(err) })
+        }
+        if (spec.cleanupExtras) {
+          try {
+            await spec.cleanupExtras(beforeCtx, probeCwd)
+          } catch (err) {
+            log.warn(`${cli} probe — cleanupExtras 실패`, { err: String(err) })
+          }
         }
       }
       await fs.rm(probeCwd, { recursive: true, force: true }).catch(() => undefined)
@@ -552,11 +572,14 @@ export async function probeQuotaInBackground(cli: CliKind): Promise<ProbeResult>
     try {
       // captureModelSessionId는 spawn 직후 즉시 시작 — codex는 internal snapshot 캡처가 필요해
       // spawn 전에 dispatch (snapshot이 spec 안에서 lazy하게 잡힘).
-      capturePromise = spec.captureModelSessionId({
-        cwd: probeCwd,
-        preSpawnSessionId,
-        signal: captureCtrl.signal
-      })
+      // 격리 박스 모드에서는 capture가 cleanup에만 쓰이고 그 청소를 건너뛰므로 dispatch 생략.
+      capturePromise = isolatedHome
+        ? null
+        : spec.captureModelSessionId({
+            cwd: probeCwd,
+            preSpawnSessionId,
+            signal: captureCtrl.signal
+          })
 
       const { sessionId } = depsCache!.startPty(
         {
@@ -565,7 +588,7 @@ export async function probeQuotaInBackground(cli: CliKind): Promise<ProbeResult>
           cwd: probeCwd,
           cols: 120,
           rows: 30,
-          env: depsCache!.buildEnv()
+          env: { ...depsCache!.buildEnv(), ...isoEnv }
         },
         sender,
         {
