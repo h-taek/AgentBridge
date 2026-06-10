@@ -56,8 +56,8 @@ function vendorXterm() {
 }
 
 // node-pty(네이티브) — out/node_modules/node-pty로 동봉. require("node-pty")가 out/extension.js
-// 기준 node 해석에서 가장 먼저 보는 위치라 코드 변경 없이 해결된다. lib + darwin prebuild만
-// (win32/linux prebuild·*.pdb 제외). pnpm 심링크라 dereference 복사.
+// 기준 node 해석에서 가장 먼저 보는 위치라 코드 변경 없이 해결된다. lib + darwin-arm64
+// prebuild만 (Apple Silicon 전용, *.pdb 제외). pnpm 심링크라 dereference 복사.
 function vendorNodePty() {
   const root = 'node_modules/node-pty';
   const dest = 'out/node_modules/node-pty';
@@ -68,7 +68,7 @@ function vendorNodePty() {
       filter: (s) => !s.endsWith('.pdb'),
     });
   }
-  for (const arch of ['darwin-arm64', 'darwin-x64']) {
+  for (const arch of ['darwin-arm64']) {
     cpSync(join(root, 'prebuilds', arch), join(dest, 'prebuilds', arch), {
       recursive: true,
       dereference: true,

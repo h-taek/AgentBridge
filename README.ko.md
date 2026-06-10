@@ -7,13 +7,13 @@
 
 # AgentBridge
 
-> 여러 AI 코딩 에이전트(Claude · Codex · Antigravity) 사이에서 작업 맥락이 자동으로 따라가는 도구. macOS에서 데스크탑 앱과 IDE 익스텐션 두 형태로 제공.
+> 여러 AI 코딩 에이전트(Claude · Codex · Antigravity) 사이에서 작업 맥락이 자동으로 따라가는 도구. macOS(Apple Silicon)에서 데스크탑 앱과 IDE 익스텐션 두 형태로 제공.
 
 <p align="center">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-green.svg"></a>
   <img alt="Version" src="https://img.shields.io/badge/version-0.2.x-orange.svg">
-  <img alt="Desktop" src="https://img.shields.io/badge/desktop-macOS-lightgrey.svg">
-  <img alt="Extension" src="https://img.shields.io/badge/extension-macOS-007ACC.svg">
+  <img alt="Desktop" src="https://img.shields.io/badge/desktop-Apple%20Silicon-lightgrey.svg">
+  <img alt="Extension" src="https://img.shields.io/badge/extension-Apple%20Silicon-007ACC.svg">
 </p>
 
 ---
@@ -62,8 +62,8 @@ AgentBridge는 사용자 환경의 CLI를 임베드하므로, 사용하려는 �
 
 ## 사용 가능 형태
 
-- macOS 데스크탑 앱 — [설치·사용법](apps/desktop/README.ko.md)
-- macOS IDE 익스텐션 — VS Code · Cursor · Antigravity IDE 등 VS Code 계열 IDE에서 동작. [설치·사용법](apps/extension/README.ko.md)
+- macOS(Apple Silicon) 데스크탑 앱 — [설치·사용법](apps/desktop/README.ko.md)
+- macOS(Apple Silicon) IDE 익스텐션 — VS Code · Cursor · Antigravity IDE 등 VS Code 계열 IDE에서 동작. [설치·사용법](apps/extension/README.ko.md)
 
 ## 프라이버시
 
