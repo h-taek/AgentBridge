@@ -22,7 +22,7 @@ export function ensureRefineHome(cli: CliKind, opts: EnsureRefineHomeOptions = {
   const rootDir = opts.rootDir ?? join(homedir(), '.agentbridge', 'cli-homes');
   const realHome = opts.realHome ?? homedir();
   const box = join(rootDir, cli);
-  bootstrapIfNeeded(cli, box, realHome, opts.binPath);  // 실제 구현은 이후 Task 2-4에서
+  bootstrapIfNeeded(cli, box, realHome, opts.binPath);  // 격리 박스 부팅: 버전 토큰 확인 후 재사용 또는 rm -rf 재생성 + 심링크/최소config
   if (cli === 'agy') return { env: { HOME: box } };
   if (cli === 'codex') return { env: { CODEX_HOME: box } };
   const _exhaustive: never = cli;   // compile-time guard for new CliKind members
