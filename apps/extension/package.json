@@ -217,8 +217,8 @@
           "default": "compact",
           "enumDescriptions": [
             "Up to 50KB of assistant response",
-            "~500 characters (head + tail)",
-            "~200 characters (head only)"
+            "~5,000 characters (head 4,000 + tail 1,000)",
+            "~1,000 characters (head 800 + tail 200)"
           ],
           "description": "How much assistant response to keep in turns.jsonl"
         },
