@@ -1,7 +1,7 @@
 // refine 서브프로세스(agy/codex CLI)를 격리된 HOME 박스에서 실행하기 위한 환경 변수 조립.
 // darwin 전용 — 다른 플랫폼은 현행 동작(실제 HOME) 유지.
 
-import { mkdirSync, symlinkSync, lstatSync, writeFileSync, existsSync } from 'fs';
+import { mkdirSync, symlinkSync, lstatSync, writeFileSync, existsSync, statSync, rmSync, readFileSync } from 'fs';
 import { homedir } from 'os';
 import { join, dirname } from 'path';
 import type { CliKind } from './shared/cli';
@@ -29,6 +29,12 @@ export function ensureRefineHome(cli: CliKind, opts: EnsureRefineHomeOptions = {
   return _exhaustive;
 }
 
+function versionToken(binPath?: string): string {
+  if (!binPath) return 'no-bin';
+  try { const s = statSync(binPath); return `${s.size}:${Math.floor(s.mtimeMs)}`; }
+  catch { return 'no-bin'; }
+}
+
 // linkPath가 이미 존재(dangling 심링크 포함)하면 스킵 — 재실행 시 EEXIST 방지.
 function linkOnce(target: string, linkPath: string): void {
   try { lstatSync(linkPath); return; }                       // already exists (incl. dangling) → reuse
@@ -42,7 +48,12 @@ function linkOnce(target: string, linkPath: string): void {
 // 불필요하므로 최소 config로 박스를 ~6MB로 유지. (real ~/.codex/config.toml 복사 금지)
 const CODEX_MIN_CONFIG = '[features]\nsuppress_unstable_features_warning = true\n';
 
-function bootstrapIfNeeded(cli: CliKind, box: string, realHome: string, _binPath?: string): void {
+function bootstrapIfNeeded(cli: CliKind, box: string, realHome: string, binPath?: string): void {
+  const token = versionToken(binPath);
+  const verFile = join(box, '.ab-version');
+  let stale = true;
+  try { stale = readFileSync(verFile, 'utf8') !== token; } catch { stale = true; }  // missing → stale
+  if (stale) rmSync(box, { recursive: true, force: true });
   mkdirSync(box, { recursive: true });
   if (cli === 'agy') {
     linkOnce(join(realHome, 'Library/Keychains'), join(box, 'Library/Keychains'));
@@ -54,4 +65,5 @@ function bootstrapIfNeeded(cli: CliKind, box: string, realHome: string, _binPath
     const cfg = join(box, 'config.toml');
     if (!existsSync(cfg)) writeFileSync(cfg, CODEX_MIN_CONFIG);
   }
+  if (stale) writeFileSync(verFile, token);
 }

@@ -55,4 +55,35 @@ describe('refineHome', () => {
       await fs.rm(rootDir, { recursive: true, force: true });
     }
   });
+
+  it('버전 토큰 불일치 시 박스 폐기 후 재부팅', async () => {
+    const rootDir = await fs.mkdtemp(join(tmpdir(), 'abtest-'));
+    try {
+      const binA = join(rootDir, 'binA'); await fs.writeFile(binA, 'v1');
+      ensureRefineHome('agy', { platform: 'darwin', rootDir, realHome: '/fake/home', binPath: binA });
+      const box = join(rootDir, 'agy');
+      await fs.writeFile(join(box, 'marker'), 'stale');               // 박스 안 잔재
+      const binB = join(rootDir, 'binB'); await fs.writeFile(binB, 'v2-different-size');
+      ensureRefineHome('agy', { platform: 'darwin', rootDir, realHome: '/fake/home', binPath: binB });
+      // 버전 바뀌면 박스 통째 폐기 → marker 사라지고 심링크 재생성
+      await assert.rejects(fs.lstat(join(box, 'marker')), 'marker는 재부팅으로 사라져야');
+      assert.ok(await fs.readlink(join(box, 'Library/Keychains')), '재부팅 후 심링크 재생성');
+    } finally {
+      await fs.rm(rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it('버전 토큰 동일 시 박스 재사용(잔재 보존)', async () => {
+    const rootDir = await fs.mkdtemp(join(tmpdir(), 'abtest-'));
+    try {
+      const bin = join(rootDir, 'bin'); await fs.writeFile(bin, 'v1');
+      ensureRefineHome('agy', { platform: 'darwin', rootDir, realHome: '/fake/home', binPath: bin });
+      const box = join(rootDir, 'agy');
+      await fs.writeFile(join(box, 'marker'), 'keep');
+      ensureRefineHome('agy', { platform: 'darwin', rootDir, realHome: '/fake/home', binPath: bin });
+      assert.equal(await fs.readFile(join(box, 'marker'), 'utf8'), 'keep', '동일 버전이면 잔재 보존');
+    } finally {
+      await fs.rm(rootDir, { recursive: true, force: true });
+    }
+  });
 });
