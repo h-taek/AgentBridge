@@ -1,15 +1,10 @@
 import { strict as assert } from 'assert';
-import { rmSync } from 'fs';
 import { buildRefineSpawnRequest } from '@agentbridge/core';
 
-describe('refineCliArgs isolatedCwd platform gate', () => {
-  it('agy refine: darwin이면 isolatedCwd 미생성', () => {
-    const req = buildRefineSpawnRequest('agy', 'p', { platform: 'darwin' });
-    assert.equal(req.isolatedCwd, undefined);
-  });
-  it('agy refine: 비-darwin이면 isolatedCwd 생성(현행 9종 청소 경로)', () => {
-    const req = buildRefineSpawnRequest('agy', 'p', { platform: 'win32' });
-    assert.ok(req.isolatedCwd);
-    if (req.isolatedCwd) rmSync(req.isolatedCwd, { recursive: true, force: true });
+describe('refineCliArgs', () => {
+  it('agy refine: 공유 tmpdir cwd + skip-permissions (per-run 격리 dir 없음)', () => {
+    const req = buildRefineSpawnRequest('agy', 'p');
+    assert.ok(req.cwd, 'cwd(tmpdir) 설정');
+    assert.deepEqual(req.args, ['-p', 'p', '--dangerously-skip-permissions']);
   });
 });
