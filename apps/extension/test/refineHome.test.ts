@@ -41,4 +41,18 @@ describe('refineHome', () => {
       await fs.rm(rootDir, { recursive: true, force: true });
     }
   });
+
+  it('codex: CODEX_HOME env + auth.json 심링크 + 플러그인 없는 최소 config', async () => {
+    const rootDir = await fs.mkdtemp(join(tmpdir(), 'abtest-'));
+    try {
+      const r = ensureRefineHome('codex', { platform: 'darwin', rootDir, realHome: '/fake/home' });
+      const box = join(rootDir, 'codex');
+      assert.equal(r.env.CODEX_HOME, box);
+      assert.equal(await fs.readlink(join(box, 'auth.json')), '/fake/home/.codex/auth.json');
+      const cfg = await fs.readFile(join(box, 'config.toml'), 'utf8');
+      assert.equal(cfg, '[features]\nsuppress_unstable_features_warning = true\n', 'config에 플러그인 항목 없어야(69M clone 방지)');
+    } finally {
+      await fs.rm(rootDir, { recursive: true, force: true });
+    }
+  });
 });

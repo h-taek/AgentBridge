@@ -1,7 +1,7 @@
 // refine 서브프로세스(agy/codex CLI)를 격리된 HOME 박스에서 실행하기 위한 환경 변수 조립.
 // darwin 전용 — 다른 플랫폼은 현행 동작(실제 HOME) 유지.
 
-import { mkdirSync, symlinkSync, lstatSync } from 'fs';
+import { mkdirSync, symlinkSync, lstatSync, writeFileSync, existsSync } from 'fs';
 import { homedir } from 'os';
 import { join, dirname } from 'path';
 import type { CliKind } from './shared/cli';
@@ -37,11 +37,21 @@ function linkOnce(target: string, linkPath: string): void {
   symlinkSync(target, linkPath);
 }
 
+// plugins 항목을 일부러 넣지 않는다 — config에 [plugins."..."]가 있으면 codex가
+// 첫 부팅 때 ~69MB 플러그인 마켓플레이스를 .tmp에 git clone한다. refine는 플러그인이
+// 불필요하므로 최소 config로 박스를 ~6MB로 유지. (real ~/.codex/config.toml 복사 금지)
+const CODEX_MIN_CONFIG = '[features]\nsuppress_unstable_features_warning = true\n';
+
 function bootstrapIfNeeded(cli: CliKind, box: string, realHome: string, _binPath?: string): void {
   mkdirSync(box, { recursive: true });
   if (cli === 'agy') {
     linkOnce(join(realHome, 'Library/Keychains'), join(box, 'Library/Keychains'));
     linkOnce(join(realHome, 'Library/Caches'), join(box, 'Library/Caches'));
     linkOnce(join(realHome, '.gemini/antigravity-cli/bin'), join(box, '.gemini/antigravity-cli/bin'));
+  }
+  if (cli === 'codex') {
+    linkOnce(join(realHome, '.codex/auth.json'), join(box, 'auth.json'));
+    const cfg = join(box, 'config.toml');
+    if (!existsSync(cfg)) writeFileSync(cfg, CODEX_MIN_CONFIG);
   }
 }
