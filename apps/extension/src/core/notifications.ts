@@ -35,7 +35,7 @@ function shouldShow(cat: NotifyCategory): boolean {
 export function notifyCliNotFound(name: string): void {
   if (!shouldShow('cli-not-found')) return;
   vscode.window.showWarningMessage(
-    `AgentBridge: \`${name}\` CLI not found in PATH. Install it first.`,
+    vscode.l10n.t('AgentBridge: `{0}` CLI not found in PATH. Install it first.', name),
   );
 }
 
@@ -43,7 +43,7 @@ export function notifyRefineFailed(reason: string): void {
   if (!shouldShow('refine-failed')) return;
   output.warn(`refine failed: ${reason}`);
   vscode.window.showInformationMessage(
-    `AgentBridge: Memory refinement failed — ${reason}. Will retry on next trigger.`,
+    vscode.l10n.t('AgentBridge: Memory refinement failed — {0}. Will retry on next trigger.', reason),
   );
 }
 
@@ -64,19 +64,19 @@ export function notifyRefineFallback(
   // 무료 토큰을 제공하는 agy 외 CLI로 떨어진 경우만 토큰 소모 가능성을 함께 안내.
   const detail = (() => {
     switch (reason) {
-      case 'unavailable': return `${triedCli} unavailable (not installed or spawn failed)`;
-      case 'quota': return `${triedCli} quota exhausted`;
-      case 'spawn-error': return `${triedCli} returned an unusable response`;
+      case 'unavailable': return vscode.l10n.t('{0} unavailable (not installed or spawn failed)', triedCli);
+      case 'quota': return vscode.l10n.t('{0} quota exhausted', triedCli);
+      case 'spawn-error': return vscode.l10n.t('{0} returned an unusable response', triedCli);
     }
   })();
-  const tokenNote = usedModel === 'agy' ? '' : ' (may consume your tokens)';
+  const tokenNote = usedModel === 'agy' ? '' : vscode.l10n.t(' (may consume your tokens)');
   vscode.window
     .showWarningMessage(
-      `AgentBridge: Memory refinement fell back to ${usedModel}${tokenNote} — ${detail}.`,
-      'Don\'t show again',
+      vscode.l10n.t('AgentBridge: Memory refinement fell back to {0}{1} — {2}.', usedModel, tokenNote, detail),
+      vscode.l10n.t('Don\'t show again'),
     )
     .then((choice) => {
-      if (choice === 'Don\'t show again') mutePerma('agy-fallback');
+      if (choice === vscode.l10n.t('Don\'t show again')) mutePerma('agy-fallback');
     });
 }
 
@@ -84,11 +84,11 @@ export function notifyCodexHooksTrust(): void {
   if (!shouldShow('codex-hooks-trust')) return;
   vscode.window
     .showInformationMessage(
-      'AgentBridge: In the Codex terminal, type `/hooks` and approve trust to enable memory injection.',
-      'Got it',
+      vscode.l10n.t('AgentBridge: In the Codex terminal, type `/hooks` and approve trust to enable memory injection.'),
+      vscode.l10n.t('Got it'),
     )
     .then((choice) => {
-      if (choice === 'Got it') mutePerma('codex-hooks-trust');
+      if (choice === vscode.l10n.t('Got it')) mutePerma('codex-hooks-trust');
     });
 }
 
@@ -97,14 +97,14 @@ export function notifyFirstRun(): void {
   if (isPermanentlyMuted('first-run')) return;
   vscode.window
     .showInformationMessage(
-      'Welcome to AgentBridge! Open the sidebar to manage sessions and memory across AI CLIs.',
-      'Open Sidebar',
-      'Don\'t show again',
+      vscode.l10n.t('Welcome to AgentBridge! Open the sidebar to manage sessions and memory across AI CLIs.'),
+      vscode.l10n.t('Open Sidebar'),
+      vscode.l10n.t('Don\'t show again'),
     )
     .then((choice) => {
-      if (choice === 'Open Sidebar') {
+      if (choice === vscode.l10n.t('Open Sidebar')) {
         vscode.commands.executeCommand('agentbridge.sessions.focus');
       }
-      if (choice === 'Don\'t show again') mutePerma('first-run');
+      if (choice === vscode.l10n.t('Don\'t show again')) mutePerma('first-run');
     });
 }

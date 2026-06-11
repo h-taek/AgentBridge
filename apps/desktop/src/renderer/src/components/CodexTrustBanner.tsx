@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { HookTrustEntry, SessionMeta } from '@shared/ipc'
+import { useT, useLang } from '../i18n'
 
 // M3 M 청크 — codex `/hooks` trust 게이트 안내 배너.
 // architecture §14.8 / probe 08 — codex는 hook 자동 등록 안 되고 사용자가 codex 안에서
@@ -12,6 +13,8 @@ type Props = {
 }
 
 export function CodexTrustBanner({ workspaceId, sessions }: Props): React.JSX.Element | null {
+  const t = useT()
+  const lang = useLang()
   const [trust, setTrust] = useState<HookTrustEntry | null>(null)
   const [updating, setUpdating] = useState(false)
 
@@ -43,11 +46,21 @@ export function CodexTrustBanner({ workspaceId, sessions }: Props): React.JSX.El
 
   return (
     <div className="codex-trust-banner">
-      <strong>codex `/hooks` 수동 승인 필요</strong>
+      <strong>{t.codexTrust.heading}</strong>
       <div style={{ marginTop: 4, lineHeight: 1.4 }}>
-        codex 탭 안에서 <code>/hooks</code> 슬래시 명령을 실행해 AgentBridge hook을 trust 처리해야
-        매 메시지마다 IR이 자동 주입됩니다. 승인 완료 후 아래 버튼을 누르면 이 안내가 사라집니다 (한
-        번만 필요).
+        {lang === 'en' ? (
+          <>
+            Run the <code>/hooks</code> slash command inside the codex tab to trust the AgentBridge
+            hook so the IR is auto-injected on every message. After approving, press the button below
+            and this notice disappears (only needed once).
+          </>
+        ) : (
+          <>
+            codex 탭 안에서 <code>/hooks</code> 슬래시 명령을 실행해 AgentBridge hook을 trust 처리해야
+            매 메시지마다 IR이 자동 주입됩니다. 승인 완료 후 아래 버튼을 누르면 이 안내가 사라집니다 (한
+            번만 필요).
+          </>
+        )}
       </div>
       <button
         className="btn"
@@ -55,7 +68,7 @@ export function CodexTrustBanner({ workspaceId, sessions }: Props): React.JSX.El
         disabled={updating}
         style={{ marginTop: 8 }}
       >
-        {updating ? '...' : 'codex에서 trust 승인 완료'}
+        {updating ? t.codexTrust.approving : t.codexTrust.approved}
       </button>
     </div>
   )

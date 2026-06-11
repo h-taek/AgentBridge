@@ -64,7 +64,7 @@ async function spawnInteractive(
     const onCapture = hooks.onModelSessionIdCaptured
     void captureNewThreadId(snapshot, { signal: captureCtrl.signal })
       .then((threadId) => {
-        onCapture(threadId)
+        if (threadId) onCapture(threadId)
       })
       .catch((err) => {
         log.warn('codex thread_id capture 실패', { err: String(err) })

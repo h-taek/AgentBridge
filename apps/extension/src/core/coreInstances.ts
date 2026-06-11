@@ -140,7 +140,12 @@ export function initializeCore(
       // 빈 priority 목록 → 기본 순서 폴백도 core가 처리.
       const cfg = getConfig();
       return resolveRefineDecisionFromConfig(
-        { policy: cfg.refinePolicy, fixedCli: cfg.refineFixedCli, priorityOrder: cfg.refinePriorityOrder },
+        {
+          policy: cfg.refinePolicy,
+          fixedCli: cfg.refineFixedCli,
+          priorityOrder: cfg.refinePriorityOrder,
+          useClaude: cfg.refineUseClaude,
+        },
         activeModel,
       );
     },

@@ -18,6 +18,7 @@ import {
   TrashIcon
 } from './icons'
 import { InlineRenameInput } from './InlineRenameInput'
+import { useT } from '../i18n'
 
 // 좌 사이드바 — flat 워크스페이스 목록.
 // 토글 정책:
@@ -111,6 +112,7 @@ export function LeftSidebar({
   onOpenSettings,
   onClose
 }: Props): React.JSX.Element {
+  const t = useT()
   const [showNew, setShowNew] = useState(false)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [addMenuFor, setAddMenuFor] = useState<string | null>(null)
@@ -230,8 +232,8 @@ export function LeftSidebar({
         <button
           className="icon-btn"
           onClick={onClose}
-          title="사이드바 접기"
-          aria-label="사이드바 접기"
+          title={t.leftSidebar.collapse}
+          aria-label={t.leftSidebar.collapse}
         >
           <SidebarLeftIcon />
         </button>
@@ -242,21 +244,21 @@ export function LeftSidebar({
           className={`sidebar-quick-row${openWorkspaceId === null ? ' active' : ''}`}
           onClick={() => void onGoHome()}
           disabled={busy || openWorkspaceId === null}
-          title="홈 화면으로"
+          title={t.leftSidebar.toHome}
         >
           <HomeIcon />
-          <span>홈</span>
+          <span>{t.leftSidebar.home}</span>
         </button>
       </div>
 
       <div className={`sidebar-quick${showNew ? ' expanded' : ''}`}>
         <button className="sidebar-quick-row" onClick={() => setShowNew((v) => !v)} disabled={busy}>
           <PlusIcon />
-          <span>새 워크스페이스</span>
+          <span>{t.leftSidebar.newWorkspace}</span>
         </button>
         {showNew && (
           <div className="new-ws">
-            <label>경로</label>
+            <label>{t.leftSidebar.pathLabel}</label>
             <div className="row">
               <input
                 className="input"
@@ -268,27 +270,28 @@ export function LeftSidebar({
                 className="icon-btn"
                 onClick={() => void onPickWorkspace()}
                 disabled={busy}
-                title="폴더 선택"
-                aria-label="폴더 선택"
+                title={t.common.pickFolder}
+                aria-label={t.common.pickFolder}
               >
                 <FolderIcon />
               </button>
             </div>
-            <label>이름 (선택)</label>
+            <label>{t.leftSidebar.nameOptional}</label>
             <div className="row">
               <input
                 className="input"
                 placeholder={
                   trimmedWorkspace
-                    ? (trimmedWorkspace.split('/').filter(Boolean).pop() ?? '폴더명')
-                    : '폴더명'
+                    ? (trimmedWorkspace.split('/').filter(Boolean).pop() ??
+                      t.leftSidebar.folderNamePlaceholder)
+                    : t.leftSidebar.folderNamePlaceholder
                 }
                 value={workspaceNameDraft}
                 onChange={(e) => setWorkspaceNameDraft(e.target.value)}
                 maxLength={120}
               />
             </div>
-            <label>모델</label>
+            <label>{t.leftSidebar.modelLabel}</label>
             <div className="row">
               <select
                 className="select"
@@ -306,12 +309,12 @@ export function LeftSidebar({
                 onClick={() => void onCreateWorkspace().then(() => setShowNew(false))}
                 disabled={!initialModelReady || !trimmedWorkspace || busy}
               >
-                만들기
+                {t.leftSidebar.create}
               </button>
             </div>
             {!initialModelReady && (
               <div className="hint" style={{ color: 'var(--color-danger)' }}>
-                {initialModel} CLI 미설치 — 설치 후 앱 재시작
+                {t.leftSidebar.cliNotInstalledRestart(initialModel)}
               </div>
             )}
           </div>
@@ -319,7 +322,7 @@ export function LeftSidebar({
       </div>
 
       <div className="sidebar-section-label">
-        <span>활성</span>
+        <span>{t.leftSidebar.sectionActive}</span>
       </div>
 
       {workspacesErr && (
@@ -332,7 +335,7 @@ export function LeftSidebar({
 
       <div className="sidebar-scroll">
         {visibleWorkspaces.length === 0 ? (
-          <div className="ws-empty">워크스페이스 없음 — 상단에서 생성</div>
+          <div className="ws-empty">{t.leftSidebar.noWorkspaces}</div>
         ) : (
           <ul className="ws-list">
             {visibleWorkspaces.map((w) => {
@@ -389,8 +392,8 @@ export function LeftSidebar({
                     <button
                       className="icon-btn-xs"
                       onClick={() => toggleExpand(w.workspaceId)}
-                      title={isExpanded ? '접기' : '펼치기'}
-                      aria-label="펼치기"
+                      title={isExpanded ? t.leftSidebar.collapseTree : t.leftSidebar.expandTree}
+                      aria-label={t.leftSidebar.expandTree}
                     >
                       <ChevronRightIcon className={`chev${isExpanded ? ' expanded' : ''}`} />
                     </button>
@@ -418,9 +421,7 @@ export function LeftSidebar({
                         }}
                         disabled={!isOpen && !canOpen}
                         title={
-                          isEmpty || anyResumable
-                            ? w.workspacePath
-                            : '이어갈 수 있는 세션이 없음 — 모든 세션이 native 미영속화/CLI 미설치'
+                          isEmpty || anyResumable ? w.workspacePath : t.leftSidebar.noResumableSession
                         }
                       >
                         {w.title}
@@ -435,8 +436,8 @@ export function LeftSidebar({
                             setAddMenuFor((cur) => (cur === w.workspaceId ? null : w.workspaceId))
                           }}
                           disabled={busy}
-                          title="세션 추가"
-                          aria-label="세션 추가"
+                          title={t.leftSidebar.addSession}
+                          aria-label={t.leftSidebar.addSession}
                         >
                           <PlusIcon />
                         </button>
@@ -460,12 +461,14 @@ export function LeftSidebar({
                                   }}
                                   disabled={!available || busy}
                                   title={
-                                    !available ? `${MODEL_LABEL[k]} CLI가 PATH에 없음` : undefined
+                                    !available ? t.common.cliNotInPath(MODEL_LABEL[k]) : undefined
                                   }
                                 >
                                   <span className={`ws-session-dot model-${k}`} />
                                   {MODEL_LABEL[k]}
-                                  {!available && <span className="hint"> (미설치)</span>}
+                                  {!available && (
+                                    <span className="hint">{t.common.notInstalledParen}</span>
+                                  )}
                                 </button>
                               )
                             })}
@@ -478,12 +481,12 @@ export function LeftSidebar({
                                 void onAddSession(w, 'shell')
                               }}
                               disabled={busy}
-                              title="내장 터미널 (zsh) — AgentBridge 메모리 없음"
+                              title={t.common.builtinTerminalTitle}
                             >
                               <span className="ws-session-icon">
                                 <TerminalIcon />
                               </span>
-                              터미널
+                              {t.common.terminal}
                             </button>
                           </div>
                         )}
@@ -495,8 +498,8 @@ export function LeftSidebar({
                           void onDeleteWorkspace(w)
                         }}
                         disabled={busy}
-                        title="워크스페이스 삭제"
-                        aria-label="워크스페이스 삭제"
+                        title={t.leftSidebar.deleteWorkspace}
+                        aria-label={t.leftSidebar.deleteWorkspace}
                       >
                         <TrashIcon />
                       </button>
@@ -507,7 +510,7 @@ export function LeftSidebar({
                     <div className="ws-sessions">
                       {sessions.length === 0 && (
                         <div className="hint" style={{ padding: '4px 8px' }}>
-                          세션 없음
+                          {t.leftSidebar.noSessions}
                         </div>
                       )}
                       {sessions.map((s) => {
@@ -525,7 +528,7 @@ export function LeftSidebar({
                           : busy || (!isOpen && (!sCliPresent || !sResumable))
                         const isEditing = editing === `sess:${s.sessionId}`
                         const displayName =
-                          s.title?.trim() || (isShellSess ? '터미널' : MODEL_LABEL[s.model])
+                          s.title?.trim() || (isShellSess ? t.common.terminal : MODEL_LABEL[s.model])
                         return (
                           <div
                             key={s.sessionId}
@@ -552,15 +555,15 @@ export function LeftSidebar({
                             }}
                             title={
                               isExternallyOwned
-                                ? '다른 앱에서 사용 중'
+                                ? t.leftSidebar.inUseByOther
                                 : isShellSess
-                                  ? '내장 터미널 (zsh)'
+                                  ? t.leftSidebar.builtinTerminalShort
                                   : !isOpen
                                     ? !sResumable
-                                      ? '모델 native 세션 미영속화 — resume 불가'
+                                      ? t.leftSidebar.notPersistedNoResume
                                       : !sCliPresent
-                                        ? `${MODEL_LABEL[s.model]} CLI 미설치`
-                                        : `워크스페이스 열기 + ${MODEL_LABEL[s.model]} 활성`
+                                        ? t.leftSidebar.cliNotInstalled(MODEL_LABEL[s.model])
+                                        : t.leftSidebar.openWorkspaceAndActivate(MODEL_LABEL[s.model])
                                     : MODEL_LABEL[s.model]
                             }
                           >
@@ -580,7 +583,7 @@ export function LeftSidebar({
                               <InlineRenameInput
                                 className="ws-session-label-input"
                                 initialValue={s.title ?? ''}
-                                placeholder={isShellSess ? '터미널' : MODEL_LABEL[s.model]}
+                                placeholder={isShellSess ? t.common.terminal : MODEL_LABEL[s.model]}
                                 maxLength={80}
                                 onSave={(v) => {
                                   setEditing(null)
@@ -594,10 +597,10 @@ export function LeftSidebar({
                             {!isEditing && isExternallyOwned && (
                               <span
                                 className="ws-session-mirror"
-                                title="다른 앱에서 사용 중"
-                                aria-label="다른 앱에서 사용 중"
+                                title={t.leftSidebar.inUseByOther}
+                                aria-label={t.leftSidebar.inUseByOther}
                               >
-                                사용 중
+                                {t.leftSidebar.inUseBadge}
                               </span>
                             )}
                             {isOpen && !isEditing && (
@@ -609,8 +612,8 @@ export function LeftSidebar({
                                     setEditing(`sess:${s.sessionId}`)
                                   }}
                                   disabled={busy}
-                                  title="세션 이름 수정"
-                                  aria-label="세션 이름 수정"
+                                  title={t.leftSidebar.renameSession}
+                                  aria-label={t.leftSidebar.renameSession}
                                 >
                                   <PencilIcon />
                                 </button>
@@ -621,8 +624,8 @@ export function LeftSidebar({
                                     void onCloseSession(s.sessionId)
                                   }}
                                   disabled={busy}
-                                  title="세션 삭제 (되돌릴 수 없음)"
-                                  aria-label="세션 삭제"
+                                  title={t.leftSidebar.deleteSessionTitle}
+                                  aria-label={t.leftSidebar.deleteSession}
                                 >
                                   <TrashIcon />
                                 </button>
@@ -641,7 +644,12 @@ export function LeftSidebar({
       </div>
 
       <div className="sidebar-footer">
-        <button className="icon-btn" onClick={onOpenSettings} title="설정" aria-label="설정">
+        <button
+          className="icon-btn"
+          onClick={onOpenSettings}
+          title={t.settings.titles.main}
+          aria-label={t.settings.titles.main}
+        >
           <GearIcon />
         </button>
       </div>
@@ -667,7 +675,7 @@ export function LeftSidebar({
                   void onOpenWorkspace(w)
                 }}
               >
-                워크스페이스 열기
+                {t.leftSidebar.ctxOpen}
               </button>
               <button
                 className="ws-context-item"
@@ -676,7 +684,7 @@ export function LeftSidebar({
                   onOpenWorkspaceInNewWindow(w)
                 }}
               >
-                새 창으로 열기
+                {t.leftSidebar.ctxOpenNewWindow}
               </button>
               <button
                 className="ws-context-item"
@@ -687,7 +695,7 @@ export function LeftSidebar({
                   setAddMenuFor(null)
                 }}
               >
-                이름 수정
+                {t.leftSidebar.ctxRename}
               </button>
               <div className="ws-context-divider" />
               <button
@@ -698,7 +706,7 @@ export function LeftSidebar({
                   void onDeleteWorkspace(w)
                 }}
               >
-                삭제
+                {t.leftSidebar.ctxDelete}
               </button>
             </div>
           )

@@ -516,6 +516,9 @@ export type AppSettings = {
   refinePriorityOrder: CliKind[]
   // fixed 정책 시 사용할 단일 CLI. 기본: 'agy'
   refineFixedCli: CliKind
+  // false면 백그라운드 정제에서 claude 제외 — 헤드리스 `claude -p`는 구독이 아닌 별도 API
+  // 크레딧을 소모하므로. 기본: true(claude 사용 = 기존 동작).
+  refineUseClaude: boolean
   // 다크/라이트/시스템 — 현재 'dark'로 잠금.
   theme: ThemeMode
   // 표시 언어 — 현재 'ko'로 잠금.

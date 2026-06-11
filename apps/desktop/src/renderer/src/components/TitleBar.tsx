@@ -1,4 +1,5 @@
 import { SidebarLeftIcon, SidebarRightIcon } from './icons'
+import { useT } from '../i18n'
 
 // 클린 모던 타이틀바 — frameless macOS 윈도우의 draggable 영역.
 // 좌측: traffic light spacer
@@ -22,6 +23,7 @@ export function TitleBar({
   onToggleRight,
   memoryActive
 }: Props): React.JSX.Element {
+  const t = useT()
   return (
     <header className="titlebar">
       <div className="titlebar-traffic-spacer" />
@@ -29,8 +31,8 @@ export function TitleBar({
         <button
           className="icon-btn"
           onClick={onToggleLeft}
-          title="좌 사이드바 열기"
-          aria-label="좌 사이드바 열기"
+          title={t.titleBar.openLeft}
+          aria-label={t.titleBar.openLeft}
         >
           <SidebarLeftIcon />
         </button>
@@ -47,8 +49,8 @@ export function TitleBar({
         <button
           className="icon-btn"
           onClick={onToggleRight}
-          title="우 사이드바 열기"
-          aria-label="우 사이드바 열기"
+          title={t.titleBar.openRight}
+          aria-label={t.titleBar.openRight}
         >
           <SidebarRightIcon />
         </button>

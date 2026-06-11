@@ -167,7 +167,7 @@ export function activate(context: vscode.ExtensionContext) {
   const newSession = vscode.commands.registerCommand('agentbridge.newSession', async () => {
     const picked = await vscode.window.showQuickPick<ModelChoice>(
       MODEL_CHOICES,
-      { placeHolder: 'Select a model to start' },
+      { placeHolder: vscode.l10n.t('Select a model to start') },
     );
     if (!picked) return;
 
@@ -180,7 +180,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     const folderUri = vscode.workspace.workspaceFolders?.[0]?.uri;
     if (!folderUri) {
-      vscode.window.showWarningMessage('AgentBridge: Open a workspace folder first.');
+      vscode.window.showWarningMessage(vscode.l10n.t('AgentBridge: Open a workspace folder first.'));
       return;
     }
     const cwd = folderUri.fsPath;
@@ -206,7 +206,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     const folderUri = vscode.workspace.workspaceFolders?.[0]?.uri;
     if (!folderUri) {
-      vscode.window.showWarningMessage('AgentBridge: Open a workspace folder first.');
+      vscode.window.showWarningMessage(vscode.l10n.t('AgentBridge: Open a workspace folder first.'));
       return;
     }
     const cwd = folderUri.fsPath;
@@ -226,14 +226,14 @@ export function activate(context: vscode.ExtensionContext) {
   const selectSessionCmd = vscode.commands.registerCommand('agentbridge.selectSession', async () => {
     const folderUri = vscode.workspace.workspaceFolders?.[0]?.uri;
     if (!folderUri) {
-      vscode.window.showWarningMessage('AgentBridge: Open a workspace folder first.');
+      vscode.window.showWarningMessage(vscode.l10n.t('AgentBridge: Open a workspace folder first.'));
       return;
     }
     const cwd = folderUri.fsPath;
     const wid = workspaceStore.getOrCreateWorkspaceId(cwd);
     const sessions = await getSessions(wid);
     if (sessions.length === 0) {
-      vscode.window.showInformationMessage('No sessions yet. Create one first.');
+      vscode.window.showInformationMessage(vscode.l10n.t('No sessions yet. Create one first.'));
       return;
     }
 
@@ -244,7 +244,7 @@ export function activate(context: vscode.ExtensionContext) {
       session: s,
     }));
 
-    const picked = await vscode.window.showQuickPick(items, { placeHolder: 'Select a session' });
+    const picked = await vscode.window.showQuickPick(items, { placeHolder: vscode.l10n.t('Select a session') });
     if (!picked) return;
     vscode.commands.executeCommand('agentbridge.openSession', picked.session);
   });
@@ -261,7 +261,7 @@ export function activate(context: vscode.ExtensionContext) {
     const session = (item ?? selectedSessionItem)?.session;
     if (!session) return;
     const newName = await vscode.window.showInputBox({
-      prompt: 'Session name',
+      prompt: vscode.l10n.t('Session name'),
       value: session.name,
     });
     if (newName === undefined) return;
@@ -273,11 +273,11 @@ export function activate(context: vscode.ExtensionContext) {
     const session = (item ?? selectedSessionItem)?.session;
     if (!session) return;
     const answer = await vscode.window.showWarningMessage(
-      `Delete session "${session.name}"?`,
+      vscode.l10n.t('Delete session "{0}"?', session.name),
       { modal: true },
-      'Delete',
+      vscode.l10n.t('Delete'),
     );
-    if (answer !== 'Delete') return;
+    if (answer !== vscode.l10n.t('Delete')) return;
     const activePanel = getActivePanel(session.sessionId);
     if (activePanel) {
       activePanel.markDeleted();
@@ -300,7 +300,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     const folderUri = vscode.workspace.workspaceFolders?.[0]?.uri;
     if (!folderUri) {
-      vscode.window.showWarningMessage('AgentBridge: Open a workspace folder first.');
+      vscode.window.showWarningMessage(vscode.l10n.t('AgentBridge: Open a workspace folder first.'));
       return;
     }
     const cwd = folderUri.fsPath;

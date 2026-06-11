@@ -28,6 +28,7 @@ import {
   ThemeIcon
 } from './icons'
 import appIcon from '../../../../resources/icon.png'
+import { useT, useLang, type Messages } from '../i18n'
 
 // 설정 모달 — Apple/ChatGPT 스타일.
 // 헤더가 본문과 자연스럽게 이어지도록 border 제거 + 동일 배경.
@@ -36,20 +37,6 @@ import appIcon from '../../../../resources/icon.png'
 
 const GITHUB_URL = 'https://github.com/h-taek/AgentBridge'
 
-const REFINE_POLICY_LABEL: Record<RefineModelPolicy, string> = {
-  priority: '기본 (우선순위)',
-  fixed: '고정',
-  active: '활성 모델',
-  off: '끔'
-}
-
-const REFINE_POLICY_DESC: Record<RefineModelPolicy, string> = {
-  priority: 'CLI 우선순위대로 시도 · 실패/한도 초과 시 다음 CLI로',
-  fixed: '특정 CLI만 사용 · 실패 시 정제 스킵',
-  active: '마지막 채팅 CLI 사용 · 실패 시 정제 스킵',
-  off: '정제 사용 안 함'
-}
-
 const CLI_LABEL: Record<CliKind, string> = {
   claude: 'Claude',
   codex: 'Codex',
@@ -57,26 +44,9 @@ const CLI_LABEL: Record<CliKind, string> = {
 }
 const CLI_ORDER_FULL: CliKind[] = ['agy', 'codex', 'claude']
 
-const THEME_LABEL: Record<ThemeMode, string> = {
-  dark: '다크',
-  light: '라이트',
-  system: '시스템'
-}
-
 const LANGUAGE_LABEL: Record<LanguageCode, string> = {
   ko: '한국어',
   en: 'English'
-}
-
-const TURNS_DETAIL_LABEL: Record<TurnsAssistantDetail, string> = {
-  full: '원문',
-  compact: '압축',
-  minimal: '최소'
-}
-const TURNS_DETAIL_DESC: Record<TurnsAssistantDetail, string> = {
-  full: '응답 원본 그대로 저장 (최대 50KB).',
-  compact: '응답의 앞 4,000자 + 뒤 1,000자만 저장 (기본값).',
-  minimal: '응답의 앞 800자 + 뒤 200자만 저장.'
 }
 
 type SubPage = 'main' | 'cli' | 'shortcuts' | 'help' | 'license'
@@ -95,6 +65,7 @@ function PriorityOrderRow({
   order: CliKind[]
   onUpdate: (next: CliKind[]) => void
 }): React.JSX.Element {
+  const t = useT()
   // missing CLI를 끝에 자동 추가하여 모든 CLI 표시.
   const fullOrder: CliKind[] = [...order]
   for (const k of CLI_ORDER_FULL) {
@@ -111,8 +82,8 @@ function PriorityOrderRow({
     <div className="settings-row settings-row-column">
       <div className="settings-row-line">
         <SparkleIcon className="settings-row-icon" />
-        <span className="settings-row-label">우선순위</span>
-        <span className="settings-row-value settings-row-desc">위에서부터 시도</span>
+        <span className="settings-row-label">{t.settings.priorityRow.label}</span>
+        <span className="settings-row-value settings-row-desc">{t.settings.priorityRow.desc}</span>
       </div>
       <div className="settings-priority-list">
         {fullOrder.map((cli, idx) => (
@@ -123,8 +94,8 @@ function PriorityOrderRow({
               className="settings-priority-btn"
               onClick={() => move(idx, -1)}
               disabled={idx === 0}
-              aria-label="위로"
-              title="위로"
+              aria-label={t.settings.priorityRow.up}
+              title={t.settings.priorityRow.up}
             >
               ↑
             </button>
@@ -132,8 +103,8 @@ function PriorityOrderRow({
               className="settings-priority-btn"
               onClick={() => move(idx, 1)}
               disabled={idx === fullOrder.length - 1}
-              aria-label="아래로"
-              title="아래로"
+              aria-label={t.settings.priorityRow.down}
+              title={t.settings.priorityRow.down}
             >
               ↓
             </button>
@@ -145,6 +116,7 @@ function PriorityOrderRow({
 }
 
 export function SettingsModal({ health, env, onClose }: Props): React.JSX.Element {
+  const t = useT()
   const [page, setPage] = useState<SubPage>('main')
   const [settings, setSettings] = useState<AppSettings | null>(null)
   // 자동 업데이트 status — 모달 mount 시 1회 getStatus + onStatus 구독으로 후속 동기화.
@@ -217,11 +189,11 @@ export function SettingsModal({ health, env, onClose }: Props): React.JSX.Elemen
   }, [settings, updateSettings])
 
   const titles: Record<SubPage, string> = {
-    main: '설정',
-    cli: 'CLI 감지',
-    shortcuts: '단축키',
-    help: '사용 설명서',
-    license: '라이선스'
+    main: t.settings.titles.main,
+    cli: t.settings.titles.cli,
+    shortcuts: t.settings.titles.shortcuts,
+    help: t.settings.titles.help,
+    license: t.settings.titles.license
   }
 
   return (
@@ -231,22 +203,32 @@ export function SettingsModal({ health, env, onClose }: Props): React.JSX.Elemen
         if (e.target === e.currentTarget) onClose()
       }}
     >
-      <div className="modal settings-modal" role="dialog" aria-modal="true" aria-label="설정">
+      <div
+        className="modal settings-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label={t.settings.titles.main}
+      >
         <header className="modal-head settings-head">
           <div className="settings-head-left">
             {page !== 'main' && (
               <button
                 className="icon-btn settings-back"
                 onClick={() => setPage('main')}
-                title="뒤로"
-                aria-label="뒤로"
+                title={t.common.back}
+                aria-label={t.common.back}
               >
                 <ArrowLeftIcon />
               </button>
             )}
             <h2>{titles[page]}</h2>
           </div>
-          <button className="icon-btn" onClick={onClose} title="닫기 (Esc)" aria-label="닫기">
+          <button
+            className="icon-btn"
+            onClick={onClose}
+            title={t.settings.closeEsc}
+            aria-label={t.common.close}
+          >
             <CloseIcon />
           </button>
         </header>
@@ -291,41 +273,43 @@ type MainPageProps = {
 // AppUpdaterStatus를 사용자 친화 라벨로 변환. (라벨, 보조 텍스트, 강조 여부) 반환.
 function describeUpdaterStatus(
   status: AppUpdaterStatus,
-  currentVersion: string | undefined
+  currentVersion: string | undefined,
+  t: Messages
 ): { label: string; sub?: string; tone: 'idle' | 'progress' | 'good' | 'warn' } {
+  const u = t.settings.updater
   switch (status.phase) {
     case 'idle':
-      return { label: '확인하지 않음', tone: 'idle' }
+      return { label: u.idle, tone: 'idle' }
     case 'skipped-dev':
-      return { label: 'dev 모드 (자동 업데이트 비활성)', tone: 'idle' }
+      return { label: u.skippedDev, tone: 'idle' }
     case 'checking':
-      return { label: '확인 중…', tone: 'progress' }
+      return { label: u.checking, tone: 'progress' }
     case 'available':
       return {
-        label: `새 버전 v${status.version}`,
-        sub: '백그라운드에서 다운로드 중',
+        label: u.available(status.version),
+        sub: u.availableSub,
         tone: 'progress'
       }
     case 'not-available':
-      return { label: `최신입니다 (v${status.version})`, tone: 'good' }
+      return { label: u.notAvailable(status.version), tone: 'good' }
     case 'downloading': {
       const pct = Math.max(0, Math.min(100, Math.round(status.percent)))
       const verLabel = status.version ? ` v${status.version}` : ''
       return {
-        label: `다운로드 중${verLabel} · ${pct}%`,
+        label: u.downloading(verLabel, pct),
         tone: 'progress'
       }
     }
     case 'downloaded':
       return {
-        label: `다운로드 완료 (v${status.version})`,
-        sub: currentVersion === status.version ? undefined : '다음 종료 시 자동 설치 시도',
+        label: u.downloaded(status.version),
+        sub: currentVersion === status.version ? undefined : u.downloadedSub,
         tone: 'good'
       }
     case 'error':
-      return { label: '에러', sub: status.message, tone: 'warn' }
+      return { label: u.error, sub: status.message, tone: 'warn' }
     default:
-      return { label: '—', tone: 'idle' }
+      return { label: u.none, tone: 'idle' }
   }
 }
 
@@ -340,6 +324,7 @@ function MainPage({
   updaterChecking,
   onCheckForUpdates
 }: MainPageProps): React.JSX.Element {
+  const t = useT()
   const foundCount = env?.clis.filter((c) => c.found).length ?? 0
   const totalCount = env?.clis.length ?? 0
   const basePathValue = settings?.defaultBasePath?.trim() || '~/AgentBridge'
@@ -353,14 +338,14 @@ function MainPage({
           <div className="settings-about-meta">
             <div className="settings-app-name">AgentBridge</div>
             <div className="settings-app-sub">
-              v{health?.version ?? '–'} · 멀티 AI 코딩 에이전트 컨텍스트 핸드오프
+              v{health?.version ?? '–'} · {t.settings.main.tagline}
             </div>
           </div>
           <button
             className="settings-row-control"
             onClick={() => void window.agentbridge.openExternal(GITHUB_URL)}
-            title="GitHub 저장소 열기"
-            aria-label="GitHub 저장소 열기"
+            title={t.settings.main.openRepo}
+            aria-label={t.settings.main.openRepo}
           >
             <ExternalLinkIcon />
           </button>
@@ -369,34 +354,34 @@ function MainPage({
           <div className="settings-about-rows">
             <div className="settings-row">
               <HomeIcon className="settings-row-icon" />
-              <span className="settings-row-label">버전</span>
+              <span className="settings-row-label">{t.settings.main.version}</span>
               <span className="settings-row-value">v{health.version}</span>
             </div>
             <div className="settings-row">
               <SparkleIcon className="settings-row-icon" />
-              <span className="settings-row-label">런타임</span>
+              <span className="settings-row-label">{t.settings.main.runtime}</span>
               <span className="settings-row-value">
                 Electron {health.electron} · Node {health.node}
               </span>
             </div>
             <div className="settings-row">
               <GlobeIcon className="settings-row-icon" />
-              <span className="settings-row-label">플랫폼</span>
+              <span className="settings-row-label">{t.settings.main.platform}</span>
               <span className="settings-row-value">
                 {health.platform} · {health.arch}
               </span>
             </div>
             <div className="settings-row">
               <DatabaseIcon className="settings-row-icon" />
-              <span className="settings-row-label">데이터 위치</span>
+              <span className="settings-row-label">{t.settings.main.dataLocation}</span>
               <span className="settings-row-value mono settings-path-val">
                 {health.userDataDir}
               </span>
               <button
                 className="settings-row-control"
                 onClick={() => void window.agentbridge.openPath(health.userDataDir)}
-                title="Finder에서 열기"
-                aria-label="Finder에서 열기"
+                title={t.common.openInFinder}
+                aria-label={t.common.openInFinder}
               >
                 <FolderIcon />
               </button>
@@ -407,46 +392,48 @@ function MainPage({
 
       {/* 앱 그룹 */}
       <div className="settings-group">
-        <div className="settings-group-label">앱</div>
+        <div className="settings-group-label">{t.settings.main.groupApp}</div>
         <div className="settings-card-list">
           <div className="settings-row">
             <ThemeIcon className="settings-row-icon" />
-            <span className="settings-row-label">외관</span>
+            <span className="settings-row-label">{t.settings.main.appearance}</span>
             <select
               className="settings-row-select"
               value={settings?.theme ?? 'dark'}
               disabled
               onChange={(e) => void onUpdate({ theme: e.target.value as ThemeMode })}
-              title="라이트/시스템은 정식 배포 이후 지원 예정"
+              title={t.settings.main.appearanceLocked}
             >
-              <option value="dark">{THEME_LABEL.dark}</option>
-              <option value="light">{THEME_LABEL.light} (잠금)</option>
-              <option value="system">{THEME_LABEL.system} (잠금)</option>
+              <option value="dark">{t.settings.themeLabel.dark}</option>
+              <option value="light">
+                {t.settings.themeLabel.light} ({t.settings.locked})
+              </option>
+              <option value="system">
+                {t.settings.themeLabel.system} ({t.settings.locked})
+              </option>
             </select>
           </div>
           <div className="settings-row">
             <GlobeIcon className="settings-row-icon" />
-            <span className="settings-row-label">언어</span>
+            <span className="settings-row-label">{t.settings.main.language}</span>
             <select
               className="settings-row-select"
               value={settings?.language ?? 'ko'}
-              disabled
               onChange={(e) => void onUpdate({ language: e.target.value as LanguageCode })}
-              title="영어는 정식 배포 이후 지원 예정"
             >
               <option value="ko">{LANGUAGE_LABEL.ko}</option>
-              <option value="en">{LANGUAGE_LABEL.en} (잠금)</option>
+              <option value="en">{LANGUAGE_LABEL.en}</option>
             </select>
           </div>
           <div className="settings-row">
             <FolderIcon className="settings-row-icon" />
-            <span className="settings-row-label">기본 경로</span>
+            <span className="settings-row-label">{t.settings.main.defaultPath}</span>
             <span className="settings-row-value mono settings-path-val">{basePathValue}</span>
             <button
               className="settings-row-control"
               onClick={() => void onPickBasePath()}
-              title="폴더 선택"
-              aria-label="폴더 선택"
+              title={t.common.pickFolder}
+              aria-label={t.common.pickFolder}
             >
               <FolderIcon />
             </button>
@@ -456,38 +443,56 @@ function MainPage({
 
       {/* 에이전트 그룹 */}
       <div className="settings-group">
-        <div className="settings-group-label">에이전트</div>
+        <div className="settings-group-label">{t.settings.main.groupAgent}</div>
         <div className="settings-card-list">
           <button
             className="settings-row settings-row-button"
             onClick={() => onSubPage('cli')}
-            title="감지된 CLI 목록 보기"
+            title={t.settings.main.cliDetectTitle}
           >
             <TerminalIcon className="settings-row-icon" />
-            <span className="settings-row-label">CLI 감지</span>
+            <span className="settings-row-label">{t.settings.main.cliDetect}</span>
             <span className="settings-row-value">
-              {env ? `${foundCount}/${totalCount} 감지됨` : 'probing…'}
+              {env ? t.settings.main.cliDetectedCount(foundCount, totalCount) : t.settings.main.probing}
             </span>
             <ChevronRightIcon className="settings-row-chev" />
           </button>
           <div className="settings-row">
             <SparkleIcon className="settings-row-icon" />
-            <span className="settings-row-label">요약 모델 정책</span>
+            <span className="settings-row-label">{t.settings.main.refineModelPolicy}</span>
             <span className="settings-row-value settings-row-desc">
-              {settings ? REFINE_POLICY_DESC[settings.refineModel] : ''}
+              {settings ? t.settings.refinePolicyDesc[settings.refineModel] : ''}
             </span>
             <select
               className="settings-row-select"
               value={settings?.refineModel ?? 'priority'}
               onChange={(e) => void onUpdate({ refineModel: e.target.value as RefineModelPolicy })}
-              title="요약(refine) LLM 선택"
+              title={t.settings.main.refineModelPolicyTitle}
             >
-              <option value="priority">{REFINE_POLICY_LABEL.priority}</option>
-              <option value="fixed">{REFINE_POLICY_LABEL.fixed}</option>
-              <option value="active">{REFINE_POLICY_LABEL.active}</option>
-              <option value="off">{REFINE_POLICY_LABEL.off}</option>
+              <option value="priority">{t.settings.refinePolicyLabel.priority}</option>
+              <option value="fixed">{t.settings.refinePolicyLabel.fixed}</option>
+              <option value="active">{t.settings.refinePolicyLabel.active}</option>
+              <option value="off">{t.settings.refinePolicyLabel.off}</option>
             </select>
           </div>
+          {settings && settings.refineModel !== 'off' && (
+            <div className="settings-row">
+              <SparkleIcon className="settings-row-icon" />
+              <span className="settings-row-label">{t.settings.main.useClaude}</span>
+              <span className="settings-row-value settings-row-desc">
+                {t.settings.main.useClaudeDesc}
+              </span>
+              <select
+                className="settings-row-select"
+                value={settings.refineUseClaude ? 'on' : 'off'}
+                onChange={(e) => void onUpdate({ refineUseClaude: e.target.value === 'on' })}
+                title={t.settings.main.useClaude}
+              >
+                <option value="on">{t.settings.main.useClaudeOn}</option>
+                <option value="off">{t.settings.main.useClaudeOff}</option>
+              </select>
+            </div>
+          )}
           {settings?.refineModel === 'priority' && (
             <PriorityOrderRow
               order={settings.refinePriorityOrder}
@@ -497,8 +502,10 @@ function MainPage({
           {settings?.refineModel === 'fixed' && (
             <div className="settings-row">
               <SparkleIcon className="settings-row-icon" />
-              <span className="settings-row-label">고정 CLI</span>
-              <span className="settings-row-value settings-row-desc">선택한 CLI로만 정제 시도</span>
+              <span className="settings-row-label">{t.settings.main.fixedCli}</span>
+              <span className="settings-row-value settings-row-desc">
+                {t.settings.main.fixedCliDesc}
+              </span>
               <select
                 className="settings-row-select"
                 value={settings.refineFixedCli}
@@ -517,28 +524,28 @@ function MainPage({
 
       {/* 데이터 그룹 */}
       <div className="settings-group">
-        <div className="settings-group-label">데이터</div>
+        <div className="settings-group-label">{t.settings.main.groupData}</div>
         <div className="settings-card-list">
           <div className="settings-row">
             <DatabaseIcon className="settings-row-icon" />
-            <span className="settings-row-label">데이터 관리</span>
+            <span className="settings-row-label">{t.settings.main.dataManage}</span>
             <span className="settings-row-value mono settings-path-val">
               {health?.userDataDir ?? '–'}
             </span>
             <button
               className="settings-row-control"
               onClick={() => health && void window.agentbridge.openPath(health.userDataDir)}
-              title="Finder에서 열기"
-              aria-label="Finder에서 열기"
+              title={t.common.openInFinder}
+              aria-label={t.common.openInFinder}
             >
               <FolderIcon />
             </button>
           </div>
           <div className="settings-row">
             <DatabaseIcon className="settings-row-icon" />
-            <span className="settings-row-label">응답 보존 정도</span>
+            <span className="settings-row-label">{t.settings.main.turnsDetail}</span>
             <span className="settings-row-value settings-row-desc">
-              {settings ? TURNS_DETAIL_DESC[settings.turnsAssistantDetail] : ''}
+              {settings ? t.settings.turnsDetailDesc[settings.turnsAssistantDetail] : ''}
             </span>
             <select
               className="settings-row-select"
@@ -546,18 +553,18 @@ function MainPage({
               onChange={(e) =>
                 void onUpdate({ turnsAssistantDetail: e.target.value as TurnsAssistantDetail })
               }
-              title="turns.jsonl에 저장되는 응답 길이"
+              title={t.settings.main.turnsDetailTitle}
             >
-              <option value="full">{TURNS_DETAIL_LABEL.full}</option>
-              <option value="compact">{TURNS_DETAIL_LABEL.compact}</option>
-              <option value="minimal">{TURNS_DETAIL_LABEL.minimal}</option>
+              <option value="full">{t.settings.turnsDetailLabel.full}</option>
+              <option value="compact">{t.settings.turnsDetailLabel.compact}</option>
+              <option value="minimal">{t.settings.turnsDetailLabel.minimal}</option>
             </select>
           </div>
           <div className="settings-row">
             <DatabaseIcon className="settings-row-icon" />
-            <span className="settings-row-label">보관 스냅샷 개수</span>
+            <span className="settings-row-label">{t.settings.main.archiveCount}</span>
             <span className="settings-row-value settings-row-desc">
-              과거 IR 스냅샷 누적 상한 (초과분 자동 삭제)
+              {t.settings.main.archiveCountDesc}
             </span>
             <input
               type="number"
@@ -572,7 +579,7 @@ function MainPage({
                   void onUpdate({ maxArchiveSnapshots: n })
                 }
               }}
-              title="archive/ 디렉토리에 보관할 compressed_*.jsonl 최대 개수"
+              title={t.settings.main.archiveCountTitle}
             />
           </div>
         </div>
@@ -580,10 +587,10 @@ function MainPage({
 
       {/* 정보 그룹 */}
       <div className="settings-group">
-        <div className="settings-group-label">정보</div>
+        <div className="settings-group-label">{t.settings.main.groupInfo}</div>
         <div className="settings-card-list">
           {(() => {
-            const desc = describeUpdaterStatus(updaterStatus, health?.version)
+            const desc = describeUpdaterStatus(updaterStatus, health?.version, t)
             const disabled =
               updaterChecking ||
               updaterStatus.phase === 'checking' ||
@@ -596,12 +603,12 @@ function MainPage({
                 disabled={disabled}
                 title={
                   updaterStatus.phase === 'skipped-dev'
-                    ? 'dev 모드에선 자동 업데이트 비활성'
-                    : '지금 새 버전 확인'
+                    ? t.settings.main.checkUpdateDevTitle
+                    : t.settings.main.checkUpdateTitle
                 }
               >
                 <ArrowUpIcon className="settings-row-icon" />
-                <span className="settings-row-label">업데이트 확인</span>
+                <span className="settings-row-label">{t.settings.main.checkUpdate}</span>
                 <span className="settings-row-value settings-updater-value">
                   <span className="settings-updater-label">{desc.label}</span>
                   {desc.sub && <span className="settings-updater-sub">{desc.sub}</span>}
@@ -613,10 +620,10 @@ function MainPage({
           <button
             className="settings-row settings-row-button"
             onClick={() => void window.agentbridge.openExternal(`${GITHUB_URL}/releases`)}
-            title="GitHub Releases 페이지를 새 창으로 열기"
+            title={t.settings.main.releaseNotesTitle}
           >
             <ExternalLinkIcon className="settings-row-icon" />
-            <span className="settings-row-label">릴리즈 노트 보기</span>
+            <span className="settings-row-label">{t.settings.main.releaseNotes}</span>
             <span className="settings-row-value">v{health?.version ?? '–'}</span>
             <ChevronRightIcon className="settings-row-chev" />
           </button>
@@ -625,17 +632,17 @@ function MainPage({
             onClick={() => onSubPage('shortcuts')}
           >
             <KeyboardIcon className="settings-row-icon" />
-            <span className="settings-row-label">단축키</span>
+            <span className="settings-row-label">{t.settings.main.shortcuts}</span>
             <ChevronRightIcon className="settings-row-chev" />
           </button>
           <button className="settings-row settings-row-button" onClick={() => onSubPage('help')}>
             <HelpIcon className="settings-row-icon" />
-            <span className="settings-row-label">사용 설명서 · 주의사항</span>
+            <span className="settings-row-label">{t.settings.main.helpAndCautions}</span>
             <ChevronRightIcon className="settings-row-chev" />
           </button>
           <button className="settings-row settings-row-button" onClick={() => onSubPage('license')}>
             <InfoIcon className="settings-row-icon" />
-            <span className="settings-row-label">라이선스</span>
+            <span className="settings-row-label">{t.settings.main.license}</span>
             <span className="settings-row-value">MIT</span>
             <ChevronRightIcon className="settings-row-chev" />
           </button>
@@ -648,13 +655,12 @@ function MainPage({
 // ─── Sub pages ────────────────────────────────────────────────────
 
 function CliPage({ env }: { env: EnvProbeResult | null }): React.JSX.Element {
+  const t = useT()
   return (
     <div className="settings-pages">
-      <p className="hint settings-page-intro">
-        AgentBridge가 사용하는 CLI 도구의 PATH 등록 상태. 설치 후 앱을 새로고침하면 자동 감지됩니다.
-      </p>
+      <p className="hint settings-page-intro">{t.settings.cliPage.intro}</p>
       <div className="settings-group">
-        <div className="settings-group-label">감지된 CLI</div>
+        <div className="settings-group-label">{t.settings.cliPage.detectedGroup}</div>
         <div className="settings-card-list">
           {env?.clis.map((c) => (
             <div className="settings-row" key={c.kind}>
@@ -664,17 +670,19 @@ function CliPage({ env }: { env: EnvProbeResult | null }): React.JSX.Element {
                 <>
                   <span className="settings-row-value mono settings-path-val">{c.path ?? ''}</span>
                   <span className="settings-row-value settings-row-version">
-                    {c.version ?? c.error ?? '(version 미수집)'}
+                    {c.version ?? c.error ?? t.settings.cliPage.versionUnknown}
                   </span>
                 </>
               ) : (
-                <span className="settings-row-value settings-row-missing">PATH에 없음</span>
+                <span className="settings-row-value settings-row-missing">
+                  {t.settings.cliPage.notInPath}
+                </span>
               )}
             </div>
           ))}
           {!env && (
             <div className="settings-row">
-              <span className="hint">probing…</span>
+              <span className="hint">{t.settings.main.probing}</span>
             </div>
           )}
         </div>
@@ -684,10 +692,10 @@ function CliPage({ env }: { env: EnvProbeResult | null }): React.JSX.Element {
           <button
             className="settings-row settings-row-button"
             onClick={() => window.location.reload()}
-            title="앱을 새로고침해서 PATH의 CLI를 다시 감지"
+            title={t.settings.cliPage.redetectTitle}
           >
             <SparkleIcon className="settings-row-icon" />
-            <span className="settings-row-label">재감지 (앱 새로고침)</span>
+            <span className="settings-row-label">{t.settings.cliPage.redetect}</span>
             <ChevronRightIcon className="settings-row-chev" />
           </button>
         </div>
@@ -697,65 +705,66 @@ function CliPage({ env }: { env: EnvProbeResult | null }): React.JSX.Element {
 }
 
 function ShortcutsPage(): React.JSX.Element {
+  const t = useT()
   return (
     <div className="settings-pages">
       <div className="settings-group">
-        <div className="settings-group-label">윈도우</div>
+        <div className="settings-group-label">{t.settings.shortcuts.groupWindow}</div>
         <div className="settings-card-list">
           <div className="settings-row">
-            <span className="settings-row-label">새 빈 윈도우</span>
+            <span className="settings-row-label">{t.settings.shortcuts.newWindow}</span>
             <span className="settings-row-value mono">⌘ N</span>
           </div>
           <div className="settings-row">
-            <span className="settings-row-label">앱 종료</span>
+            <span className="settings-row-label">{t.settings.shortcuts.quit}</span>
             <span className="settings-row-value mono">⌘ Q</span>
           </div>
         </div>
       </div>
       <div className="settings-group">
-        <div className="settings-group-label">사이드바</div>
+        <div className="settings-group-label">{t.settings.shortcuts.groupSidebar}</div>
         <div className="settings-card-list">
           <div className="settings-row">
-            <span className="settings-row-label">좌 사이드바 토글</span>
+            <span className="settings-row-label">{t.settings.shortcuts.toggleLeft}</span>
             <span className="settings-row-value mono">⌘ B</span>
           </div>
           <div className="settings-row">
-            <span className="settings-row-label">우 사이드바 토글</span>
+            <span className="settings-row-label">{t.settings.shortcuts.toggleRight}</span>
             <span className="settings-row-value mono">⌘ ⌥ B</span>
           </div>
         </div>
       </div>
       <div className="settings-group">
-        <div className="settings-group-label">홈 화면</div>
+        <div className="settings-group-label">{t.settings.shortcuts.groupHome}</div>
         <div className="settings-card-list">
           <div className="settings-row">
-            <span className="settings-row-label">메시지 전송</span>
+            <span className="settings-row-label">{t.settings.shortcuts.send}</span>
             <span className="settings-row-value mono">Enter</span>
           </div>
           <div className="settings-row">
-            <span className="settings-row-label">줄바꿈</span>
+            <span className="settings-row-label">{t.settings.shortcuts.newline}</span>
             <span className="settings-row-value mono">⇧ Enter</span>
           </div>
         </div>
       </div>
       <div className="settings-group">
-        <div className="settings-group-label">터미널 (xterm)</div>
+        <div className="settings-group-label">{t.settings.shortcuts.groupTerminal}</div>
         <div className="settings-card-list">
           <div className="settings-row">
-            <span className="settings-row-label">줄바꿈 (입력 박스 내부)</span>
+            <span className="settings-row-label">{t.settings.shortcuts.newlineInput}</span>
             <span className="settings-row-value mono">⇧ Enter</span>
           </div>
           <div className="settings-row">
-            <span className="settings-row-label">현재 응답 중단</span>
+            <span className="settings-row-label">{t.settings.shortcuts.interrupt}</span>
             <span className="settings-row-value mono">Ctrl C</span>
           </div>
         </div>
       </div>
       <div className="settings-group">
-        <div className="settings-group-label">모달</div>
+        <div className="settings-group-label">{t.settings.shortcuts.groupModal}</div>
         <div className="settings-card-list">
           <div className="settings-row">
-            <span className="settings-row-label">설정 닫기 · 뒤로</span>
+            <span className="settings-row-label">{t.settings.shortcuts.closeBack}</span>
             <span className="settings-row-value mono">Esc</span>
           </div>
         </div>
@@ -764,7 +773,14 @@ function ShortcutsPage(): React.JSX.Element {
   )
 }
 
+// 사용 설명서는 <code>/<strong> 섞인 리치 마크업이라 문자열 테이블에 못 담는다 →
+// 언어별 JSX로 분기(useLang). 나머지 화면은 useT() 문자열 테이블로 충분.
 function HelpPage(): React.JSX.Element {
+  const lang = useLang()
+  return lang === 'en' ? <HelpPageEn /> : <HelpPageKo />
+}
+
+function HelpPageKo(): React.JSX.Element {
   return (
     <div className="settings-pages">
       <div className="settings-group">
@@ -872,6 +888,117 @@ function HelpPage(): React.JSX.Element {
   )
 }
 
+function HelpPageEn(): React.JSX.Element {
+  return (
+    <div className="settings-pages">
+      <div className="settings-group">
+        <div className="settings-group-label">Basics</div>
+        <div className="settings-card-list settings-card-list-pad">
+          <ul className="settings-help-list">
+            <li>
+              Type a message and pick a model on the home screen — a workspace is created
+              automatically and the model starts.
+            </li>
+            <li>
+              Inside a workspace, add another model tab with the <code>+ Model</code> button at the
+              top. Switching tabs = switching models, and the IR follows automatically.
+            </li>
+            <li>
+              In the memory panel on the right sidebar you can view the current IR and past
+              snapshots, and manually refine / reset memory / delete individual IR cards.
+            </li>
+            <li>
+              From the left sidebar you can enter another workspace, or right-click for actions like
+              open in new window / rename / delete.
+            </li>
+          </ul>
+        </div>
+      </div>
+
+      <div className="settings-group">
+        <div className="settings-group-label">Key features</div>
+        <div className="settings-card-list settings-card-list-pad">
+          <ul className="settings-help-list">
+            <li>
+              <strong>Drag &amp; drop attach</strong> — drop files onto the xterm area and their
+              absolute paths are auto-pasted into the model input. Bracketed paste blocks
+              auto-submit, so nothing is sent until you press Enter yourself. Up to 20 files at once.
+            </li>
+            <li>
+              <strong>Multi-window</strong> — open a workspace in its own window.{' '}
+              <code>⌘ N</code> opens a new empty window, or pick &quot;Open in new window&quot; from
+              the left sidebar&apos;s right-click menu. One workspace = one window, so duplicate
+              opens are blocked.
+            </li>
+            <li>
+              <strong>Built-in terminal session</strong> — open a plain zsh terminal tab without
+              spawning a model. Handy for checking the CLI environment or odd jobs.
+            </li>
+            <li>
+              <strong>Antigravity quota auto-fallback</strong> — the agy CLI footer&apos;s usage
+              display (<code>X% used</code>) is auto-detected, and at 95%+ it falls back to the
+              active model. Released automatically at UTC midnight.
+            </li>
+          </ul>
+        </div>
+      </div>
+
+      <div className="settings-group">
+        <div className="settings-group-label">Cautions</div>
+        <div className="settings-card-list settings-card-list-pad">
+          <ul className="settings-help-list">
+            <li>
+              Each CLI (claude / codex / agy (Antigravity)) must be installed and on PATH
+              beforehand. Check detection on the &quot;CLI detection&quot; page.
+            </li>
+            <li>
+              Three files are added to the workspace folder via marker-block merge —{' '}
+              <code>.codex/hooks.json</code>, <code>.codex/config.toml</code>,{' '}
+              <code>.agents/hooks.json</code>. Content outside the marker block is left untouched.
+              claude creates no files in the workspace folder.
+            </li>
+            <li>
+              codex&apos;s hook system requires manual approval via the <code>/hooks</code> slash
+              command on first run. Until approved, IR injection does not work and a notice banner is
+              shown at the top.
+            </li>
+            <li>
+              Even if you clear the model context with <code>/clear</code> in the terminal,
+              AgentBridge re-injects the IR on every message. To clear the memory itself, use the
+              reset button in the memory panel.
+            </li>
+            <li>
+              Antigravity&apos;s free quota is measured accurately only from the interactive session
+              footer. Near the limit it auto-falls back to the active model and is released
+              automatically at UTC midnight.
+            </li>
+            <li>
+              Main-model messages are sent only through each CLI you authenticated, to the backend
+              that CLI natively talks to (Anthropic / OpenAI / Google). IR refinement is sent only
+              through authenticated Antigravity. Nothing is sent to any external service outside
+              these two paths.
+            </li>
+          </ul>
+        </div>
+      </div>
+
+      <div className="settings-group">
+        <div className="settings-group-label">Feedback</div>
+        <div className="settings-card-list">
+          <button
+            className="settings-row settings-row-button"
+            onClick={() => void window.agentbridge.openExternal(`${GITHUB_URL}/issues`)}
+          >
+            <ExternalLinkIcon className="settings-row-icon" />
+            <span className="settings-row-label">Open GitHub Issues</span>
+            <ChevronRightIcon className="settings-row-chev" />
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // LICENSE 본문은 루트의 LICENSE 파일과 동기 유지. MIT 본문은 사실상 변하지 않으므로
 // build-time embed보다 source 내 string 상수로 둔다(vite root 밖 raw import 회피).
 const LICENSE_TEXT = `MIT License
@@ -897,12 +1024,10 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.`
 
 function LicensePage(): React.JSX.Element {
+  const t = useT()
   return (
     <div className="settings-pages">
-      <p className="hint settings-page-intro">
-        AgentBridge는 MIT 라이선스 하에 배포됩니다. 소프트웨어 자유로운 사용 · 수정 · 재배포가
-        가능하며, 원본 저작권 표기는 유지되어야 합니다.
-      </p>
+      <p className="hint settings-page-intro">{t.settings.licensePage.intro}</p>
       <div className="settings-group">
         <div className="settings-card-list">
           <pre className="settings-license-text">{LICENSE_TEXT}</pre>
@@ -915,7 +1040,7 @@ function LicensePage(): React.JSX.Element {
             onClick={() => void window.agentbridge.openExternal(`${GITHUB_URL}/blob/main/LICENSE`)}
           >
             <ExternalLinkIcon className="settings-row-icon" />
-            <span className="settings-row-label">저장소에서 LICENSE 파일 보기</span>
+            <span className="settings-row-label">{t.settings.licensePage.viewInRepo}</span>
             <ChevronRightIcon className="settings-row-chev" />
           </button>
         </div>

@@ -4,6 +4,18 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 <p align="center"><a href="CHANGELOG.ko.md">한국어</a></p>
 
+## [0.3.0] — 2026-06-11
+
+### Added
+
+- English UI — the desktop app's interface is now fully available in English, with a Korean/English toggle in Settings (Language).
+- Toggle Claude for background refinement — a new setting controls whether memory refinement may use Claude. Claude's headless refine (`claude -p`) consumes separate API credits rather than your subscription, so turn it off to keep refinement on the other CLIs (or skip it) and avoid unexpected charges. On by default (unchanged behavior); interactive Claude sessions are unaffected.
+
+### Fixed
+
+- Codex and Antigravity sessions resume reliably even after a delay — if you opened a session and didn't send your first message for a while, the session could later fail to resume (a brand-new session opened instead) and that first input could be lost. The session is now tracked for as long as the chat is open, so it resumes correctly no matter when you send the first message.
+- Usage (quota) for Antigravity and Codex is reported again — the background usage check couldn't read Antigravity's or Codex's remaining quota, so it showed nothing. Antigravity was getting stuck on a first-run setup screen in its isolated environment, and Codex's status panel loads its limits asynchronously (the first read just said "refresh requested"). Both are handled now, so remaining usage is shown for all three CLIs.
+
 ## [0.2.1] — 2026-06-11
 
 ### Changed

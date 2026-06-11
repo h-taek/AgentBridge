@@ -1,7 +1,7 @@
 {
   "name": "agentbridge",
   "productName": "AgentBridge",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "멀티 AI 코딩 에이전트 환경에서 context handoff 문제를 해결하는 macOS 데스크탑 앱",
   "main": "./out/main/index.js",
   "author": "h-taek",
