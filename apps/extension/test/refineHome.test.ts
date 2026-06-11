@@ -37,6 +37,36 @@ describe('refineHome', () => {
     }
   });
 
+  it('agy: 박스에 cache/onboarding.json 완료 마커를 써넣어 온보딩을 스킵시킨다 (실 홈 의존 없음)', async () => {
+    const rootDir = await fs.mkdtemp(join(tmpdir(), 'abtest-'));
+    try {
+      ensureRefineHome('agy', { rootDir, realHome: '/fake/home' }); // 실 홈 없어도 마커는 써짐
+      const dest = join(rootDir, 'agy', '.gemini/antigravity-cli/cache/onboarding.json');
+      const st = await fs.lstat(dest);
+      assert.ok(st.isFile() && !st.isSymbolicLink(), '심링크가 아니라 실제 파일이어야');
+      const parsed = JSON.parse(await fs.readFile(dest, 'utf8')) as { onboardingComplete?: boolean };
+      assert.equal(parsed.onboardingComplete, true, 'onboardingComplete=true 마커여야');
+    } finally {
+      await fs.rm(rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it('agy: 버전 동일 재사용 시 기존 onboarding.json을 덮어쓰지 않는다', async () => {
+    const rootDir = await fs.mkdtemp(join(tmpdir(), 'abtest-'));
+    try {
+      const bin = join(rootDir, 'bin');
+      await fs.writeFile(bin, 'v1');
+      ensureRefineHome('agy', { rootDir, realHome: '/fake/home', binPath: bin });
+      const dest = join(rootDir, 'agy', '.gemini/antigravity-cli/cache/onboarding.json');
+      await fs.writeFile(dest, '{"onboardingComplete":true,"_mark":"keep"}'); // agy가 갱신한 상태 모사
+      ensureRefineHome('agy', { rootDir, realHome: '/fake/home', binPath: bin }); // 같은 버전 → 재사용
+      const after = JSON.parse(await fs.readFile(dest, 'utf8')) as { _mark?: string };
+      assert.equal(after._mark, 'keep', '같은 버전이면 기존 마커 보존(덮어쓰기 X)');
+    } finally {
+      await fs.rm(rootDir, { recursive: true, force: true });
+    }
+  });
+
   it('codex: CODEX_HOME env + auth.json 심링크 + 플러그인 없는 최소 config', async () => {
     const rootDir = await fs.mkdtemp(join(tmpdir(), 'abtest-'));
     try {

@@ -150,8 +150,9 @@ export function looksLikeQuotaError(
 
 // ─── Background quota probe — per CLI ───────────────────────────────────
 
-// CLI별 step delay 누적이 PROBE_TIMEOUT_MS 안에 들어가야 함.
-const PROBE_TIMEOUT_MS = 40_000
+// CLI별 step maxWait 누적 + responseMax(+ codex 재전송 여유)가 PROBE_TIMEOUT_MS 안에 들어가야 함
+// (idle 게이트라 보통은 훨씬 빨리 끝남 — 이건 화면이 끝내 안 떴을 때의 상한).
+const PROBE_TIMEOUT_MS = 80_000
 const ANSI_STRIP_RE = new RegExp(
   '\\u001b\\[[0-?]*[ -/]*[@-~]' +
     '|\\u001b\\][\\s\\S]*?(?:\\u0007|\\u001b\\\\)' +
@@ -222,15 +223,18 @@ export async function probeQuotaIfStale(cli: CliKind, maxAgeMs: number): Promise
   return p
 }
 
-// 입력 step — spawn 후 *순차적으로* PTY stdin에 쓰는 작업. delayBeforeMs만큼 *대기 후* 입력.
-// 마지막 step 이후 finalDelayMs 대기 후 응답 파싱.
+// 입력 step — spawn 후 *순차적으로* PTY stdin에 쓰는 작업.
+// 고정 시계 대신 idle 게이트: PTY 출력이 minIdleMs 동안 잠잠하면(= TUI가 이 단계 화면을 다 그림)
+// 입력을 보낸다. maxWaitMs는 그 신호가 끝내 안 와도 보내는 상한(폴백).
 type InputStep = {
-  // 이 step 입력 전 대기 시간 (이전 step 종료 시점부터).
-  delayBeforeMs: number
   // PTY stdin에 쓸 raw 바이트 (예: '\r' = Enter, '/usage' = 텍스트).
   write: string
   // 진단용 라벨 (로그에 표시).
   label: string
+  // 출력이 이만큼 잠잠하면 입력 전송 (TUI 렌더 완료 신호).
+  minIdleMs: number
+  // idle 신호가 안 와도 이 시간이 지나면 전송 (상한 폴백).
+  maxWaitMs: number
 }
 
 // CLI별 probe 사양 (spawn args / 입력 시퀀스 / cleanup).
@@ -241,8 +245,9 @@ type ProbeSpec = {
   argsFor(opts: { cwd: string; sessionId: string }): string[]
   // 순차 입력 step 리스트. trust 확인 + 슬래시 명령 + Enter 분할 등.
   steps: InputStep[]
-  // 마지막 step 후 응답 누적 대기.
-  responseDelayMs: number
+  // 마지막 step(슬래시 submit) 후 응답 누적 대기 — 잠잠해지거나(responseIdleMs) 상한(responseMaxMs)에서 파싱.
+  responseIdleMs: number
+  responseMaxMs: number
   // (비격리 전용) spawn 완료 후 modelSessionId 캡처. null이면 캡처 실패 — cleanup은 cwd rm만.
   captureModelSessionId?(opts: {
     cwd: string
@@ -266,11 +271,12 @@ function makeSpec(cli: CliKind): ProbeSpec {
       return {
         argsFor: (): string[] => ['--dangerously-skip-permissions'],
         steps: [
-          { delayBeforeMs: 4_000, write: '\r', label: 'trust confirm' },
-          { delayBeforeMs: 3_000, write: '/usage', label: 'slash text' },
-          { delayBeforeMs: 250, write: '\r', label: 'slash submit' }
+          { write: '\r', label: 'trust confirm', minIdleMs: 800, maxWaitMs: 8_000 },
+          { write: '/usage', label: 'slash text', minIdleMs: 800, maxWaitMs: 8_000 },
+          { write: '\r', label: 'slash submit', minIdleMs: 300, maxWaitMs: 2_000 }
         ],
-        responseDelayMs: 6_000
+        responseIdleMs: 1_500,
+        responseMaxMs: 8_000
       }
     case 'codex': {
       // codex 부팅 흐름:
@@ -283,11 +289,13 @@ function makeSpec(cli: CliKind): ProbeSpec {
       return {
         argsFor: (): string[] => [],
         steps: [
-          { delayBeforeMs: 3_000, write: '\r', label: 'trust confirm' },
-          { delayBeforeMs: 8_000, write: '/status', label: 'slash text' },
-          { delayBeforeMs: 250, write: '\r', label: 'slash submit' }
+          { write: '\r', label: 'trust confirm', minIdleMs: 800, maxWaitMs: 6_000 },
+          // MCP 부팅이 끝나 컴포저가 떠 잠잠해질 때까지 대기 — 부팅 애니메이션이 도는 동안은 idle 안 됨.
+          { write: '/status', label: 'slash text', minIdleMs: 1_200, maxWaitMs: 30_000 },
+          { write: '\r', label: 'slash submit', minIdleMs: 300, maxWaitMs: 2_000 }
         ],
-        responseDelayMs: 6_000
+        responseIdleMs: 1_500,
+        responseMaxMs: 10_000
       }
     }
     case 'claude':
@@ -303,11 +311,12 @@ function makeSpec(cli: CliKind): ProbeSpec {
       return {
         argsFor: ({ sessionId }): string[] => ['--session-id', sessionId],
         steps: [
-          { delayBeforeMs: 4_000, write: '\r', label: 'trust confirm' },
-          { delayBeforeMs: 4_000, write: '/usage', label: 'slash text' },
-          { delayBeforeMs: 500, write: '\r', label: 'slash submit' }
+          { write: '\r', label: 'trust confirm', minIdleMs: 800, maxWaitMs: 6_000 },
+          { write: '/usage', label: 'slash text', minIdleMs: 800, maxWaitMs: 8_000 },
+          { write: '\r', label: 'slash submit', minIdleMs: 400, maxWaitMs: 2_000 }
         ],
-        responseDelayMs: 10_000,
+        responseIdleMs: 1_500,
+        responseMaxMs: 12_000,
         captureModelSessionId: async ({ preSpawnSessionId }) => preSpawnSessionId,
         cleanupNativeSession: async (uuid) => {
           if (!uuid) return
@@ -404,15 +413,16 @@ export async function probeQuotaInBackground(cli: CliKind): Promise<ProbeResult>
   return new Promise<ProbeResult>((resolve) => {
     let resolved = false
     let allOutput = ''
+    let lastDataAt = Date.now()
     const OUTPUT_MAX = 50_000
     let ptySessionId: string | null = null
-    const stepTimers: ReturnType<typeof setTimeout>[] = []
+    let driveTimer: ReturnType<typeof setInterval> | null = null
     let hardTimer: ReturnType<typeof setTimeout> | null = null
     const captureCtrl = new AbortController()
     let capturePromise: Promise<string | null> | null = null
 
     const cleanup = async (): Promise<void> => {
-      for (const t of stepTimers) clearTimeout(t)
+      if (driveTimer) clearInterval(driveTimer)
       if (hardTimer) clearTimeout(hardTimer)
       captureCtrl.abort()
       if (ptySessionId) {
@@ -490,6 +500,7 @@ export async function probeQuotaInBackground(cli: CliKind): Promise<ProbeResult>
         {
           onData: (data): void => {
             if (resolved) return
+            lastDataAt = Date.now()
             allOutput += data
             if (allOutput.length > OUTPUT_MAX) {
               allOutput = allOutput.slice(-OUTPUT_MAX)
@@ -503,45 +514,84 @@ export async function probeQuotaInBackground(cli: CliKind): Promise<ProbeResult>
       )
       ptySessionId = sessionId
 
-      // 누적 delay로 step + 응답 파싱 timer 스케줄링. 모든 timer는 stepTimers에 저장돼
-      // cleanup 시 일괄 clear (finalize 후 stray fire 방지).
-      let elapsed = 0
-      const t0 = Date.now()
-      for (const step of spec.steps) {
-        elapsed += step.delayBeforeMs
-        const scheduledAt = elapsed
-        stepTimers.push(
-          setTimeout(() => {
-            if (resolved) return
+      // idle 게이트 드라이버: 고정 시계 대신 "PTY 출력이 minIdleMs 동안 잠잠하면(= TUI가 그 단계
+      // 화면을 다 그림) 다음 입력 전송". maxWaitMs는 신호가 끝내 안 와도 보내는 상한. codex MCP
+      // 부팅 지연·agy 온보딩 등 가변 타이밍에 강건. 모든 step 후 응답이 잠잠해지면 파싱.
+      let stepIdx = 0
+      let stepStartedAt = Date.now()
+      // codex: 첫 /status는 'refresh requested'(rate-limit 비동기 로드 중)라 정적 스냅샷이 자동 갱신 안 됨.
+      // limit이 채워지면 /status를 다시 쳐야 새 화면이 그려진다 → miss 시 재전송(최대 2회).
+      let codexRetriesLeft = cli === 'codex' ? 2 : 0
+      let resendPendingAt: number | null = null // /status 텍스트 후 CR 보낼 시각(250ms 뒤)
+      driveTimer = setInterval(() => {
+        if (resolved) return
+        const now = Date.now()
+        const idleFor = now - lastDataAt
+        const waited = now - stepStartedAt
+        const hasOutput = allOutput.length > 0
+
+        // 재전송 /status의 CR(텍스트 보낸 뒤 250ms) — 다른 로직보다 먼저 처리.
+        if (resendPendingAt !== null) {
+          if (now >= resendPendingAt) {
             try {
-              depsCache!.writePty(sessionId, step.write)
-              log.info(`quota probe — ${cli} step`, {
-                label: step.label,
-                write: step.write === '\r' ? '<CR>' : step.write,
-                scheduledAt,
-                actualMs: Date.now() - t0
-              })
-            } catch (err) {
-              void finalize(false, `step '${step.label}' failed: ${String(err)}`, null)
+              depsCache!.writePty(sessionId, '\r')
+            } catch {
+              /* noop */
             }
-          }, scheduledAt)
-        )
-      }
-      elapsed += spec.responseDelayMs
-      stepTimers.push(
-        setTimeout(() => {
-          if (resolved) return
-          const stripped = allOutput.replace(ANSI_STRIP_RE, '')
-          const pct = extractQuotaPercent(cli, stripped)
-          // 정규식 실패 시에만 디버깅용 preview 동봉.
-          log.info(`quota probe — ${cli} 응답 파싱`, {
-            outputLen: stripped.length,
-            usedPercent: pct,
-            tailPreview: pct == null ? stripped.slice(-2048) : undefined
-          })
-          void finalize(pct != null, pct != null ? undefined : 'no quota in output', pct)
-        }, elapsed)
-      )
+            resendPendingAt = null
+            stepStartedAt = now // 응답 타이머 리셋
+          }
+          return
+        }
+
+        if (stepIdx < spec.steps.length) {
+          const step = spec.steps[stepIdx]
+          const idleReady = hasOutput && idleFor >= step.minIdleMs
+          if (!idleReady && waited < step.maxWaitMs) return // 아직 화면 그리는 중
+          try {
+            depsCache!.writePty(sessionId, step.write)
+            log.info(`quota probe — ${cli} step`, {
+              label: step.label,
+              write: step.write === '\r' ? '<CR>' : step.write,
+              gate: idleReady ? 'idle' : 'maxWait',
+              idleForMs: idleFor,
+              waitedMs: waited
+            })
+          } catch (err) {
+            void finalize(false, `step '${step.label}' failed: ${String(err)}`, null)
+            return
+          }
+          stepIdx++
+          stepStartedAt = now
+          return
+        }
+
+        // 모든 step 전송 완료 → 응답이 잠잠해지거나(responseIdleMs) 상한(responseMaxMs)에서 파싱.
+        const responseReady = (hasOutput && idleFor >= spec.responseIdleMs) || waited >= spec.responseMaxMs
+        if (!responseReady) return
+        const stripped = allOutput.replace(ANSI_STRIP_RE, '')
+        const pct = extractQuotaPercent(cli, stripped)
+        // codex: limit 미로드('refresh requested')면 /status 재전송 후 재대기 (정적 스냅샷이라 다시 쳐야 채워짐).
+        if (pct == null && codexRetriesLeft > 0 && /refresh requested/i.test(stripped)) {
+          codexRetriesLeft--
+          log.info(`quota probe — codex /status 재전송 (refresh requested, ${codexRetriesLeft} left)`)
+          try {
+            depsCache!.writePty(sessionId, '/status')
+          } catch (err) {
+            void finalize(false, `codex retry write failed: ${String(err)}`, null)
+            return
+          }
+          resendPendingAt = now + 250 // 250ms 뒤 CR → 응답 타이머 리셋
+          return
+        }
+        // 정규식 실패 시에만 디버깅용 preview 동봉.
+        log.info(`quota probe — ${cli} 응답 파싱`, {
+          outputLen: stripped.length,
+          usedPercent: pct,
+          tailPreview: pct == null ? stripped.slice(-2048) : undefined
+        })
+        void finalize(pct != null, pct != null ? undefined : 'no quota in output', pct)
+      }, 150)
     } catch (err) {
       log.warn(`quota probe — ${cli} spawn 실패`, { err: String(err) })
       void finalize(false, `spawn failed: ${String(err)}`, null)
