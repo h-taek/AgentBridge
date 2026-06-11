@@ -4,6 +4,16 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 <p align="center"><a href="CHANGELOG.ko.md">한국어</a></p>
 
+## [Unreleased]
+
+### Added
+
+- English UI — the extension's interface is now available in English and follows the IDE's display language (English or Korean).
+
+### Fixed
+
+- Codex and Antigravity sessions resume reliably even after a delay — if you opened a session and didn't send your first message for a while, the session could later fail to resume (a brand-new session opened instead) and that first input could be lost. The session is now tracked for as long as the chat is open, so it resumes correctly no matter when you send the first message.
+
 ## [0.2.1] — 2026-06-11
 
 ### Changed

@@ -2,6 +2,16 @@
 
 이 프로젝트는 [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/) 1.1.0 형식을 따르며 [Semantic Versioning](https://semver.org/spec/v2.0.0.html)을 사용한다.
 
+## [Unreleased]
+
+### Added
+
+- 영어 UI — 익스텐션 인터페이스가 영어로도 제공되며, IDE 표시 언어(영어/한국어)를 따라간다.
+
+### Fixed
+
+- codex·agy 세션이 첫 입력이 늦어도 안정적으로 재개 — 세션을 열어두고 한참 뒤에 첫 메시지를 보내면, 이어가던 세션이 재개되지 않고 새 세션이 열리거나 그 입력이 누락되던 문제를 수정했다. 이제 채팅이 열려 있는 한 첫 메시지를 언제 보내든 세션이 제대로 이어진다.
+
 ## [0.2.1] — 2026-06-11
 
 ### Changed
