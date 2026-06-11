@@ -16,12 +16,14 @@ import { RightSidebar } from './components/RightSidebar'
 import { SessionTabs } from './components/SessionTabs'
 import { SettingsModal } from './components/SettingsModal'
 import { XtermView } from './components/XtermView'
+import { useT } from './i18n'
 
 // AppShell — 좌 사이드바(workspace 트리) + 중앙(SessionTabs + xterm stack) + 우 사이드바(메모리).
 // 설정은 좌 사이드바 하단 톱니바퀴에서 모달로 열림.
 // state/handler는 기존 그대로 유지하고 JSX 구성만 갱신.
 
 function App(): React.JSX.Element {
+  const t = useT()
   const [health, setHealth] = useState<AppHealth | null>(null)
   const [env, setEnv] = useState<EnvProbeResult | null>(null)
   const [workspaces, setWorkspaces] = useState<WorkspaceListEntry[]>([])
@@ -398,9 +400,7 @@ function App(): React.JSX.Element {
           }
         }
         if (orphanIds.length > 0) {
-          setWorkspacesErr(
-            `빈 세션 ${orphanIds.length}개가 강제 종료로 native 영속화되지 않아 자동 정리되었습니다.`
-          )
+          setWorkspacesErr(t.app.orphanCleaned(orphanIds.length))
         }
         void reloadWorkspaces()
       } catch (e) {
@@ -409,7 +409,7 @@ function App(): React.JSX.Element {
         setBusy(false)
       }
     },
-    [busy, openWorkspaceId, closeAllAttachments, reloadWorkspaces, applyHookStatus]
+    [busy, openWorkspaceId, closeAllAttachments, reloadWorkspaces, applyHookStatus, t]
   )
 
   // M3.6 C — 부팅 직후 window:getBootstrap 조회. workspaceId가 있으면(= 이 윈도우가 특정
@@ -439,11 +439,7 @@ function App(): React.JSX.Element {
   const handleDeleteCard = useCallback(
     async (w: WorkspaceListEntry) => {
       if (busy) return
-      if (
-        !window.confirm(
-          `"${w.title}" 워크스페이스 전체를 삭제합니다. 되돌릴 수 없습니다. 진행할까요?`
-        )
-      ) {
+      if (!window.confirm(t.app.confirmDeleteWorkspace(w.title))) {
         return
       }
       setBusy(true)
@@ -463,7 +459,7 @@ function App(): React.JSX.Element {
         setBusy(false)
       }
     },
-    [busy, openWorkspaceId, reloadWorkspaces]
+    [busy, openWorkspaceId, reloadWorkspaces, t]
   )
 
   const handlePickWorkspace = useCallback(async () => {
@@ -624,7 +620,7 @@ function App(): React.JSX.Element {
         // main 소유권 가드가 막은 경우 — placeholder로 폴백(분기 방지).
         if (String(e).includes('EXTERNALLY_OWNED')) {
           markSessionOwned(sessionId)
-          setWorkspacesErr('다른 앱에서 사용 중입니다.')
+          setWorkspacesErr(t.app.errInUse)
         } else {
           setWorkspacesErr(String(e))
         }
@@ -641,7 +637,8 @@ function App(): React.JSX.Element {
       workspaces,
       markSessionOwned,
       reloadWorkspaces,
-      applyHookStatus
+      applyHookStatus,
+      t
     ]
   )
 
@@ -666,7 +663,7 @@ function App(): React.JSX.Element {
             next.set(sessionId, { ownerApp: stillOwned.app })
             return next
           })
-          setWorkspacesErr('아직 다른 앱에서 사용 중입니다. 상대 앱에서 세션을 닫은 뒤 다시 시도하세요.')
+          setWorkspacesErr(t.app.errStillInUse)
           return
         }
         // 해제됨 — 라이브로 연다 (sessions.open = resume-spawn + owner.json 획득).
@@ -692,7 +689,7 @@ function App(): React.JSX.Element {
         // main 소유권 가드가 막은 경우(리스트 캐시 지연 등) — placeholder 유지 + 안내.
         if (String(e).includes('EXTERNALLY_OWNED')) {
           markSessionOwned(sessionId)
-          setWorkspacesErr('아직 다른 앱에서 사용 중입니다. 상대 앱에서 세션을 닫은 뒤 다시 시도하세요.')
+          setWorkspacesErr(t.app.errStillInUse)
         } else {
           setWorkspacesErr(String(e))
         }
@@ -700,7 +697,7 @@ function App(): React.JSX.Element {
         setBusy(false)
       }
     },
-    [openWorkspaceId, busy, markSessionOwned, applyHookStatus]
+    [openWorkspaceId, busy, markSessionOwned, applyHookStatus, t]
   )
 
   const handleRenameWorkspace = useCallback(
@@ -937,18 +934,21 @@ function App(): React.JSX.Element {
                 return (
                   <div key={sid} className={`xterm-wrap${isActive ? ' xterm-host-active' : ''}`}>
                     <div className="session-inuse">
-                      <h2>{o.ownerApp === 'extension' ? '익스텐션' : '데스크탑'}에서 사용 중</h2>
-                      <p>
-                        이 세션은 다른 앱에서 라이브로 열려 있습니다. 충돌을 막기 위해 여기서는
-                        열지 않습니다. 상대 앱에서 세션을 닫은 뒤 아래 버튼으로 이어서 여세요.
-                      </p>
+                      <h2>
+                        {t.app.inUseBy(
+                          o.ownerApp === 'extension'
+                            ? t.app.appNameExtension
+                            : t.app.appNameDesktop
+                        )}
+                      </h2>
+                      <p>{t.app.inUseDesc}</p>
                       <button
                         type="button"
                         className="session-inuse-btn"
                         disabled={busy}
                         onClick={() => void handleReopen(sid)}
                       >
-                        다시 열기
+                        {t.app.reopen}
                       </button>
                     </div>
                   </div>
@@ -956,10 +956,8 @@ function App(): React.JSX.Element {
               })}
               {attachments.size === 0 && ownedSessions.size === 0 && (
                 <div className="center-empty">
-                  <h2>활성 세션 없음</h2>
-                  <p>
-                    좌 사이드바에서 워크스페이스를 열거나 &quot;+ 모델&quot;로 새 탭을 추가하세요
-                  </p>
+                  <h2>{t.app.noActiveSession}</h2>
+                  <p>{t.app.noActiveSessionDesc}</p>
                 </div>
               )}
             </div>
