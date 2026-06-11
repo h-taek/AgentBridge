@@ -136,7 +136,7 @@ export class MemoryPanelProvider implements vscode.WebviewViewProvider {
     const names: Record<string, string> = { claude: 'Claude', codex: 'Codex', agy: 'Antigravity' };
     const lines = items.map(x => `• ${names[x.model] ?? x.model}: ${x.reason}`).join('\n');
     const choice = await vscode.window.showWarningMessage(
-      `메모리 hook 비활성\n\n${lines}`,
+      vscode.l10n.t('Memory hook disabled') + `\n\n${lines}`,
       { modal: true },
       'Copy',
       'Open Output',
@@ -183,6 +183,9 @@ export class MemoryPanelProvider implements vscode.WebviewViewProvider {
 
   private buildHtml(webview: vscode.Webview): string {
     const nonce = getNonce();
+    // 웹뷰 JS는 host의 vscode.l10n.t()를 못 부르므로, 번역된 문자열을 HTML 빌드 시 주입한다.
+    const l10nMemDisabled = vscode.l10n.t('Memory disabled');
+    const l10nClickForDetails = vscode.l10n.t('Click for details');
     return /*html*/ `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -458,8 +461,8 @@ export class MemoryPanelProvider implements vscode.WebviewViewProvider {
       const names = { claude: 'Claude', codex: 'Codex', agy: 'Antigravity' };
       const labels = lastHookDisabled.map(x => names[x.model] || x.model).join(', ');
       const icon = '<svg class="hook-badge-icon" width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1.5a.75.75 0 0 1 .67.42l6 12A.75.75 0 0 1 14 15H2a.75.75 0 0 1-.67-1.08l6-12A.75.75 0 0 1 8 1.5zm0 4.5a.75.75 0 0 0-.75.75v3a.75.75 0 0 0 1.5 0v-3A.75.75 0 0 0 8 6zm0 6.5a.875.875 0 1 0 0-1.75.875.875 0 0 0 0 1.75z"/></svg>';
-      hookBadge.innerHTML = icon + '<span class="hook-badge-text">메모리 비활성 · ' + escapeHtml(labels) + '</span>';
-      hookBadge.title = '자세히 보려면 클릭';
+      hookBadge.innerHTML = icon + '<span class="hook-badge-text">' + ${JSON.stringify(l10nMemDisabled)} + ' · ' + escapeHtml(labels) + '</span>';
+      hookBadge.title = ${JSON.stringify(l10nClickForDetails)};
       hookBadge.style.display = '';
     }
     hookBadge.addEventListener('click', () => {
