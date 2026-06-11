@@ -9,6 +9,7 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 ### Added
 
 - English UI — the desktop app's interface is now fully available in English, with a Korean/English toggle in Settings (Language).
+- Toggle Claude for background refinement — a new setting controls whether memory refinement may use Claude. Claude's headless refine (`claude -p`) consumes separate API credits rather than your subscription, so turn it off to keep refinement on the other CLIs (or skip it) and avoid unexpected charges. On by default (unchanged behavior); interactive Claude sessions are unaffected.
 
 ### Fixed
 

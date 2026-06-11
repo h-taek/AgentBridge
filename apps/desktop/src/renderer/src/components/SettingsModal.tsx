@@ -475,6 +475,24 @@ function MainPage({
               <option value="off">{t.settings.refinePolicyLabel.off}</option>
             </select>
           </div>
+          {settings && settings.refineModel !== 'off' && (
+            <div className="settings-row">
+              <SparkleIcon className="settings-row-icon" />
+              <span className="settings-row-label">{t.settings.main.useClaude}</span>
+              <span className="settings-row-value settings-row-desc">
+                {t.settings.main.useClaudeDesc}
+              </span>
+              <select
+                className="settings-row-select"
+                value={settings.refineUseClaude ? 'on' : 'off'}
+                onChange={(e) => void onUpdate({ refineUseClaude: e.target.value === 'on' })}
+                title={t.settings.main.useClaude}
+              >
+                <option value="on">{t.settings.main.useClaudeOn}</option>
+                <option value="off">{t.settings.main.useClaudeOff}</option>
+              </select>
+            </div>
+          )}
           {settings?.refineModel === 'priority' && (
             <PriorityOrderRow
               order={settings.refinePriorityOrder}

@@ -71,7 +71,12 @@ async function ensureScheduler(): Promise<CompactionScheduler> {
       // 변환 switch는 core resolveRefineDecisionFromConfig 단일 구현 사용.
       const s = getCachedSettings()
       return resolveRefineDecisionFromConfig(
-        { policy: s.refineModel, fixedCli: s.refineFixedCli, priorityOrder: s.refinePriorityOrder },
+        {
+          policy: s.refineModel,
+          fixedCli: s.refineFixedCli,
+          priorityOrder: s.refinePriorityOrder,
+          useClaude: s.refineUseClaude
+        },
         activeModel
       )
     },

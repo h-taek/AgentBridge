@@ -208,6 +208,11 @@
           "default": "agy",
           "description": "%agentbridge.refine.fixedCli.description%"
         },
+        "agentbridge.refine.useClaude": {
+          "type": "boolean",
+          "default": true,
+          "description": "%agentbridge.refine.useClaude.description%"
+        },
         "agentbridge.turns.assistantDetail": {
           "type": "string",
           "enum": [

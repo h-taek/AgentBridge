@@ -39,6 +39,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   refineModel: 'priority',
   refinePriorityOrder: ['agy', 'codex', 'claude'],
   refineFixedCli: 'agy',
+  refineUseClaude: true,
   theme: 'dark',
   language: 'ko',
   defaultBasePath: '',
@@ -70,6 +71,10 @@ export async function loadSettings(): Promise<AppSettings> {
       refinePriorityOrder:
         validateCliKindArray(parsed.refinePriorityOrder) ?? DEFAULT_SETTINGS.refinePriorityOrder,
       refineFixedCli: validateCliKind(parsed.refineFixedCli) ?? DEFAULT_SETTINGS.refineFixedCli,
+      refineUseClaude:
+        typeof parsed.refineUseClaude === 'boolean'
+          ? parsed.refineUseClaude
+          : DEFAULT_SETTINGS.refineUseClaude,
       theme: validateTheme(parsed.theme) ?? DEFAULT_SETTINGS.theme,
       language: validateLanguage(parsed.language) ?? DEFAULT_SETTINGS.language,
       defaultBasePath: typeof parsed.defaultBasePath === 'string' ? parsed.defaultBasePath : '',
@@ -101,6 +106,8 @@ export async function saveSettings(patch: Partial<AppSettings>): Promise<AppSett
     refinePriorityOrder:
       validateCliKindArray(patch.refinePriorityOrder) ?? current.refinePriorityOrder,
     refineFixedCli: validateCliKind(patch.refineFixedCli) ?? current.refineFixedCli,
+    refineUseClaude:
+      typeof patch.refineUseClaude === 'boolean' ? patch.refineUseClaude : current.refineUseClaude,
     theme: validateTheme(patch.theme) ?? current.theme,
     language: validateLanguage(patch.language) ?? current.language,
     defaultBasePath:

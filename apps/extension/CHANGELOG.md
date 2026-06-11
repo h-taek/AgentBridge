@@ -9,6 +9,7 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 ### Added
 
 - English UI — the extension's interface is now available in English and follows the IDE's display language (English or Korean).
+- Toggle Claude for background refinement — a new setting (`agentbridge.refine.useClaude`) controls whether memory refinement may use Claude. Claude's headless refine (`claude -p`) consumes separate API credits rather than your subscription, so turn it off to keep refinement on the other CLIs (or skip it) and avoid unexpected charges. On by default (unchanged behavior); interactive Claude sessions are unaffected.
 
 ### Fixed
 
