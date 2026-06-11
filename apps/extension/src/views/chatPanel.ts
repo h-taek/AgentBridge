@@ -452,7 +452,7 @@ export class ChatPanel {
   private async handleRenameSession(workspaceId: string, sessionId: string): Promise<void> {
     const session = await this.resolveOwnedSession(workspaceId, sessionId);
     if (!session) return;
-    const newName = await vscode.window.showInputBox({ prompt: 'Session name', value: session.name });
+    const newName = await vscode.window.showInputBox({ prompt: vscode.l10n.t('Session name'), value: session.name });
     if (newName === undefined) return;
     await renameSession(workspaceId, sessionId, newName);
     this.handleGetSessions();
@@ -462,8 +462,8 @@ export class ChatPanel {
     const session = await this.resolveOwnedSession(workspaceId, sessionId);
     if (!session) return;
     // 확인 모달에는 메시지가 주장한 이름이 아니라 저장소의 실제 이름을 띄운다 (이름표 바꿔치기 차단).
-    const answer = await vscode.window.showWarningMessage(`Delete session "${session.name}"?`, { modal: true }, 'Delete');
-    if (answer !== 'Delete') return;
+    const answer = await vscode.window.showWarningMessage(vscode.l10n.t('Delete session "{0}"?', session.name), { modal: true }, vscode.l10n.t('Delete'));
+    if (answer !== vscode.l10n.t('Delete')) return;
     const activePanel = activePanels.get(sessionId);
     if (activePanel) activePanel.markDeleted();
     if (activePanel && activePanel !== this) activePanel.dispose();

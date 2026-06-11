@@ -100,7 +100,7 @@ export class MemoryPanelProvider implements vscode.WebviewViewProvider {
   private async handleRefine(): Promise<void> {
     const wid = this.getWorkspaceId();
     if (!wid) {
-      vscode.window.showWarningMessage('AgentBridge: No workspace open.');
+      vscode.window.showWarningMessage(vscode.l10n.t('AgentBridge: No workspace open.'));
       return;
     }
 
@@ -117,14 +117,14 @@ export class MemoryPanelProvider implements vscode.WebviewViewProvider {
     try {
       const result = await runManualCompaction(wid, activeModel, workspacePath, 60_000);
       if (result.ok) {
-        vscode.window.showInformationMessage(`AgentBridge: Refined (${result.durationMs}ms)`);
+        vscode.window.showInformationMessage(vscode.l10n.t('AgentBridge: Refined ({0}ms)', result.durationMs));
       } else {
-        vscode.window.showWarningMessage(`AgentBridge: Refine failed — ${result.error ?? 'unknown error'}`);
+        vscode.window.showWarningMessage(vscode.l10n.t('AgentBridge: Refine failed — {0}', result.error ?? vscode.l10n.t('unknown error')));
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       output.warn(`memoryPanel: refine failed — ${msg}`);
-      vscode.window.showErrorMessage(`AgentBridge: Refine failed — ${msg}`);
+      vscode.window.showErrorMessage(vscode.l10n.t('AgentBridge: Refine failed — {0}', msg));
     } finally {
       this.postMessage({ type: 'ir:refining', active: false });
       await this.sendIR();
@@ -138,12 +138,12 @@ export class MemoryPanelProvider implements vscode.WebviewViewProvider {
     const choice = await vscode.window.showWarningMessage(
       vscode.l10n.t('Memory hook disabled') + `\n\n${lines}`,
       { modal: true },
-      'Copy',
-      'Open Output',
+      vscode.l10n.t('Copy'),
+      vscode.l10n.t('Open Output'),
     );
-    if (choice === 'Copy') {
+    if (choice === vscode.l10n.t('Copy')) {
       await vscode.env.clipboard.writeText(lines);
-    } else if (choice === 'Open Output') {
+    } else if (choice === vscode.l10n.t('Open Output')) {
       output.getOutputChannel().show();
     }
   }
@@ -153,27 +153,27 @@ export class MemoryPanelProvider implements vscode.WebviewViewProvider {
     if (!wid) return;
 
     const answer = await vscode.window.showWarningMessage(
-      'AgentBridge: Reset all memory (IR + turns) for this workspace?',
+      vscode.l10n.t('AgentBridge: Reset all memory (IR + turns) for this workspace?'),
       { modal: true },
-      'Reset',
+      vscode.l10n.t('Reset'),
     );
-    if (answer !== 'Reset') return;
+    if (answer !== vscode.l10n.t('Reset')) return;
 
     // V-06/V-14: reset도 compaction과 같은 락으로 직렬화하고, 쓰기 로직은 core resetMemory로 통합.
     const result = await resetMemory(wid);
     if (!result.ok) {
       if (result.error === 'compaction-in-progress') {
         vscode.window.showWarningMessage(
-          'AgentBridge: Memory compaction is in progress. Please try again in a moment.',
+          vscode.l10n.t('AgentBridge: Memory compaction is in progress. Please try again in a moment.'),
         );
       } else {
-        vscode.window.showErrorMessage(`AgentBridge: Memory reset failed — ${result.error}`);
+        vscode.window.showErrorMessage(vscode.l10n.t('AgentBridge: Memory reset failed — {0}', result.error ?? vscode.l10n.t('unknown error')));
       }
       return;
     }
 
     output.log('memoryPanel: memory reset');
-    vscode.window.showInformationMessage('AgentBridge: Memory reset.');
+    vscode.window.showInformationMessage(vscode.l10n.t('AgentBridge: Memory reset.'));
     await this.sendIR();
   }
 
