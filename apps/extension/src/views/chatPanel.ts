@@ -347,7 +347,9 @@ export class ChatPanel {
       const ctrl = new AbortController();
       this.modelSessionWatchAbort = ctrl;
       void captureNewThreadId(codexSessionSnapshot, { signal: ctrl.signal })
-        .then((threadId) => persist(threadId))
+        .then((threadId) => {
+          if (threadId) persist(threadId);
+        })
         .catch((err) => {
           output.warn(`ChatPanel: codex thread_id 캡처 실패 — ${String(err)}`);
         });

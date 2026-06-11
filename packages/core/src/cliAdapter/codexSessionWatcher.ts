@@ -8,6 +8,7 @@ import * as path from 'path';
 import * as os from 'os';
 import type { Logger } from '../interfaces';
 import { noopLogger } from '../interfaces';
+import { createSessionFileWatcher, type SessionFileWatcher } from '../sessionFileWatcher';
 
 const CODEX_SESSIONS_ROOT = path.join(os.homedir(), '.codex', 'sessions');
 
@@ -20,7 +21,7 @@ export type CodexSessionSnapshot = {
 
 // snapshot 이후 새로 생기는 파일만 감지하면 되므로 today + yesterday만 스캔(자정 경계).
 // 전체 DFS는 누적 세션이 많은 사용자에서 polling 시 I/O 스파이크 유발.
-async function walkRolloutFiles(daysBack = 1): Promise<Set<string>> {
+async function walkRolloutFiles(root: string, daysBack = 1): Promise<Set<string>> {
   const out = new Set<string>();
   const now = new Date();
   for (let back = 0; back <= daysBack; back++) {
@@ -28,7 +29,7 @@ async function walkRolloutFiles(daysBack = 1): Promise<Set<string>> {
     const y = String(d.getFullYear());
     const m = String(d.getMonth() + 1).padStart(2, '0');
     const day = String(d.getDate()).padStart(2, '0');
-    const dp = path.join(CODEX_SESSIONS_ROOT, y, m, day);
+    const dp = path.join(root, y, m, day);
     let entries: string[];
     try {
       entries = await fs.readdir(dp);
@@ -44,64 +45,79 @@ async function walkRolloutFiles(daysBack = 1): Promise<Set<string>> {
   return out;
 }
 
-export async function snapshotCodexSessions(): Promise<CodexSessionSnapshot> {
-  const files = await walkRolloutFiles();
+export async function snapshotCodexSessions(
+  root: string = CODEX_SESSIONS_ROOT,
+): Promise<CodexSessionSnapshot> {
+  const files = await walkRolloutFiles(root);
   return { files };
 }
 
 export type CaptureOptions = {
+  // watch 누락/미지원 시 안전망 폴링 주기. 기본 3초.
   intervalMs?: number;
-  timeoutMs?: number;
+  // 감시 루트 override(테스트용). 기본 ~/.codex/sessions.
+  sessionsRoot?: string;
   signal?: AbortSignal;
   logger?: Logger;
 };
 
+// 새 codex 세션이 **첫 입력 시점에** 만드는 rollout jsonl을 잡아 thread_id를 돌려준다.
+// OS watch(즉시성) + 저빈도 폴링(안전망)으로 감시하며 **데드라인은 없다** — 첫 입력이 언제
+// 들어오든(채팅이 열려 있는 한) 잡는다. 수명은 opts.signal에 매여 있고(PTY exit/패널 dispose),
+// abort되면 캡처 없이 null을 돌려준다.
 export async function captureNewThreadId(
   before: CodexSessionSnapshot,
   opts: CaptureOptions = {},
-): Promise<string> {
+): Promise<string | null> {
   const log = opts.logger ?? noopLogger;
-  const intervalMs = opts.intervalMs ?? 1000;
-  const timeoutMs = opts.timeoutMs ?? 60_000;
-  const start = Date.now();
-  while (true) {
-    if (opts.signal?.aborted) {
-      throw new Error('codex thread_id capture aborted');
-    }
-    const now = await walkRolloutFiles();
-    for (const f of now) {
-      if (!before.files.has(f)) {
-        const base = path.basename(f);
-        const m = ROLLOUT_FILE_RE.exec(base);
+  const pollMs = opts.intervalMs ?? 3000;
+  const root = opts.sessionsRoot ?? CODEX_SESSIONS_ROOT;
+  if (opts.signal?.aborted) return null;
+
+  return new Promise<string | null>((resolve) => {
+    let settled = false;
+    let watcher: SessionFileWatcher | null = null;
+    let timer: ReturnType<typeof setInterval> | null = null;
+
+    const finish = (value: string | null): void => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearInterval(timer);
+      watcher?.stop();
+      opts.signal?.removeEventListener('abort', onAbort);
+      resolve(value);
+    };
+    const onAbort = (): void => finish(null);
+
+    // 트리거마다 폴더를 재스캔해 snapshot에 없던 새 rollout 파일을 찾는다(이벤트 자체는 믿지 않음).
+    const check = async (): Promise<void> => {
+      if (settled) return;
+      let now: Set<string>;
+      try {
+        now = await walkRolloutFiles(root);
+      } catch {
+        return;
+      }
+      for (const f of now) {
+        if (before.files.has(f)) continue;
+        const m = ROLLOUT_FILE_RE.exec(path.basename(f));
         if (m) {
           log.log(`codexSessionWatcher: thread_id captured ${m[1]} (${f})`);
-          return m[1];
+          finish(m[1]);
+          return;
         }
       }
-    }
-    if (Date.now() - start > timeoutMs) {
-      throw new Error(
-        `codex thread_id capture timeout (${timeoutMs}ms) — ~/.codex/sessions에 새 jsonl 미감지.`,
-      );
-    }
-    await sleepWithAbort(intervalMs, opts.signal);
-  }
-}
-
-function sleepWithAbort(ms: number, signal?: AbortSignal): Promise<void> {
-  return new Promise<void>((resolve) => {
-    if (signal?.aborted) {
-      resolve();
-      return;
-    }
-    const timer = setTimeout(() => {
-      signal?.removeEventListener('abort', onAbort);
-      resolve();
-    }, ms);
-    const onAbort = (): void => {
-      clearTimeout(timer);
-      resolve();
     };
-    signal?.addEventListener('abort', onAbort, { once: true });
+
+    opts.signal?.addEventListener('abort', onAbort, { once: true });
+    // 주: OS watch(즉시성). 보조: 저빈도 폴링(루트 미존재·watch 미지원 안전망).
+    watcher = createSessionFileWatcher({
+      root,
+      filenames: ['.jsonl'],
+      onChange: () => void check(),
+      logger: { warn: (m) => log.warn(m) },
+    });
+    timer = setInterval(() => void check(), pollMs);
+    void check();
   });
 }

@@ -12,6 +12,7 @@ import * as path from 'path';
 import * as os from 'os';
 import type { Logger } from '../interfaces';
 import { noopLogger } from '../interfaces';
+import { createSessionFileWatcher, type SessionFileWatcher } from '../sessionFileWatcher';
 
 const AGY_BASE_DIR = path.join(os.homedir(), '.gemini', 'antigravity-cli');
 
@@ -83,33 +84,56 @@ export async function snapshotAgyConversations(): Promise<Set<string>> {
   return out;
 }
 
+// 새 agy 세션이 **첫 메시지 교환 시점에** 만드는 conversation 파일(<uuid>.db/.pb)을 잡아
+// onCaptured로 넘긴다. OS watch(즉시성) + 저빈도 폴링(안전망)으로 감시하며 **데드라인은 없다**
+// — 첫 입력이 언제 들어오든(채팅이 열려 있는 한) 잡는다. 수명은 abortSignal에 매여 있고
+// (PTY exit/패널 dispose), abort되면 캡처 없이 종료한다.
 export async function watchForNewConversationUuid(opts: {
   cwd: string;
   excludeUuids: Set<string>;
-  timeoutMs?: number;
+  // watch 누락/미지원 시 안전망 폴링 주기. 기본 3초.
+  intervalMs?: number;
+  // 감시 디렉터리 override(테스트용). 기본 ~/.gemini/antigravity-cli/conversations.
+  conversationsDir?: string;
   onCaptured: (uuid: string) => void;
   abortSignal?: AbortSignal;
   logger?: Logger;
 }): Promise<void> {
   const log = opts.logger ?? noopLogger;
-  const start = Date.now();
-  const limit = opts.timeoutMs ?? 5 * 60_000;
-  const interval = 1_000;
-  while (!opts.abortSignal?.aborted) {
-    const elapsed = Date.now() - start;
-    if (elapsed > limit) {
-      log.warn(`agyResume: modelSessionId 캡처 timeout cwd=${opts.cwd} elapsed=${elapsed}`);
-      return;
-    }
-    try {
-      const entries = await fs.readdir(getConversationsDir());
+  const pollMs = opts.intervalMs ?? 3000;
+  const dir = opts.conversationsDir ?? getConversationsDir();
+  if (opts.abortSignal?.aborted) return;
+
+  await new Promise<void>((resolve) => {
+    let settled = false;
+    let watcher: SessionFileWatcher | null = null;
+    let timer: ReturnType<typeof setInterval> | null = null;
+
+    const finish = (): void => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearInterval(timer);
+      watcher?.stop();
+      opts.abortSignal?.removeEventListener('abort', onAbort);
+      resolve();
+    };
+    const onAbort = (): void => finish();
+
+    // 트리거마다 conversations/를 재스캔해 excludeUuids에 없는 **최신** conversation 파일을 잡는다.
+    const check = async (): Promise<void> => {
+      if (settled) return;
+      let entries: string[];
+      try {
+        entries = await fs.readdir(dir);
+      } catch {
+        return;
+      }
       let newest: { uuid: string; mtimeMs: number } | null = null;
       for (const e of entries) {
         const uuid = parseConversationFilename(e);
-        if (!uuid) continue;
-        if (opts.excludeUuids.has(uuid)) continue;
+        if (!uuid || opts.excludeUuids.has(uuid)) continue;
         try {
-          const stat = await fs.stat(path.join(getConversationsDir(), e));
+          const stat = await fs.stat(path.join(dir, e));
           if (!stat.isFile() || stat.size === 0) continue;
           if (!newest || stat.mtimeMs > newest.mtimeMs) {
             newest = { uuid, mtimeMs: stat.mtimeMs };
@@ -121,29 +145,19 @@ export async function watchForNewConversationUuid(opts: {
       if (newest) {
         log.log(`agyResume: modelSessionId 캡처 완료 cwd=${opts.cwd} uuid=${newest.uuid}`);
         opts.onCaptured(newest.uuid);
-        return;
+        finish();
       }
-    } catch (err) {
-      log.warn(`agyResume: scan failed — ${err instanceof Error ? err.message : String(err)}`);
-    }
-    await sleepWithAbort(interval, opts.abortSignal);
-  }
-}
-
-function sleepWithAbort(ms: number, signal?: AbortSignal): Promise<void> {
-  return new Promise<void>((resolve) => {
-    if (signal?.aborted) {
-      resolve();
-      return;
-    }
-    const timer = setTimeout(() => {
-      signal?.removeEventListener('abort', onAbort);
-      resolve();
-    }, ms);
-    const onAbort = (): void => {
-      clearTimeout(timer);
-      resolve();
     };
-    signal?.addEventListener('abort', onAbort, { once: true });
+
+    opts.abortSignal?.addEventListener('abort', onAbort, { once: true });
+    // 주: OS watch(즉시성). 보조: 저빈도 폴링(디렉터리 미존재·watch 미지원 안전망).
+    watcher = createSessionFileWatcher({
+      root: dir,
+      filenames: [...CONVERSATION_EXTENSIONS],
+      onChange: () => void check(),
+      logger: { warn: (m) => log.warn(m) },
+    });
+    timer = setInterval(() => void check(), pollMs);
+    void check();
   });
 }
