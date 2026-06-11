@@ -51,6 +51,12 @@ function linkIfTargetExists(target: string, linkPath: string): void {
 // 불필요하므로 최소 config로 박스를 ~6MB로 유지. (real ~/.codex/config.toml 복사 금지)
 const CODEX_MIN_CONFIG = '[features]\nsuppress_unstable_features_warning = true\n';
 
+// agy 온보딩(색 테마·ToS 위저드) 완료 마커. quota probe가 인터랙티브 TUI를 띄울 때 빈 박스라
+// first-run 위저드에 갇혀 /usage가 묻히는 것을 방지한다. 게이트는 cache/onboarding.json 하나뿐임을
+// 격리 bisect로 확인 → 실 홈 의존 없이 직접 써넣는다 (codex config와 같은 시드 패턴). refine는 비-TUI라 무관.
+const AGY_ONBOARDING_DONE =
+  '{"consumerOnboardingComplete":true,"enterpriseOnboardingComplete":false,"onboardingComplete":true}';
+
 function bootstrapIfNeeded(cli: CliKind, box: string, realHome: string, binPath?: string): void {
   const token = versionToken(binPath);
   const verFile = join(box, '.ab-version');
@@ -62,6 +68,12 @@ function bootstrapIfNeeded(cli: CliKind, box: string, realHome: string, binPath?
     linkOnce(join(realHome, 'Library/Keychains'), join(box, 'Library/Keychains'));
     linkOnce(join(realHome, 'Library/Caches'), join(box, 'Library/Caches'));
     linkOnce(join(realHome, '.gemini/antigravity-cli/bin'), join(box, '.gemini/antigravity-cli/bin'));
+    // 온보딩 완료 마커를 써넣어 first-run 위저드를 건너뛴다 → probe가 곧장 /usage로.
+    const onb = join(box, '.gemini/antigravity-cli/cache/onboarding.json');
+    if (!existsSync(onb)) {
+      mkdirSync(dirname(onb), { recursive: true });
+      writeFileSync(onb, AGY_ONBOARDING_DONE);
+    }
   }
   if (cli === 'codex') {
     linkOnce(join(realHome, '.codex/auth.json'), join(box, 'auth.json'));
