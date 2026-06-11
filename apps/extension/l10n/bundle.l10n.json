@@ -1,0 +1,8 @@
+{
+  "the desktop app": "the desktop app",
+  "the other extension": "the other extension",
+  "\r\n[AgentBridge] This session is in use by {0}.\r\nClose the session in the other app, then close and reopen this tab.\r\n": "\r\n[AgentBridge] This session is in use by {0}.\r\nClose the session in the other app, then close and reopen this tab.\r\n",
+  "Memory hook disabled": "Memory hook disabled",
+  "Memory disabled": "Memory disabled",
+  "Click for details": "Click for details"
+}

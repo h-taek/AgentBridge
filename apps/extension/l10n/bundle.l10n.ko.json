@@ -1,0 +1,8 @@
+{
+  "the desktop app": "데스크탑",
+  "the other extension": "다른 익스텐션",
+  "\r\n[AgentBridge] This session is in use by {0}.\r\nClose the session in the other app, then close and reopen this tab.\r\n": "\r\n[AgentBridge] 이 세션은 {0}에서 사용 중입니다.\r\n상대 앱에서 세션을 닫은 뒤 이 탭을 닫았다 다시 여세요.\r\n",
+  "Memory hook disabled": "메모리 hook 비활성",
+  "Memory disabled": "메모리 비활성",
+  "Click for details": "자세히 보려면 클릭"
+}

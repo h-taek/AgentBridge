@@ -4,6 +4,7 @@
   "description": "Bridge multiple AI CLI agents with shared context in your IDE",
   "version": "0.2.1",
   "publisher": "h-taek",
+  "l10n": "./l10n",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -227,7 +228,7 @@
           "default": 15,
           "minimum": 1,
           "maximum": 100,
-          "description": "Memory 패널에 보관할 IR 스냅샷 최대 개수. 초과분은 가장 오래된 것부터 삭제."
+          "description": "%agentbridge.memory.maxArchiveSnapshots.description%"
         }
       }
     },

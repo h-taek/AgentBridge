@@ -2,6 +2,7 @@ import type { WorkspaceMeta } from '@shared/ipc'
 import { CodexTrustBanner } from './CodexTrustBanner'
 import { IrPanel } from './IrPanel'
 import { SidebarRightIcon, TerminalIcon } from './icons'
+import { useT } from '../i18n'
 
 // 우 사이드바 — 활성 워크스페이스 컨텍스트 + 메모리(IR).
 // 활성 세션이 shell(내장 터미널)이면 IR 패널 대신 안내문 — shell 세션은 hook/turnRecorder/refine
@@ -20,6 +21,7 @@ export function RightSidebar({
   openSessionId,
   onClose
 }: Props): React.JSX.Element {
+  const t = useT()
   const activeSession = openWorkspace?.sessions.find((s) => s.sessionId === openSessionId) ?? null
   const isShellActive = activeSession ? (activeSession.kind ?? 'cli') === 'shell' : false
 
@@ -29,8 +31,8 @@ export function RightSidebar({
         <button
           className="icon-btn"
           onClick={onClose}
-          title="우 사이드바 접기"
-          aria-label="우 사이드바 접기"
+          title={t.rightSidebar.collapse}
+          aria-label={t.rightSidebar.collapse}
         >
           <SidebarRightIcon />
         </button>
@@ -40,11 +42,9 @@ export function RightSidebar({
         <>
           <div className="right-header">
             <div className="right-eyebrow">WORKSPACE</div>
-            <div className="right-title">선택 없음</div>
+            <div className="right-title">{t.rightSidebar.noSelection}</div>
           </div>
-          <div className="right-empty">
-            좌측에서 워크스페이스를 열면 현재 메모리(IR) 상태가 여기에 표시됩니다.
-          </div>
+          <div className="right-empty">{t.rightSidebar.empty}</div>
         </>
       ) : (
         <>
@@ -58,10 +58,8 @@ export function RightSidebar({
               <div className="right-shell-icon" aria-hidden="true">
                 <TerminalIcon />
               </div>
-              <div className="right-shell-title">메모리 없음</div>
-              <div className="right-shell-sub">
-                일반 터미널 세션 — AgentBridge가 컨텍스트를 추적하지 않습니다.
-              </div>
+              <div className="right-shell-title">{t.rightSidebar.shellNoMemory}</div>
+              <div className="right-shell-sub">{t.rightSidebar.shellNoMemorySub}</div>
             </div>
           ) : (
             <div className="sidebar-scroll">

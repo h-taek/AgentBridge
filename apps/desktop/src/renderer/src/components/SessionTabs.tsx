@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { createPortal } from 'react-dom'
 import type { CliKind, EnvProbeResult, SessionMeta } from '@shared/ipc'
 import { TerminalIcon } from './icons'
+import { useT } from '../i18n'
 
 // M3 L3 청크 — Workspace 안 sessions[] 탭 표시.
 // architecture §14 multi-tab UI 패턴.
@@ -50,6 +51,7 @@ export function SessionTabs({
   onAddTab,
   hookDisabledMap
 }: Props): React.JSX.Element {
+  const t = useT()
   // 두 dropdown은 *상호 배타* — 한쪽 열면 다른쪽 자동 닫힘. 어느 한쪽이라도 열려 있으면 외부
   // 클릭 + 세션 탭 선택 시 둘 다 닫힘 (이슈 4).
   // dropdown 위치는 click 시점에 button rect를 캡처해 state로 저장 — render 중 ref.current 접근
@@ -153,7 +155,7 @@ export function SessionTabs({
   const renderTab = (s: SessionMeta, hidden = false): React.JSX.Element => {
     const isActive = s.sessionId === activeSessionId
     const isShell = (s.kind ?? 'cli') === 'shell'
-    const displayName = s.title?.trim() || (isShell ? '터미널' : MODEL_LABELS[s.model])
+    const displayName = s.title?.trim() || (isShell ? t.common.terminal : MODEL_LABELS[s.model])
     const hookReason = hookDisabledMap.get(s.sessionId)
     return (
       <div
@@ -202,8 +204,8 @@ export function SessionTabs({
           {hookReason && (
             <span
               className="session-tab-hook-disabled"
-              title={`메모리 주입 비활성 — ${hookReason}`}
-              aria-label="메모리 비활성"
+              title={t.sessionTabs.memoryInjectDisabled(hookReason)}
+              aria-label={t.sessionTabs.memoryDisabledBadge}
             >
               ⚠
             </span>
@@ -216,8 +218,8 @@ export function SessionTabs({
             onCloseTab(s.sessionId)
           }}
           disabled={busy}
-          title="탭 닫기 (사이드바에서 다시 열 수 있음)"
-          aria-label="탭 닫기"
+          title={t.sessionTabs.closeTabTitle}
+          aria-label={t.sessionTabs.closeTab}
         >
           ×
         </button>
@@ -245,8 +247,8 @@ export function SessionTabs({
                 setOverflowMenuPos((cur) => (cur ? null : pos))
               }}
               disabled={busy}
-              title={`${hiddenSessions.length}개 더 보기`}
-              aria-label="더 많은 탭"
+              title={t.sessionTabs.moreCount(hiddenSessions.length)}
+              aria-label={t.sessionTabs.moreTabs}
             >
               ⋯
             </button>
@@ -263,9 +265,9 @@ export function SessionTabs({
               setAddMenuPos((cur) => (cur ? null : pos))
             }}
             disabled={busy}
-            title="다른 모델 탭 추가"
+            title={t.sessionTabs.addModelTab}
           >
-            + 모델
+            {t.sessionTabs.addModel}
           </button>
         </div>
       </div>
@@ -289,7 +291,7 @@ export function SessionTabs({
           >
             {hiddenSessions.map((s) => {
               const isShell = (s.kind ?? 'cli') === 'shell'
-              const displayName = s.title?.trim() || (isShell ? '터미널' : MODEL_LABELS[s.model])
+              const displayName = s.title?.trim() || (isShell ? t.common.terminal : MODEL_LABELS[s.model])
               return (
                 <button
                   key={s.sessionId}
@@ -339,11 +341,11 @@ export function SessionTabs({
                   onAddTab(k)
                 }}
                 disabled={!isAvailable(k) || busy}
-                title={!isAvailable(k) ? `${MODEL_LABELS[k]} CLI가 PATH에 없음` : undefined}
+                title={!isAvailable(k) ? t.common.cliNotInPath(MODEL_LABELS[k]) : undefined}
               >
                 <span className={`session-tab-dot model-${k}`} />
                 {MODEL_LABELS[k]}
-                {!isAvailable(k) && <span className="hint"> (미설치)</span>}
+                {!isAvailable(k) && <span className="hint">{t.common.notInstalledParen}</span>}
               </button>
             ))}
             <button
@@ -354,12 +356,12 @@ export function SessionTabs({
                 onAddTab('shell')
               }}
               disabled={busy}
-              title="내장 터미널 (zsh) — AgentBridge 메모리 없음"
+              title={t.common.builtinTerminalTitle}
             >
               <span className="session-tab-icon" aria-hidden="true">
                 <TerminalIcon />
               </span>
-              터미널
+              {t.common.terminal}
             </button>
           </div>,
           document.body

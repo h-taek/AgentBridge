@@ -1,0 +1,3 @@
+{
+  "agentbridge.memory.maxArchiveSnapshots.description": "Max IR snapshots to keep in the Memory panel; the oldest beyond this limit are deleted."
+}

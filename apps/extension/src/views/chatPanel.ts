@@ -217,11 +217,17 @@ export class ChatPanel {
       const dir = workspaceStore.getSessionDir(this.opts.workspaceId, this.opts.sessionId);
       const foreign = await readForeignOwner(dir);
       if (foreign) {
-        const appName = foreign.app === 'desktop' ? '데스크탑' : '다른 익스텐션';
+        const appName =
+          foreign.app === 'desktop'
+            ? vscode.l10n.t('the desktop app')
+            : vscode.l10n.t('the other extension');
         output.log(`ChatPanel PTY spawn 거부 — 외부 소유(${appName}, pid=${foreign.pid})`);
         this.panel.webview.postMessage({
           type: 'output',
-          data: `\r\n[AgentBridge] 이 세션은 ${appName}에서 사용 중입니다.\r\n상대 앱에서 세션을 닫은 뒤 이 탭을 닫았다 다시 여세요.\r\n`,
+          data: vscode.l10n.t(
+            '\r\n[AgentBridge] This session is in use by {0}.\r\nClose the session in the other app, then close and reopen this tab.\r\n',
+            appName,
+          ),
         });
         return;
       }
