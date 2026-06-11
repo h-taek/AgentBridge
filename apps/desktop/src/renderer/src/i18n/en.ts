@@ -7,7 +7,11 @@ export const en = {
     close: 'Close',
     back: 'Back',
     openInFinder: 'Reveal in Finder',
-    pickFolder: 'Choose folder'
+    pickFolder: 'Choose folder',
+    terminal: 'Terminal',
+    cliNotInPath: (label: string) => `${label} CLI is not on PATH`,
+    notInstalledParen: ' (not installed)',
+    builtinTerminalTitle: 'Built-in terminal (zsh) — no AgentBridge memory'
   },
   settings: {
     titles: {
@@ -147,5 +151,76 @@ export const en = {
       `${n} empty session(s) were auto-cleaned — a forced quit left them unpersisted by the CLI.`,
     errInUse: 'In use by another app.',
     errStillInUse: 'Still in use by another app. Close the session in the other app, then try again.'
+  },
+  titleBar: {
+    openLeft: 'Open left sidebar',
+    openRight: 'Open right sidebar'
+  },
+  home: {
+    subtitle: 'Type a message and pick a model to start a new workspace.',
+    placeholder: 'How can I help?',
+    startHint: 'Press Enter to start',
+    start: 'Start',
+    startDisabledTitle: 'Enter a message and pick an available model',
+    modelSelect: 'Select model',
+    cliNotInPath: (label: string) => `${label} CLI is not on PATH`,
+    notInstalled: 'Not installed'
+  },
+  rightSidebar: {
+    collapse: 'Collapse right sidebar',
+    noSelection: 'None selected',
+    empty: 'Open a workspace on the left to see its current memory (IR) here.',
+    shellNoMemory: 'No memory',
+    shellNoMemorySub: 'Plain terminal session — AgentBridge does not track context.'
+  },
+  codexTrust: {
+    heading: 'codex `/hooks` manual approval required',
+    approving: '...',
+    approved: 'Approved trust in codex'
+  },
+  leftSidebar: {
+    collapse: 'Collapse sidebar',
+    toHome: 'Go to home',
+    home: 'Home',
+    newWorkspace: 'New workspace',
+    pathLabel: 'Path',
+    nameOptional: 'Name (optional)',
+    folderNamePlaceholder: 'folder name',
+    modelLabel: 'Model',
+    create: 'Create',
+    cliNotInstalledRestart: (model: string) =>
+      `${model} CLI not installed — install it and restart the app`,
+    sectionActive: 'Active',
+    noWorkspaces: 'No workspaces — create one above',
+    collapseTree: 'Collapse',
+    expandTree: 'Expand',
+    noResumableSession:
+      'No resumable session — every session is unpersisted natively / its CLI is not installed',
+    addSession: 'Add session',
+    deleteWorkspace: 'Delete workspace',
+    noSessions: 'No sessions',
+    inUseByOther: 'In use by another app',
+    builtinTerminalShort: 'Built-in terminal (zsh)',
+    notPersistedNoResume: 'Model native session not persisted — cannot resume',
+    cliNotInstalled: (label: string) => `${label} CLI not installed`,
+    openWorkspaceAndActivate: (label: string) => `Open workspace + activate ${label}`,
+    inUseBadge: 'In use',
+    renameSession: 'Rename session',
+    deleteSessionTitle: 'Delete session (cannot be undone)',
+    deleteSession: 'Delete session',
+    ctxOpen: 'Open workspace',
+    ctxOpenNewWindow: 'Open in new window',
+    ctxRename: 'Rename',
+    ctxDelete: 'Delete'
+  },
+  sessionTabs: {
+    memoryInjectDisabled: (reason: string) => `Memory injection disabled — ${reason}`,
+    memoryDisabledBadge: 'Memory disabled',
+    closeTabTitle: 'Close tab (reopen from the sidebar)',
+    closeTab: 'Close tab',
+    moreCount: (n: number) => `${n} more`,
+    moreTabs: 'More tabs',
+    addModelTab: 'Add another model tab',
+    addModel: '+ Model'
   }
 } satisfies Messages

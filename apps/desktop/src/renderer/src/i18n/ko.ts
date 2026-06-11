@@ -7,7 +7,11 @@ export const ko = {
     close: '닫기',
     back: '뒤로',
     openInFinder: 'Finder에서 열기',
-    pickFolder: '폴더 선택'
+    pickFolder: '폴더 선택',
+    terminal: '터미널',
+    cliNotInPath: (label: string) => `${label} CLI가 PATH에 없음`,
+    notInstalledParen: ' (미설치)',
+    builtinTerminalTitle: '내장 터미널 (zsh) — AgentBridge 메모리 없음'
   },
   settings: {
     titles: {
@@ -147,6 +151,75 @@ export const ko = {
       `빈 세션 ${n}개가 강제 종료로 native 영속화되지 않아 자동 정리되었습니다.`,
     errInUse: '다른 앱에서 사용 중입니다.',
     errStillInUse: '아직 다른 앱에서 사용 중입니다. 상대 앱에서 세션을 닫은 뒤 다시 시도하세요.'
+  },
+  titleBar: {
+    openLeft: '좌 사이드바 열기',
+    openRight: '우 사이드바 열기'
+  },
+  home: {
+    subtitle: '메시지를 입력하고 모델을 선택해 새 워크스페이스를 시작하세요.',
+    placeholder: '무엇을 도와드릴까요?',
+    startHint: 'Enter로 시작',
+    start: '시작',
+    startDisabledTitle: '메시지와 사용 가능한 모델을 선택하세요',
+    modelSelect: '모델 선택',
+    cliNotInPath: (label: string) => `${label} CLI가 PATH에 없음`,
+    notInstalled: '미설치'
+  },
+  rightSidebar: {
+    collapse: '우 사이드바 접기',
+    noSelection: '선택 없음',
+    empty: '좌측에서 워크스페이스를 열면 현재 메모리(IR) 상태가 여기에 표시됩니다.',
+    shellNoMemory: '메모리 없음',
+    shellNoMemorySub: '일반 터미널 세션 — AgentBridge가 컨텍스트를 추적하지 않습니다.'
+  },
+  codexTrust: {
+    heading: 'codex `/hooks` 수동 승인 필요',
+    approving: '...',
+    approved: 'codex에서 trust 승인 완료'
+  },
+  leftSidebar: {
+    collapse: '사이드바 접기',
+    toHome: '홈 화면으로',
+    home: '홈',
+    newWorkspace: '새 워크스페이스',
+    pathLabel: '경로',
+    nameOptional: '이름 (선택)',
+    folderNamePlaceholder: '폴더명',
+    modelLabel: '모델',
+    create: '만들기',
+    cliNotInstalledRestart: (model: string) => `${model} CLI 미설치 — 설치 후 앱 재시작`,
+    sectionActive: '활성',
+    noWorkspaces: '워크스페이스 없음 — 상단에서 생성',
+    collapseTree: '접기',
+    expandTree: '펼치기',
+    noResumableSession: '이어갈 수 있는 세션이 없음 — 모든 세션이 native 미영속화/CLI 미설치',
+    addSession: '세션 추가',
+    deleteWorkspace: '워크스페이스 삭제',
+    noSessions: '세션 없음',
+    inUseByOther: '다른 앱에서 사용 중',
+    builtinTerminalShort: '내장 터미널 (zsh)',
+    notPersistedNoResume: '모델 native 세션 미영속화 — resume 불가',
+    cliNotInstalled: (label: string) => `${label} CLI 미설치`,
+    openWorkspaceAndActivate: (label: string) => `워크스페이스 열기 + ${label} 활성`,
+    inUseBadge: '사용 중',
+    renameSession: '세션 이름 수정',
+    deleteSessionTitle: '세션 삭제 (되돌릴 수 없음)',
+    deleteSession: '세션 삭제',
+    ctxOpen: '워크스페이스 열기',
+    ctxOpenNewWindow: '새 창으로 열기',
+    ctxRename: '이름 수정',
+    ctxDelete: '삭제'
+  },
+  sessionTabs: {
+    memoryInjectDisabled: (reason: string) => `메모리 주입 비활성 — ${reason}`,
+    memoryDisabledBadge: '메모리 비활성',
+    closeTabTitle: '탭 닫기 (사이드바에서 다시 열 수 있음)',
+    closeTab: '탭 닫기',
+    moreCount: (n: number) => `${n}개 더 보기`,
+    moreTabs: '더 많은 탭',
+    addModelTab: '다른 모델 탭 추가',
+    addModel: '+ 모델'
   }
 }
 

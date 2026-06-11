@@ -4,6 +4,7 @@ import { ArrowUpIcon } from './icons'
 import claudeLogo from '../assets/logos/claude.png'
 import codexLogo from '../assets/logos/codex.png'
 import agyLogo from '../assets/logos/agy.png'
+import { useT } from '../i18n'
 
 // 홈 화면 — 워크스페이스 미선택 상태에서 본문에 표시.
 // 입력 + 모델 선택 → 기본 경로 하위에 워크스페이스 자동 생성 + 세션 spawn + 첫 메시지 submit.
@@ -24,6 +25,7 @@ const MODEL_META: Record<CliKind, { label: string; logo: string; desc: string }>
 }
 
 export function HomePane({ env, busy, onSubmit }: Props): React.JSX.Element {
+  const t = useT()
   const [model, setModel] = useState<CliKind>('claude')
   const [message, setMessage] = useState('')
 
@@ -43,15 +45,13 @@ export function HomePane({ env, busy, onSubmit }: Props): React.JSX.Element {
       <div className="home-pane-inner">
         <div className="home-header">
           <h1 className="home-title">AgentBridge</h1>
-          <p className="home-subtitle">
-            메시지를 입력하고 모델을 선택해 새 워크스페이스를 시작하세요.
-          </p>
+          <p className="home-subtitle">{t.home.subtitle}</p>
         </div>
 
         <div className="home-input-wrap">
           <textarea
             className="home-input"
-            placeholder="무엇을 도와드릴까요?"
+            placeholder={t.home.placeholder}
             value={message}
             onChange={(e) => setMessage(e.target.value)}
             onKeyDown={(e) => {
@@ -66,20 +66,20 @@ export function HomePane({ env, busy, onSubmit }: Props): React.JSX.Element {
             disabled={busy}
           />
           <div className="home-input-foot">
-            <span className="hint">Enter로 시작</span>
+            <span className="hint">{t.home.startHint}</span>
             <button
               className="home-submit"
               onClick={submit}
               disabled={!canSubmit}
-              title={canSubmit ? '시작' : '메시지와 사용 가능한 모델을 선택하세요'}
-              aria-label="시작"
+              title={canSubmit ? t.home.start : t.home.startDisabledTitle}
+              aria-label={t.home.start}
             >
               <ArrowUpIcon />
             </button>
           </div>
         </div>
 
-        <div className="home-models" role="radiogroup" aria-label="모델 선택">
+        <div className="home-models" role="radiogroup" aria-label={t.home.modelSelect}>
           {(['claude', 'codex', 'agy'] as CliKind[]).map((k) => {
             const meta = MODEL_META[k]
             const available = isAvailable(k)
@@ -92,12 +92,12 @@ export function HomePane({ env, busy, onSubmit }: Props): React.JSX.Element {
                 aria-checked={selected}
                 onClick={() => available && setModel(k)}
                 disabled={!available || busy}
-                title={available ? meta.desc : `${meta.label} CLI가 PATH에 없음`}
+                title={available ? meta.desc : t.home.cliNotInPath(meta.label)}
               >
                 <img src={meta.logo} alt="" className="home-model-logo" />
                 <div className="home-model-meta">
                   <div className="home-model-name">{meta.label}</div>
-                  <div className="home-model-desc">{available ? meta.desc : '미설치'}</div>
+                  <div className="home-model-desc">{available ? meta.desc : t.home.notInstalled}</div>
                 </div>
               </button>
             )
