@@ -11,7 +11,8 @@ export const en = {
     terminal: 'Terminal',
     cliNotInPath: (label: string) => `${label} CLI is not on PATH`,
     notInstalledParen: ' (not installed)',
-    builtinTerminalTitle: 'Built-in terminal (zsh) — no AgentBridge memory'
+    builtinTerminalTitle: 'Built-in terminal (zsh) — no AgentBridge memory',
+    cancel: 'Cancel'
   },
   settings: {
     titles: {
@@ -222,5 +223,101 @@ export const en = {
     moreTabs: 'More tabs',
     addModelTab: 'Add another model tab',
     addModel: '+ Model'
+  },
+  time: {
+    never: 'none yet',
+    justNow: 'just now',
+    secondsAgo: (n: number) => `${n}s ago`,
+    minutesAgo: (n: number) => `${n}m ago`,
+    hoursAgo: (n: number) => `${n}h ago`,
+    daysAgo: (n: number) => `${n}d ago`
+  },
+  mem: {
+    panelAria: 'Memory panel',
+    groupInstructions: 'AI instructions',
+    groupMemory: 'Memory',
+    infoTip:
+      'AgentBridge memory (IR) is re-injected into the next message even after `/clear`.\nTo clear the memory itself, reset it with the trash button.',
+    infoTipAria: 'About memory behavior',
+    refineNow: 'Refine now',
+    resetMemory: 'Reset memory',
+    prevSnapshots: 'Previous snapshots',
+    collapse: 'Collapse',
+    archiveMore: (n: number) => `+ ${n} more`,
+    snapshotDetailTitle: 'Memory snapshot',
+    currentMemoryTitle: 'Current memory',
+    lastRefined: (abs: string) => `Last refined · ${abs}`,
+    refineFailed: 'Refine failed',
+    refineWarn: (e: string) => `Warning: ${e}`,
+    resetFailed: 'Reset failed',
+    restoreFailed: 'Restore failed',
+    snapshotDeleteFailed: 'Snapshot delete failed',
+    confirmDeleteCurrentWithArchive:
+      'Clear the current memory and restore the latest snapshot as the current memory.\nThe restored snapshot is removed from the archive list. Continue?',
+    confirmDeleteCurrentNoArchive:
+      'Clear the current memory (no archive snapshot — switches to empty memory). Continue?',
+    confirmDeleteSnapshot: (abs: string) =>
+      `Delete this snapshot (${abs}).\nThis cannot be undone. Continue?`,
+    resetBody:
+      'Clears the IR (summary memory) of the current workspace. This cannot be undone. Archive snapshots are preserved.',
+    resetAlsoTurns: 'Also reset recent turn records (turns.jsonl)',
+    resetting: 'Resetting…',
+    reset: 'Reset',
+    noWorkspacePath: 'No workspace path.',
+    notCreated: 'not created',
+    openInEditor: 'Open in editor',
+    createEmptyAndOpen: 'Create an empty file and open it',
+    create: 'Create',
+    refinePolicy: 'Refine policy',
+    policyPriority: 'Default (priority)',
+    policyFixed: 'Fixed',
+    policyActiveHeadless: 'Active model (headless)',
+    policyOff: 'Refining off',
+    sevUnknown: 'Unknown',
+    sevOk: 'OK',
+    sevWarn: 'Warning',
+    sevCritical: 'Critical',
+    sevExceeded: 'Exceeded',
+    nextRefineCli: (label: string) => `${label} · CLI for the next refine`,
+    forcedFallbackNote: 'Marked as fallback due to a response error (released at UTC midnight)',
+    aggregating: 'Aggregating…',
+    willAutoRefine: 'Auto-refine soon',
+    untilNextRefine: 'Until next refine',
+    noIrYet:
+      'No IR generated yet. It auto-refines after you start a conversation, or refine manually with ✨ at the top right.',
+    goalUnset: '(goal unset)',
+    sectionGoal: 'Goal',
+    sectionDecisions: 'Decisions',
+    sectionFiles: 'Files',
+    sectionCommands: 'Commands',
+    sectionTests: 'Tests',
+    sectionPending: 'To-do',
+    clearCurrentTitle: 'Clear current memory (restore the latest archive snapshot)',
+    clearCurrent: 'Clear current memory',
+    snapshotEyebrow: 'Snapshot',
+    total: (n: number) => `Total ${n}`,
+    deleteSnapshotTitle: 'Delete this snapshot',
+    deleteSnapshot: 'Delete snapshot',
+    detailAria: 'Memory detail',
+    loading: 'Loading…',
+    noIrToShow: 'No IR to show.',
+    role: 'Role',
+    next: 'Next',
+    blocked: 'Blocked',
+    empty: '(none)',
+    testStatus: {
+      passed: 'Pass',
+      failed: 'Fail',
+      pending: 'Pending',
+      skipped: 'Skip'
+    }
+  },
+  xterm: {
+    dropPathFailed: 'Could not extract file path',
+    attachFailed: 'Attach failed',
+    someRejected: (reasons: string) => `Some rejected: ${reasons}`,
+    attachTitle: '+ Attach files',
+    pasteAbsoluteShell: 'Paste absolute path',
+    pasteAbsoluteMention: 'Paste @absolute-path'
   }
 } satisfies Messages

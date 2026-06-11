@@ -11,7 +11,8 @@ export const ko = {
     terminal: '터미널',
     cliNotInPath: (label: string) => `${label} CLI가 PATH에 없음`,
     notInstalledParen: ' (미설치)',
-    builtinTerminalTitle: '내장 터미널 (zsh) — AgentBridge 메모리 없음'
+    builtinTerminalTitle: '내장 터미널 (zsh) — AgentBridge 메모리 없음',
+    cancel: '취소'
   },
   settings: {
     titles: {
@@ -220,6 +221,101 @@ export const ko = {
     moreTabs: '더 많은 탭',
     addModelTab: '다른 모델 탭 추가',
     addModel: '+ 모델'
+  },
+  time: {
+    never: '아직 없음',
+    justNow: '방금',
+    secondsAgo: (n: number) => `${n}초 전`,
+    minutesAgo: (n: number) => `${n}분 전`,
+    hoursAgo: (n: number) => `${n}시간 전`,
+    daysAgo: (n: number) => `${n}일 전`
+  },
+  mem: {
+    panelAria: '메모리 패널',
+    groupInstructions: 'AI 지시',
+    groupMemory: '메모리',
+    infoTip:
+      'AgentBridge 메모리(IR)는 `/clear` 후에도 다음 메시지에 자동 재주입됩니다.\n메모리 자체를 비우려면 휴지통 버튼으로 초기화하세요.',
+    infoTipAria: '메모리 동작 안내',
+    refineNow: '지금 정제',
+    resetMemory: '메모리 초기화',
+    prevSnapshots: '이전 스냅샷',
+    collapse: '접기',
+    archiveMore: (n: number) => `+ ${n}개 더보기`,
+    snapshotDetailTitle: '메모리 스냅샷',
+    currentMemoryTitle: '현재 메모리',
+    lastRefined: (abs: string) => `마지막 정제 · ${abs}`,
+    refineFailed: '정제 실패',
+    refineWarn: (e: string) => `경고: ${e}`,
+    resetFailed: '초기화 실패',
+    restoreFailed: '복원 실패',
+    snapshotDeleteFailed: '스냅샷 삭제 실패',
+    confirmDeleteCurrentWithArchive:
+      '현재 메모리를 비우고 가장 최신 스냅샷을 현재 메모리로 복원합니다.\n복원된 스냅샷은 archive 목록에서 제거됩니다. 계속할까요?',
+    confirmDeleteCurrentNoArchive:
+      '현재 메모리를 비웁니다 (archive 스냅샷 없음 — 빈 메모리로 전환). 계속할까요?',
+    confirmDeleteSnapshot: (abs: string) =>
+      `이 스냅샷을 삭제합니다 (${abs}).\n되돌릴 수 없습니다. 계속할까요?`,
+    resetBody:
+      '현재 워크스페이스의 IR(요약 메모리)을 비웁니다. 되돌릴 수 없습니다. archive 스냅샷은 보존됩니다.',
+    resetAlsoTurns: '최근 turn 기록(turns.jsonl)도 함께 초기화',
+    resetting: '초기화 중…',
+    reset: '초기화',
+    noWorkspacePath: '워크스페이스 경로가 없습니다.',
+    notCreated: '미생성',
+    openInEditor: '에디터에서 열기',
+    createEmptyAndOpen: '빈 파일 생성 후 열기',
+    create: '만들기',
+    refinePolicy: '정제 정책',
+    policyPriority: '기본 (우선순위)',
+    policyFixed: '고정',
+    policyActiveHeadless: '활성 모델 헤드리스',
+    policyOff: '정제 끔',
+    sevUnknown: '미감지',
+    sevOk: 'OK',
+    sevWarn: '주의',
+    sevCritical: '임박',
+    sevExceeded: '초과',
+    nextRefineCli: (label: string) => `${label} · 다음 refine에 사용될 CLI`,
+    forcedFallbackNote: '응답 에러로 폴백 마킹됨 (UTC 자정 해제)',
+    aggregating: '집계 중…',
+    willAutoRefine: '곧 자동 정제됨',
+    untilNextRefine: '다음 정제까지',
+    noIrYet: '아직 IR이 생성되지 않았습니다. 대화 시작 후 자동 정제 또는 우측 위 ✨로 수동 정제.',
+    goalUnset: '(목표 미설정)',
+    sectionGoal: '목표',
+    sectionDecisions: '결정',
+    sectionFiles: '파일',
+    sectionCommands: '명령',
+    sectionTests: '테스트',
+    sectionPending: '할 일',
+    clearCurrentTitle: '현재 메모리 비우기 (archive 최신 스냅샷 복원)',
+    clearCurrent: '현재 메모리 비우기',
+    snapshotEyebrow: '스냅샷',
+    total: (n: number) => `총 ${n}`,
+    deleteSnapshotTitle: '이 스냅샷 삭제',
+    deleteSnapshot: '스냅샷 삭제',
+    detailAria: '메모리 상세',
+    loading: '불러오는 중…',
+    noIrToShow: '표시할 IR이 없습니다.',
+    role: '역할',
+    next: '다음',
+    blocked: '막힘',
+    empty: '(없음)',
+    testStatus: {
+      passed: '통과',
+      failed: '실패',
+      pending: '대기',
+      skipped: '스킵'
+    }
+  },
+  xterm: {
+    dropPathFailed: '파일 경로 추출 실패',
+    attachFailed: '첨부 실패',
+    someRejected: (reasons: string) => `일부 거부: ${reasons}`,
+    attachTitle: '+ 파일 첨부',
+    pasteAbsoluteShell: '절대 경로 paste',
+    pasteAbsoluteMention: '@절대경로 paste'
   }
 }
 

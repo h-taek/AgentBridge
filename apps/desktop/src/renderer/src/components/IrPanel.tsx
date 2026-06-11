@@ -20,6 +20,7 @@ import {
   TrashIcon
 } from './icons'
 import { IrDetailModal } from './IrDetailModal'
+import { useT, type Messages } from '../i18n'
 
 // M3.5 UI-E 후속 — 메모리 관리 패널 (3 collapsible 그룹).
 //   Group 1: AI 지시 (cwd 안 AGENTS.md / CLAUDE.md / GEMINI.md)
@@ -37,19 +38,19 @@ type DetailTarget =
 
 const ARCHIVE_INITIAL_VISIBLE = 5
 
-function formatRelative(iso: string | null, now: number): string {
-  if (!iso) return '아직 없음'
-  const t = new Date(iso).getTime()
-  if (Number.isNaN(t)) return '아직 없음'
-  const diffSec = Math.max(0, Math.round((now - t) / 1000))
-  if (diffSec < 10) return '방금'
-  if (diffSec < 60) return `${diffSec}초 전`
+function formatRelative(iso: string | null, now: number, t: Messages): string {
+  if (!iso) return t.time.never
+  const ms = new Date(iso).getTime()
+  if (Number.isNaN(ms)) return t.time.never
+  const diffSec = Math.max(0, Math.round((now - ms) / 1000))
+  if (diffSec < 10) return t.time.justNow
+  if (diffSec < 60) return t.time.secondsAgo(diffSec)
   const min = Math.floor(diffSec / 60)
-  if (min < 60) return `${min}분 전`
+  if (min < 60) return t.time.minutesAgo(min)
   const hr = Math.floor(min / 60)
-  if (hr < 24) return `${hr}시간 전`
+  if (hr < 24) return t.time.hoursAgo(hr)
   const day = Math.floor(hr / 24)
-  if (day < 7) return `${day}일 전`
+  if (day < 7) return t.time.daysAgo(day)
   return new Date(iso).toLocaleDateString()
 }
 
@@ -67,6 +68,7 @@ function formatBytes(n: number): string {
 }
 
 export function IrPanel({ workspaceId }: Props): React.JSX.Element {
+  const t = useT()
   const [ir, setIr] = useState<IR | null>(null)
   const [irMtime, setIrMtime] = useState<string | null>(null)
   const [turns, setTurns] = useState<TurnsSummaryResult | null>(null)
@@ -238,8 +240,8 @@ export function IrPanel({ workspaceId }: Props): React.JSX.Element {
     setRefineError(null)
     try {
       const res = await window.agentbridge.ir.refine({ workspaceId, timeoutMs: 120_000 })
-      if (!res.ok) setRefineError(res.error ?? '정제 실패')
-      else if (res.error) setRefineError(`경고: ${res.error}`)
+      if (!res.ok) setRefineError(res.error ?? t.mem.refineFailed)
+      else if (res.error) setRefineError(t.mem.refineWarn(res.error))
       await loadIr()
       await loadTurns()
       await loadArchive()
@@ -248,7 +250,7 @@ export function IrPanel({ workspaceId }: Props): React.JSX.Element {
     } finally {
       setRefining(false)
     }
-  }, [refining, workspaceId, loadIr, loadTurns, loadArchive])
+  }, [refining, workspaceId, loadIr, loadTurns, loadArchive, t])
 
   // 메모리 초기화 — ir.json + (옵션) turns.jsonl 비움. archive 보존.
   // main이 ir:updated / turns:updated broadcast → 자동 fetch chain 재실행하지만,
@@ -263,7 +265,7 @@ export function IrPanel({ workspaceId }: Props): React.JSX.Element {
         alsoTurns: resetAlsoTurns
       })
       if (!res.ok) {
-        setResetError(res.error ?? '초기화 실패')
+        setResetError(res.error ?? t.mem.resetFailed)
         return
       }
       setResetOpen(false)
@@ -276,7 +278,7 @@ export function IrPanel({ workspaceId }: Props): React.JSX.Element {
     } finally {
       setResetting(false)
     }
-  }, [resetting, workspaceId, resetAlsoTurns, loadIr, loadTurns, loadArchive])
+  }, [resetting, workspaceId, resetAlsoTurns, loadIr, loadTurns, loadArchive, t])
 
   // 워크스페이스 변경 시 reset 모달 닫기 — 외부 시그널 동기화. workspaceId 자체가 외부 입력이고
   // 모달은 워크스페이스에 종속이라 동기 setState 정당.
@@ -294,34 +296,29 @@ export function IrPanel({ workspaceId }: Props): React.JSX.Element {
     if (!ir) return
     const hasArchive = archive.length > 0
     const msg = hasArchive
-      ? '현재 메모리를 비우고 가장 최신 스냅샷을 현재 메모리로 복원합니다.\n복원된 스냅샷은 archive 목록에서 제거됩니다. 계속할까요?'
-      : '현재 메모리를 비웁니다 (archive 스냅샷 없음 — 빈 메모리로 전환). 계속할까요?'
+      ? t.mem.confirmDeleteCurrentWithArchive
+      : t.mem.confirmDeleteCurrentNoArchive
     if (!window.confirm(msg)) return
     try {
       const res = await window.agentbridge.memory.promoteLatestArchive({ workspaceId })
-      if (!res.ok) setRefineError(res.error ?? '복원 실패')
+      if (!res.ok) setRefineError(res.error ?? t.mem.restoreFailed)
     } catch (e) {
       setRefineError(String(e))
     }
-  }, [ir, workspaceId, archive.length])
+  }, [ir, workspaceId, archive.length, t])
 
   // ArchiveCard 카드 헤더 휴지통 → 개별 스냅샷 파일 삭제.
   // archive:delete(workspaceId, archivePath) — main이 안전 가드 통과 후 unlink. 성공 시 loadArchive 갱신.
   const handleDeleteArchive = useCallback(
     async (meta: ArchiveSnapshotMeta) => {
-      if (
-        !window.confirm(
-          `이 스냅샷을 삭제합니다 (${formatAbsolute(meta.archivedAt)}).\n되돌릴 수 없습니다. 계속할까요?`
-        )
-      )
-        return
+      if (!window.confirm(t.mem.confirmDeleteSnapshot(formatAbsolute(meta.archivedAt)))) return
       try {
         const res = await window.agentbridge.memory.archiveDelete({
           workspaceId,
           archivePath: meta.archivePath
         })
         if (!res.ok) {
-          setRefineError(res.error ?? '스냅샷 삭제 실패')
+          setRefineError(res.error ?? t.mem.snapshotDeleteFailed)
           return
         }
         await loadArchive()
@@ -329,7 +326,7 @@ export function IrPanel({ workspaceId }: Props): React.JSX.Element {
         setRefineError(String(e))
       }
     },
-    [workspaceId, loadArchive]
+    [workspaceId, loadArchive, t]
   )
 
   // archive 카드 클릭 → IR 본문 fetch 후 모달 표시.
@@ -405,9 +402,9 @@ export function IrPanel({ workspaceId }: Props): React.JSX.Element {
   }, [settings, workspace])
 
   return (
-    <section className="mem-panel" aria-label="메모리 패널">
+    <section className="mem-panel" aria-label={t.mem.panelAria}>
       <MemGroup
-        title="AI 지시"
+        title={t.mem.groupInstructions}
         open={openInstructions}
         onToggle={() => setOpenInstructions((v) => !v)}
       >
@@ -419,18 +416,16 @@ export function IrPanel({ workspaceId }: Props): React.JSX.Element {
       </MemGroup>
 
       <MemGroup
-        title="메모리"
+        title={t.mem.groupMemory}
         open={openMemory}
         onToggle={() => setOpenMemory((v) => !v)}
         action={
           <>
             <span
               className="mem-info-tip"
-              title={
-                'AgentBridge 메모리(IR)는 `/clear` 후에도 다음 메시지에 자동 재주입됩니다.\n메모리 자체를 비우려면 휴지통 버튼으로 초기화하세요.'
-              }
+              title={t.mem.infoTip}
               role="img"
-              aria-label="메모리 동작 안내"
+              aria-label={t.mem.infoTipAria}
               onClick={(e) => e.stopPropagation()}
             >
               <InfoIcon />
@@ -443,8 +438,8 @@ export function IrPanel({ workspaceId }: Props): React.JSX.Element {
                 void handleRefine()
               }}
               disabled={refining}
-              title="지금 정제"
-              aria-label="지금 정제"
+              title={t.mem.refineNow}
+              aria-label={t.mem.refineNow}
             >
               {refining ? <RefreshIcon className="spin" /> : <SparkleIcon />}
             </button>
@@ -458,8 +453,8 @@ export function IrPanel({ workspaceId }: Props): React.JSX.Element {
                 setResetOpen(true)
               }}
               disabled={refining || resetting}
-              title="메모리 초기화"
-              aria-label="메모리 초기화"
+              title={t.mem.resetMemory}
+              aria-label={t.mem.resetMemory}
             >
               <TrashIcon />
             </button>
@@ -470,7 +465,7 @@ export function IrPanel({ workspaceId }: Props): React.JSX.Element {
         <TurnFlowCard summary={turns} />
         <CurrentIrCard
           ir={ir}
-          updatedLabel={formatRelative(currentUpdatedAt, now)}
+          updatedLabel={formatRelative(currentUpdatedAt, now, t)}
           onOpen={() => {
             if (ir) setDetail({ kind: 'current', ir, mtime: irMtime })
           }}
@@ -478,12 +473,14 @@ export function IrPanel({ workspaceId }: Props): React.JSX.Element {
         />
         {archive.length > 0 && (
           <>
-            <div className="mem-subhead">이전 스냅샷 · {archive.length}</div>
+            <div className="mem-subhead">
+              {t.mem.prevSnapshots} · {archive.length}
+            </div>
             {visibleArchive.map((s) => (
               <ArchiveCard
                 key={s.archivePath}
                 snapshot={s}
-                relativeLabel={formatRelative(s.updatedAt, now)}
+                relativeLabel={formatRelative(s.updatedAt, now, t)}
                 onOpen={() => void openArchiveDetail(s)}
                 onDelete={() => void handleDeleteArchive(s)}
               />
@@ -494,7 +491,9 @@ export function IrPanel({ workspaceId }: Props): React.JSX.Element {
                 className="mem-archive-more"
                 onClick={() => setShowAllArchive((v) => !v)}
               >
-                {showAllArchive ? '접기' : `+ ${archive.length - ARCHIVE_INITIAL_VISIBLE}개 더보기`}
+                {showAllArchive
+                  ? t.mem.collapse
+                  : t.mem.archiveMore(archive.length - ARCHIVE_INITIAL_VISIBLE)}
               </button>
             )}
           </>
@@ -503,12 +502,12 @@ export function IrPanel({ workspaceId }: Props): React.JSX.Element {
 
       <IrDetailModal
         open={detail !== null}
-        title={detail?.kind === 'archive' ? '메모리 스냅샷' : '현재 메모리'}
+        title={detail?.kind === 'archive' ? t.mem.snapshotDetailTitle : t.mem.currentMemoryTitle}
         subtitle={
           detail?.kind === 'archive'
-            ? `${formatAbsolute(detail.meta.updatedAt)} · ${formatRelative(detail.meta.updatedAt, now)}`
+            ? `${formatAbsolute(detail.meta.updatedAt)} · ${formatRelative(detail.meta.updatedAt, now, t)}`
             : currentUpdatedAt
-              ? `마지막 정제 · ${formatAbsolute(currentUpdatedAt)}`
+              ? t.mem.lastRefined(formatAbsolute(currentUpdatedAt))
               : undefined
         }
         ir={detail?.kind === 'current' ? detail.ir : archiveDetailIr.ir}
@@ -553,6 +552,7 @@ function MemoryResetConfirm({
   onCancel: () => void
   onConfirm: () => void | Promise<void>
 }): React.JSX.Element | null {
+  const t = useT()
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent): void => {
@@ -574,19 +574,16 @@ function MemoryResetConfirm({
         role="dialog"
         aria-modal
       >
-        <div className="mem-reset-title">메모리 초기화</div>
-        <div className="mem-reset-body">
-          현재 워크스페이스의 IR(요약 메모리)을 비웁니다. 되돌릴 수 없습니다. archive 스냅샷은
-          보존됩니다.
-        </div>
+        <div className="mem-reset-title">{t.mem.resetMemory}</div>
+        <div className="mem-reset-body">{t.mem.resetBody}</div>
         <label className="mem-reset-option">
           <input type="checkbox" checked={alsoTurns} onChange={onToggleAlsoTurns} disabled={busy} />
-          <span>최근 turn 기록(turns.jsonl)도 함께 초기화</span>
+          <span>{t.mem.resetAlsoTurns}</span>
         </label>
         {error && <div className="mem-reset-error">{error}</div>}
         <div className="mem-reset-actions">
           <button type="button" className="btn" onClick={onCancel} disabled={busy}>
-            취소
+            {t.common.cancel}
           </button>
           <button
             type="button"
@@ -594,7 +591,7 @@ function MemoryResetConfirm({
             onClick={() => void onConfirm()}
             disabled={busy}
           >
-            {busy ? '초기화 중…' : '초기화'}
+            {busy ? t.mem.resetting : t.mem.reset}
           </button>
         </div>
       </div>
@@ -637,8 +634,9 @@ function InstructionsCard({
   onAction: (info: InstructionFileInfo) => Promise<void> | void
   now: number
 }): React.JSX.Element {
+  const t = useT()
   if (files.length === 0) {
-    return <div className="mem-card mem-card-empty">워크스페이스 경로가 없습니다.</div>
+    return <div className="mem-card mem-card-empty">{t.mem.noWorkspacePath}</div>
   }
   return (
     <div className="mem-card mem-card-static">
@@ -649,16 +647,16 @@ function InstructionsCard({
               <div className="mem-instruction-name mono">{f.filename}</div>
               <div className="mem-instruction-sub">
                 {f.exists
-                  ? `${formatBytes(f.sizeBytes ?? 0)} · ${formatRelative(f.mtime, now)}`
-                  : '미생성'}
+                  ? `${formatBytes(f.sizeBytes ?? 0)} · ${formatRelative(f.mtime, now, t)}`
+                  : t.mem.notCreated}
               </div>
             </div>
             <button
               type="button"
               className="mem-instruction-action"
               onClick={() => void onAction(f)}
-              title={f.exists ? '에디터에서 열기' : '빈 파일 생성 후 열기'}
-              aria-label={f.exists ? '에디터에서 열기' : '만들기'}
+              title={f.exists ? t.mem.openInEditor : t.mem.createEmptyAndOpen}
+              aria-label={f.exists ? t.mem.openInEditor : t.mem.create}
             >
               {f.exists ? <ExternalLinkIcon /> : <PlusIcon />}
             </button>
@@ -685,21 +683,22 @@ function RefineQuotaCard({
   quota: QuotaSnapshotsByCli | null
   activeCli: CliKind | null
 }): React.JSX.Element {
+  const t = useT()
   const policyLabel = settings
     ? {
-        priority: '기본 (우선순위)',
-        fixed: '고정',
-        active: '활성 모델 헤드리스',
-        off: '정제 끔'
+        priority: t.mem.policyPriority,
+        fixed: t.mem.policyFixed,
+        active: t.mem.policyActiveHeadless,
+        off: t.mem.policyOff
       }[settings.refineModel]
     : '—'
 
   const severityLabel: Record<QuotaSnapshot['severity'], string> = {
-    unknown: '미감지',
-    ok: 'OK',
-    warn: '주의',
-    critical: '임박',
-    exceeded: '초과'
+    unknown: t.mem.sevUnknown,
+    ok: t.mem.sevOk,
+    warn: t.mem.sevWarn,
+    critical: t.mem.sevCritical,
+    exceeded: t.mem.sevExceeded
   }
   const severityCls: Record<QuotaSnapshot['severity'], string> = {
     unknown: 'mem-badge-skip',
@@ -714,7 +713,7 @@ function RefineQuotaCard({
   return (
     <div className="mem-card mem-card-static">
       <div className="mem-kv-row">
-        <span className="mem-kv-key">정제 정책</span>
+        <span className="mem-kv-key">{t.mem.refinePolicy}</span>
         <span className="mem-kv-val">{policyLabel}</span>
       </div>
       <div className="mem-quota-row">
@@ -731,9 +730,7 @@ function RefineQuotaCard({
               <span
                 className={`mem-quota-item model-${cli}${isActive ? ' is-active' : ''}`}
                 title={
-                  isActive
-                    ? `${CLI_QUOTA_LABEL[cli]} · 다음 refine에 사용될 CLI`
-                    : CLI_QUOTA_LABEL[cli]
+                  isActive ? t.mem.nextRefineCli(CLI_QUOTA_LABEL[cli]) : CLI_QUOTA_LABEL[cli]
                 }
               >
                 <span className="mem-quota-dot" aria-hidden />
@@ -750,7 +747,7 @@ function RefineQuotaCard({
         })}
       </div>
       {order.some((cli) => quota?.[cli]?.forcedFallback) && (
-        <div className="mem-kv-note">응답 에러로 폴백 마킹됨 (UTC 자정 해제)</div>
+        <div className="mem-kv-note">{t.mem.forcedFallbackNote}</div>
       )}
     </div>
   )
@@ -764,8 +761,9 @@ function RefineQuotaCard({
 const BAR_DIVISIONS = 7
 
 function TurnFlowCard({ summary }: { summary: TurnsSummaryResult | null }): React.JSX.Element {
+  const t = useT()
   if (!summary) {
-    return <div className="mem-card mem-card-static mem-card-empty">집계 중…</div>
+    return <div className="mem-card mem-card-static mem-card-empty">{t.mem.aggregating}</div>
   }
   const uncompacted = Math.max(0, summary.count - summary.keepRecent)
   const countPct = Math.min(100, (summary.count / BAR_DIVISIONS) * 100)
@@ -779,7 +777,9 @@ function TurnFlowCard({ summary }: { summary: TurnsSummaryResult | null }): Reac
   return (
     <div className="mem-card mem-card-static">
       <div className="mem-flow-header">
-        <span className="mem-flow-label">{willTrigger ? '곧 자동 정제됨' : '다음 정제까지'}</span>
+        <span className="mem-flow-label">
+          {willTrigger ? t.mem.willAutoRefine : t.mem.untilNextRefine}
+        </span>
         <span className="mem-flow-count">
           {summary.count} turn · {formatBytes(summary.bytes)}
         </span>
@@ -821,12 +821,9 @@ function CurrentIrCard({
   onOpen: () => void
   onDelete: () => void
 }): React.JSX.Element {
+  const t = useT()
   if (!ir) {
-    return (
-      <div className="mem-card mem-card-static mem-card-empty">
-        아직 IR이 생성되지 않았습니다. 대화 시작 후 자동 정제 또는 우측 위 ✨로 수동 정제.
-      </div>
-    )
+    return <div className="mem-card mem-card-static mem-card-empty">{t.mem.noIrYet}</div>
   }
   // key 동기화 — IR 본문이 바뀌면(promote 또는 refine 직후) wrapper가 remount되며
   // CSS animation 'mem-card-promote'가 한 번 발동해 새 카드가 위에서 내려오는 효과.
@@ -835,16 +832,16 @@ function CurrentIrCard({
     <div className="mem-card-wrap mem-card-promote" key={animKey}>
       <button type="button" className="mem-card mem-card-button" onClick={onOpen}>
         <div className="mem-card-head">
-          <span className="mem-card-eyebrow">현재 메모리</span>
+          <span className="mem-card-eyebrow">{t.mem.currentMemoryTitle}</span>
           <span className="mem-card-time">{updatedLabel}</span>
         </div>
-        <div className="mem-card-title">{ir.intent.goal?.trim() || '(목표 미설정)'}</div>
+        <div className="mem-card-title">{ir.intent.goal?.trim() || t.mem.goalUnset}</div>
         <div className="mem-card-counts">
-          <CountChip label="결정" n={ir.decisions.length} />
-          <CountChip label="파일" n={ir.files.length} />
-          <CountChip label="명령" n={ir.commands.length} />
-          <CountChip label="테스트" n={ir.tests.length} />
-          <CountChip label="할 일" n={ir.pending.length} />
+          <CountChip label={t.mem.sectionDecisions} n={ir.decisions.length} />
+          <CountChip label={t.mem.sectionFiles} n={ir.files.length} />
+          <CountChip label={t.mem.sectionCommands} n={ir.commands.length} />
+          <CountChip label={t.mem.sectionTests} n={ir.tests.length} />
+          <CountChip label={t.mem.sectionPending} n={ir.pending.length} />
         </div>
       </button>
       <button
@@ -854,8 +851,8 @@ function CurrentIrCard({
           e.stopPropagation()
           onDelete()
         }}
-        title="현재 메모리 비우기 (archive 최신 스냅샷 복원)"
-        aria-label="현재 메모리 비우기"
+        title={t.mem.clearCurrentTitle}
+        aria-label={t.mem.clearCurrent}
       >
         <TrashIcon />
       </button>
@@ -875,6 +872,7 @@ function ArchiveCard({
   onOpen: () => void
   onDelete: () => void
 }): React.JSX.Element {
+  const t = useT()
   const total =
     snapshot.counts.decisions +
     snapshot.counts.files +
@@ -885,17 +883,17 @@ function ArchiveCard({
     <div className="mem-card-wrap">
       <button type="button" className="mem-card mem-card-button mem-card-history" onClick={onOpen}>
         <div className="mem-card-head">
-          <span className="mem-card-eyebrow">스냅샷</span>
+          <span className="mem-card-eyebrow">{t.mem.snapshotEyebrow}</span>
           <span className="mem-card-time">{relativeLabel}</span>
         </div>
-        <div className="mem-card-title">{snapshot.intentGoal?.trim() || '(목표 미설정)'}</div>
+        <div className="mem-card-title">{snapshot.intentGoal?.trim() || t.mem.goalUnset}</div>
         <div className="mem-card-counts">
-          <CountChip label="결정" n={snapshot.counts.decisions} />
-          <CountChip label="파일" n={snapshot.counts.files} />
-          <CountChip label="명령" n={snapshot.counts.commands} />
-          <CountChip label="테스트" n={snapshot.counts.tests} />
-          <CountChip label="할 일" n={snapshot.counts.pending} />
-          <span className="mem-count-total">총 {total}</span>
+          <CountChip label={t.mem.sectionDecisions} n={snapshot.counts.decisions} />
+          <CountChip label={t.mem.sectionFiles} n={snapshot.counts.files} />
+          <CountChip label={t.mem.sectionCommands} n={snapshot.counts.commands} />
+          <CountChip label={t.mem.sectionTests} n={snapshot.counts.tests} />
+          <CountChip label={t.mem.sectionPending} n={snapshot.counts.pending} />
+          <span className="mem-count-total">{t.mem.total(total)}</span>
         </div>
       </button>
       <button
@@ -905,8 +903,8 @@ function ArchiveCard({
           e.stopPropagation()
           onDelete()
         }}
-        title="이 스냅샷 삭제"
-        aria-label="스냅샷 삭제"
+        title={t.mem.deleteSnapshotTitle}
+        aria-label={t.mem.deleteSnapshot}
       >
         <TrashIcon />
       </button>

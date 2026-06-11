@@ -6,6 +6,7 @@ import log from 'electron-log/renderer'
 import type { CliKind, SessionKind } from '@shared/ipc'
 import { ClaudeLogo, CodexLogo, AgyLogo } from './modelLogos'
 import { TerminalIcon } from './icons'
+import { useT } from '../i18n'
 
 const MODEL_LABEL: Record<CliKind, string> = {
   claude: 'Claude',
@@ -57,6 +58,7 @@ export function XtermView({
   isActive = true,
   onExit
 }: Props): React.JSX.Element {
+  const t = useT()
   const containerRef = useRef<HTMLDivElement | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
   const termRef = useRef<Terminal | null>(null)
@@ -341,7 +343,7 @@ export function XtermView({
       }
     }
     if (paths.length === 0) {
-      setDropError('파일 경로 추출 실패')
+      setDropError(t.xterm.dropPathFailed)
       window.setTimeout(() => setDropError(null), 3000)
       return
     }
@@ -351,11 +353,11 @@ export function XtermView({
       .files({ workspaceId: workspaceId!, sessionId: sessionId!, paths })
       .then((res) => {
         if (!res.ok) {
-          setDropError(res.error ?? '첨부 실패')
+          setDropError(res.error ?? t.xterm.attachFailed)
           window.setTimeout(() => setDropError(null), 3500)
         } else if (res.rejected.length > 0) {
           // 일부 거부만 — 경고로 잠깐 표시.
-          setDropError(`일부 거부: ${res.rejected.map((r) => r.reason).join(', ')}`)
+          setDropError(t.xterm.someRejected(res.rejected.map((r) => r.reason).join(', ')))
           window.setTimeout(() => setDropError(null), 3500)
         }
       })
@@ -380,9 +382,9 @@ export function XtermView({
       {dndEnabled && dragDepth > 0 && (
         <div className="xterm-dropzone" aria-hidden="true">
           <div className="xterm-dropzone-inner">
-            <div className="xterm-dropzone-title">+ 파일 첨부</div>
+            <div className="xterm-dropzone-title">{t.xterm.attachTitle}</div>
             <div className="xterm-dropzone-hint">
-              {kind === 'shell' ? '절대 경로 paste' : '@절대경로 paste'}
+              {kind === 'shell' ? t.xterm.pasteAbsoluteShell : t.xterm.pasteAbsoluteMention}
             </div>
           </div>
         </div>
@@ -392,7 +394,7 @@ export function XtermView({
         (() => {
           const isShell = kind === 'shell'
           const Logo = MODEL_LOGO[model]
-          const labelText = isShell ? '터미널' : MODEL_LABEL[model]
+          const labelText = isShell ? t.common.terminal : MODEL_LABEL[model]
           const classModel = isShell ? 'shell' : model
           return (
             <div
