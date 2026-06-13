@@ -22,11 +22,16 @@
 
 'use strict'
 
-// @agentbridge-helper-version 0.2.0
+// @agentbridge-helper-version 0.3.0
 // (단일 설치 버전 비교용 — 이 파일을 수정하면 반드시 버전을 올릴 것)
 
 const fs = require('fs')
 const path = require('path')
+
+// §G3 — 검색·주입 로직은 core 단일 소스. esbuild가 빌드 때 이 require를 인라인한다(옵션 나).
+// 런타임 헬퍼 옆엔 node_modules가 없어 require('@agentbridge/core') 불가 → 상대 경로로 엔트리 그래프에 포함.
+const { resolveContext } = require('../src/globalSearch')
+const { resolveQuery, renderGlobalMatches } = require('../src/globalInject')
 
 // claude/codex/agy 모두 stdout JSON의 `hookEventName`이 *호출된 hook event 이름과 정확히 일치*
 // 해야 한다. 일치 안 하면 CLI host가 "expected X but got Y" 에러로 hook을 거부 (claude는 warning,
@@ -78,6 +83,31 @@ function parseArgs(argv) {
     }
   }
   return out
+}
+
+// hook 입력(stdin)을 best-effort로 읽는다. claude/codex는 UserPromptSubmit JSON을 stdin으로 pipe.
+// TTY면 즉시 빈값(대화형 실행 — hang 금지). 비-TTY인데 close 안 하는 host(agy 등)는 짧은 타임아웃으로 포기.
+function readStdin(timeoutMs) {
+  return new Promise((resolve) => {
+    if (process.stdin.isTTY) {
+      resolve('')
+      return
+    }
+    let data = ''
+    let done = false
+    const finish = () => {
+      if (done) return
+      done = true
+      try { process.stdin.pause() } catch { /* noop */ }
+      resolve(data)
+    }
+    const timer = setTimeout(finish, timeoutMs)
+    if (timer && typeof timer.unref === 'function') timer.unref()
+    process.stdin.setEncoding('utf8')
+    process.stdin.on('data', (c) => { data += c })
+    process.stdin.on('end', () => { clearTimeout(timer); finish() })
+    process.stdin.on('error', () => { clearTimeout(timer); finish() })
+  })
 }
 
 function readJsonSafe(p) {
@@ -241,10 +271,12 @@ function renderRecentTurns(turns) {
   return lines.join('\n')
 }
 
-function buildAdditionalContext(ir, recentTurns, workspaceId) {
-  // architecture §15.5 본문 — IR 압축 메모리 + 최근 3개 raw turn.
-  // 빈 IR + 빈 turns여도 명시적으로 "AgentBridge 컨텍스트"임을 모델이 식별할 수 있게 sentinel 태그로 감싼다.
-  if (!ir && (!recentTurns || recentTurns.length === 0)) {
+function buildAdditionalContext(ir, recentTurns, workspaceId, globalBlock) {
+  // architecture §15.5 본문 — 글로벌 메모리(장기) + IR 압축 메모리 + 최근 raw turn.
+  const hasTurns = Array.isArray(recentTurns) && recentTurns.length > 0
+  const hasGlobal = !!(globalBlock && globalBlock.trim())
+  // 셋 다 비면 명시적으로 "AgentBridge 컨텍스트(미초기화)"임을 모델이 식별하게 sentinel로 감싼다.
+  if (!ir && !hasTurns && !hasGlobal) {
     return [
       '<agentbridge-context>',
       HOOK_INSTRUCTIONS,
@@ -256,6 +288,11 @@ function buildAdditionalContext(ir, recentTurns, workspaceId) {
     ].join('\n')
   }
   const parts = ['<agentbridge-context>', HOOK_INSTRUCTIONS, '']
+  // 장기(글로벌) 메모리를 가장 위에 — 안정적 배경 → 세션 작업기억(IR) → 최근 턴 순.
+  if (hasGlobal) {
+    parts.push(globalBlock)
+    parts.push('')
+  }
   if (ir) {
     parts.push('## Memory (compacted — IR)')
     parts.push('')
@@ -277,19 +314,19 @@ function buildAdditionalContext(ir, recentTurns, workspaceId) {
     parts.push('### Pending')
     parts.push(renderPending(ir))
     parts.push('')
-  } else {
+  } else if (hasTurns) {
     parts.push('## Memory (IR uninitialized — only recent turns available)')
     parts.push('')
   }
-  parts.push(
-    '## Recent conversation (raw, last ' + (recentTurns ? recentTurns.length : 0) + ' turns)'
-  )
-  parts.push(renderRecentTurns(recentTurns))
+  if (hasTurns) {
+    parts.push('## Recent conversation (raw, last ' + recentTurns.length + ' turns)')
+    parts.push(renderRecentTurns(recentTurns))
+  }
   parts.push('</agentbridge-context>')
   return parts.join('\n')
 }
 
-function main() {
+async function main() {
   const parsed = parseArgs(process.argv.slice(2))
   if (parsed.cmd !== 'inject') {
     process.stderr.write(
@@ -312,10 +349,6 @@ function main() {
     process.exit(2)
   }
   if (!parsed.userData) {
-    // 과거에는 macOS 데스크탑 경로(~/Library/Application Support/AgentBridge)로 조용히 폴백했다.
-    // extension 등 다른 호스트에서는 엉뚱한 저장소를 읽어 "IR이 안 따라온다"로만 보이는 문제 —
-    // 추측 대신 빈 컨텍스트 + stderr 진단으로 fail-safe. exit 2는 claude가 프롬프트를 차단하므로
-    // CLI 흐름을 깨지 않는 exit 0 유지 (하단 catch 블록과 같은 원칙).
     process.stderr.write(
       'agentbridge-memory: --user-data required (stale or broken hook command — reopen the session in the app to reinstall hooks)\n'
     )
@@ -323,9 +356,6 @@ function main() {
     process.exit(0)
   }
   const userData = parsed.userData
-  // --workspace는 workspaces/ 아래 단일 디렉토리명으로만 쓰인다. 경로 구분자나 '..'가 들어오면
-  // path.join이 workspaces/ 밖을 가리켜 임의 파일을 읽을 수 있다 (path traversal 방어, V-31 ①).
-  // 정상 흐름에선 hookInstaller가 UUID를 주므로 발생하지 않음 — 발생 시 빈 컨텍스트로 fail-safe.
   if (parsed.workspace !== path.basename(parsed.workspace) || parsed.workspace === '..') {
     process.stderr.write('agentbridge-memory: --workspace must be a single path segment\n')
     process.stdout.write(JSON.stringify(buildHookOutput(parsed.agent, parsed.event, '')))
@@ -335,16 +365,28 @@ function main() {
   const irPath = path.join(wsDir, 'ir.json')
   const turnsPath = path.join(wsDir, 'turns.jsonl')
   const ir = readJsonSafe(irPath)
-  // 최근 N개 raw turn — compaction keepRecent와 동일(현재 3). 사용자가 임계 변경 시 동기화 필요.
   const recentTurns = readRecentTurns(turnsPath, 3)
-  const additionalContext = buildAdditionalContext(ir, recentTurns, parsed.workspace)
-  // hook protocol — stdout JSON. agent마다 schema가 다르다 (CLI host의 hook output unmarshaller가 다르므로).
-  //
-  //   claude/codex: `{ hookSpecificOutput: { hookEventName, additionalContext }, suppressOutput: true }`
-  //   agy:          `{ injectSteps: [{ ephemeralMessage: { content: "..." } }] }` (protojson — agy 1.0.0)
-  //                 hooks_go_proto.HookInjectedStep_EphemeralMessage + CortexStepEphemeralMessage.content
-  //                 (binary string 검증: protobuf:"bytes,103,opt,name=ephemeral_message,...,oneof" /
-  //                  (*CortexStepEphemeralMessage).GetContent)
+
+  // §G3 글로벌 메모리 검색 — additive·best-effort. 어떤 실패도 IR/turns 주입을 막지 않는다.
+  let globalBlock = ''
+  try {
+    const stdinRaw = await readStdin(200)
+    const lastTurn = recentTurns.length ? recentTurns[recentTurns.length - 1] : null
+    const lastUserTurn = lastTurn && typeof lastTurn.user === 'string' ? lastTurn.user : ''
+    const query = resolveQuery(stdinRaw, lastUserTurn)
+    if (query && query.trim()) {
+      const globalDir = path.join(userData, 'global')
+      const matches = await resolveContext(globalDir, 'default', query, { topN: 5 })
+      globalBlock = renderGlobalMatches(matches)
+    }
+  } catch (e) {
+    process.stderr.write(
+      'agentbridge-memory: global search skipped — ' + String(e && e.message ? e.message : e) + '\n'
+    )
+    globalBlock = ''
+  }
+
+  const additionalContext = buildAdditionalContext(ir, recentTurns, parsed.workspace, globalBlock)
   process.stdout.write(
     JSON.stringify(buildHookOutput(parsed.agent, parsed.event, additionalContext))
   )
@@ -372,23 +414,14 @@ function buildHookOutput(agent, event, additionalContext) {
   }
 }
 
-try {
-  main()
-} catch (err) {
+main().catch((err) => {
   // 에러여도 CLI 흐름을 깨지 않게 stdout은 안전한 빈 컨텍스트로 출력하고 stderr만 진단 메시지.
-  // 단 --event를 알 수 없는 catastrophic 케이스에서는 안전한 default 'UserPromptSubmit' 사용.
   process.stderr.write('agentbridge-memory: ' + String(err && err.stack ? err.stack : err) + '\n')
   let fallbackEvent = 'UserPromptSubmit'
-  try {
-    const parsed = parseArgs(process.argv.slice(2))
-    if (parsed.event && ALLOWED_EVENTS.has(parsed.event)) fallbackEvent = parsed.event
-  } catch {
-    /* noop */
-  }
-  // fallback agent도 마지막 args에서 추출(있으면) — agy 응답 schema mismatch 방지.
   let fallbackAgent = 'claude'
   try {
     const parsed = parseArgs(process.argv.slice(2))
+    if (parsed.event && ALLOWED_EVENTS.has(parsed.event)) fallbackEvent = parsed.event
     if (parsed.agent === 'claude' || parsed.agent === 'codex' || parsed.agent === 'agy') {
       fallbackAgent = parsed.agent
     }
@@ -397,4 +430,4 @@ try {
   }
   process.stdout.write(JSON.stringify(buildHookOutput(fallbackAgent, fallbackEvent, '')))
   process.exit(0)
-}
+})
