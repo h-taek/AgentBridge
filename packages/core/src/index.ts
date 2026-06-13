@@ -9,6 +9,7 @@ export * from './globalPaths';
 export * from './globalMarkdown';
 export * from './globalValidate';
 export * from './globalStore';
+export * from './globalSearch';
 
 // 순수 유틸
 export * from './shellQuote';
