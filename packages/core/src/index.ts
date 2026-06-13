@@ -4,6 +4,7 @@
 export * from './shared/cli';
 export * from './shared/ir';
 export * from './shared/turns';
+export * from './shared/global';
 
 // 순수 유틸
 export * from './shellQuote';
