@@ -4,15 +4,25 @@ import * as claudeAdapter from './core/cliAdapter/claudeAdapter';
 import * as codexAdapter from './core/cliAdapter/codexAdapter';
 import * as agyAdapter from './core/cliAdapter/agyAdapter';
 import * as workspaceStore from './core/workspaceStore';
-import { installHelperToCanonicalPath, createSessionFileWatcher, getStorageRoot } from '@agentbridge/core';
-import { initializeCore, getBundledHelperPath, getWorkspaceStore, getLogger } from './core/coreInstances';
+import {
+  installHelperToCanonicalPath,
+  createSessionFileWatcher,
+  getStorageRoot,
+  maybeRunProposalPass,
+  resolveRefineDecisionFromConfig,
+  getGlobalDir,
+  resolveProfile,
+  readIR,
+} from '@agentbridge/core';
+import { initializeCore, getBundledHelperPath, getWorkspaceStore, getLogger, getCoreEnvProbe } from './core/coreInstances';
 import * as output from './log/output';
 import { MemoryPanelProvider } from './views/memoryPanel';
+import { ProfilePanelProvider } from './views/profilePanel';
 import { SessionTreeProvider, SessionItem } from './views/sessionTreeView';
 import { ChatPanel, getActivePanel, getAllPanels, chatPanelEvents } from './views/chatPanel';
 import { compactionEvents } from './core/compactionScheduler';
 import { registerSession, markSessionClosed, markSessionActive, renameSession, deleteSession } from './core/sessionRegistry';
-import { registerConfigWatcher } from './settings/config';
+import { registerConfigWatcher, getConfig } from './settings/config';
 import * as notifications from './core/notifications';
 import { CLI_DISPLAY_NAME, type CliKind } from './shared/types';
 import { getSessions, type SessionMeta } from './core/sessionRegistry';
@@ -94,9 +104,61 @@ export function activate(context: vscode.ExtensionContext) {
     ),
   );
 
-  compactionEvents.on('ir:updated', () => {
+  // --- Profile Panel (장기 메모리 — 자동제안 승인 큐 + 읽기전용 문서) ---
+  const profileProvider = new ProfilePanelProvider();
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider(
+      ProfilePanelProvider.viewType,
+      profileProvider,
+      { webviewOptions: { retainContextWhenHidden: true } },
+    ),
+  );
+
+  // gc-tree §E3 — compaction 성공 후 자동제안(장기기억) 패스를 백그라운드로 발사.
+  // fire-and-forget: ir:updated 핸들러가 void 처리해 compaction 흐름/락을 절대 막지 않는다.
+  // 워크스페이스당 1패스만 동시 실행(중복 spawn 방지). everyN 게이트·카운터는 코어가 담당.
+  const proposalPassInFlight = new Set<string>();
+  async function fireProposalTrigger(workspaceId: string): Promise<void> {
+    if (proposalPassInFlight.has(workspaceId)) return;
+    proposalPassInFlight.add(workspaceId);
+    try {
+      const workspaceRoot = workspaceStore.getWorkspacePath(workspaceId);
+      // activeModel은 직전 IR의 lastModel 기준(없으면 claude) — memoryPanel 수동정제와 동일.
+      const ir = await readIR(workspaceRoot);
+      const activeModel: CliKind = (ir?.meta.lastModel as CliKind) ?? 'claude';
+      const cfg = getConfig();
+      // compaction 스케줄러의 resolveRefineDecision과 동일한 변환 — 같은 refine 정책으로 분석.
+      const decision = resolveRefineDecisionFromConfig(
+        {
+          policy: cfg.refinePolicy,
+          fixedCli: cfg.refineFixedCli,
+          priorityOrder: cfg.refinePriorityOrder,
+          useClaude: cfg.refineUseClaude,
+        },
+        activeModel,
+      );
+      const r = await maybeRunProposalPass({
+        workspaceRoot,
+        globalDir: getGlobalDir(),
+        profileId: resolveProfile(workspaceId),
+        decision,
+        envProbe: getCoreEnvProbe(),
+        logger: getLogger(),
+        timeoutMs: 60_000,
+        everyN: cfg.proposalEveryN,
+      });
+      if (r.ran) profileProvider.notifyProposalsUpdated();
+    } catch (err) {
+      output.warn(`extension: proposal trigger failed — ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      proposalPassInFlight.delete(workspaceId);
+    }
+  }
+
+  compactionEvents.on('ir:updated', (workspaceId: string) => {
     output.log('extension: ir:updated event received');
     memoryProvider.notifyIRUpdated();
+    void fireProposalTrigger(workspaceId);
   });
   compactionEvents.on('turns:updated', () => {
     output.log('extension: turns:updated event received');

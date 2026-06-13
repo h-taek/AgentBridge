@@ -61,6 +61,11 @@
           "type": "webview",
           "id": "agentbridge.memoryPanel",
           "name": "Memory"
+        },
+        {
+          "type": "webview",
+          "id": "agentbridge.proposalPanel",
+          "name": "장기 메모리"
         }
       ]
     },
@@ -234,6 +239,12 @@
           "minimum": 1,
           "maximum": 100,
           "description": "%agentbridge.memory.maxArchiveSnapshots.description%"
+        },
+        "agentbridge.memory.proposalEveryN": {
+          "type": "number",
+          "default": 5,
+          "minimum": 0,
+          "description": "%agentbridge.memory.proposalEveryN.description%"
         }
       }
     },

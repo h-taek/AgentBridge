@@ -11,6 +11,7 @@ export interface AgentBridgeConfig {
   refineUseClaude: boolean;
   assistantDetail: AssistantDetail;
   maxArchiveSnapshots: number;
+  proposalEveryN: number;
 }
 
 const SECTION = 'agentbridge';
@@ -24,6 +25,7 @@ function read(): AgentBridgeConfig {
     refineUseClaude: cfg.get<boolean>('refine.useClaude', true),
     assistantDetail: cfg.get<AssistantDetail>('turns.assistantDetail', 'compact'),
     maxArchiveSnapshots: Math.max(1, cfg.get<number>('memory.maxArchiveSnapshots', 15)),
+    proposalEveryN: Math.max(0, Math.floor(cfg.get<number>('memory.proposalEveryN', 5))),
   };
 }
 
