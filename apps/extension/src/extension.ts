@@ -338,7 +338,13 @@ export function activate(context: vscode.ExtensionContext) {
         panel.dispose();
         return;
       }
-      const opts = await buildOpts(s.model, folder.fsPath, s.workspaceId, s.sessionId, s.modelSessionId);
+      // modelSessionId(codex thread_id / agy UUID)는 PTY spawn 직후 비동기로 캡처되어 레지스트리에만
+      // 영속되고, webview state에는 생성 시점 값(codex/agy는 보통 null)이 박힌 채 갱신되지 않는다.
+      // 그래서 복원 때 state의 modelSessionId를 그대로 믿으면 resume 인자가 비어 새 세션으로 fallback된다
+      // (openSession이 정상인 이유는 레지스트리를 읽기 때문). 복원도 레지스트리를 SSOT로 삼아 최신 값을 읽는다.
+      const sessions = await getSessions(s.workspaceId);
+      const meta = sessions.find((m) => m.sessionId === s.sessionId);
+      const opts = await buildOpts(s.model, folder.fsPath, s.workspaceId, s.sessionId, meta?.modelSessionId ?? s.modelSessionId);
       // activate의 resetAllSessionsActive(모든 세션 비활성)와 경합 회피 — reset 완료 후 active 표시.
       // 안 기다리면 reset이 이 복구된 세션의 active 플래그를 덮어써 비활성으로 남을 수 있음 (V-21).
       if (pendingResetDone) await pendingResetDone;

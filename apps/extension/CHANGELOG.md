@@ -4,6 +4,13 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 <p align="center"><a href="CHANGELOG.ko.md">한국어</a></p>
 
+## [Unreleased]
+
+### Fixed
+
+- Sessions restore correctly after restarting the IDE — with Codex or Antigravity chats open, restarting the IDE could reopen them as empty new sessions instead of resuming your previous conversation (closing and reopening the tab worked around it). Restored sessions now resume reliably.
+- Sidebar no longer briefly shows duplicate sessions on restart — during restart the session list could momentarily appear doubled before settling back. The list now updates cleanly.
+
 ## [0.3.0] — 2026-06-11
 
 ### Added
