@@ -1,5 +1,6 @@
 // gc-tree resolve.ts 토큰 스코어러 이식 + 한국어 비파괴 처리(§C.2).
 // 핵심: 파괴하지 말고 추가하라 — 조사 제거는 변이형으로만, 원형 보존.
+import { readProfileDocs } from './globalStore';
 
 const STOP_WORDS = new Set([
   'the', 'a', 'an', 'of', 'to', 'in', 'on', 'for', 'and', 'or', 'is', 'are', 'be',
@@ -107,4 +108,29 @@ export function scoreDoc(rec: SearchDocRecord, tokens: string[]): number {
 // gc-tree minimumUsefulScore: 1토큰 쿼리는 1점, 그 외 2점.
 export function minimumUsefulScore(tokens: string[]): number {
   return tokens.length <= 1 ? 1 : 2;
+}
+
+export type SearchMatch = { category: string; slug: string; title: string; summary: string; score: number };
+
+// 프로필 문서를 쿼리로 점수화 → 임계 통과분을 점수순 정렬 → top-N teaser.
+export async function resolveContext(
+  globalDir: string,
+  profileId: string,
+  query: string,
+  opts?: { topN?: number },
+): Promise<SearchMatch[]> {
+  const tokens = tokenizeQuery(query);
+  if (tokens.length === 0) return [];
+  const minScore = minimumUsefulScore(tokens);
+  const phrase = String(query || '').trim().toLowerCase();
+  const docs = await readProfileDocs(globalDir, profileId);
+  const scored: SearchMatch[] = [];
+  for (const rec of docs) {
+    let score = scoreDoc(rec, tokens);
+    score += exactPhraseScore(`${rec.title} ${rec.summary} ${rec.indexEntries.join(' ')}`, phrase) * 3;
+    if (score < minScore) continue;
+    scored.push({ category: rec.category, slug: rec.slug, title: rec.title, summary: rec.summary, score });
+  }
+  scored.sort((a, b) => b.score - a.score || a.title.localeCompare(b.title));
+  return scored.slice(0, opts?.topN ?? 5);
 }

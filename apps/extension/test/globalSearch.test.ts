@@ -1,7 +1,10 @@
 import { strict as assert } from 'assert';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import { tokenizeQuery } from '@agentbridge/core';
 import { countTokenMatches } from '@agentbridge/core';
 import { scoreDoc, minimumUsefulScore } from '@agentbridge/core';
+import { getGlobalDir, writeProfileDocs, resolveContext } from '@agentbridge/core';
 
 describe('globalSearch.tokenize', () => {
   it('영문: 소문자화 + 불용어/1글자 제거', () => {
@@ -55,5 +58,31 @@ describe('globalSearch.score', () => {
   it('minimumUsefulScore: 1토큰=1, 다토큰=2', () => {
     assert.equal(minimumUsefulScore(tokenizeQuery('배포')), 1);
     assert.equal(minimumUsefulScore(tokenizeQuery('배포 절차')), 2);
+  });
+});
+
+async function tmpGlobal(): Promise<string> {
+  return getGlobalDir(join(tmpdir(), `gcs-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`));
+}
+
+describe('globalSearch.resolveContext', () => {
+  it('쿼리에 맞는 문서를 점수순 top-N teaser로 반환', async () => {
+    const g = await tmpGlobal();
+    await writeProfileDocs(g, 'default', {
+      docs: [
+        { category: 'workflows', slug: 'git-flow', title: 'git-flow', summary: 'main 릴리스 전용', body: '', indexEntries: ['배포', 'release', 'git-flow'] },
+        { category: 'role', slug: 'solo', title: '1인 개발', summary: '혼자 만든다', body: '', indexEntries: ['solo'] },
+      ],
+    });
+    const matches = await resolveContext(g, 'default', '배포 절차', { topN: 5 });
+    assert.ok(matches.length >= 1);
+    assert.equal(matches[0].slug, 'git-flow');         // 배포 매칭 문서가 1위
+    assert.ok(matches[0].summary.includes('릴리스'));   // teaser에 요약 포함
+    assert.ok(matches.every((m) => m.slug !== 'solo')); // 무관 문서 제외(임계 미달)
+  });
+  it('매칭 없으면 빈 배열', async () => {
+    const g = await tmpGlobal();
+    await writeProfileDocs(g, 'default', { docs: [{ category: 'role', slug: 'solo', title: '1인', summary: 's', body: '', indexEntries: ['solo'] }] });
+    assert.deepEqual(await resolveContext(g, 'default', 'xyz레디스큐브', { topN: 5 }), []);
   });
 });

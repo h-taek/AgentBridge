@@ -6,9 +6,10 @@ import { join } from 'node:path';
 
 import { withFileLock } from './fileLock';
 import { DEFAULT_PROFILE_ID, profileDir, profilesRoot, profileDocsDir, profileIndexPath } from './globalPaths';
-import { renderIndexMarkdown, renderDocMarkdown, extractTitle, extractIndexEntries } from './globalMarkdown';
+import { renderIndexMarkdown, renderDocMarkdown, extractTitle, extractSummary, extractIndexEntries } from './globalMarkdown';
 import { validateGlobalUpdateInput } from './globalValidate';
 import type { GlobalUpdateInput } from './shared/global';
+import type { SearchDocRecord } from './globalSearch';
 
 // v1: 항상 default (vNext에서 workspace→profile 매핑 도입 — §F).
 export function resolveProfile(_workspaceId: string): string {
@@ -77,6 +78,28 @@ export async function writeIndexFromDocs(globalDir: string, profileId: string): 
   const indexPath = profileIndexPath(globalDir, profileId);
   await fsp.writeFile(indexPath, renderIndexMarkdown({ profileId, docs }), 'utf8');
   return { indexPath, docCount: files.length };
+}
+
+// 프로필 docs/를 읽어 검색용 레코드로. 락 불요(읽기 전용).
+export async function readProfileDocs(globalDir: string, profileId: string): Promise<SearchDocRecord[]> {
+  const docsDir = profileDocsDir(globalDir, profileId);
+  const files = (await listDocRelPaths(docsDir)).filter((f) => !/(^|\/)index\.md$/i.test(f));
+  const recs: SearchDocRecord[] = [];
+  for (const file of files) {
+    const raw = await fsp.readFile(join(docsDir, file), 'utf8');
+    const category = file.includes('/') ? file.split('/')[0]! : 'general';
+    const slug = file.replace(/\.md$/i, '').split('/').slice(1).join('/') || file.replace(/\.md$/i, '');
+    const detailsMatch = raw.match(/## Details\s+([\s\S]*?)$/);
+    recs.push({
+      category,
+      slug,
+      title: extractTitle(raw),
+      summary: extractSummary(raw),
+      indexEntries: extractIndexEntries(raw),
+      body: detailsMatch?.[1]?.trim() || '',
+    });
+  }
+  return recs;
 }
 
 // 검증 → 프로필 보장 → 문서 기록 → 인덱스 재생성. 쓰기/인덱스는 한 락 안에서.
