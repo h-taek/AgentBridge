@@ -313,6 +313,20 @@ export const ko = {
       skipped: '스킵'
     }
   },
+  profile: {
+    tabIr: '단기 · IR',
+    tabProfile: '장기 · 메모리',
+    panelAria: '장기 메모리 패널',
+    profileLabel: 'default',
+    openFolder: '폴더 열기',
+    openFolderTitle: '프로필 폴더 열기 (수동 .md 편집)',
+    queueTitle: '제안 승인 큐',
+    queueEmpty: '대기 중인 제안이 없습니다',
+    docsTitle: '프로필 문서',
+    docsEmpty: '아직 문서가 없습니다. 쓸수록 자동으로 채워집니다.',
+    approve: '승인',
+    discard: '버림'
+  },
   xterm: {
     dropPathFailed: '파일 경로 추출 실패',
     attachFailed: '첨부 실패',

@@ -316,6 +316,20 @@ export const en = {
       skipped: 'Skip'
     }
   },
+  profile: {
+    tabIr: 'Short-term · IR',
+    tabProfile: 'Long-term · Memory',
+    panelAria: 'Long-term memory panel',
+    profileLabel: 'default',
+    openFolder: 'Open folder',
+    openFolderTitle: 'Open profile folder (edit .md manually)',
+    queueTitle: 'Proposal queue',
+    queueEmpty: 'No pending proposals',
+    docsTitle: 'Profile docs',
+    docsEmpty: 'No docs yet. They fill in automatically as you work.',
+    approve: 'Approve',
+    discard: 'Discard'
+  },
   xterm: {
     dropPathFailed: 'Could not extract file path',
     attachFailed: 'Attach failed',

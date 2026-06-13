@@ -1,4 +1,5 @@
 import { ipcMain } from 'electron'
+import { join } from 'node:path'
 import {
   IpcChannel,
   type ProposalActionRequest,
@@ -37,7 +38,9 @@ async function handleProposalList(
     title: d.title,
     summary: d.summary
   }))
-  return { proposals, docs }
+  // 렌더러 "폴더 열기"가 openPath로 직접 열 default 프로필 디렉토리 절대경로.
+  const profileDir = join(globalDir, 'profiles', profileId)
+  return { proposals, docs, profileDir }
 }
 
 async function handleProposalApprove(

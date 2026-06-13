@@ -445,6 +445,8 @@ export type ProposalListResult = {
     createdAt: string
   }[]
   docs: { category: string; slug: string; title: string; summary: string }[]
+  // default 프로필 디렉토리 절대경로 — "폴더 열기"로 수동 .md 편집(openPath)에 사용.
+  profileDir: string
 }
 
 // proposal:approve / proposal:discard — 단건 제안에 대한 승인/버림. id = StoredProposal.id.

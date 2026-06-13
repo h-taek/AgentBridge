@@ -20,6 +20,7 @@ import {
   TrashIcon
 } from './icons'
 import { IrDetailModal } from './IrDetailModal'
+import { ProfilePanel } from './ProfilePanel'
 import { useT, type Messages } from '../i18n'
 
 // M3.5 UI-E 후속 — 메모리 관리 패널 (3 collapsible 그룹).
@@ -69,6 +70,9 @@ function formatBytes(n: number): string {
 
 export function IrPanel({ workspaceId }: Props): React.JSX.Element {
   const t = useT()
+  // 단기·IR / 장기·메모리 2-탭. 장기 탭의 ProfilePanel은 비활성일 때도 마운트 유지(배지 개수 계산).
+  const [tab, setTab] = useState<'ir' | 'profile'>('ir')
+  const [proposalCount, setProposalCount] = useState(0)
   const [ir, setIr] = useState<IR | null>(null)
   const [irMtime, setIrMtime] = useState<string | null>(null)
   const [turns, setTurns] = useState<TurnsSummaryResult | null>(null)
@@ -402,134 +406,168 @@ export function IrPanel({ workspaceId }: Props): React.JSX.Element {
   }, [settings, workspace])
 
   return (
-    <section className="mem-panel" aria-label={t.mem.panelAria}>
-      <MemGroup
-        title={t.mem.groupInstructions}
-        open={openInstructions}
-        onToggle={() => setOpenInstructions((v) => !v)}
-      >
-        <InstructionsCard files={instructions} onAction={handleOpenInstructionFile} now={now} />
-      </MemGroup>
+    <>
+      <div className="ir-tabbar" role="tablist">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === 'ir'}
+          className={`ir-tab${tab === 'ir' ? ' active' : ''}`}
+          onClick={() => setTab('ir')}
+        >
+          {t.profile.tabIr}
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === 'profile'}
+          className={`ir-tab${tab === 'profile' ? ' active' : ''}`}
+          onClick={() => setTab('profile')}
+        >
+          {t.profile.tabProfile}
+          {proposalCount > 0 && <span className="ir-tab-badge">{proposalCount}</span>}
+        </button>
+      </div>
 
-      <MemGroup title="Refine / Quota" open={openRefine} onToggle={() => setOpenRefine((v) => !v)}>
-        <RefineQuotaCard settings={settings} quota={quota} activeCli={activeCli} />
-      </MemGroup>
-
-      <MemGroup
-        title={t.mem.groupMemory}
-        open={openMemory}
-        onToggle={() => setOpenMemory((v) => !v)}
-        action={
-          <>
-            <span
-              className="mem-info-tip"
-              title={t.mem.infoTip}
-              role="img"
-              aria-label={t.mem.infoTipAria}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <InfoIcon />
-            </span>
-            <button
-              type="button"
-              className="mem-refine-btn"
-              onClick={(e) => {
-                e.stopPropagation()
-                void handleRefine()
-              }}
-              disabled={refining}
-              title={t.mem.refineNow}
-              aria-label={t.mem.refineNow}
-            >
-              {refining ? <RefreshIcon className="spin" /> : <SparkleIcon />}
-            </button>
-            <button
-              type="button"
-              className="mem-reset-btn"
-              onClick={(e) => {
-                e.stopPropagation()
-                setResetAlsoTurns(true)
-                setResetError(null)
-                setResetOpen(true)
-              }}
-              disabled={refining || resetting}
-              title={t.mem.resetMemory}
-              aria-label={t.mem.resetMemory}
-            >
-              <TrashIcon />
-            </button>
-          </>
-        }
+      <section
+        className="mem-panel"
+        aria-label={t.mem.panelAria}
+        style={{ display: tab === 'ir' ? undefined : 'none' }}
       >
-        {refineError && <div className="mem-error">{refineError}</div>}
-        <TurnFlowCard summary={turns} />
-        <CurrentIrCard
-          ir={ir}
-          updatedLabel={formatRelative(currentUpdatedAt, now, t)}
-          onOpen={() => {
-            if (ir) setDetail({ kind: 'current', ir, mtime: irMtime })
-          }}
-          onDelete={handleDeleteCurrentIr}
-        />
-        {archive.length > 0 && (
-          <>
-            <div className="mem-subhead">
-              {t.mem.prevSnapshots} · {archive.length}
-            </div>
-            {visibleArchive.map((s) => (
-              <ArchiveCard
-                key={s.archivePath}
-                snapshot={s}
-                relativeLabel={formatRelative(s.updatedAt, now, t)}
-                onOpen={() => void openArchiveDetail(s)}
-                onDelete={() => void handleDeleteArchive(s)}
-              />
-            ))}
-            {archive.length > ARCHIVE_INITIAL_VISIBLE && (
+        <MemGroup
+          title={t.mem.groupInstructions}
+          open={openInstructions}
+          onToggle={() => setOpenInstructions((v) => !v)}
+        >
+          <InstructionsCard files={instructions} onAction={handleOpenInstructionFile} now={now} />
+        </MemGroup>
+
+        <MemGroup title="Refine / Quota" open={openRefine} onToggle={() => setOpenRefine((v) => !v)}>
+          <RefineQuotaCard settings={settings} quota={quota} activeCli={activeCli} />
+        </MemGroup>
+
+        <MemGroup
+          title={t.mem.groupMemory}
+          open={openMemory}
+          onToggle={() => setOpenMemory((v) => !v)}
+          action={
+            <>
+              <span
+                className="mem-info-tip"
+                title={t.mem.infoTip}
+                role="img"
+                aria-label={t.mem.infoTipAria}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <InfoIcon />
+              </span>
               <button
                 type="button"
-                className="mem-archive-more"
-                onClick={() => setShowAllArchive((v) => !v)}
+                className="mem-refine-btn"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  void handleRefine()
+                }}
+                disabled={refining}
+                title={t.mem.refineNow}
+                aria-label={t.mem.refineNow}
               >
-                {showAllArchive
-                  ? t.mem.collapse
-                  : t.mem.archiveMore(archive.length - ARCHIVE_INITIAL_VISIBLE)}
+                {refining ? <RefreshIcon className="spin" /> : <SparkleIcon />}
               </button>
-            )}
-          </>
-        )}
-      </MemGroup>
+              <button
+                type="button"
+                className="mem-reset-btn"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setResetAlsoTurns(true)
+                  setResetError(null)
+                  setResetOpen(true)
+                }}
+                disabled={refining || resetting}
+                title={t.mem.resetMemory}
+                aria-label={t.mem.resetMemory}
+              >
+                <TrashIcon />
+              </button>
+            </>
+          }
+        >
+          {refineError && <div className="mem-error">{refineError}</div>}
+          <TurnFlowCard summary={turns} />
+          <CurrentIrCard
+            ir={ir}
+            updatedLabel={formatRelative(currentUpdatedAt, now, t)}
+            onOpen={() => {
+              if (ir) setDetail({ kind: 'current', ir, mtime: irMtime })
+            }}
+            onDelete={handleDeleteCurrentIr}
+          />
+          {archive.length > 0 && (
+            <>
+              <div className="mem-subhead">
+                {t.mem.prevSnapshots} · {archive.length}
+              </div>
+              {visibleArchive.map((s) => (
+                <ArchiveCard
+                  key={s.archivePath}
+                  snapshot={s}
+                  relativeLabel={formatRelative(s.updatedAt, now, t)}
+                  onOpen={() => void openArchiveDetail(s)}
+                  onDelete={() => void handleDeleteArchive(s)}
+                />
+              ))}
+              {archive.length > ARCHIVE_INITIAL_VISIBLE && (
+                <button
+                  type="button"
+                  className="mem-archive-more"
+                  onClick={() => setShowAllArchive((v) => !v)}
+                >
+                  {showAllArchive
+                    ? t.mem.collapse
+                    : t.mem.archiveMore(archive.length - ARCHIVE_INITIAL_VISIBLE)}
+                </button>
+              )}
+            </>
+          )}
+        </MemGroup>
 
-      <IrDetailModal
-        open={detail !== null}
-        title={detail?.kind === 'archive' ? t.mem.snapshotDetailTitle : t.mem.currentMemoryTitle}
-        subtitle={
-          detail?.kind === 'archive'
-            ? `${formatAbsolute(detail.meta.updatedAt)} · ${formatRelative(detail.meta.updatedAt, now, t)}`
-            : currentUpdatedAt
-              ? t.mem.lastRefined(formatAbsolute(currentUpdatedAt))
-              : undefined
-        }
-        ir={detail?.kind === 'current' ? detail.ir : archiveDetailIr.ir}
-        loading={detail?.kind === 'archive' ? archiveDetailIr.loading : false}
-        error={detail?.kind === 'archive' ? archiveDetailIr.error : null}
-        onClose={closeDetail}
-      />
+        <IrDetailModal
+          open={detail !== null}
+          title={detail?.kind === 'archive' ? t.mem.snapshotDetailTitle : t.mem.currentMemoryTitle}
+          subtitle={
+            detail?.kind === 'archive'
+              ? `${formatAbsolute(detail.meta.updatedAt)} · ${formatRelative(detail.meta.updatedAt, now, t)}`
+              : currentUpdatedAt
+                ? t.mem.lastRefined(formatAbsolute(currentUpdatedAt))
+                : undefined
+          }
+          ir={detail?.kind === 'current' ? detail.ir : archiveDetailIr.ir}
+          loading={detail?.kind === 'archive' ? archiveDetailIr.loading : false}
+          error={detail?.kind === 'archive' ? archiveDetailIr.error : null}
+          onClose={closeDetail}
+        />
 
-      <MemoryResetConfirm
-        open={resetOpen}
-        alsoTurns={resetAlsoTurns}
-        onToggleAlsoTurns={() => setResetAlsoTurns((v) => !v)}
-        busy={resetting}
-        error={resetError}
-        onCancel={() => {
-          if (resetting) return
-          setResetOpen(false)
-          setResetError(null)
-        }}
-        onConfirm={handleResetConfirm}
+        <MemoryResetConfirm
+          open={resetOpen}
+          alsoTurns={resetAlsoTurns}
+          onToggleAlsoTurns={() => setResetAlsoTurns((v) => !v)}
+          busy={resetting}
+          error={resetError}
+          onCancel={() => {
+            if (resetting) return
+            setResetOpen(false)
+            setResetError(null)
+          }}
+          onConfirm={handleResetConfirm}
+        />
+      </section>
+
+      <ProfilePanel
+        workspaceId={workspaceId}
+        active={tab === 'profile'}
+        onProposalCount={setProposalCount}
       />
-    </section>
+    </>
   )
 }
 
