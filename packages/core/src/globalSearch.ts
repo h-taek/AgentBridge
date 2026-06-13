@@ -47,3 +47,35 @@ export function tokenizeQuery(query: string): string[] {
   }
   return [...out];
 }
+
+// 한글 토큰은 부분문자열 포함(min 2음절), ASCII는 단어경계 + 긴 토큰 prefix-stem(gc-tree).
+export function countTokenMatches(text: string, tokens: string[]): number {
+  const haystack = String(text || '').toLowerCase();
+  let sum = 0;
+  for (const token of tokens) {
+    if (HANGUL.test(token)) {
+      if (token.length >= 2 && haystack.includes(token)) sum += 1; // 비파괴 부분문자열
+      continue;
+    }
+    // ASCII: 단어 경계
+    const re = new RegExp(`(?<![a-z0-9])${escapeRegExp(token)}(?![a-z0-9])`);
+    if (re.test(haystack)) {
+      sum += 1;
+    } else if (token.length >= 9) {
+      // 긴 ASCII 토큰만 prefix-stem 폴백(gc-tree). 보수적: 7자 prefix.
+      const stem = escapeRegExp(token.slice(0, 7));
+      if (new RegExp(`\\b${stem}[a-z]*\\b`).test(haystack)) sum += 1;
+    }
+  }
+  return sum;
+}
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+export function exactPhraseScore(text: string, query: string): number {
+  const phrase = String(query || '').trim().toLowerCase();
+  if (phrase.length < 3) return 0;
+  return String(text || '').toLowerCase().includes(phrase) ? 1 : 0;
+}
