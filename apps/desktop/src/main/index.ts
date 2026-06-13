@@ -40,6 +40,7 @@ import {
 } from './modules/sessionActive'
 import { registerIrHandlers } from './ipc/irHandlers'
 import { registerMemoryHandlers } from './ipc/memoryHandlers'
+import { registerProposalHandlers } from './ipc/proposalHandlers'
 import { registerWorkspacesHandlers, stopStorageWatcher } from './ipc/workspacesHandlers'
 import { registerSettingsHandlers } from './ipc/settingsHandlers'
 import { registerAttachHandlers } from './ipc/attachHandlers'
@@ -245,6 +246,7 @@ function registerIpcHandlers(userDataDir: string): void {
 
   registerIrHandlers()
   registerMemoryHandlers()
+  registerProposalHandlers()
   registerWorkspacesHandlers()
   registerSettingsHandlers()
   registerAttachHandlers()
