@@ -3,6 +3,7 @@
 
 import { runRefineSpawn, type SpawnRefineResult } from './refineHeadless';
 import { parseRefineOutput } from './irModule/parse';
+import { parseProposalOutput } from './proposalParse';
 import type { CliKind } from './shared/cli';
 import type { EnvProbe } from './envProbe';
 import type { Logger } from './interfaces';
@@ -89,6 +90,9 @@ export type RefineAttemptEvent =
   | { cli: CliKind; status: 'empty' | 'invalid-ir'; result: SpawnRefineResult }
   | { cli: CliKind; status: 'unavailable' | 'spawn-error'; error: unknown };
 
+// 헤드리스 출력 유효성 게이트 — 출력이 기대 형식으로 파싱되는지만 본다(파싱 결과는 호출자가 재파싱).
+export type HeadlessValidator = (text: string) => { ok: boolean; error?: string };
+
 export type RunRefineArgs = {
   // 사용자 설정의 refinePolicy 해석 결과 — 코어는 정책 출처를 모름. 호스트가 계산해서 넘김.
   decision: RefineDecision;
@@ -145,7 +149,14 @@ async function tryRefine(
   return { result: { assistantText, ...base } };
 }
 
-export async function runRefine(args: RunRefineArgs): Promise<RefineModelChoice> {
+// 파서 주입형 공통 실행기 — agy 무료 → codex/claude 유료 폴백, spawn/cleanup 공통.
+// validate = 출력 유효성 게이트(IR이면 parseRefineOutput, 제안이면 parseProposalOutput).
+// label = 로그/이벤트용(기본 'IR').
+export async function runHeadlessAnalysis(
+  args: RunRefineArgs,
+  validate: HeadlessValidator,
+  label = 'IR',
+): Promise<RefineModelChoice> {
   const log = args.logger ?? noopLogger;
   const { order, singleCandidate } = resolveDecisionToOrder(args.decision);
   if (order.length === 0) throw new RefineOffError();
@@ -186,11 +197,11 @@ export async function runRefine(args: RunRefineArgs): Promise<RefineModelChoice>
         if (singleCandidate) throw new RefineFailedError(cli, lastError);
         continue;
       }
-      const parsed = parseRefineOutput(result.assistantText);
+      const parsed = validate(result.assistantText);
       if (!parsed.ok) {
-        log.warn(`refineDispatcher: ${cli} response not valid IR JSON — ${parsed.error}`);
+        log.warn(`refineDispatcher: ${cli} response not valid ${label} — ${parsed.error}`);
         await emit({ cli, status: 'invalid-ir', result });
-        lastError = new Error(`${cli} invalid IR`);
+        lastError = new Error(`${cli} invalid ${label}`);
         lastReason = 'spawn-error';
         if (singleCandidate) throw new RefineFailedError(cli, lastError);
         continue;
@@ -217,4 +228,14 @@ export async function runRefine(args: RunRefineArgs): Promise<RefineModelChoice>
   }
 
   throw new RefineFailedError(tried[tried.length - 1] ?? order[0], lastError);
+}
+
+// IR 정제 — 기존 공개 API. 동작·시그니처 불변(parseRefineOutput 게이트).
+export async function runRefine(args: RunRefineArgs): Promise<RefineModelChoice> {
+  return runHeadlessAnalysis(args, (t) => parseRefineOutput(t), 'IR');
+}
+
+// 자동제안 분석 — 같은 디스패처, proposalParse 게이트.
+export async function runProposalAnalysis(args: RunRefineArgs): Promise<RefineModelChoice> {
+  return runHeadlessAnalysis(args, (t) => parseProposalOutput(t), 'proposals');
 }
