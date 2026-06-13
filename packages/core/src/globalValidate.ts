@@ -57,7 +57,10 @@ export function validateGlobalUpdateInput(input: unknown): asserts input is Glob
     reqStr(doc, 'title', subject, DOC_CAPS.title);
     const slug = reqStr(doc, 'slug', subject, 200);
     reqStr(doc, 'summary', subject, DOC_CAPS.summary);
-    const body = reqStr(doc, 'body', subject, DOC_CAPS.body);
+    // body는 빈 문자열 허용(renderDocMarkdown이 '(no details yet)' 로 대체) — 길이캡·구조 검사만.
+    if (typeof doc.body !== 'string') throw new Error(`Invalid global update: ${subject}.body must be a string.`);
+    if (doc.body.length > DOC_CAPS.body) throw new Error(`Invalid global update: ${subject}.body exceeds ${DOC_CAPS.body} chars.`);
+    const body = doc.body;
     const category = reqStr(doc, 'category', subject, 50);
     if (!CATS.has(category)) {
       throw new Error(`Invalid global update: ${subject}.category must be one of ${[...CATS].join(', ')}.`);
