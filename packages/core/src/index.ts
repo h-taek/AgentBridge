@@ -8,6 +8,7 @@ export * from './shared/global';
 export * from './globalPaths';
 export * from './globalMarkdown';
 export * from './globalValidate';
+export * from './globalStore';
 
 // 순수 유틸
 export * from './shellQuote';
