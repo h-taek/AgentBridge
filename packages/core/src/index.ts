@@ -11,6 +11,7 @@ export * from './globalValidate';
 export * from './globalStore';
 export * from './proposalStore';
 export * from './proposalParse';
+export * from './proposalPrompt';
 export * from './globalSearch';
 export * from './globalInject';
 
