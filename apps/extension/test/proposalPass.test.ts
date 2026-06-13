@@ -36,7 +36,7 @@ describe('runProposalPass', () => {
     });
     assert.equal(res.written, 1);
     assert.equal((await readProposals(globalDir, DEFAULT_PROFILE_ID)).length, 1);
-    assert.equal((await readProposalState(workspaceRoot)).lastCompletedAt, '2026-06-13T00:00:01Z');
+    assert.equal((await readProposalState(workspaceRoot)).lastProcessedId, 'a');
   });
 
   it('새 턴이 없으면 분석 호출 없이 조기 종료', async () => {
@@ -62,6 +62,6 @@ describe('runProposalPass', () => {
     });
     assert.equal(res.written, 0);
     assert.equal(res.skippedReason, 'analysis-failed');
-    assert.equal((await readProposalState(workspaceRoot)).lastCompletedAt, null); // 전진 안 됨
+    assert.equal((await readProposalState(workspaceRoot)).lastProcessedId, null); // 전진 안 됨
   });
 });
