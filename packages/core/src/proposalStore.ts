@@ -5,6 +5,7 @@ import { join } from 'node:path';
 
 import { proposalsDir } from './globalPaths';
 import { slugify } from './globalMarkdown';
+import { writeProfileDocs } from './globalStore';
 import { PROPOSAL_CAPS, type ProposalInput, type StoredProposal } from './shared/global';
 
 // (카테고리, 제목) 정규화 키 — 중복 판정 단일 규칙.
@@ -79,4 +80,45 @@ export async function writeProposals(
     n++;
   }
   return { written, skipped };
+}
+
+// ─── 승인 게이트(§D.5) — GUI가 호출 ───
+
+// 제안 승인 → 검증 통과 시 프로필 문서로 쓰고(writeProfileDocs) 제안 파일 제거. 없으면 null.
+// indexEntries는 v1에서 제목을 키워드로 둔다(사용자가 .md 편집으로 보강 — §D.3).
+export async function approveProposal(
+  globalDir: string,
+  profileId: string,
+  proposalId: string,
+): Promise<{ written: string[] } | null> {
+  const all = await readProposals(globalDir, profileId);
+  const p = all.find((x) => x.id === proposalId);
+  if (!p) return null;
+  const res = await writeProfileDocs(globalDir, profileId, {
+    docs: [{
+      category: p.category,
+      slug: slugify(p.title) || 'untitled',
+      title: p.title,
+      summary: p.summary,
+      body: p.body,
+      indexEntries: [p.title],
+    }],
+  });
+  await discardProposal(globalDir, profileId, proposalId);
+  return { written: res.written };
+}
+
+// 제안 버리기 — 제안 파일만 제거(문서는 안 만듦). 파일 없으면 false.
+export async function discardProposal(
+  globalDir: string,
+  profileId: string,
+  proposalId: string,
+): Promise<boolean> {
+  const file = join(proposalsDir(globalDir, profileId), `${proposalId}.json`);
+  try {
+    await fsp.unlink(file);
+    return true;
+  } catch {
+    return false;
+  }
 }
