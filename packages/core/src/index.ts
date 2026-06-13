@@ -7,6 +7,7 @@ export * from './shared/turns';
 export * from './shared/global';
 export * from './globalPaths';
 export * from './globalMarkdown';
+export * from './globalValidate';
 
 // 순수 유틸
 export * from './shellQuote';
