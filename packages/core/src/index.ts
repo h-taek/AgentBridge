@@ -10,6 +10,7 @@ export * from './globalMarkdown';
 export * from './globalValidate';
 export * from './globalStore';
 export * from './proposalStore';
+export * from './proposalParse';
 export * from './globalSearch';
 export * from './globalInject';
 
