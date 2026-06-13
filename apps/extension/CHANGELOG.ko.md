@@ -2,6 +2,13 @@
 
 이 프로젝트는 [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/) 1.1.0 형식을 따르며 [Semantic Versioning](https://semver.org/spec/v2.0.0.html)을 사용한다.
 
+## [Unreleased]
+
+### Fixed
+
+- IDE 재시작 후 세션이 제대로 복원 — Codex·Antigravity 채팅을 열어둔 채 IDE를 재시작하면 이전 대화가 이어지지 않고 빈 새 세션으로 열리던 문제를 수정했다(탭을 닫았다 다시 열면 되던 증상). 이제 재시작해도 세션이 안정적으로 이어진다.
+- 재시작 시 사이드바에 세션이 잠깐 중복 표시되던 문제 수정 — 재시작 도중 세션 목록이 순간적으로 두 배로 보였다가 정리되던 현상을 없앴다. 이제 목록이 깔끔하게 갱신된다.
+
 ## [0.3.0] — 2026-06-11
 
 ### Added

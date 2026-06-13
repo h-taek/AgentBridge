@@ -67,6 +67,11 @@ export class SessionItem extends vscode.TreeItem {
   constructor(public readonly session: SessionMeta) {
     super(session.name, vscode.TreeItemCollapsibleState.None);
 
+    // 안정적 행 정체성 — 재시작 시 refresh가 폭주하며 active 플래그로 정렬이 바뀔 때,
+    // id가 없으면 VS Code가 옛 행과 새 행을 같은 항목으로 못 묶어 잠깐 중복 렌더된다.
+    // sessionId를 id로 고정하면 행을 추적해 중복을 없애고 셀렉션/펼침 상태도 유지된다.
+    this.id = session.sessionId;
+
     const closed = !session.active;
     this.description = timeAgo(session.lastActiveAt);
     const icon = ensureDotIcon(session.model, closed);
