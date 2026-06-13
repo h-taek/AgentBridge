@@ -13,6 +13,7 @@ export * from './proposalStore';
 export * from './proposalParse';
 export * from './proposalPrompt';
 export * from './proposalCursor';
+export * from './proposalPass';
 export * from './globalSearch';
 export * from './globalInject';
 
