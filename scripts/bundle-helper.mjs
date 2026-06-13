@@ -25,3 +25,14 @@ export async function bundleHelper(outFile) {
   });
   chmodSync(outFile, 0o755); // hook host가 직접 실행 — 실행권한 유지
 }
+
+// 직접 실행 지원 — `node scripts/bundle-helper.mjs <outFile>`. CJS 테스트 하네스(ts-node, module:commonjs)는
+// `await import(file://)`를 require로 다운레벨해 .mjs를 못 불러오므로, 테스트는 이 CLI로 spawn해 번들한다.
+if (process.argv[1] && process.argv[1] === fileURLToPath(import.meta.url)) {
+  const outFile = process.argv[2];
+  if (!outFile) {
+    console.error('usage: node scripts/bundle-helper.mjs <outFile>');
+    process.exit(2);
+  }
+  await bundleHelper(outFile);
+}
