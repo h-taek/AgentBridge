@@ -25,3 +25,25 @@ export const DOC_CAPS = {
   body: 20_000,
   indexEntries: 50,
 } as const;
+
+// ─── 자동제안(§D.1) — 스키마 동결(§H): {category,title,summary,body,confidence} ───
+export type ProposalInput = {
+  category: GlobalCategory;
+  title: string;
+  summary: string;
+  body: string;
+  confidence: number; // 0..1
+};
+
+// 디스크 저장 봉투 — 입력 + id/생성시각. (sourceTurnIds 미포함 — 출처 UI 미표시.)
+export type StoredProposal = ProposalInput & {
+  id: string;
+  createdAt: string;
+};
+
+export const PROPOSAL_CAPS = {
+  title: DOC_CAPS.title,
+  summary: DOC_CAPS.summary,
+  body: DOC_CAPS.body,
+  maxPerPass: 12, // 한 패스가 만들 제안 상한 — 폭주 방지
+} as const;
