@@ -79,3 +79,32 @@ export function exactPhraseScore(text: string, query: string): number {
   if (phrase.length < 3) return 0;
   return String(text || '').toLowerCase().includes(phrase) ? 1 : 0;
 }
+
+// 검색 대상 문서 레코드.
+export type SearchDocRecord = {
+  category: string;
+  slug: string;
+  title: string;
+  summary: string;
+  indexEntries: string[];
+  body: string;
+};
+
+// gc-tree scoreDoc 가중치 그대로: label×10 / title×7 / summary×5 / category×2 / path×2 / content×1 + exactPhrase.
+export function scoreDoc(rec: SearchDocRecord, tokens: string[]): number {
+  const label = rec.indexEntries.join(' ');
+  const path = `${rec.category}/${rec.slug}`;
+  let score = 0;
+  score += countTokenMatches(label, tokens) * 10;
+  score += countTokenMatches(rec.title, tokens) * 7;
+  score += countTokenMatches(rec.summary, tokens) * 5;
+  score += countTokenMatches(rec.category, tokens) * 2;
+  score += countTokenMatches(path, tokens) * 2;
+  score += countTokenMatches(rec.body, tokens) * 1;
+  return score;
+}
+
+// gc-tree minimumUsefulScore: 1토큰 쿼리는 1점, 그 외 2점.
+export function minimumUsefulScore(tokens: string[]): number {
+  return tokens.length <= 1 ? 1 : 2;
+}

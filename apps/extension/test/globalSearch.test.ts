@@ -1,6 +1,7 @@
 import { strict as assert } from 'assert';
 import { tokenizeQuery } from '@agentbridge/core';
 import { countTokenMatches } from '@agentbridge/core';
+import { scoreDoc, minimumUsefulScore } from '@agentbridge/core';
 
 describe('globalSearch.tokenize', () => {
   it('영문: 소문자화 + 불용어/1글자 제거', () => {
@@ -35,5 +36,24 @@ describe('globalSearch.match', () => {
   it('ASCII: 단어 경계 매칭', () => {
     assert.equal(countTokenMatches('deploy now', tokenizeQuery('deploy')), 1);
     assert.equal(countTokenMatches('redeployment', tokenizeQuery('dep')), 0); // 부분단어 비매칭
+  });
+});
+
+const rec = {
+  category: 'workflows', slug: 'git-flow', title: 'git-flow', summary: 'main 릴리스 전용',
+  indexEntries: ['배포', 'release', 'git-flow'], body: 'develop 통합',
+};
+
+describe('globalSearch.score', () => {
+  it('index entries(label) 가중치가 가장 큼', () => {
+    // '배포'는 indexEntries에만 → label 가중치 10
+    assert.ok(scoreDoc(rec, tokenizeQuery('배포')) >= 10);
+  });
+  it('미매칭 문서는 0점', () => {
+    assert.equal(scoreDoc(rec, tokenizeQuery('xyz레디스')), 0);
+  });
+  it('minimumUsefulScore: 1토큰=1, 다토큰=2', () => {
+    assert.equal(minimumUsefulScore(tokenizeQuery('배포')), 1);
+    assert.equal(minimumUsefulScore(tokenizeQuery('배포 절차')), 2);
   });
 });
