@@ -10,6 +10,7 @@ export * from './globalMarkdown';
 export * from './globalValidate';
 export * from './globalStore';
 export * from './globalSearch';
+export * from './globalInject';
 
 // 순수 유틸
 export * from './shellQuote';
