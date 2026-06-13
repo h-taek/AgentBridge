@@ -6,7 +6,7 @@ import { noopLogger } from './interfaces';
 import { runProposalAnalysis, type RefineDecision, type RefineModelChoice } from './refineDispatcher';
 import { buildProposalPrompt } from './proposalPrompt';
 import { parseProposalOutput } from './proposalParse';
-import { collectProposalTurns, writeProposalCursor } from './proposalCursor';
+import { collectProposalTurns, writeProposalCursor, bumpCompactionCount, shouldRunProposalPass } from './proposalCursor';
 import { writeProposals } from './proposalStore';
 import { readProfileDocs } from './globalStore';
 
@@ -70,4 +70,17 @@ export async function runProposalPass(args: RunProposalPassArgs): Promise<Propos
   if (collected.newCursor) await writeProposalCursor(args.workspaceRoot, collected.newCursor);
   log.log(`proposalPass: wrote ${written.length}, skipped ${skipped.length}, cursor → ${collected.newCursor}`);
   return { written: written.length, skipped: skipped.length };
+}
+
+// 매 compaction 후 앱이 호출하는 게이트 — 카운터는 매번 증가, 분석 패스는 everyN의 배수에서만.
+// (분석은 헤드리스 spawn이라 비용 큼 → 빈도를 카운터로 제어.)
+export async function maybeRunProposalPass(
+  args: RunProposalPassArgs & { everyN: number },
+): Promise<ProposalPassResult & { ran: boolean }> {
+  await bumpCompactionCount(args.workspaceRoot);
+  if (!(await shouldRunProposalPass(args.workspaceRoot, args.everyN))) {
+    return { written: 0, skipped: 0, ran: false };
+  }
+  const res = await runProposalPass(args);
+  return { ...res, ran: true };
 }
