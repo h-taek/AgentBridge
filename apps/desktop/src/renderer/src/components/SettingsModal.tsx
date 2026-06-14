@@ -582,6 +582,28 @@ function MainPage({
               title={t.settings.main.archiveCountTitle}
             />
           </div>
+          <div className="settings-row">
+            <DatabaseIcon className="settings-row-icon" />
+            <span className="settings-row-label">{t.settings.main.proposalEveryN}</span>
+            <span className="settings-row-value settings-row-desc">
+              {t.settings.main.proposalEveryNDesc}
+            </span>
+            <input
+              type="number"
+              min={0}
+              max={100}
+              step={1}
+              className="settings-row-number"
+              value={settings?.proposalEveryN ?? 5}
+              onChange={(e) => {
+                const n = Math.floor(Number(e.target.value))
+                if (Number.isFinite(n) && n >= 0) {
+                  void onUpdate({ proposalEveryN: n })
+                }
+              }}
+              title={t.settings.main.proposalEveryNTitle}
+            />
+          </div>
         </div>
       </div>
 
