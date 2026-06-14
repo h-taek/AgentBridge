@@ -18,6 +18,9 @@ export async function bundleHelper(outFile) {
   await build({
     entryPoints: [HELPER_ENTRY],
     outfile: outFile,
+    // 번들 내 모듈 라벨 주석을 *실행 cwd와 무관하게* 루트 기준으로 고정 — dev(apps/* cwd)와
+    // 릴리스/테스트(root cwd)가 동일 출력을 내, resources/bin이 매 빌드 diff로 뜨는 노이즈 제거.
+    absWorkingDir: root,
     bundle: true,
     platform: 'node',
     format: 'cjs',
