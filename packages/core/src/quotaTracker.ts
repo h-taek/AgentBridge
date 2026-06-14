@@ -114,11 +114,13 @@ export function snapshotFrom(state: QuotaFile): CliQuotaSnapshot {
 
 // ─── 슬래시 명령 응답 파싱 (per CLI) ─────────────────────────────────────
 
-// agy: 두 가지 포맷 — N = 남은 quota → usedPercent = 100 - N.
-//   미사용(100%) 시: `<bar> N%\nQuota available|exhausted`
-//   일부 사용 시:    `<bar> N%\nN% remaining · Refreshes in 1h 3m` ("Quota available" 줄이 사라짐)
-const AGY_USAGE_RE = /(\d+)\s*%\s*\n\s*Quota\s+(?:available|exhausted)/i;
-const AGY_REMAINING_RE = /(\d+)\s*%\s+remaining\b/i;
+// agy `/usage` → "Models & Quota" 멀티그룹 화면 (2026-06 개편, CLI 1.0.8 실측).
+//   격리 박스에서 정제는 항상 기본 모델(Gemini)로 도므로 GEMINI 그룹의 Five Hour 한도만 본다.
+//   막대 줄 퍼센트 = *남은* quota (실측: `[██░] 96.81%` → "97% remaining"). usedPercent = 100 - N.
+//   100.00% = `Quota available`(완전 미사용). 소수점 포함. "Five Hour Limit" 라벨을 먼저 앵커로
+//   잡아 바로 위 Weekly 퍼센트를 건너뛴다.
+const AGY_GEMINI_5H_RE =
+  /GEMINI\s+MODELS\b[\s\S]*?Five[\s-]*Hour\s+Limit\b[\s\S]*?(\d+(?:\.\d+)?)\s*%/i;
 // codex: `5h limit: ... N% left` — N = 남은 quota → usedPercent = 100 - N.
 const CODEX_STATUS_RE = /5h\s*limit:[\s\S]{0,200}?(\d+)\s*%\s+left/i;
 // claude: `Current session ... N%used` — N = 사용된 quota 그대로.
@@ -129,11 +131,11 @@ export function extractQuotaPercent(cli: CliKind, stripped: string): number | nu
   let n: number;
   switch (cli) {
     case 'agy':
-      m = AGY_USAGE_RE.exec(stripped) ?? AGY_REMAINING_RE.exec(stripped);
+      m = AGY_GEMINI_5H_RE.exec(stripped);
       if (!m) return null;
-      n = Number.parseInt(m[1], 10);
+      n = Number.parseFloat(m[1]);
       if (!Number.isFinite(n) || n < 0 || n > 100) return null;
-      return 100 - n;
+      return Math.round(100 - n);
     case 'codex':
       m = CODEX_STATUS_RE.exec(stripped);
       if (!m) return null;

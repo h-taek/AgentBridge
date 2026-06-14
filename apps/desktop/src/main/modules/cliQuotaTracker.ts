@@ -25,8 +25,7 @@ import { broadcastToAll } from './windowManager'
 // 백그라운드 PTY spawn → /usage 또는 /status 입력 → 응답 파싱 → SIGTERM + native 세션 파일 unlink.
 //
 // 슬래시 명령:
-//   agy:    `/usage`   응답에 "N% \n Quota available|exhausted" (미사용 시) 또는
-//                      "N% remaining · Refreshes in ..." (일부 사용 시) 블록 (N = 남은 %)
+//   agy:    `/usage`   "Models & Quota" 멀티그룹 화면 — GEMINI 그룹 Five Hour 막대 % (N = 남은 %)
 //   codex:  `/status`  응답에 "5h limit: ... N% left" (N = 남은 %)
 //   claude: `/usage`   응답에 "Current session ... N% used" (N = 사용된 %)
 //
