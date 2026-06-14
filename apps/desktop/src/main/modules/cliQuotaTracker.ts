@@ -25,8 +25,7 @@ import { broadcastToAll } from './windowManager'
 // 백그라운드 PTY spawn → /usage 또는 /status 입력 → 응답 파싱 → SIGTERM + native 세션 파일 unlink.
 //
 // 슬래시 명령:
-//   agy:    `/usage`   응답에 "N% \n Quota available|exhausted" (미사용 시) 또는
-//                      "N% remaining · Refreshes in ..." (일부 사용 시) 블록 (N = 남은 %)
+//   agy:    `/usage`   "Models & Quota" 멀티그룹 화면 — GEMINI 그룹 Five Hour 막대 % (N = 남은 %)
 //   codex:  `/status`  응답에 "5h limit: ... N% left" (N = 남은 %)
 //   claude: `/usage`   응답에 "Current session ... N% used" (N = 사용된 %)
 //
@@ -42,6 +41,10 @@ import { broadcastToAll } from './windowManager'
 const QUOTA_FILE_NAME = 'cli_quota.json'
 const LEGACY_AGY_QUOTA_FILE_NAME = 'agy_quota.json'
 const LEGACY_GEMINI_QUOTA_FILE_NAME = 'gemini_quota.json'
+
+// quota 재측정 주기 — 이보다 최근 측정이 있으면 probe 스킵. compaction 후 재측정과
+// 앱 시작 시 워밍이 같은 임계값을 쓰도록 단일 출처로 export (probeQuotaIfStale의 maxAgeMs).
+export const QUOTA_PROBE_STALE_MS = 30 * 60_000
 
 // 코어 상수/타입 re-export — 호스트 모듈은 데스크탑 내부 export로 계속 사용.
 export {

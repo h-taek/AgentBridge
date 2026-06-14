@@ -16,7 +16,7 @@ import { getCoreEnvProbe } from './envProbe'
 import { loadSettings, getCachedSettings } from './settings'
 import { broadcastIrUpdated } from './irBroadcast'
 import { broadcastProposalsUpdated } from '../ipc/proposalHandlers'
-import { markForcedFallback, probeQuotaIfStale } from './cliQuotaTracker'
+import { markForcedFallback, probeQuotaIfStale, QUOTA_PROBE_STALE_MS } from './cliQuotaTracker'
 
 // 데스크탑 CompactionScheduler facade — 코어 createCompactionScheduler 위임.
 // 호스트 책임:
@@ -26,10 +26,6 @@ import { markForcedFallback, probeQuotaIfStale } from './cliQuotaTracker'
 //   - quota 부가효과 (onRefineAttempt: markForcedFallback / background probe)
 //   - 알림 — 현재는 no-op (메뉴/Toast 미설치, 추후 추가)
 //   - events.on('ir:updated') → broadcastIrUpdated 변환
-
-// refine 성공 후 "spawn 안 된" CLI 재측정 주기 — 이보다 최근 측정이 있으면 probe 스킵.
-// 실제 spawn된 CLI는 방금 quota를 소비했으므로 maxAge 0(무조건 재측정).
-const QUOTA_PROBE_STALE_MS = 30 * 60_000
 
 export type ManualCompactionResult = CoreManualCompactionResult
 
