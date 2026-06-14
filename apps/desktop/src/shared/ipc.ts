@@ -427,6 +427,47 @@ export type MemoryPromoteArchiveResult = {
   error?: string
 }
 
+// ─── gc-tree §D — 자동제안(장기기억) 승인 게이트 ────────────────────────────
+// 자동제안 패스가 default 프로필에 쌓아둔 pending 제안을 GUI가 [승인]/[버림] 한다.
+// 제안·문서는 default 프로필 단위로 모든 워크스페이스가 공유 — workspaceId는 resolveProfile 입력일 뿐.
+
+// proposal:list — pending 제안 목록 + 읽기전용 문서 목록(이미 승인되어 .md가 된 항목).
+export type ProposalListRequest = { workspaceId: string }
+
+export type ProposalListResult = {
+  proposals: {
+    id: string
+    category: string
+    title: string
+    summary: string
+    body: string
+    confidence: number
+    createdAt: string
+  }[]
+  docs: { category: string; slug: string; title: string; summary: string }[]
+  // default 프로필 디렉토리 절대경로 — "폴더 열기"로 수동 .md 편집(openPath)에 사용.
+  profileDir: string
+}
+
+// proposal:approve / proposal:discard — 단건 제안에 대한 승인/버림. id = StoredProposal.id.
+export type ProposalActionRequest = {
+  workspaceId: string
+  id: string
+}
+
+export type ProposalApproveResult = {
+  ok: boolean
+  // 해당 id의 제안 파일이 이미 없을 때(중복 클릭 등). approveProposal이 null 반환한 경우.
+  notFound?: boolean
+}
+
+export type ProposalDiscardResult = {
+  ok: boolean
+}
+
+// proposal:updated — 승인/버림 또는 자동제안 패스 종료 직후 broadcast. 모든 윈도우가 목록 재조회.
+export type ProposalsUpdatedEvent = { workspaceId: string }
+
 // ─── M3.6 C 청크 — 멀티 윈도우 ────────────────────────────────────────────
 // 각 워크스페이스를 별도 BrowserWindow로 띄울 수 있다. 한 워크스페이스 = 한 윈도우 정책(중복
 // 열림 불허) — 이미 열린 윈도우가 있으면 focus만. workspaceId=null은 홈 윈도우(HomePane).
@@ -531,6 +572,8 @@ export type AppSettings = {
   // 보관할 compacted archive snapshot 최대 개수. 초과분은 오래된 것부터 자동 삭제.
   // 누적된 과거 IR snapshot이 컨텍스트로 새어들지 않도록 상한 — 토큰 절약 정책.
   maxArchiveSnapshots: number
+  // 자동제안 패스를 몇 turn마다 1회 trigger할지. 0이면 자동제안 비활성.
+  proposalEveryN: number
 }
 
 // quota severity (Phase 2 — per-CLI 슬래시 명령 응답 기반):
@@ -665,6 +708,12 @@ export const IpcChannel = {
   // ─── M3.6 D 청크 — 메모리 초기화 ───
   MemoryReset: 'memory:reset',
   MemoryPromoteArchive: 'memory:promoteLatestArchive',
+  // ─── gc-tree §D — 자동제안(장기기억) 승인 게이트 ───
+  ProposalList: 'proposal:list',
+  ProposalApprove: 'proposal:approve',
+  ProposalDiscard: 'proposal:discard',
+  // 제안 승인/버림 또는 자동제안 패스 종료 직후 main → renderer broadcast. 제안 목록 즉시 갱신.
+  ProposalsUpdated: 'proposal:updated',
   // ─── M3.6 C 청크 — 멀티 윈도우 ───
   // 새 윈도우(또는 기존 매칭 윈도우 focus)에 워크스페이스를 연다. workspaceId=null이면 빈 홈 윈도우.
   WindowOpenWorkspace: 'window:openWorkspace',

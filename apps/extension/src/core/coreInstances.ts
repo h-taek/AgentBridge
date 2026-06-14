@@ -65,6 +65,10 @@ export function getCliAdapters(): CliAdapterSet {
 export function getCompactionScheduler(): CompactionScheduler {
   return ensureInitialized(_compactionScheduler, 'compactionScheduler');
 }
+// 자동제안 트리거(profilePanel)가 maybeRunProposalPass에 넘길 envProbe.
+export function getCoreEnvProbe(): EnvProbe {
+  return ensureInitialized(_envProbe, 'envProbe');
+}
 // 외부 미사용 — initializeCore의 onRefineAttempt 콜백에서만 호출.
 function getQuotaTracker(): QuotaTracker {
   return ensureInitialized(_quotaTracker, 'quotaTracker');

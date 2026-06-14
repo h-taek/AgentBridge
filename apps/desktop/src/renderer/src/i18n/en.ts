@@ -102,6 +102,9 @@ export const en = {
       archiveCount: 'Archived snapshots',
       archiveCountDesc: 'Cap on accumulated past IR snapshots (excess auto-deleted)',
       archiveCountTitle: 'Max compressed_*.jsonl files kept in archive/',
+      proposalEveryN: 'Auto-suggest frequency',
+      proposalEveryNDesc: 'Analyze long-term memory suggestions every Nth compaction (0 = off)',
+      proposalEveryNTitle: 'Run the auto-suggest headless analysis every Nth compaction (0 disables it)',
       groupInfo: 'About',
       checkUpdate: 'Check for updates',
       checkUpdateDevTitle: 'Auto-update is disabled in dev mode',
@@ -315,6 +318,20 @@ export const en = {
       pending: 'Pending',
       skipped: 'Skip'
     }
+  },
+  profile: {
+    tabIr: 'Short-term · IR',
+    tabProfile: 'Long-term · Memory',
+    panelAria: 'Long-term memory panel',
+    profileLabel: 'default',
+    openFolder: 'Open folder',
+    openFolderTitle: 'Open profile folder (edit .md manually)',
+    queueTitle: 'Proposal queue',
+    queueEmpty: 'No pending proposals',
+    docsTitle: 'Profile docs',
+    docsEmpty: 'No docs yet. They fill in automatically as you work.',
+    approve: 'Approve',
+    discard: 'Discard'
   },
   xterm: {
     dropPathFailed: 'Could not extract file path',

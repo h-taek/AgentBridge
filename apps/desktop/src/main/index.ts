@@ -4,6 +4,7 @@ import log from 'electron-log/main'
 import * as path from 'node:path'
 import { IpcChannel } from '@shared/ipc'
 import type { AppHealth, AppUpdaterCheckResult } from '@shared/ipc'
+import { getStorageRoot } from '@agentbridge/core'
 import { probeEnvOnce, getCliPath, getShellPath } from './modules/envProbe'
 import { buildAdapterEnv } from './modules/cliAdapter/env'
 import { ensureConversationDirs } from './modules/conversationStore'
@@ -40,6 +41,7 @@ import {
 } from './modules/sessionActive'
 import { registerIrHandlers } from './ipc/irHandlers'
 import { registerMemoryHandlers } from './ipc/memoryHandlers'
+import { registerProposalHandlers } from './ipc/proposalHandlers'
 import { registerWorkspacesHandlers, stopStorageWatcher } from './ipc/workspacesHandlers'
 import { registerSettingsHandlers } from './ipc/settingsHandlers'
 import { registerAttachHandlers } from './ipc/attachHandlers'
@@ -146,14 +148,17 @@ function registerIpcHandlers(userDataDir: string): void {
 
   // 설정 모달 등에서 폴더/파일 reveal — shell.openPath. 허용 prefix만 통과.
   //   1) userData 디렉토리 안 (health.userDataDir 노출용)
-  //   2) 등록된 워크스페이스 cwd 안 (instruction 파일 reveal용)
+  //   2) AgentBridge 저장소 루트(~/.agentbridge) 안 (글로벌 프로필 폴더 열기 — gc-tree §G5)
+  //   3) 등록된 워크스페이스 cwd 안 (instruction 파일 reveal용)
   //   renderer 변조 시 임의 로컬 파일/앱 트리거 차단.
   ipcMain.handle(IpcChannel.AppOpenPath, async (_e, target: string) => {
     if (typeof target !== 'string' || target.length === 0) return
     const resolved = path.resolve(target)
     const userData = app.getPath('userData')
     const inUserData = resolved === userData || resolved.startsWith(userData + path.sep)
-    let allowed = inUserData
+    const storageRoot = getStorageRoot()
+    const inStorageRoot = resolved === storageRoot || resolved.startsWith(storageRoot + path.sep)
+    let allowed = inUserData || inStorageRoot
     if (!allowed) {
       try {
         const workspaces = await listWorkspaces()
@@ -245,6 +250,7 @@ function registerIpcHandlers(userDataDir: string): void {
 
   registerIrHandlers()
   registerMemoryHandlers()
+  registerProposalHandlers()
   registerWorkspacesHandlers()
   registerSettingsHandlers()
   registerAttachHandlers()

@@ -44,7 +44,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   language: 'ko',
   defaultBasePath: '',
   turnsAssistantDetail: 'compact',
-  maxArchiveSnapshots: 15
+  maxArchiveSnapshots: 15,
+  proposalEveryN: 5
 }
 
 function getSettingsFilePath(): string {
@@ -83,7 +84,9 @@ export async function loadSettings(): Promise<AppSettings> {
         DEFAULT_SETTINGS.turnsAssistantDetail,
       maxArchiveSnapshots:
         validateMaxArchiveSnapshots(parsed.maxArchiveSnapshots) ??
-        DEFAULT_SETTINGS.maxArchiveSnapshots
+        DEFAULT_SETTINGS.maxArchiveSnapshots,
+      proposalEveryN:
+        validateProposalEveryN(parsed.proposalEveryN) ?? DEFAULT_SETTINGS.proposalEveryN
     }
     cache = merged
     return merged
@@ -115,7 +118,8 @@ export async function saveSettings(patch: Partial<AppSettings>): Promise<AppSett
     turnsAssistantDetail:
       validateTurnsAssistantDetail(patch.turnsAssistantDetail) ?? current.turnsAssistantDetail,
     maxArchiveSnapshots:
-      validateMaxArchiveSnapshots(patch.maxArchiveSnapshots) ?? current.maxArchiveSnapshots
+      validateMaxArchiveSnapshots(patch.maxArchiveSnapshots) ?? current.maxArchiveSnapshots,
+    proposalEveryN: validateProposalEveryN(patch.proposalEveryN) ?? current.proposalEveryN
   }
   const p = getSettingsFilePath()
   const tmp = `${p}.${process.pid}.${Date.now()}.tmp`
@@ -176,6 +180,13 @@ function validateMaxArchiveSnapshots(v: unknown): number | null {
   const n = Math.floor(v)
   if (n < 1) return null
   return n
+}
+
+// 자동제안 trigger 주기 — 0 이상 정수로 클램프. 0이면 자동제안 비활성(maxArchiveSnapshots와 달리
+// 0을 유효값으로 허용하므로 하한이 1이 아닌 0).
+function validateProposalEveryN(v: unknown): number | null {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return null
+  return Math.max(0, Math.floor(v))
 }
 
 // EnvProbe에서 agy 어댑터 가용 여부 확인 — RefineDispatcher가 'auto'/'agy-flash' 처리 시 사용.

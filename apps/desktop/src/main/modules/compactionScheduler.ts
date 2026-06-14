@@ -3,6 +3,9 @@ import type { CliKind, SessionMeta } from '@shared/ipc'
 import {
   createCompactionScheduler,
   resolveRefineDecisionFromConfig,
+  maybeRunProposalPass,
+  getGlobalDir,
+  resolveProfile,
   type CompactionScheduler,
   type ManualCompactionResult as CoreManualCompactionResult,
   type MemoryResetOutcome
@@ -12,6 +15,7 @@ import { getWorkspacePaths } from './workspaceStore'
 import { getCoreEnvProbe } from './envProbe'
 import { loadSettings, getCachedSettings } from './settings'
 import { broadcastIrUpdated } from './irBroadcast'
+import { broadcastProposalsUpdated } from '../ipc/proposalHandlers'
 import { markForcedFallback, probeQuotaIfStale } from './cliQuotaTracker'
 
 // 데스크탑 CompactionScheduler facade — 코어 createCompactionScheduler 위임.
@@ -41,6 +45,49 @@ function pickActiveModel(ws: {
   if (primary && (primary.kind ?? 'cli') === 'cli') return primary.model
   const cliSession = ws.sessions.find((s) => (s.kind ?? 'cli') === 'cli')
   return cliSession?.model ?? 'claude'
+}
+
+// gc-tree §G5 — compaction 성공 후 자동제안(장기기억) 패스를 백그라운드로 발사.
+// fire-and-forget: 호출자(ir:updated 핸들러)가 void 처리해 compaction 흐름/락을 절대 막지 않는다.
+// 워크스페이스당 1패스만 동시 실행(중복 spawn 방지).
+const proposalPassInFlight = new Set<string>()
+
+async function fireProposalTrigger(workspaceId: string): Promise<void> {
+  if (proposalPassInFlight.has(workspaceId)) return
+  proposalPassInFlight.add(workspaceId)
+  try {
+    const ws = await loadWorkspace(workspaceId)
+    const activeModel = pickActiveModel(ws)
+    const workspaceRoot = getWorkspacePaths(workspaceId).dir
+    const s = await loadSettings()
+    // compaction의 resolveRefineDecision과 동일한 변환 — 자동제안도 같은 refine 정책으로 분석.
+    const decision = resolveRefineDecisionFromConfig(
+      {
+        policy: s.refineModel,
+        fixedCli: s.refineFixedCli,
+        priorityOrder: s.refinePriorityOrder,
+        useClaude: s.refineUseClaude
+      },
+      activeModel
+    )
+    // everyN 게이트는 코어가 담당 — 매번 카운터만 증가, 배수에서만 실제 분석(everyN===0이면 no-op).
+    const r = await maybeRunProposalPass({
+      workspaceRoot,
+      globalDir: getGlobalDir(),
+      profileId: resolveProfile(workspaceId),
+      decision,
+      envProbe: getCoreEnvProbe(),
+      logger: { log: (m) => log.info(m), warn: (m) => log.warn(m) },
+      timeoutMs: 60_000,
+      everyN: s.proposalEveryN
+    })
+    if (r.ran) broadcastProposalsUpdated(workspaceId)
+  } catch (err) {
+    // 백그라운드 작업 — 절대 throw 금지. 실패해도 compaction에는 영향 없음.
+    log.warn('Proposal trigger 실패 — 무시', { workspaceId, err: String(err) })
+  } finally {
+    proposalPassInFlight.delete(workspaceId)
+  }
 }
 
 let _scheduler: CompactionScheduler | null = null
@@ -111,9 +158,12 @@ async function ensureScheduler(): Promise<CompactionScheduler> {
       warn: (m) => log.warn(m)
     }
   })
-  // ir:updated 이벤트 → renderer broadcast
+  // ir:updated 이벤트 → renderer broadcast + 자동제안 백그라운드 트리거.
+  // 자동/수동 compaction 모두 이 이벤트를 emit하므로 두 경로 다 커버. void로 fire-and-forget —
+  // compaction 흐름/락을 막지 않는다.
   sched.events.on('ir:updated', (workspaceId: string) => {
     broadcastIrUpdated({ workspaceId, source: 'auto' })
+    void fireProposalTrigger(workspaceId)
   })
   _scheduler = sched
   return sched

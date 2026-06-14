@@ -4,6 +4,12 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 <p align="center"><a href="CHANGELOG.ko.md">한국어</a></p>
 
+## [Unreleased]
+
+### Added
+
+- Long-term memory — AgentBridge now keeps a profile of durable knowledge that carries across projects (your role, your conventions, the repos and domains you work in). It automatically proposes things worth remembering from your conversations; you approve or dismiss each in the new Long-term memory tab, and approved notes are surfaced into relevant prompts automatically. Open the profile folder to edit notes as plain Markdown.
+
 ## [0.3.0] — 2026-06-11
 
 ### Added

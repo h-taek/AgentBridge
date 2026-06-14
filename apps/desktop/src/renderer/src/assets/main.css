@@ -3444,6 +3444,260 @@ code {
   border-color: rgba(255, 255, 255, 0.2);
 }
 
+/* ─── gc-tree §E — 단기·IR / 장기·메모리 2-탭 + 프로필 패널 ──────────────── */
+
+.ir-tabbar {
+  display: flex;
+  border-bottom: 1px solid var(--color-border);
+  margin-bottom: 8px;
+}
+
+.ir-tab {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 4px;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  color: var(--color-text-tertiary);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  transition:
+    color var(--t-fast),
+    border-color var(--t-fast);
+}
+
+.ir-tab:hover {
+  color: var(--color-text-secondary);
+}
+
+.ir-tab.active {
+  color: var(--color-text-primary);
+  border-bottom-color: var(--color-accent);
+}
+
+.ir-tab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: var(--radius-pill);
+  background: var(--color-success-bg);
+  color: var(--color-success);
+  font-size: 10px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.profile-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.profile-loc {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.profile-loc-icon {
+  width: 14px;
+  height: 14px;
+  color: var(--color-text-tertiary);
+  flex-shrink: 0;
+}
+
+.profile-loc-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.profile-open-folder {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--color-surface-1);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 4px 9px;
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  transition:
+    background var(--t-fast),
+    color var(--t-fast);
+}
+
+.profile-open-folder svg {
+  width: 13px;
+  height: 13px;
+}
+
+.profile-open-folder:hover:not(:disabled) {
+  background: var(--color-surface-hover);
+  color: var(--color-text-primary);
+}
+
+.profile-open-folder:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.profile-sechead {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-text-tertiary);
+  padding: 4px 4px 0;
+}
+
+.profile-sechead-count {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0;
+  color: var(--color-text-secondary);
+  background: var(--color-surface-2);
+  padding: 0 6px;
+  border-radius: var(--radius-pill);
+  font-variant-numeric: tabular-nums;
+}
+
+.profile-cat {
+  align-self: flex-start;
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-accent-strong);
+  background: var(--color-accent-bg);
+  padding: 1px 7px;
+  border-radius: 4px;
+}
+
+.profile-body {
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  line-height: 1.45;
+  word-break: break-word;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.profile-card-acts {
+  display: flex;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.profile-act {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background var(--t-fast),
+    border-color var(--t-fast),
+    opacity var(--t-fast);
+}
+
+.profile-act:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.profile-act-approve {
+  background: var(--color-success-bg);
+  border-color: rgba(111, 210, 138, 0.32);
+  color: var(--color-success);
+}
+
+.profile-act-approve:hover:not(:disabled) {
+  background: rgba(111, 210, 138, 0.24);
+}
+
+.profile-act-discard {
+  background: transparent;
+  border-color: rgba(248, 113, 113, 0.3);
+  color: var(--color-danger);
+}
+
+.profile-act-discard:hover:not(:disabled) {
+  background: var(--color-danger-bg);
+}
+
+.profile-docs {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.profile-doc-group {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.profile-doc-cat {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  padding: 2px 4px;
+}
+
+.profile-doc {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 5px 8px;
+  border-radius: var(--radius-sm);
+}
+
+.profile-doc:hover {
+  background: var(--color-surface-1);
+}
+
+.profile-doc-title {
+  font-size: 12px;
+  color: var(--color-text-primary);
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.profile-doc-summary {
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  line-height: 1.4;
+  word-break: break-word;
+}
+
 /* ─── γ AI 지시 카드 ──────────────────────────────────────────────── */
 
 .mem-instructions-list {
