@@ -3,7 +3,7 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import log from 'electron-log/main'
 import * as path from 'node:path'
 import { IpcChannel } from '@shared/ipc'
-import type { AppHealth, AppUpdaterCheckResult } from '@shared/ipc'
+import type { AppHealth, AppUpdaterCheckResult, CliKind } from '@shared/ipc'
 import { getStorageRoot } from '@agentbridge/core'
 import { probeEnvOnce, getCliPath, getShellPath } from './modules/envProbe'
 import { buildAdapterEnv } from './modules/cliAdapter/env'
@@ -23,7 +23,7 @@ import {
   writePty
 } from './modules/ptySession'
 import { disposeAndFlushAll } from './modules/turnRecorder'
-import { registerProbeDeps } from './modules/cliQuotaTracker'
+import { registerProbeDeps, probeQuotaIfStale, QUOTA_PROBE_STALE_MS } from './modules/cliQuotaTracker'
 import { getCurrentUpdaterStatus, initAppUpdater, triggerManualCheck } from './modules/appUpdater'
 import {
   applyAppIcon,
@@ -314,6 +314,18 @@ app.whenReady().then(async () => {
     getCliPath: (cli) => getCliPath(cli) ?? null,
     buildEnv: () => buildAdapterEnv({ shellPath: getShellPath() })
   })
+  // 앱 시작 시 quota 워밍 — stale(QUOTA_PROBE_STALE_MS 초과)한 CLI만 백그라운드 캡처.
+  // 런치 비차단: 창 뜬 뒤 지연 + fire-and-forget. probeQuotaIfStale의 stale 게이트가 최근 값은
+  // spawn 없이 스킵하므로 자주 껐다 켜면 0비용, 첫 실행/오래 idle 후에만 실제 캡처.
+  const STARTUP_QUOTA_PROBE_DELAY_MS = 4_000
+  setTimeout(() => {
+    for (const cli of ['agy', 'codex', 'claude'] as CliKind[]) {
+      void probeQuotaIfStale(cli, QUOTA_PROBE_STALE_MS).catch((err) =>
+        log.warn('startup quota 워밍 실패, 무시', { cli, err: String(err) })
+      )
+    }
+  }, STARTUP_QUOTA_PROBE_DELAY_MS)
+
   log.info('AgentBridge ready', { userData: dirs.root, version: app.getVersion() })
   registerIpcHandlers(dirs.root)
   buildApplicationMenu()

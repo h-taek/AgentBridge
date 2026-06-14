@@ -42,6 +42,10 @@ const QUOTA_FILE_NAME = 'cli_quota.json'
 const LEGACY_AGY_QUOTA_FILE_NAME = 'agy_quota.json'
 const LEGACY_GEMINI_QUOTA_FILE_NAME = 'gemini_quota.json'
 
+// quota 재측정 주기 — 이보다 최근 측정이 있으면 probe 스킵. compaction 후 재측정과
+// 앱 시작 시 워밍이 같은 임계값을 쓰도록 단일 출처로 export (probeQuotaIfStale의 maxAgeMs).
+export const QUOTA_PROBE_STALE_MS = 30 * 60_000
+
 // 코어 상수/타입 re-export — 호스트 모듈은 데스크탑 내부 export로 계속 사용.
 export {
   QUOTA_WARN_PERCENT,
