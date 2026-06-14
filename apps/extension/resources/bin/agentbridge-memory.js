@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @agentbridge-helper-version 0.3.0
 "use strict";
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -63,7 +64,7 @@ var init_globalPaths = __esm({
 });
 
 // packages/core/src/shared/global.ts
-var GLOBAL_CATEGORIES;
+var GLOBAL_CATEGORIES, DOC_CAPS, PROPOSAL_CAPS;
 var init_global = __esm({
   "packages/core/src/shared/global.ts"() {
     "use strict";
@@ -76,6 +77,19 @@ var init_global = __esm({
       "infra",
       "verification"
     ];
+    DOC_CAPS = {
+      title: 200,
+      summary: 2e3,
+      body: 2e4,
+      indexEntries: 50
+    };
+    PROPOSAL_CAPS = {
+      title: DOC_CAPS.title,
+      summary: DOC_CAPS.summary,
+      body: DOC_CAPS.body,
+      maxPerPass: 12
+      // 한 패스가 만들 제안 상한 — 폭주 방지
+    };
   }
 });
 

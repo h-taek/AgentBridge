@@ -65,4 +65,12 @@ describe('helper inject — 글로벌 메모리 검색 종단(§G3)', () => {
     const ctx = res.hookSpecificOutput.additionalContext as string;
     assert.doesNotMatch(ctx, /Global memory/);
   });
+
+  // 회귀 방지: esbuild가 주석을 제거해 `@agentbridge-helper-version` 마커가 사라지면
+  // hookInstaller 버전비교가 번들을 0.0.0으로 읽어 기존 설치본을 영영 갱신하지 않는다(주입 미동작).
+  // bundleHelper가 번들 출력에 마커를 다시 주입해야 한다.
+  it('번들 출력에 헬퍼 버전 마커가 남아 install 버전비교가 동작한다', async () => {
+    const src = await fsp.readFile(bundlePath, 'utf8');
+    assert.match(src, /@agentbridge-helper-version \d+\.\d+\.\d+/);
+  });
 });

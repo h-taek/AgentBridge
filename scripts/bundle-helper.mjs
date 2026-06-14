@@ -5,12 +5,14 @@
 // 헬퍼 옆엔 node_modules가 없어 런타임 require('@agentbridge/core') 불가하므로, 빌드 때 인라인이 필수.
 // node 빌트인(fs/path)은 platform:'node'로 external 유지. 엔트리의 shebang은 esbuild가 보존한다.
 import { build } from 'esbuild';
-import { chmodSync } from 'fs';
+import { readFileSync, writeFileSync, chmodSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 export const HELPER_ENTRY = join(root, 'packages/core/bin/agentbridge-memory.js');
+
+const VERSION_RE = /@agentbridge-helper-version (\d+\.\d+\.\d+)/;
 
 export async function bundleHelper(outFile) {
   await build({
@@ -23,6 +25,19 @@ export async function bundleHelper(outFile) {
     legalComments: 'none',
     logLevel: 'silent',
   });
+  // esbuild가 주석을 제거하므로 `@agentbridge-helper-version` 마커가 번들 출력에서 사라진다.
+  // hookInstaller(installHelperToCanonicalPath)는 이 마커를 grep해 install 버전비교를 하는데,
+  // 사라지면 번들 버전이 0.0.0으로 읽혀 *기존 설치본을 영영 갱신하지 않는다*(주입 미동작 버그).
+  // → 엔트리 소스를 단일 버전 출처로 삼아, 번들 출력 shebang 다음 줄에 마커를 다시 주입한다.
+  const entryVer = VERSION_RE.exec(readFileSync(HELPER_ENTRY, 'utf8'))?.[1];
+  if (!entryVer) throw new Error('bundle-helper: 엔트리에 @agentbridge-helper-version 마커가 없음');
+  let out = readFileSync(outFile, 'utf8');
+  if (!VERSION_RE.test(out)) {
+    const marker = `// @agentbridge-helper-version ${entryVer}\n`;
+    const nl = out.startsWith('#!') ? out.indexOf('\n') + 1 : 0;
+    out = out.slice(0, nl) + marker + out.slice(nl);
+    writeFileSync(outFile, out);
+  }
   chmodSync(outFile, 0o755); // hook host가 직접 실행 — 실행권한 유지
 }
 
