@@ -10,6 +10,14 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 - Long-term memory — AgentBridge now keeps a profile of durable knowledge that carries across projects (your role, your conventions, the repos and domains you work in). It automatically proposes things worth remembering from your conversations; you approve or dismiss each in the new Long-term memory tab, and approved notes are surfaced into relevant prompts automatically. Open the profile folder to edit notes as plain Markdown.
 
+### Changed
+
+- Usage is refreshed at app startup — when you launch the app, AgentBridge checks each CLI's remaining usage in the background (skipping any checked within the last 30 minutes), so the usage display reflects current values right after launch instead of the previous session's.
+
+### Fixed
+
+- Antigravity usage (quota) is read correctly after its on-screen format changed — Antigravity's `/usage` now shows a multi-group "Models & Quota" layout with decimal percentages, which broke the background usage check (a full quota could be misread as exhausted). The reader was updated to the new format, so Antigravity's remaining usage is reported correctly again.
+
 ## [0.3.0] — 2026-06-11
 
 ### Added
