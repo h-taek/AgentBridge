@@ -106,3 +106,5 @@ The Desktop and extension share the same location under `~/.agentbridge/` — if
 ## License
 
 [MIT](LICENSE) © h-taek
+
+The long-term memory module adapts code from [gc-tree](https://github.com/handsupmin/gc-tree) (MIT). See [NOTICE](NOTICE).

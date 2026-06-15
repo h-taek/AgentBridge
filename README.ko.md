@@ -104,3 +104,5 @@ AgentBridge는 자체 서버나 백엔드 없이 사용자 본인 환경의 CLI�
 ## 라이선스
 
 [MIT](LICENSE) © h-taek
+
+장기 기억 모듈은 [gc-tree](https://github.com/handsupmin/gc-tree)(MIT)의 코드를 각색했습니다. [NOTICE](NOTICE) 참고.
