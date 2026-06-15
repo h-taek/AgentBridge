@@ -8,8 +8,7 @@ import {
   installHelperToCanonicalPath,
   createSessionFileWatcher,
   getStorageRoot,
-  maybeRunProposalPass,
-  resolveRefineDecisionFromConfig,
+  runProposalTrigger,
   getGlobalDir,
   resolveProfile,
   readIR,
@@ -115,43 +114,35 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   // gc-tree §E3 — compaction 성공 후 자동제안(장기기억) 패스를 백그라운드로 발사.
-  // fire-and-forget: ir:updated 핸들러가 void 처리해 compaction 흐름/락을 절대 막지 않는다.
-  // 워크스페이스당 1패스만 동시 실행(중복 spawn 방지). everyN 게이트·카운터는 코어가 담당.
-  const proposalPassInFlight = new Set<string>();
+  // 오케스트레이션(카운터·everyN 게이트·in-flight 가드·분석)은 코어 runProposalTrigger가 담당.
+  // 호스트는 자기 설정·activeModel·통지 콜백만 주입. fire-and-forget(compaction 흐름을 막지 않음).
   async function fireProposalTrigger(workspaceId: string): Promise<void> {
-    if (proposalPassInFlight.has(workspaceId)) return;
-    proposalPassInFlight.add(workspaceId);
     try {
       const workspaceRoot = workspaceStore.getWorkspacePath(workspaceId);
       // activeModel은 직전 IR의 lastModel 기준(없으면 claude) — memoryPanel 수동정제와 동일.
       const ir = await readIR(workspaceRoot);
       const activeModel: CliKind = (ir?.meta.lastModel as CliKind) ?? 'claude';
       const cfg = getConfig();
-      // compaction 스케줄러의 resolveRefineDecision과 동일한 변환 — 같은 refine 정책으로 분석.
-      const decision = resolveRefineDecisionFromConfig(
-        {
+      await runProposalTrigger({
+        workspaceId,
+        workspaceRoot,
+        globalDir: getGlobalDir(),
+        profileId: resolveProfile(workspaceId),
+        activeModel,
+        refineConfig: {
           policy: cfg.refinePolicy,
           fixedCli: cfg.refineFixedCli,
           priorityOrder: cfg.refinePriorityOrder,
           useClaude: cfg.refineUseClaude,
         },
-        activeModel,
-      );
-      const r = await maybeRunProposalPass({
-        workspaceRoot,
-        globalDir: getGlobalDir(),
-        profileId: resolveProfile(workspaceId),
-        decision,
         envProbe: getCoreEnvProbe(),
         logger: getLogger(),
         timeoutMs: 60_000,
         everyN: cfg.proposalEveryN,
+        onUpdated: () => profileProvider.notifyProposalsUpdated(),
       });
-      if (r.ran) profileProvider.notifyProposalsUpdated();
     } catch (err) {
       output.warn(`extension: proposal trigger failed — ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
-      proposalPassInFlight.delete(workspaceId);
     }
   }
 

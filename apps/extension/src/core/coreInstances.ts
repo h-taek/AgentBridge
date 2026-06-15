@@ -65,7 +65,7 @@ export function getCliAdapters(): CliAdapterSet {
 export function getCompactionScheduler(): CompactionScheduler {
   return ensureInitialized(_compactionScheduler, 'compactionScheduler');
 }
-// 자동제안 트리거(profilePanel)가 maybeRunProposalPass에 넘길 envProbe.
+// 자동제안 트리거(runProposalTrigger)에 넘길 envProbe.
 export function getCoreEnvProbe(): EnvProbe {
   return ensureInitialized(_envProbe, 'envProbe');
 }

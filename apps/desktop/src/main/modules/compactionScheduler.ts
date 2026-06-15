@@ -3,7 +3,7 @@ import type { CliKind, SessionMeta } from '@shared/ipc'
 import {
   createCompactionScheduler,
   resolveRefineDecisionFromConfig,
-  maybeRunProposalPass,
+  runProposalTrigger,
   getGlobalDir,
   resolveProfile,
   type CompactionScheduler,
@@ -44,45 +44,33 @@ function pickActiveModel(ws: {
 }
 
 // gc-tree §G5 — compaction 성공 후 자동제안(장기기억) 패스를 백그라운드로 발사.
-// fire-and-forget: 호출자(ir:updated 핸들러)가 void 처리해 compaction 흐름/락을 절대 막지 않는다.
-// 워크스페이스당 1패스만 동시 실행(중복 spawn 방지).
-const proposalPassInFlight = new Set<string>()
-
+// 오케스트레이션(카운터·everyN 게이트·in-flight 가드·분석)은 코어 runProposalTrigger가 담당.
+// 호스트는 자기 설정·activeModel·통지 콜백만 주입. fire-and-forget(compaction 흐름/락을 막지 않음).
 async function fireProposalTrigger(workspaceId: string): Promise<void> {
-  if (proposalPassInFlight.has(workspaceId)) return
-  proposalPassInFlight.add(workspaceId)
   try {
     const ws = await loadWorkspace(workspaceId)
-    const activeModel = pickActiveModel(ws)
-    const workspaceRoot = getWorkspacePaths(workspaceId).dir
     const s = await loadSettings()
-    // compaction의 resolveRefineDecision과 동일한 변환 — 자동제안도 같은 refine 정책으로 분석.
-    const decision = resolveRefineDecisionFromConfig(
-      {
+    await runProposalTrigger({
+      workspaceId,
+      workspaceRoot: getWorkspacePaths(workspaceId).dir,
+      globalDir: getGlobalDir(),
+      profileId: resolveProfile(workspaceId),
+      activeModel: pickActiveModel(ws),
+      refineConfig: {
         policy: s.refineModel,
         fixedCli: s.refineFixedCli,
         priorityOrder: s.refinePriorityOrder,
         useClaude: s.refineUseClaude
       },
-      activeModel
-    )
-    // everyN 게이트는 코어가 담당 — 매번 카운터만 증가, 배수에서만 실제 분석(everyN===0이면 no-op).
-    const r = await maybeRunProposalPass({
-      workspaceRoot,
-      globalDir: getGlobalDir(),
-      profileId: resolveProfile(workspaceId),
-      decision,
       envProbe: getCoreEnvProbe(),
       logger: { log: (m) => log.info(m), warn: (m) => log.warn(m) },
       timeoutMs: 60_000,
-      everyN: s.proposalEveryN
+      everyN: s.proposalEveryN,
+      onUpdated: () => broadcastProposalsUpdated(workspaceId)
     })
-    if (r.ran) broadcastProposalsUpdated(workspaceId)
   } catch (err) {
-    // 백그라운드 작업 — 절대 throw 금지. 실패해도 compaction에는 영향 없음.
+    // 호스트 데이터 로딩 실패 가드 — 절대 throw 금지(코어 트리거는 자체적으로 에러를 삼킴).
     log.warn('Proposal trigger 실패 — 무시', { workspaceId, err: String(err) })
-  } finally {
-    proposalPassInFlight.delete(workspaceId)
   }
 }
 
