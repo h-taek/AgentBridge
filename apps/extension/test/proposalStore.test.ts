@@ -36,6 +36,22 @@ describe('proposalStore', () => {
     assert.equal((await readProposals(g, DEFAULT_PROFILE_ID)).length, 1);
   });
 
+  it('slug이 충돌하는 다른 제목 두 개는 별도 파일로 공존한다(덮어쓰기 손실 방지)', async () => {
+    const g = await tmpGlobal();
+    // 'C# tips'·'C++ tips'는 slugify 결과가 둘 다 'c-tips'라 예전엔 같은 파일로 덮어써졌다.
+    const res = await writeProposals(g, DEFAULT_PROFILE_ID, [
+      P({ title: 'C# tips' }), P({ title: 'C++ tips' }),
+    ], { existingDocTitles: [] });
+    assert.equal(res.written.length, 2);
+    assert.notEqual(res.written[0].id, res.written[1].id);
+    const all = await readProposals(g, DEFAULT_PROFILE_ID);
+    assert.equal(all.length, 2);
+    assert.deepEqual(
+      new Set(all.map((p) => p.title)),
+      new Set(['C# tips', 'C++ tips']),
+    );
+  });
+
   it('이미 프로필 문서로 존재하는 제목은 제안하지 않는다', async () => {
     const g = await tmpGlobal();
     const res = await writeProposals(g, DEFAULT_PROFILE_ID, [P()], {

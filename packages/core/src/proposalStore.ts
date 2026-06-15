@@ -13,8 +13,25 @@ function dedupKey(category: string, title: string): string {
   return `${category}::${title.trim().toLowerCase()}`;
 }
 
+// dedupKey의 짧은 결정적 지문(FNV-1a, 의존성 0). 같은 dedupKey면 항상 같은 값.
+function shortHash(s: string): string {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0).toString(36).padStart(7, '0').slice(0, 7);
+}
+
+// slugify는 특수문자를 뭉개 충돌한다(예: 'C# tips'·'C++ tips' → 둘 다 'c-tips'). dedupKey 지문을
+// 붙여 파일명 충돌을 막는다 — 같은 dedupKey면 같은 id(업데이트), 다른 dedupKey면 다른 id(공존).
 function proposalId(category: string, title: string): string {
-  return `${category}__${slugify(title) || 'untitled'}`;
+  return `${category}__${slugify(title)}__${shortHash(dedupKey(category, title))}`;
+}
+
+// 승인 문서 slug(docs/<category>/<slug>.md)도 같은 충돌을 겪으므로 동일하게 지문을 붙인다.
+function docSlug(category: string, title: string): string {
+  return `${slugify(title)}-${shortHash(dedupKey(category, title))}`;
 }
 
 function clampLen(s: string, cap: number): string {
@@ -97,7 +114,7 @@ export async function approveProposal(
   const res = await writeProfileDocs(globalDir, profileId, {
     docs: [{
       category: p.category,
-      slug: slugify(p.title) || 'untitled',
+      slug: docSlug(p.category, p.title),
       title: p.title,
       summary: p.summary,
       body: p.body,

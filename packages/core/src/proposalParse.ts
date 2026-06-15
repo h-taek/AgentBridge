@@ -60,13 +60,21 @@ export function parseProposalOutput(assistantText: string): ParseProposalResult 
     const o = x as Record<string, unknown>;
     const category = asStr(o.category).trim();
     const title = asStr(o.title).trim();
+    const body = asStr(o.body).trim();
+    let summary = asStr(o.summary).trim();
     if (!CATEGORY_SET.has(category)) { warnings.push(`dropped: bad category "${category}"`); continue; }
     if (!title) { warnings.push('dropped: empty title'); continue; }
+    // 빈 summary 처리: body까지 비면 내용 없는 껍데기라 버리고, body가 있으면 title로 summary를 채워 살린다.
+    // (summary는 승인 검증에서 필수라, 빈 채로 저장하면 [승인]이 조용히 막힌다.)
+    if (!summary) {
+      if (!body) { warnings.push('dropped: empty summary and body'); continue; }
+      summary = title;
+    }
     proposals.push({
       category: category as GlobalCategory,
       title,
-      summary: asStr(o.summary).trim(),
-      body: asStr(o.body).trim(),
+      summary,
+      body,
       confidence: asConfidence(o.confidence),
     });
   }

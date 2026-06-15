@@ -28,6 +28,26 @@ describe('parseProposalOutput', () => {
     if (r.ok) assert.equal(r.proposals.length, 0);
   });
 
+  it('빈 summary + body 있음 → title로 summary를 채워 살린다', () => {
+    const r = parseProposalOutput(JSON.stringify([
+      { category: 'conventions', title: 'pnpm 사용', summary: '', body: '모든 repo에서 pnpm 일관 사용', confidence: 0.8 },
+    ]));
+    assert.ok(r.ok);
+    if (r.ok) {
+      assert.equal(r.proposals.length, 1);
+      assert.equal(r.proposals[0].summary, 'pnpm 사용');
+      assert.equal(r.proposals[0].body, '모든 repo에서 pnpm 일관 사용');
+    }
+  });
+
+  it('빈 summary + 빈 body → 내용 없는 껍데기라 버린다', () => {
+    const r = parseProposalOutput(JSON.stringify([
+      { category: 'conventions', title: 'pnpm 사용', summary: '', body: '', confidence: 0.8 },
+    ]));
+    assert.ok(r.ok);
+    if (r.ok) assert.equal(r.proposals.length, 0);
+  });
+
   it('빈 배열은 ok이고 제안 0개', () => {
     const r = parseProposalOutput('[]');
     assert.ok(r.ok);
