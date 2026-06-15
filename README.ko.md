@@ -11,7 +11,7 @@
 
 <p align="center">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-green.svg"></a>
-  <img alt="Version" src="https://img.shields.io/badge/version-0.2.x-orange.svg">
+  <img alt="Version" src="https://img.shields.io/badge/version-0.4.x-orange.svg">
   <img alt="Desktop" src="https://img.shields.io/badge/desktop-Apple%20Silicon-lightgrey.svg">
   <img alt="Extension" src="https://img.shields.io/badge/extension-Apple%20Silicon-007ACC.svg">
 </p>
@@ -23,6 +23,8 @@
 Claude Code CLI, Codex CLI, Antigravity CLI를 병행 사용할 때 발생하는 **context handoff** 문제 — 모델을 갈아탈 때마다 작업 맥락이 끊기는 문제 — 를 해결한다.
 
 AgentBridge는 한 워크스페이스 안에 여러 모델 탭을 *동시에* 띄우고, 매 사용자 메시지마다 **IR(Intermediate Representation, "공유 메모리")** 을 hook 메커니즘으로 자동 주입한다. 모델을 갈아타도 *어디까지 작업했고 무엇을 결정했는지* 가 끊기지 않는다.
+
+이 단기 기억 위에, AgentBridge는 **장기 기억(global context)** 도 쌓는다: 당신과 당신의 작업 방식에 관한 오래 가는 사실(역할·컨벤션·워크플로…)을 대화에서 자동 제안하고, 승인하면 *모든* 워크스페이스·세션에 걸쳐 유지된다 — ChatGPT/Claude 메모리처럼, 단 로컬에 저장되고 여러 CLI가 공유한다.
 
 각 CLI의 기본 동작(권한 다이얼로그, 도구 승인 흐름, 세션 관리)은 그대로 유지된다. AgentBridge는 CLI의 native 기능을 제한하지 않는다.
 
@@ -38,6 +40,7 @@ AgentBridge는 한 워크스페이스 안에 여러 모델 탭을 *동시에* �
 - **IR 자동 핸드오프** — 매 메시지마다 공유 메모리(IR)가 hook으로 주입돼, 모델을 갈아타도 작업 맥락이 끊기지 않는다.
 - **무료/저비용 정제** — 기본 정책이 메모리 갱신을 Antigravity 무료 티어 CLI로 헤드리스 수행해 메인 모델 토큰을 소비하지 않는다.
 - **메모리 패널** — 현재 메모리 · 이전 스냅샷 · 턴 흐름을 한눈에 보고, 수동 정제·초기화를 할 수 있다.
+- **장기 기억(global context)** — 오래 가는 지식(역할 · 컨벤션 · 워크플로 · …)을 대화에서 자동 제안하고, 승인/버림으로 큐레이션한다. 승인된 기억은 모든 워크스페이스가 공유한다. 자동 제안은 설정에서 끌 수 있다.
 - **세션 영속화 + resume** — 앱을 껐다 켜도 native `--resume`으로 이전 대화를 그대로 이어간다.
 - **데스크탑·익스텐션 메모리 공유** — 같은 프로젝트 폴더면 두 앱이 같은 작업 기억(메모리·대화 기록)을 사용한다.
 - **사용자 자산 격리** — 글로벌 설정을 수정하지 않고, 사용자가 이미 인증한 본인 CLI만 임베드한다.
@@ -80,13 +83,16 @@ AgentBridge는 자체 서버나 백엔드 없이 사용자 본인 환경의 CLI�
 
 ```
 ~/.agentbridge/                              ← AgentBridge 메타데이터 (데스크탑·익스텐션 공유)
-└── workspaces/<workspaceId>/
-    ├── workspace.json
-    ├── ir.json                             ← 압축된 공유 메모리
-    ├── turns.jsonl                         ← raw 턴 로그
-    ├── archive/                            ← compaction 스냅샷
-    ├── sessions/<sessionId>/replay.log     ← PTY raw bytes (탭별)
-    └── settings/claude-settings.json       ← claude --settings flag 대상
+├── workspaces/<workspaceId>/
+│   ├── workspace.json
+│   ├── ir.json                             ← 압축된 공유 메모리 (단기)
+│   ├── turns.jsonl                         ← raw 턴 로그
+│   ├── archive/                            ← compaction 스냅샷
+│   ├── sessions/<sessionId>/replay.log     ← PTY raw bytes (탭별)
+│   └── settings/claude-settings.json       ← claude --settings flag 대상
+└── global/profiles/default/                ← 장기 기억 (글로벌 프로필, 공유)
+    ├── proposals/                          ← 대기 중 자동 제안 (승인 전)
+    └── docs/<category>/<slug>.md           ← 승인된 장기 기억
 
 <사용자 워크스페이스 cwd>/           ← 사용자 프로젝트
 ├── .codex/hooks.json           ← codex hook (마커 블록 merge)

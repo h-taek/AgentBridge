@@ -11,7 +11,7 @@
 
 <p align="center">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-green.svg"></a>
-  <img alt="Version" src="https://img.shields.io/badge/version-0.2.x-orange.svg">
+  <img alt="Version" src="https://img.shields.io/badge/version-0.4.x-orange.svg">
   <img alt="Desktop" src="https://img.shields.io/badge/desktop-Apple%20Silicon-lightgrey.svg">
   <img alt="Extension" src="https://img.shields.io/badge/extension-Apple%20Silicon-007ACC.svg">
 </p>
@@ -25,6 +25,8 @@
 It solves the **context handoff** problem that arises when you use Claude Code CLI, Codex CLI, and Antigravity CLI side by side — the problem where your working context is lost every time you switch models.
 
 AgentBridge opens multiple model tabs *simultaneously* within a single workspace, and on every user message it automatically injects the **IR (Intermediate Representation, "shared memory")** through a hook mechanism. Even when you switch models, *how far you've gotten and what you've decided* is never lost.
+
+On top of this short-term memory, AgentBridge also builds a **long-term memory (global context)**: durable facts about you and how you work (your role, conventions, workflows…) are auto-proposed from your conversations, and once you approve them they persist across *all* workspaces and sessions — like ChatGPT/Claude memory, but local and shared across your CLIs.
 
 Each CLI's default behavior (permission dialogs, tool approval flow, session management) is preserved as-is. AgentBridge does not limit the CLI's native features.
 
@@ -40,6 +42,7 @@ Each CLI's default behavior (permission dialogs, tool approval flow, session man
 - **Automatic IR handoff** — On every message the shared memory (IR) is injected via a hook, so your working context is never lost when you switch models.
 - **Free/low-cost refine** — The default policy performs memory updates headlessly with the Antigravity free-tier CLI, so it consumes no main-model tokens.
 - **Memory panel** — See the current memory · previous snapshots · turn flow at a glance, and run manual refine and reset.
+- **Long-term memory (global context)** — Durable knowledge (your role · conventions · workflows · …) is auto-proposed from conversations; you approve or dismiss, and approved memory is shared across every workspace. Auto-proposal can be toggled off in settings.
 - **Session persistence + resume** — Even after you quit and relaunch the app, native `--resume` continues your previous conversation as-is.
 - **Desktop·extension memory sharing** — If the project folder is the same, both apps use the same working memory (memory · conversation history).
 - **User-asset isolation** — Without modifying global settings, it embeds only the user's own already-authenticated CLIs.
@@ -82,13 +85,16 @@ The Desktop and extension share the same location under `~/.agentbridge/` — if
 
 ```
 ~/.agentbridge/                              ← AgentBridge metadata (shared by Desktop·extension)
-└── workspaces/<workspaceId>/
-    ├── workspace.json
-    ├── ir.json                             ← compressed shared memory
-    ├── turns.jsonl                         ← raw turn log
-    ├── archive/                            ← compaction snapshots
-    ├── sessions/<sessionId>/replay.log     ← PTY raw bytes (per tab)
-    └── settings/claude-settings.json       ← target of the claude --settings flag
+├── workspaces/<workspaceId>/
+│   ├── workspace.json
+│   ├── ir.json                             ← compressed shared memory (short-term)
+│   ├── turns.jsonl                         ← raw turn log
+│   ├── archive/                            ← compaction snapshots
+│   ├── sessions/<sessionId>/replay.log     ← PTY raw bytes (per tab)
+│   └── settings/claude-settings.json       ← target of the claude --settings flag
+└── global/profiles/default/                ← long-term memory (global profile, shared)
+    ├── proposals/                          ← pending auto-proposals (awaiting approval)
+    └── docs/<category>/<slug>.md           ← approved long-term memory
 
 <user workspace cwd>/           ← user project
 ├── .codex/hooks.json           ← codex hook (marker-block merge)
