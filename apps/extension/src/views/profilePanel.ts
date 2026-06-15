@@ -117,8 +117,19 @@ export class ProfilePanelProvider implements vscode.WebviewViewProvider {
 
   private buildHtml(webview: vscode.Webview): string {
     const nonce = getNonce();
+    // 라벨은 IDE 언어를 따른다(l10n). 데스크탑 ProfilePanel.tsx와 달리 기존엔 한국어 고정이었음.
+    const L = {
+      openFolder: vscode.l10n.t('Open folder'),
+      openFolderTitle: vscode.l10n.t('Open profile folder (edit .md manually)'),
+      approvalQueue: vscode.l10n.t('Approval queue'),
+      noProposals: vscode.l10n.t('No pending proposals'),
+      approve: vscode.l10n.t('Approve'),
+      discard: vscode.l10n.t('Dismiss'),
+      profileDocs: vscode.l10n.t('Profile documents'),
+      noDocs: vscode.l10n.t('No documents yet. They fill in automatically as you work.'),
+    };
     return /*html*/ `<!DOCTYPE html>
-<html lang="ko">
+<html lang="${vscode.env.language || 'en'}">
 <head>
   <meta charset="UTF-8"/>
   <meta http-equiv="Content-Security-Policy"
@@ -275,9 +286,9 @@ export class ProfilePanelProvider implements vscode.WebviewViewProvider {
   <div class="profile-loc">
     <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M14.5 3H7.71l-.85-.85L6.51 2h-5l-.5.5v11l.5.5h13l.5-.5v-10L14.5 3zm-.51 8.49V13h-12V7h4.49l.35-.15.86-.86H14v1.5l-.01 4z"/></svg>
     <span class="profile-loc-name">default</span>
-    <button id="openFolderBtn" class="open-folder" disabled title="프로필 폴더 열기 (수동 .md 편집)">
+    <button id="openFolderBtn" class="open-folder" disabled title="${L.openFolderTitle}">
       <svg viewBox="0 0 16 16" fill="currentColor"><path d="M14.5 3H7.71l-.85-.85L6.51 2h-5l-.5.5v11l.5.5h13l.5-.5v-10L14.5 3zm-.51 8.49V13h-12V7h4.49l.35-.15.86-.86H14v1.5l-.01 4z"/></svg>
-      폴더 열기
+      ${L.openFolder}
     </button>
   </div>
 
@@ -285,6 +296,7 @@ export class ProfilePanelProvider implements vscode.WebviewViewProvider {
 
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
+    const L = ${JSON.stringify(L)};
     const contentEl = document.getElementById('content');
     const openFolderBtn = document.getElementById('openFolderBtn');
 
@@ -322,10 +334,10 @@ export class ProfilePanelProvider implements vscode.WebviewViewProvider {
       let html = '';
 
       // ① 승인 큐
-      html += '<div class="sechead"><span>제안 승인 큐</span>' +
+      html += '<div class="sechead"><span>' + L.approvalQueue + '</span>' +
         (proposals.length > 0 ? '<span class="sechead-count">' + proposals.length + '</span>' : '') + '</div>';
       if (proposals.length === 0) {
-        html += '<div class="empty">대기 중인 제안이 없습니다</div>';
+        html += '<div class="empty">' + L.noProposals + '</div>';
       } else {
         proposals.forEach((p) => {
           html += '<div class="card">';
@@ -334,17 +346,17 @@ export class ProfilePanelProvider implements vscode.WebviewViewProvider {
           if (p.summary) html += '<div class="card-sub">' + esc(p.summary) + '</div>';
           if (p.body) html += '<div class="card-body">' + esc(bodyPreview(p.body)) + '</div>';
           html += '<div class="card-acts">';
-          html += '<button class="act-approve" data-act="approve" data-id="' + esc(p.id) + '"' + (busy ? ' disabled' : '') + '>승인</button>';
-          html += '<button class="act-discard" data-act="discard" data-id="' + esc(p.id) + '"' + (busy ? ' disabled' : '') + '>버림</button>';
+          html += '<button class="act-approve" data-act="approve" data-id="' + esc(p.id) + '"' + (busy ? ' disabled' : '') + '>' + L.approve + '</button>';
+          html += '<button class="act-discard" data-act="discard" data-id="' + esc(p.id) + '"' + (busy ? ' disabled' : '') + '>' + L.discard + '</button>';
           html += '</div></div>';
         });
       }
 
       // ② 읽기전용 문서 (카테고리별 그룹)
-      html += '<div class="sechead"><span>프로필 문서</span>' +
+      html += '<div class="sechead"><span>' + L.profileDocs + '</span>' +
         (docs.length > 0 ? '<span class="sechead-count">' + docs.length + '</span>' : '') + '</div>';
       if (docs.length === 0) {
-        html += '<div class="empty">아직 문서가 없습니다. 쓸수록 자동으로 채워집니다.</div>';
+        html += '<div class="empty">' + L.noDocs + '</div>';
       } else {
         const groups = [];
         const byCat = {};

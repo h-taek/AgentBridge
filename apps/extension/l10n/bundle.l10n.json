@@ -34,5 +34,13 @@
   "Reset": "Reset",
   "AgentBridge: Memory compaction is in progress. Please try again in a moment.": "AgentBridge: Memory compaction is in progress. Please try again in a moment.",
   "AgentBridge: Memory reset failed — {0}": "AgentBridge: Memory reset failed — {0}",
-  "AgentBridge: Memory reset.": "AgentBridge: Memory reset."
+  "AgentBridge: Memory reset.": "AgentBridge: Memory reset.",
+  "Open folder": "Open folder",
+  "Open profile folder (edit .md manually)": "Open profile folder (edit .md manually)",
+  "Approval queue": "Approval queue",
+  "No pending proposals": "No pending proposals",
+  "Approve": "Approve",
+  "Dismiss": "Dismiss",
+  "Profile documents": "Profile documents",
+  "No documents yet. They fill in automatically as you work.": "No documents yet. They fill in automatically as you work."
 }
