@@ -27,6 +27,14 @@ const DISCRIMINATOR = [
   'When in doubt, DROP it. A missed durable fact is cheap; a polluted profile is expensive.',
 ].join('\n');
 
+// IR 정제(irModule/prompt.ts)의 LANGUAGE_RULE과 동형 — 프롬프트 본문은 영어지만 *출력 텍스트
+// 필드*는 사용자 언어를 따라가야 한다. 이 규칙이 없으면 한국어 대화에도 영어 제안이 나온다.
+const LANGUAGE_RULE = [
+  '## Language',
+  'The output text fields `title`, `summary`, `body` must be written in **the same language the user uses in the conversation turns above** — Korean conversation → Korean text, English → English. Mixed-language sessions follow the *most recent* user turn.',
+  '`category` (one of the 7 enums above) and `confidence` (number) stay as-is — do not translate them.',
+].join('\n');
+
 function formatTurn(t: TurnRecord, i: number): string {
   const lines = [
     `### Turn ${i + 1} (${t.model}, ${t.completedAt})`,
@@ -67,6 +75,8 @@ export function buildProposalPrompt(args: ProposalPromptArgs): string {
     '',
     `## Conversation turns to analyze (${args.turns.length}, oldest first)`,
     turnsBody,
+    '',
+    LANGUAGE_RULE,
     '',
     '## Output format',
     '1. Respond with EXACTLY one JSON array. No prose, no code fences — start with `[` and end with `]`.',

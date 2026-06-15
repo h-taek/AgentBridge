@@ -17,6 +17,9 @@ describe('buildProposalPrompt', () => {
     assert.match(p, /JSON array/i);
     // 제외목록(시한부·현재작업상태 등)과 "when in doubt" 가드 존재
     assert.match(p, /when in doubt/i);
+    // 언어 규칙: 출력 텍스트(title/summary/body)는 사용자 언어 추종 (IR LANGUAGE_RULE과 동형)
+    assert.match(p, /## Language/);
+    assert.match(p, /same language the user uses/i);
   });
 
   it('턴 본문과 기존 인덱스(중복방지)를 포함한다', () => {
