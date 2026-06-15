@@ -41,6 +41,7 @@
   "No pending proposals": "대기 중인 제안이 없습니다",
   "Approve": "승인",
   "Dismiss": "버림",
+  "AgentBridge: Failed to update the proposal — {0}.": "AgentBridge: 제안 처리에 실패했습니다 — {0}.",
   "Profile documents": "프로필 문서",
   "No documents yet. They fill in automatically as you work.": "아직 문서가 없습니다. 쓸수록 자동으로 채워집니다."
 }

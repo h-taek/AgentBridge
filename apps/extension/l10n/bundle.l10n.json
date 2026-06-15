@@ -41,6 +41,7 @@
   "No pending proposals": "No pending proposals",
   "Approve": "Approve",
   "Dismiss": "Dismiss",
+  "AgentBridge: Failed to update the proposal — {0}.": "AgentBridge: Failed to update the proposal — {0}.",
   "Profile documents": "Profile documents",
   "No documents yet. They fill in automatically as you work.": "No documents yet. They fill in automatically as you work."
 }

@@ -33,6 +33,8 @@ export function ProfilePanel({ workspaceId, active, onProposalCount }: Props): R
   const [profileDir, setProfileDir] = useState<string>('')
   // 승인/버림 in-flight 중인 제안 id — 진행 중엔 모든 액션 버튼 비활성.
   const [busyId, setBusyId] = useState<string | null>(null)
+  // 승인/버림이 진짜 에러(권한·디스크 등)로 실패했을 때 표면화 — 무반응처럼 보이지 않게.
+  const [actionError, setActionError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     const res = await window.agentbridge.proposal.list({ workspaceId })
@@ -65,32 +67,35 @@ export function ProfilePanel({ workspaceId, active, onProposalCount }: Props): R
     async (id: string) => {
       if (busyId) return
       setBusyId(id)
+      setActionError(null)
       try {
         await window.agentbridge.proposal.approve({ workspaceId, id })
         await load()
       } catch {
-        // broadcast가 목록을 갱신하므로 별도 에러 표면 없이 무시 — 실패 시 카드는 그대로 남음.
+        // 진짜 실패(권한·디스크 등) — 카드에 인라인 에러를 띄워 무반응처럼 보이지 않게.
+        setActionError(t.profile.actionError)
       } finally {
         setBusyId(null)
       }
     },
-    [busyId, workspaceId, load]
+    [busyId, workspaceId, load, t]
   )
 
   const handleDiscard = useCallback(
     async (id: string) => {
       if (busyId) return
       setBusyId(id)
+      setActionError(null)
       try {
         await window.agentbridge.proposal.discard({ workspaceId, id })
         await load()
       } catch {
-        // 위와 동일 — 실패 시 카드 유지.
+        setActionError(t.profile.actionError)
       } finally {
         setBusyId(null)
       }
     },
-    [busyId, workspaceId, load]
+    [busyId, workspaceId, load, t]
   )
 
   const openFolder = useCallback(() => {
@@ -135,6 +140,8 @@ export function ProfilePanel({ workspaceId, active, onProposalCount }: Props): R
           {t.profile.openFolder}
         </button>
       </div>
+
+      {actionError && <div className="mem-error">{actionError}</div>}
 
       <div className="profile-sechead">
         <span>{t.profile.queueTitle}</span>

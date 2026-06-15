@@ -330,7 +330,8 @@ export const ko = {
     docsTitle: '프로필 문서',
     docsEmpty: '아직 문서가 없습니다. 쓸수록 자동으로 채워집니다.',
     approve: '승인',
-    discard: '버림'
+    discard: '버림',
+    actionError: '작업에 실패했습니다 — 프로필 폴더 권한을 확인하고 다시 시도하세요.'
   },
   xterm: {
     dropPathFailed: '파일 경로 추출 실패',

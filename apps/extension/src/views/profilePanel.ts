@@ -88,7 +88,10 @@ export class ProfilePanelProvider implements vscode.WebviewViewProvider {
     try {
       await approveProposal(getGlobalDir(), resolveProfile(wid), id);
     } catch (err) {
-      output.warn(`profilePanel: approve failed — ${err instanceof Error ? err.message : String(err)}`);
+      const msg = err instanceof Error ? err.message : String(err);
+      output.warn(`profilePanel: approve failed — ${msg}`);
+      // 진짜 실패(권한·디스크 등)를 사용자에게 표면화 — output 로그만으론 안 보임.
+      void vscode.window.showWarningMessage(vscode.l10n.t('AgentBridge: Failed to update the proposal — {0}.', msg));
     }
     await this.sendProposals();
   }
@@ -99,7 +102,9 @@ export class ProfilePanelProvider implements vscode.WebviewViewProvider {
     try {
       await discardProposal(getGlobalDir(), resolveProfile(wid), id);
     } catch (err) {
-      output.warn(`profilePanel: discard failed — ${err instanceof Error ? err.message : String(err)}`);
+      const msg = err instanceof Error ? err.message : String(err);
+      output.warn(`profilePanel: discard failed — ${msg}`);
+      void vscode.window.showWarningMessage(vscode.l10n.t('AgentBridge: Failed to update the proposal — {0}.', msg));
     }
     await this.sendProposals();
   }

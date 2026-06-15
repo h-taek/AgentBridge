@@ -333,7 +333,8 @@ export const en = {
     docsTitle: 'Profile docs',
     docsEmpty: 'No docs yet. They fill in automatically as you work.',
     approve: 'Approve',
-    discard: 'Discard'
+    discard: 'Discard',
+    actionError: 'Action failed — check the profile folder permissions and try again.'
   },
   xterm: {
     dropPathFailed: 'Could not extract file path',
