@@ -4,6 +4,7 @@ import { killPty, resizePty, startPty, writePty } from '../ptySession'
 import { extractQuotaPercent, recordQuotaPercent } from '../cliQuotaTracker'
 import { deleteAgyNativeSession, watchForNewConversationUuid } from '@agentbridge/core'
 import { getCoreCliAdapters } from './coreCliAdapters'
+import { createCaptureLifetime } from './captureLifetime'
 import type {
   CLIAdapter,
   SpawnInteractiveHooks,
@@ -57,13 +58,23 @@ async function spawnInteractive(
   })
 
   const quotaHook = createQuotaCaptureHook()
-  const wrappedHooks: SpawnInteractiveHooks = {
+  const baseHooks: SpawnInteractiveHooks = {
     ...hooks,
     onData: (data): void => {
       quotaHook(data)
       hooks.onData?.(data)
     }
   }
+
+  // 새 세션 또는 resume fallback 케이스 — UUID 후처리 캡처.
+  // 캡처 결과는 hooks.onModelSessionIdCaptured 콜백으로만 호출자에 전달 (반환값은 이미 결정됨).
+  // core watchForNewConversationUuid 사용 — conversations/ FS 스캔(mtime) + spawn 전 스냅샷
+  // (opts.agyWatchUuid.excludeUuids). cwd-키 캐시 폴링(/private 불일치로 실패)을 대체 (V-17).
+  const initialModelSessionId: string | null = opts.modelSessionId ?? null
+  // 캡처가 도는 경우만 PTY exit에 워처 수명을 묶는다(createCaptureLifetime — codex와 동일 배선).
+  // 이 배선 누락이 0.4.0 전 데스크탑 agy 워처 누수의 원인이었다.
+  const willCapture = initialModelSessionId === null && req.cwd != null && opts.agyWatchUuid != null
+  const lifetime = willCapture ? createCaptureLifetime(baseHooks) : null
 
   const result = startPty(
     {
@@ -75,20 +86,16 @@ async function spawnInteractive(
       env: opts.env
     },
     sender,
-    wrappedHooks
+    lifetime?.hooks ?? baseHooks
   )
 
-  // 새 세션 또는 resume fallback 케이스 — UUID 후처리 캡처.
-  // 캡처 결과는 hooks.onModelSessionIdCaptured 콜백으로만 호출자에 전달 (반환값은 이미 결정됨).
-  // core watchForNewConversationUuid 사용 — conversations/ FS 스캔(mtime) + spawn 전 스냅샷
-  // (opts.agyWatchUuid.excludeUuids). cwd-키 캐시 폴링(/private 불일치로 실패)을 대체 (V-17).
-  const initialModelSessionId: string | null = opts.modelSessionId ?? null
-  if (initialModelSessionId === null && req.cwd && opts.agyWatchUuid) {
+  if (lifetime && req.cwd && opts.agyWatchUuid) {
     const cwd = req.cwd
     const exclude = opts.agyWatchUuid.excludeUuids
     void watchForNewConversationUuid({
       cwd,
       excludeUuids: exclude,
+      abortSignal: lifetime.signal,
       onCaptured: (uuid) => {
         hooks.onModelSessionIdCaptured?.(uuid)
       },

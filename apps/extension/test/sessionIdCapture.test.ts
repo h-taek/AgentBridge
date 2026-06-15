@@ -44,7 +44,7 @@ describe('captureNewThreadId (codex)', () => {
 
   it('캡처 시작 한참 뒤에 생긴 rollout도 잡는다 (데드라인 없음)', async () => {
     const before = await snapshotCodexSessions(root);
-    const p = captureNewThreadId(before, { sessionsRoot: root, intervalMs: 50 });
+    const p = captureNewThreadId(before, { sessionsRoot: root, intervalMs: 50, signal: new AbortController().signal });
     // 첫 입력이 늦은 상황 시뮬레이션 — 과거 60초 데드라인보다는 짧지만, 즉시가 아님을 보장.
     await wait(300);
     await writeRollout(root, UUID);
@@ -54,7 +54,7 @@ describe('captureNewThreadId (codex)', () => {
   it('snapshot에 이미 있던 파일은 무시하고 새 파일만 잡는다', async () => {
     await writeRollout(root, '019e0000-0000-7000-8000-000000000001'); // 기존 파일
     const before = await snapshotCodexSessions(root);
-    const p = captureNewThreadId(before, { sessionsRoot: root, intervalMs: 50 });
+    const p = captureNewThreadId(before, { sessionsRoot: root, intervalMs: 50, signal: new AbortController().signal });
     await wait(150);
     await writeRollout(root, UUID); // 새 파일
     assert.equal(await p, UUID);
@@ -91,6 +91,7 @@ describe('watchForNewConversationUuid (agy)', () => {
       excludeUuids: new Set(),
       conversationsDir: dir,
       intervalMs: 50,
+      abortSignal: new AbortController().signal,
       onCaptured: (u) => {
         captured = u;
       },
@@ -110,6 +111,7 @@ describe('watchForNewConversationUuid (agy)', () => {
       excludeUuids: new Set([OLD]),
       conversationsDir: dir,
       intervalMs: 50,
+      abortSignal: new AbortController().signal,
       onCaptured: (u) => {
         captured = u;
       },

@@ -57,7 +57,10 @@ export type CaptureOptions = {
   intervalMs?: number;
   // 감시 루트 override(테스트용). 기본 ~/.codex/sessions.
   sessionsRoot?: string;
-  signal?: AbortSignal;
+  // 데드라인이 없으므로 수명은 전적으로 이 시그널에 매인다 → **필수**. 호스트가 PTY exit/패널
+  // dispose에 묶어 넘기지 않으면 워처가 영원히 살아남는다(누수). 옵셔널이면 호출부 누락을
+  // 타입체커가 못 잡으므로 의도적으로 필수로 둔다.
+  signal: AbortSignal;
   logger?: Logger;
 };
 
@@ -67,12 +70,12 @@ export type CaptureOptions = {
 // abort되면 캡처 없이 null을 돌려준다.
 export async function captureNewThreadId(
   before: CodexSessionSnapshot,
-  opts: CaptureOptions = {},
+  opts: CaptureOptions,
 ): Promise<string | null> {
   const log = opts.logger ?? noopLogger;
   const pollMs = opts.intervalMs ?? 3000;
   const root = opts.sessionsRoot ?? CODEX_SESSIONS_ROOT;
-  if (opts.signal?.aborted) return null;
+  if (opts.signal.aborted) return null;
 
   return new Promise<string | null>((resolve) => {
     let settled = false;
@@ -84,7 +87,7 @@ export async function captureNewThreadId(
       settled = true;
       if (timer) clearInterval(timer);
       watcher?.stop();
-      opts.signal?.removeEventListener('abort', onAbort);
+      opts.signal.removeEventListener('abort', onAbort);
       resolve(value);
     };
     const onAbort = (): void => finish(null);
@@ -109,7 +112,7 @@ export async function captureNewThreadId(
       }
     };
 
-    opts.signal?.addEventListener('abort', onAbort, { once: true });
+    opts.signal.addEventListener('abort', onAbort, { once: true });
     // 주: OS watch(즉시성). 보조: 저빈도 폴링(루트 미존재·watch 미지원 안전망).
     watcher = createSessionFileWatcher({
       root,

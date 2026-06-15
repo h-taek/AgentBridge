@@ -4,6 +4,7 @@ import { killPty, resizePty, startPty, writePty } from '../ptySession'
 import { captureNewThreadId } from './codexSessionWatcher'
 import { deleteCodexNativeSession } from '@agentbridge/core'
 import { getCoreCliAdapters } from './coreCliAdapters'
+import { createCaptureLifetime } from './captureLifetime'
 import type {
   CLIAdapter,
   SpawnInteractiveHooks,
@@ -33,18 +34,8 @@ async function spawnInteractive(
   })
 
   const snapshot = opts.codexSessionSnapshot ?? null
-  const captureCtrl = snapshot && hooks.onModelSessionIdCaptured ? new AbortController() : null
-
-  // PTY exit 시 폴링 중단 — wrapper로 기존 hook 체이닝.
-  const wrappedHooks: SpawnInteractiveHooks = captureCtrl
-    ? {
-        ...hooks,
-        onExit: (info) => {
-          captureCtrl.abort()
-          hooks.onExit?.(info)
-        }
-      }
-    : hooks
+  // PTY exit에 캡처 워처 수명을 묶는 공통 배선(createCaptureLifetime). 캡처가 실제로 도는 경우만.
+  const lifetime = snapshot && hooks.onModelSessionIdCaptured ? createCaptureLifetime(hooks) : null
 
   const result = startPty(
     {
@@ -56,13 +47,13 @@ async function spawnInteractive(
       env: opts.env
     },
     sender,
-    wrappedHooks
+    lifetime?.hooks ?? hooks
   )
 
   // 비동기 캡처 — fire-and-forget.
-  if (snapshot && captureCtrl && hooks.onModelSessionIdCaptured) {
+  if (snapshot && lifetime && hooks.onModelSessionIdCaptured) {
     const onCapture = hooks.onModelSessionIdCaptured
-    void captureNewThreadId(snapshot, { signal: captureCtrl.signal })
+    void captureNewThreadId(snapshot, { signal: lifetime.signal })
       .then((threadId) => {
         if (threadId) onCapture(threadId)
       })
