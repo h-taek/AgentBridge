@@ -175,18 +175,25 @@ function validateTurnsAssistantDetail(v: unknown): TurnsAssistantDetail | null {
   return null
 }
 
+// 보존 하한 5 — 자동제안 커서가 prune 전에 raw 턴을 읽도록 보장(스냅샷 5개 ≥ 제안 주기 5).
+// 하한 미만은 거부(→ 기본값 15). 스냅샷 1개 = 3턴(countThreshold 6 − keepRecent 3) → 5개 ≈ 15턴 보존.
 function validateMaxArchiveSnapshots(v: unknown): number | null {
   if (typeof v !== 'number' || !Number.isFinite(v)) return null
   const n = Math.floor(v)
-  if (n < 1) return null
+  if (n < 5) return null
   return n
 }
 
-// 자동제안 trigger 주기 — 0 이상 정수로 클램프. 0이면 자동제안 비활성(maxArchiveSnapshots와 달리
-// 0을 유효값으로 허용하므로 하한이 1이 아닌 0).
+// 자동제안 헤드리스 분석 주기(압축 N회마다). 사용자 비노출 고정값(Q2 토글화).
+// 빈도는 커서 기반이라 토큰 총량을 안 바꾸고 작을수록 추출 품질만 떨어진다. maxArchiveSnapshots
+// 하한(5) 이하여야 커서가 prune 전에 턴을 읽는다(보존 ≥ 주기).
+const PROPOSAL_EVERY_N = 5
+
+// 자동제안은 토글(켜짐/꺼짐)만 의미 있다 → 저장값을 0(끔) 또는 PROPOSAL_EVERY_N(켬)으로 정규화.
+// 양수면 무엇이든 켬으로 보고 고정 주기를 쓴다(레거시·잘못된 큰 값도 안전하게 5로 수렴).
 function validateProposalEveryN(v: unknown): number | null {
   if (typeof v !== 'number' || !Number.isFinite(v)) return null
-  return Math.max(0, Math.floor(v))
+  return Math.floor(v) > 0 ? PROPOSAL_EVERY_N : 0
 }
 
 // EnvProbe에서 agy 어댑터 가용 여부 확인 — RefineDispatcher가 'auto'/'agy-flash' 처리 시 사용.

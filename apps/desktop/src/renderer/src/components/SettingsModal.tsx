@@ -568,14 +568,14 @@ function MainPage({
             </span>
             <input
               type="number"
-              min={1}
+              min={5}
               max={100}
               step={1}
               className="settings-row-number"
               value={settings?.maxArchiveSnapshots ?? 15}
               onChange={(e) => {
                 const n = Math.floor(Number(e.target.value))
-                if (Number.isFinite(n) && n >= 1) {
+                if (Number.isFinite(n) && n >= 5) {
                   void onUpdate({ maxArchiveSnapshots: n })
                 }
               }}
@@ -588,21 +588,15 @@ function MainPage({
             <span className="settings-row-value settings-row-desc">
               {t.settings.main.proposalEveryNDesc}
             </span>
-            <input
-              type="number"
-              min={0}
-              max={100}
-              step={1}
-              className="settings-row-number"
-              value={settings?.proposalEveryN ?? 5}
-              onChange={(e) => {
-                const n = Math.floor(Number(e.target.value))
-                if (Number.isFinite(n) && n >= 0) {
-                  void onUpdate({ proposalEveryN: n })
-                }
-              }}
+            <select
+              className="settings-row-select"
+              value={(settings?.proposalEveryN ?? 5) > 0 ? 'on' : 'off'}
+              onChange={(e) => void onUpdate({ proposalEveryN: e.target.value === 'on' ? 5 : 0 })}
               title={t.settings.main.proposalEveryNTitle}
-            />
+            >
+              <option value="on">{t.settings.main.proposalOn}</option>
+              <option value="off">{t.settings.main.proposalOff}</option>
+            </select>
           </div>
         </div>
       </div>
