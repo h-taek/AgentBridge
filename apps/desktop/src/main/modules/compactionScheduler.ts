@@ -15,7 +15,7 @@ import { getWorkspacePaths } from './workspaceStore'
 import { getCoreEnvProbe } from './envProbe'
 import { loadSettings, getCachedSettings } from './settings'
 import { broadcastIrUpdated } from './irBroadcast'
-import { broadcastProposalsUpdated } from '../ipc/proposalHandlers'
+import { broadcastProposalsUpdated } from './proposalBroadcast'
 import { markForcedFallback, probeQuotaIfStale, QUOTA_PROBE_STALE_MS } from './cliQuotaTracker'
 
 // 데스크탑 CompactionScheduler facade — 코어 createCompactionScheduler 위임.

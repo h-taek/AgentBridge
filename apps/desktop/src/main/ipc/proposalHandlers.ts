@@ -6,8 +6,7 @@ import {
   type ProposalApproveResult,
   type ProposalDiscardResult,
   type ProposalListRequest,
-  type ProposalListResult,
-  type ProposalsUpdatedEvent
+  type ProposalListResult
 } from '@shared/ipc'
 import {
   approveProposal,
@@ -17,7 +16,7 @@ import {
   readProposals,
   resolveProfile
 } from '@agentbridge/core'
-import { broadcastToAll } from '../modules/windowManager'
+import { broadcastProposalsUpdated } from '../modules/proposalBroadcast'
 
 // gc-tree §D — 자동제안(장기기억) 승인 게이트 IPC.
 //   proposal:list    — pending 제안 목록 + 읽기전용 문서 목록(이미 승인된 .md)
@@ -63,13 +62,6 @@ async function handleProposalDiscard(
   const ok = await discardProposal(globalDir, profileId, req.id)
   broadcastProposalsUpdated(req.workspaceId)
   return { ok }
-}
-
-// main → renderer. 제안/문서는 default 프로필 단위로 모든 워크스페이스가 공유하므로
-// workspace-scoped인 broadcastIrUpdated와 달리 전체 윈도우에 통지한다. (D3 자동제안 패스도 호출.)
-export function broadcastProposalsUpdated(workspaceId: string): void {
-  const evt: ProposalsUpdatedEvent = { workspaceId }
-  broadcastToAll(IpcChannel.ProposalsUpdated, evt)
 }
 
 export function registerProposalHandlers(): void {
