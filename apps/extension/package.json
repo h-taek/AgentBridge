@@ -65,7 +65,7 @@
         {
           "type": "webview",
           "id": "agentbridge.proposalPanel",
-          "name": "장기 메모리"
+          "name": "Long-term Memory"
         }
       ]
     },
