@@ -2,7 +2,7 @@
   "name": "agentbridge",
   "displayName": "AgentBridge",
   "description": "%extension.description%",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "publisher": "h-taek",
   "l10n": "./l10n",
   "license": "MIT",
@@ -61,6 +61,11 @@
           "type": "webview",
           "id": "agentbridge.memoryPanel",
           "name": "Memory"
+        },
+        {
+          "type": "webview",
+          "id": "agentbridge.proposalPanel",
+          "name": "Long-term Memory"
         }
       ]
     },
@@ -231,9 +236,14 @@
         "agentbridge.memory.maxArchiveSnapshots": {
           "type": "number",
           "default": 15,
-          "minimum": 1,
+          "minimum": 5,
           "maximum": 100,
           "description": "%agentbridge.memory.maxArchiveSnapshots.description%"
+        },
+        "agentbridge.memory.proposalEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "%agentbridge.memory.proposalEnabled.description%"
         }
       }
     },

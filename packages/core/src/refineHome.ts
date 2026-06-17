@@ -1,7 +1,7 @@
 // refine 서브프로세스(agy/codex CLI)를 격리된 HOME 박스에서 실행하기 위한 환경 변수 조립.
 // 앱이 macOS 전용이므로 플랫폼 분기 없음 (claude는 격리 미지원으로 빈 env).
 
-import { mkdirSync, symlinkSync, lstatSync, writeFileSync, existsSync, statSync, rmSync, readFileSync } from 'fs';
+import { mkdirSync, symlinkSync, lstatSync, writeFileSync, existsSync, statSync, rmSync, readFileSync, chmodSync, readdirSync } from 'fs';
 import { homedir } from 'os';
 import { join, dirname } from 'path';
 import type { CliKind } from './shared/cli';
@@ -57,12 +57,35 @@ const CODEX_MIN_CONFIG = '[features]\nsuppress_unstable_features_warning = true\
 const AGY_ONBOARDING_DONE =
   '{"consumerOnboardingComplete":true,"enterpriseOnboardingComplete":false,"onboardingComplete":true}';
 
+// agy가 박스 안에 만드는 Go 모듈 캐시(go/pkg/mod)는 디렉터리를 0555, 파일을 0444로 박는다.
+// unlink는 파일이 든 디렉터리에 쓰기 권한이 필요한데 0555라 없으므로, rmSync가 EACCES로 죽는다
+// (force:true는 ENOENT만 무시할 뿐 읽기 전용을 chmod해 주지 않는다). 트리에 쓰기 비트를 더한다.
+// 심링크는 건너뛴다 — 실 홈의 Keychains/Caches/auth.json을 망가뜨리지 않기 위함.
+function makeWritableRecursive(p: string): void {
+  let st;
+  try { st = lstatSync(p); } catch { return; }   // 이미 없음
+  if (st.isSymbolicLink()) return;
+  try { chmodSync(p, st.mode | 0o200); } catch { /* best-effort */ }
+  if (st.isDirectory()) {
+    for (const name of readdirSync(p)) makeWritableRecursive(join(p, name));
+  }
+}
+
+// 박스 폐기. Go 모듈 캐시(go/pkg/mod)는 0555/0444 읽기 전용이라 force:true로도 unlink가 EACCES로
+// 죽는다(force는 ENOENT만 무시). 폐기가 죽으면 .ab-version 갱신 전에 중단돼 박스가 영영 stale로 남아
+// refine가 매번 실패하므로, 먼저 트리에 쓰기 비트를 더한 뒤 지운다. recursive rm은 macOS에서 간헐적
+// ENOTEMPTY를 내므로(Node가 재시도 가능 오류로 명시) maxRetries로 재시도한다.
+function removeBox(box: string): void {
+  makeWritableRecursive(box);
+  rmSync(box, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+}
+
 function bootstrapIfNeeded(cli: CliKind, box: string, realHome: string, binPath?: string): void {
   const token = versionToken(binPath);
   const verFile = join(box, '.ab-version');
   let stale = true;
   try { stale = readFileSync(verFile, 'utf8') !== token; } catch { stale = true; }  // missing → stale
-  if (stale) rmSync(box, { recursive: true, force: true });
+  if (stale) removeBox(box);
   mkdirSync(box, { recursive: true });
   if (cli === 'agy') {
     linkOnce(join(realHome, 'Library/Keychains'), join(box, 'Library/Keychains'));

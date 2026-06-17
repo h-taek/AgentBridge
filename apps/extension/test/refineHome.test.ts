@@ -125,6 +125,29 @@ describe('refineHome', () => {
     }
   });
 
+  it('읽기 전용 잔재(Go 모듈 캐시 모사)가 있어도 버전 불일치 시 EACCES 없이 폐기·재부팅', async () => {
+    const rootDir = await fs.mkdtemp(join(tmpdir(), 'abtest-'));
+    const box = join(rootDir, 'agy');
+    const roDir = join(box, 'go/pkg/mod/example.com/foo@v1.0.0');
+    try {
+      const binA = join(rootDir, 'binA'); await fs.writeFile(binA, 'v1');
+      ensureRefineHome('agy', { rootDir, realHome: '/fake/home', binPath: binA });
+      // Go pkg/mod 모사: 읽기 전용 파일을 읽기 전용 디렉터리에 둔다 (unlink가 EACCES 나는 조건)
+      await fs.mkdir(roDir, { recursive: true });
+      await fs.writeFile(join(roDir, 'LICENSE'), 'x');
+      await fs.chmod(join(roDir, 'LICENSE'), 0o444);
+      await fs.chmod(roDir, 0o555);
+      // 버전 바뀌면 박스 통째 폐기 — 읽기 전용 잔재여도 EACCES로 죽지 않고 재부팅돼야
+      const binB = join(rootDir, 'binB'); await fs.writeFile(binB, 'v2-different-size');
+      ensureRefineHome('agy', { rootDir, realHome: '/fake/home', binPath: binB });
+      await assert.rejects(fs.lstat(roDir), '읽기 전용 잔재도 재부팅으로 제거되어야');
+      assert.ok(await fs.readlink(join(box, 'Library/Keychains')), '재부팅 후 심링크 재생성');
+    } finally {
+      try { await fs.chmod(roDir, 0o755); } catch { /* 이미 폐기됐으면 무시 */ }
+      await fs.rm(rootDir, { recursive: true, force: true });
+    }
+  });
+
   it('버전 토큰 동일 시 박스 재사용(잔재 보존)', async () => {
     const rootDir = await fs.mkdtemp(join(tmpdir(), 'abtest-'));
     try {

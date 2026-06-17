@@ -34,5 +34,14 @@
   "Reset": "초기화",
   "AgentBridge: Memory compaction is in progress. Please try again in a moment.": "AgentBridge: 메모리 압축이 진행 중입니다. 잠시 후 다시 시도하세요.",
   "AgentBridge: Memory reset failed — {0}": "AgentBridge: 메모리 초기화 실패 — {0}",
-  "AgentBridge: Memory reset.": "AgentBridge: 메모리를 초기화했습니다."
+  "AgentBridge: Memory reset.": "AgentBridge: 메모리를 초기화했습니다.",
+  "Open folder": "폴더 열기",
+  "Open profile folder (edit .md manually)": "프로필 폴더 열기 (수동 .md 편집)",
+  "Approval queue": "제안 승인 큐",
+  "No pending proposals": "대기 중인 제안이 없습니다",
+  "Approve": "승인",
+  "Dismiss": "버림",
+  "AgentBridge: Failed to update the proposal — {0}.": "AgentBridge: 제안 처리에 실패했습니다 — {0}.",
+  "Profile documents": "프로필 문서",
+  "No documents yet. They fill in automatically as you work.": "아직 문서가 없습니다. 쓸수록 자동으로 채워집니다."
 }

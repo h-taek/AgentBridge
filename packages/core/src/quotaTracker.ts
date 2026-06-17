@@ -114,11 +114,13 @@ export function snapshotFrom(state: QuotaFile): CliQuotaSnapshot {
 
 // ─── 슬래시 명령 응답 파싱 (per CLI) ─────────────────────────────────────
 
-// agy: 두 가지 포맷 — N = 남은 quota → usedPercent = 100 - N.
-//   미사용(100%) 시: `<bar> N%\nQuota available|exhausted`
-//   일부 사용 시:    `<bar> N%\nN% remaining · Refreshes in 1h 3m` ("Quota available" 줄이 사라짐)
-const AGY_USAGE_RE = /(\d+)\s*%\s*\n\s*Quota\s+(?:available|exhausted)/i;
-const AGY_REMAINING_RE = /(\d+)\s*%\s+remaining\b/i;
+// agy `/usage` → "Models & Quota" 멀티그룹 화면 (2026-06 개편, CLI 1.0.8 실측).
+//   격리 박스에서 정제는 항상 기본 모델(Gemini)로 도므로 GEMINI 그룹의 Five Hour 한도만 본다.
+//   막대 줄 퍼센트 = *남은* quota (실측: `[██░] 96.81%` → "97% remaining"). usedPercent = 100 - N.
+//   100.00% = `Quota available`(완전 미사용). 소수점 포함. "Five Hour Limit" 라벨을 먼저 앵커로
+//   잡아 바로 위 Weekly 퍼센트를 건너뛴다.
+const AGY_GEMINI_5H_RE =
+  /GEMINI\s+MODELS\b[\s\S]*?Five[\s-]*Hour\s+Limit\b[\s\S]*?(\d+(?:\.\d+)?)\s*%/i;
 // codex: `5h limit: ... N% left` — N = 남은 quota → usedPercent = 100 - N.
 const CODEX_STATUS_RE = /5h\s*limit:[\s\S]{0,200}?(\d+)\s*%\s+left/i;
 // claude: `Current session ... N%used` — N = 사용된 quota 그대로.
@@ -129,11 +131,11 @@ export function extractQuotaPercent(cli: CliKind, stripped: string): number | nu
   let n: number;
   switch (cli) {
     case 'agy':
-      m = AGY_USAGE_RE.exec(stripped) ?? AGY_REMAINING_RE.exec(stripped);
+      m = AGY_GEMINI_5H_RE.exec(stripped);
       if (!m) return null;
-      n = Number.parseInt(m[1], 10);
+      n = Number.parseFloat(m[1]);
       if (!Number.isFinite(n) || n < 0 || n > 100) return null;
-      return 100 - n;
+      return Math.round(100 - n);
     case 'codex':
       m = CODEX_STATUS_RE.exec(stripped);
       if (!m) return null;
@@ -200,24 +202,68 @@ export function createQuotaTracker(opts: QuotaTrackerOptions): QuotaTracker {
     }
   };
 
-  return {
-    async getSnapshot(cli) {
-      const map = await opts.store.read();
-      const raw = map[cli] ?? EMPTY_QUOTA_FILE;
-      const afterRollover = rolloverIfNeeded(raw);
-      const afterReconcile = reconcileForcedFallback(afterRollover);
-      if (
-        afterReconcile.forcedFallback !== raw.forcedFallback ||
-        afterReconcile.forcedFallbackDate !== raw.forcedFallbackDate
-      ) {
-        await opts.store.write({ ...map, [cli]: afterReconcile });
-        const snap = snapshotFrom(afterReconcile);
-        emit(cli, snap);
-        return snap;
-      }
-      return snapshotFrom(afterReconcile);
-    },
+  // 쓰기를 동반하는 작업(getSnapshot 롤오버 자체쓰기·recordPercent·markForcedFallback)을 한 번에
+  // 하나씩 직렬화한다. 셋 다 store 전체 맵을 read → 한 칸 수정 → write 하므로, 시작 워밍이 3개 CLI를
+  // 같은 tick에 probe하면 둘이 같은 옛 맵을 읽고 한쪽 갱신이 사라질 수 있다(lost-update). 압축처럼
+  // 위에서 직렬화해 주는 락이 없어 여기서 in-process 큐로 막는다.
+  let chain: Promise<unknown> = Promise.resolve();
+  const serialize = <T>(fn: () => Promise<T>): Promise<T> => {
+    const run = chain.then(fn, fn);
+    chain = run.then(() => undefined, () => undefined);
+    return run;
+  };
 
+  // 내부 구현 — 메서드 간 호출(recordPercent→getSnapshot)은 직렬화 재진입(자기 큐를 기다리는 교착)을
+  // 피하려 impl을 직접 부른다. 공개 메서드만 serialize로 감싼다.
+  const getSnapshotImpl = async (cli: CliKind): Promise<CliQuotaSnapshot> => {
+    const map = await opts.store.read();
+    const raw = map[cli] ?? EMPTY_QUOTA_FILE;
+    const afterRollover = rolloverIfNeeded(raw);
+    const afterReconcile = reconcileForcedFallback(afterRollover);
+    if (
+      afterReconcile.forcedFallback !== raw.forcedFallback ||
+      afterReconcile.forcedFallbackDate !== raw.forcedFallbackDate
+    ) {
+      await opts.store.write({ ...map, [cli]: afterReconcile });
+      const snap = snapshotFrom(afterReconcile);
+      emit(cli, snap);
+      return snap;
+    }
+    return snapshotFrom(afterReconcile);
+  };
+
+  const recordPercentImpl = async (cli: CliKind, percent: number): Promise<CliQuotaSnapshot> => {
+    if (!Number.isFinite(percent) || percent < 0 || percent > 1000) {
+      return getSnapshotImpl(cli);
+    }
+    const map = await opts.store.read();
+    let state = rolloverIfNeeded(map[cli] ?? EMPTY_QUOTA_FILE);
+    // 같은 %여도 lastSeenAt은 갱신 — 측정 신선도(stale 판단)는 값 변화와 무관하게 유지되어야
+    // probeQuotaIfStale 류의 재측정 스킵이 올바르게 동작한다.
+    state = { ...state, usedPercent: percent, lastSeenAt: new Date().toISOString() };
+    state = reconcileForcedFallback(state);
+    await opts.store.write({ ...map, [cli]: state });
+    log.log(`quota 캡처: ${cli} usedPercent=${percent}`);
+    const snap = snapshotFrom(state);
+    emit(cli, snap);
+    return snap;
+  };
+
+  const markForcedFallbackImpl = async (cli: CliKind): Promise<CliQuotaSnapshot> => {
+    const map = await opts.store.read();
+    let state = rolloverIfNeeded(map[cli] ?? EMPTY_QUOTA_FILE);
+    state = { ...state, forcedFallback: true, forcedFallbackDate: todayKey() };
+    await opts.store.write({ ...map, [cli]: state });
+    log.warn(`quota 강제 폴백 마킹: ${cli}`);
+    const snap = snapshotFrom(state);
+    emit(cli, snap);
+    return snap;
+  };
+
+  return {
+    getSnapshot: (cli) => serialize(() => getSnapshotImpl(cli)),
+
+    // 순수 읽기 — 쓰기가 없어 lost-update 위험이 없으므로 직렬화 대상이 아니다.
     async getAllSnapshots() {
       const map = await opts.store.read();
       const out = {} as Record<CliKind, CliQuotaSnapshot>;
@@ -228,32 +274,8 @@ export function createQuotaTracker(opts: QuotaTrackerOptions): QuotaTracker {
       return out;
     },
 
-    async recordPercent(cli, percent) {
-      if (!Number.isFinite(percent) || percent < 0 || percent > 1000) {
-        return this.getSnapshot(cli);
-      }
-      const map = await opts.store.read();
-      let state = rolloverIfNeeded(map[cli] ?? EMPTY_QUOTA_FILE);
-      // 같은 %여도 lastSeenAt은 갱신 — 측정 신선도(stale 판단)는 값 변화와 무관하게 유지되어야
-      // probeQuotaIfStale 류의 재측정 스킵이 올바르게 동작한다.
-      state = { ...state, usedPercent: percent, lastSeenAt: new Date().toISOString() };
-      state = reconcileForcedFallback(state);
-      await opts.store.write({ ...map, [cli]: state });
-      log.log(`quota 캡처: ${cli} usedPercent=${percent}`);
-      const snap = snapshotFrom(state);
-      emit(cli, snap);
-      return snap;
-    },
+    recordPercent: (cli, percent) => serialize(() => recordPercentImpl(cli, percent)),
 
-    async markForcedFallback(cli) {
-      const map = await opts.store.read();
-      let state = rolloverIfNeeded(map[cli] ?? EMPTY_QUOTA_FILE);
-      state = { ...state, forcedFallback: true, forcedFallbackDate: todayKey() };
-      await opts.store.write({ ...map, [cli]: state });
-      log.warn(`quota 강제 폴백 마킹: ${cli}`);
-      const snap = snapshotFrom(state);
-      emit(cli, snap);
-      return snap;
-    },
+    markForcedFallback: (cli) => serialize(() => markForcedFallbackImpl(cli)),
   };
 }

@@ -4,6 +4,18 @@
 export * from './shared/cli';
 export * from './shared/ir';
 export * from './shared/turns';
+export * from './shared/global';
+export * from './globalPaths';
+export * from './globalMarkdown';
+export * from './globalValidate';
+export * from './globalStore';
+export * from './proposalStore';
+export * from './proposalParse';
+export * from './proposalPrompt';
+export * from './proposalCursor';
+export * from './proposalPass';
+export * from './globalSearch';
+export * from './globalInject';
 
 // 순수 유틸
 export * from './shellQuote';

@@ -4,15 +4,24 @@ import * as claudeAdapter from './core/cliAdapter/claudeAdapter';
 import * as codexAdapter from './core/cliAdapter/codexAdapter';
 import * as agyAdapter from './core/cliAdapter/agyAdapter';
 import * as workspaceStore from './core/workspaceStore';
-import { installHelperToCanonicalPath, createSessionFileWatcher, getStorageRoot } from '@agentbridge/core';
-import { initializeCore, getBundledHelperPath, getWorkspaceStore, getLogger } from './core/coreInstances';
+import {
+  installHelperToCanonicalPath,
+  createSessionFileWatcher,
+  getStorageRoot,
+  runProposalTrigger,
+  getGlobalDir,
+  resolveProfile,
+  readIR,
+} from '@agentbridge/core';
+import { initializeCore, getBundledHelperPath, getWorkspaceStore, getLogger, getCoreEnvProbe } from './core/coreInstances';
 import * as output from './log/output';
 import { MemoryPanelProvider } from './views/memoryPanel';
+import { ProfilePanelProvider } from './views/profilePanel';
 import { SessionTreeProvider, SessionItem } from './views/sessionTreeView';
 import { ChatPanel, getActivePanel, getAllPanels, chatPanelEvents } from './views/chatPanel';
 import { compactionEvents } from './core/compactionScheduler';
 import { registerSession, markSessionClosed, markSessionActive, renameSession, deleteSession } from './core/sessionRegistry';
-import { registerConfigWatcher } from './settings/config';
+import { registerConfigWatcher, getConfig } from './settings/config';
 import * as notifications from './core/notifications';
 import { CLI_DISPLAY_NAME, type CliKind } from './shared/types';
 import { getSessions, type SessionMeta } from './core/sessionRegistry';
@@ -94,9 +103,53 @@ export function activate(context: vscode.ExtensionContext) {
     ),
   );
 
-  compactionEvents.on('ir:updated', () => {
+  // --- Profile Panel (장기 메모리 — 자동제안 승인 큐 + 읽기전용 문서) ---
+  const profileProvider = new ProfilePanelProvider();
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider(
+      ProfilePanelProvider.viewType,
+      profileProvider,
+      { webviewOptions: { retainContextWhenHidden: true } },
+    ),
+  );
+
+  // gc-tree §E3 — compaction 성공 후 자동제안(장기기억) 패스를 백그라운드로 발사.
+  // 오케스트레이션(카운터·everyN 게이트·in-flight 가드·분석)은 코어 runProposalTrigger가 담당.
+  // 호스트는 자기 설정·activeModel·통지 콜백만 주입. fire-and-forget(compaction 흐름을 막지 않음).
+  async function fireProposalTrigger(workspaceId: string): Promise<void> {
+    try {
+      const workspaceRoot = workspaceStore.getWorkspacePath(workspaceId);
+      // activeModel은 직전 IR의 lastModel 기준(없으면 claude) — memoryPanel 수동정제와 동일.
+      const ir = await readIR(workspaceRoot);
+      const activeModel: CliKind = (ir?.meta.lastModel as CliKind) ?? 'claude';
+      const cfg = getConfig();
+      await runProposalTrigger({
+        workspaceId,
+        workspaceRoot,
+        globalDir: getGlobalDir(),
+        profileId: resolveProfile(workspaceId),
+        activeModel,
+        refineConfig: {
+          policy: cfg.refinePolicy,
+          fixedCli: cfg.refineFixedCli,
+          priorityOrder: cfg.refinePriorityOrder,
+          useClaude: cfg.refineUseClaude,
+        },
+        envProbe: getCoreEnvProbe(),
+        logger: getLogger(),
+        timeoutMs: 60_000,
+        everyN: cfg.proposalEveryN,
+        onUpdated: () => profileProvider.notifyProposalsUpdated(),
+      });
+    } catch (err) {
+      output.warn(`extension: proposal trigger failed — ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  compactionEvents.on('ir:updated', (workspaceId: string) => {
     output.log('extension: ir:updated event received');
     memoryProvider.notifyIRUpdated();
+    void fireProposalTrigger(workspaceId);
   });
   compactionEvents.on('turns:updated', () => {
     output.log('extension: turns:updated event received');
@@ -338,7 +391,13 @@ export function activate(context: vscode.ExtensionContext) {
         panel.dispose();
         return;
       }
-      const opts = await buildOpts(s.model, folder.fsPath, s.workspaceId, s.sessionId, s.modelSessionId);
+      // modelSessionId(codex thread_id / agy UUID)는 PTY spawn 직후 비동기로 캡처되어 레지스트리에만
+      // 영속되고, webview state에는 생성 시점 값(codex/agy는 보통 null)이 박힌 채 갱신되지 않는다.
+      // 그래서 복원 때 state의 modelSessionId를 그대로 믿으면 resume 인자가 비어 새 세션으로 fallback된다
+      // (openSession이 정상인 이유는 레지스트리를 읽기 때문). 복원도 레지스트리를 SSOT로 삼아 최신 값을 읽는다.
+      const sessions = await getSessions(s.workspaceId);
+      const meta = sessions.find((m) => m.sessionId === s.sessionId);
+      const opts = await buildOpts(s.model, folder.fsPath, s.workspaceId, s.sessionId, meta?.modelSessionId ?? s.modelSessionId);
       // activate의 resetAllSessionsActive(모든 세션 비활성)와 경합 회피 — reset 완료 후 active 표시.
       // 안 기다리면 reset이 이 복구된 세션의 active 플래그를 덮어써 비활성으로 남을 수 있음 (V-21).
       if (pendingResetDone) await pendingResetDone;

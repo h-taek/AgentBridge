@@ -3,7 +3,8 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import log from 'electron-log/main'
 import * as path from 'node:path'
 import { IpcChannel } from '@shared/ipc'
-import type { AppHealth, AppUpdaterCheckResult } from '@shared/ipc'
+import type { AppHealth, AppUpdaterCheckResult, CliKind } from '@shared/ipc'
+import { getStorageRoot } from '@agentbridge/core'
 import { probeEnvOnce, getCliPath, getShellPath } from './modules/envProbe'
 import { buildAdapterEnv } from './modules/cliAdapter/env'
 import { ensureConversationDirs } from './modules/conversationStore'
@@ -22,7 +23,7 @@ import {
   writePty
 } from './modules/ptySession'
 import { disposeAndFlushAll } from './modules/turnRecorder'
-import { registerProbeDeps } from './modules/cliQuotaTracker'
+import { registerProbeDeps, probeQuotaIfStale, QUOTA_PROBE_STALE_MS } from './modules/cliQuotaTracker'
 import { getCurrentUpdaterStatus, initAppUpdater, triggerManualCheck } from './modules/appUpdater'
 import {
   applyAppIcon,
@@ -40,6 +41,7 @@ import {
 } from './modules/sessionActive'
 import { registerIrHandlers } from './ipc/irHandlers'
 import { registerMemoryHandlers } from './ipc/memoryHandlers'
+import { registerProposalHandlers } from './ipc/proposalHandlers'
 import { registerWorkspacesHandlers, stopStorageWatcher } from './ipc/workspacesHandlers'
 import { registerSettingsHandlers } from './ipc/settingsHandlers'
 import { registerAttachHandlers } from './ipc/attachHandlers'
@@ -146,14 +148,17 @@ function registerIpcHandlers(userDataDir: string): void {
 
   // 설정 모달 등에서 폴더/파일 reveal — shell.openPath. 허용 prefix만 통과.
   //   1) userData 디렉토리 안 (health.userDataDir 노출용)
-  //   2) 등록된 워크스페이스 cwd 안 (instruction 파일 reveal용)
+  //   2) AgentBridge 저장소 루트(~/.agentbridge) 안 (글로벌 프로필 폴더 열기 — gc-tree §G5)
+  //   3) 등록된 워크스페이스 cwd 안 (instruction 파일 reveal용)
   //   renderer 변조 시 임의 로컬 파일/앱 트리거 차단.
   ipcMain.handle(IpcChannel.AppOpenPath, async (_e, target: string) => {
     if (typeof target !== 'string' || target.length === 0) return
     const resolved = path.resolve(target)
     const userData = app.getPath('userData')
     const inUserData = resolved === userData || resolved.startsWith(userData + path.sep)
-    let allowed = inUserData
+    const storageRoot = getStorageRoot()
+    const inStorageRoot = resolved === storageRoot || resolved.startsWith(storageRoot + path.sep)
+    let allowed = inUserData || inStorageRoot
     if (!allowed) {
       try {
         const workspaces = await listWorkspaces()
@@ -245,6 +250,7 @@ function registerIpcHandlers(userDataDir: string): void {
 
   registerIrHandlers()
   registerMemoryHandlers()
+  registerProposalHandlers()
   registerWorkspacesHandlers()
   registerSettingsHandlers()
   registerAttachHandlers()
@@ -308,6 +314,18 @@ app.whenReady().then(async () => {
     getCliPath: (cli) => getCliPath(cli) ?? null,
     buildEnv: () => buildAdapterEnv({ shellPath: getShellPath() })
   })
+  // 앱 시작 시 quota 워밍 — stale(QUOTA_PROBE_STALE_MS 초과)한 CLI만 백그라운드 캡처.
+  // 런치 비차단: 창 뜬 뒤 지연 + fire-and-forget. probeQuotaIfStale의 stale 게이트가 최근 값은
+  // spawn 없이 스킵하므로 자주 껐다 켜면 0비용, 첫 실행/오래 idle 후에만 실제 캡처.
+  const STARTUP_QUOTA_PROBE_DELAY_MS = 4_000
+  setTimeout(() => {
+    for (const cli of ['agy', 'codex', 'claude'] as CliKind[]) {
+      void probeQuotaIfStale(cli, QUOTA_PROBE_STALE_MS).catch((err) =>
+        log.warn('startup quota 워밍 실패, 무시', { cli, err: String(err) })
+      )
+    }
+  }, STARTUP_QUOTA_PROBE_DELAY_MS)
+
   log.info('AgentBridge ready', { userData: dirs.root, version: app.getVersion() })
   registerIpcHandlers(dirs.root)
   buildApplicationMenu()

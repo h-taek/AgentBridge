@@ -568,19 +568,35 @@ function MainPage({
             </span>
             <input
               type="number"
-              min={1}
+              min={5}
               max={100}
               step={1}
               className="settings-row-number"
               value={settings?.maxArchiveSnapshots ?? 15}
               onChange={(e) => {
                 const n = Math.floor(Number(e.target.value))
-                if (Number.isFinite(n) && n >= 1) {
+                if (Number.isFinite(n) && n >= 5) {
                   void onUpdate({ maxArchiveSnapshots: n })
                 }
               }}
               title={t.settings.main.archiveCountTitle}
             />
+          </div>
+          <div className="settings-row">
+            <DatabaseIcon className="settings-row-icon" />
+            <span className="settings-row-label">{t.settings.main.proposalEveryN}</span>
+            <span className="settings-row-value settings-row-desc">
+              {t.settings.main.proposalEveryNDesc}
+            </span>
+            <select
+              className="settings-row-select"
+              value={(settings?.proposalEveryN ?? 5) > 0 ? 'on' : 'off'}
+              onChange={(e) => void onUpdate({ proposalEveryN: e.target.value === 'on' ? 5 : 0 })}
+              title={t.settings.main.proposalEveryNTitle}
+            >
+              <option value="on">{t.settings.main.proposalOn}</option>
+              <option value="off">{t.settings.main.proposalOff}</option>
+            </select>
           </div>
         </div>
       </div>
@@ -827,9 +843,8 @@ function HelpPageKo(): React.JSX.Element {
               있습니다. CLI 환경 점검이나 잡일에 활용하세요.
             </li>
             <li>
-              <strong>Antigravity quota 자동 폴백</strong> — agy CLI footer의 사용량 표시(
-              <code>X% used</code>)를 자동 감지해 95% 이상이면 활성 모델로 폴백합니다. UTC 자정에
-              자동 해제됩니다.
+              <strong>Antigravity quota 폴백</strong> — 정제가 quota 한도 오류에 막히면 정제
+              정책의 다음 우선순위 모델로 자동 폴백합니다. 폴백 표시는 UTC 자정에 자동 해제됩니다.
             </li>
           </ul>
         </div>
@@ -859,8 +874,9 @@ function HelpPageKo(): React.JSX.Element {
               IR을 다시 주입합니다. 메모리 자체를 비우려면 메모리 패널의 초기화 버튼을 사용하세요.
             </li>
             <li>
-              Antigravity의 무료 quota는 인터랙티브 세션 footer로만 정확히 측정됩니다. 한도 근접 시
-              자동으로 활성 모델로 폴백하며 UTC 자정에 자동 해제됩니다.
+              Antigravity의 무료 quota 사용량은 백그라운드에서 <code>/usage</code> 화면을 읽어
+              측정·표시합니다. 정제가 quota 한도에 막히면 정제 정책의 다음 우선순위 모델로 폴백하며,
+              UTC 자정에 자동 해제됩니다.
             </li>
             <li>
               메인 모델 메시지는 사용자가 인증한 각 CLI를 통해 그 CLI가 원래 통신하는 백엔드
@@ -935,9 +951,9 @@ function HelpPageEn(): React.JSX.Element {
               spawning a model. Handy for checking the CLI environment or odd jobs.
             </li>
             <li>
-              <strong>Antigravity quota auto-fallback</strong> — the agy CLI footer&apos;s usage
-              display (<code>X% used</code>) is auto-detected, and at 95%+ it falls back to the
-              active model. Released automatically at UTC midnight.
+              <strong>Antigravity quota fallback</strong> — when refinement hits a quota-limit
+              error, it automatically falls back to the next model in your refine policy order.
+              The fallback flag clears automatically at UTC midnight.
             </li>
           </ul>
         </div>
@@ -968,8 +984,9 @@ function HelpPageEn(): React.JSX.Element {
               reset button in the memory panel.
             </li>
             <li>
-              Antigravity&apos;s free quota is measured accurately only from the interactive session
-              footer. Near the limit it auto-falls back to the active model and is released
+              Antigravity&apos;s free quota usage is measured and shown by reading the{' '}
+              <code>/usage</code> screen in the background. If refinement hits the quota limit, it
+              falls back to the next model in your refine policy order, and the fallback clears
               automatically at UTC midnight.
             </li>
             <li>

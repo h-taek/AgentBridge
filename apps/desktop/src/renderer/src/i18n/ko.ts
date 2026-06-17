@@ -102,6 +102,11 @@ export const ko = {
       archiveCount: '보관 스냅샷 개수',
       archiveCountDesc: '과거 IR 스냅샷 누적 상한 (초과분 자동 삭제)',
       archiveCountTitle: 'archive/ 디렉토리에 보관할 compressed_*.jsonl 최대 개수',
+      proposalEveryN: '자동 제안',
+      proposalEveryNDesc: '대화에서 장기 메모리 후보를 자동 추출 (끄면 미동작)',
+      proposalEveryNTitle: '장기 메모리 자동 제안을 켜고 끕니다',
+      proposalOn: '켜짐',
+      proposalOff: '꺼짐',
       groupInfo: '정보',
       checkUpdate: '업데이트 확인',
       checkUpdateDevTitle: 'dev 모드에선 자동 업데이트 비활성',
@@ -312,6 +317,21 @@ export const ko = {
       pending: '대기',
       skipped: '스킵'
     }
+  },
+  profile: {
+    tabIr: '단기 · IR',
+    tabProfile: '장기 · 메모리',
+    panelAria: '장기 메모리 패널',
+    profileLabel: 'default',
+    openFolder: '폴더 열기',
+    openFolderTitle: '프로필 폴더 열기 (수동 .md 편집)',
+    queueTitle: '제안 승인 큐',
+    queueEmpty: '대기 중인 제안이 없습니다',
+    docsTitle: '프로필 문서',
+    docsEmpty: '아직 문서가 없습니다. 쓸수록 자동으로 채워집니다.',
+    approve: '승인',
+    discard: '버림',
+    actionError: '작업에 실패했습니다 — 프로필 폴더 권한을 확인하고 다시 시도하세요.'
   },
   xterm: {
     dropPathFailed: '파일 경로 추출 실패',

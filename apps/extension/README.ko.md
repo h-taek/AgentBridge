@@ -41,6 +41,7 @@ VS Code 설정(`settings.json` 또는 Settings UI):
 | `agentbridge.refine.fixedCli` | `agy` | fixed 정책일 때 사용할 CLI |
 | `agentbridge.turns.assistantDetail` | `compact` | turns.jsonl 응답 디테일: full / compact / minimal |
 | `agentbridge.memory.maxArchiveSnapshots` | `15` | IR 스냅샷 보관 최대 개수. 초과분은 가장 오래된 것부터 자동 삭제 |
+| `agentbridge.memory.proposalEnabled` | `true` | 대화에서 장기 기억 후보를 자동 제안. 끄면 자동 제안 비활성화 |
 
 ## 라이선스
 

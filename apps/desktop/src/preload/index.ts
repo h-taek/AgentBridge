@@ -29,6 +29,12 @@ import type {
   MemoryPromoteArchiveResult,
   MemoryResetRequest,
   MemoryResetResult,
+  ProposalActionRequest,
+  ProposalApproveResult,
+  ProposalDiscardResult,
+  ProposalListRequest,
+  ProposalListResult,
+  ProposalsUpdatedEvent,
   IrLoadRequest,
   IrLoadResult,
   IrRefineRequest,
@@ -206,6 +212,23 @@ const agentbridge = {
     // 그 archive 파일은 소비(unlink). archive 비어있으면 빈 IR 동일 동작.
     promoteLatestArchive: (req: MemoryPromoteArchiveRequest): Promise<MemoryPromoteArchiveResult> =>
       ipcRenderer.invoke(IpcChannel.MemoryPromoteArchive, req)
+  },
+  // gc-tree §D — 자동제안(장기기억) 승인 게이트. pending 제안 목록 조회 + 단건 승인/버림.
+  // 폴더 열기는 기존 openPath 재사용. onUpdated는 승인/버림/자동패스 종료 broadcast 구독.
+  proposal: {
+    list: (req: ProposalListRequest): Promise<ProposalListResult> =>
+      ipcRenderer.invoke(IpcChannel.ProposalList, req),
+    approve: (req: ProposalActionRequest): Promise<ProposalApproveResult> =>
+      ipcRenderer.invoke(IpcChannel.ProposalApprove, req),
+    discard: (req: ProposalActionRequest): Promise<ProposalDiscardResult> =>
+      ipcRenderer.invoke(IpcChannel.ProposalDiscard, req),
+    onUpdated: (cb: (evt: ProposalsUpdatedEvent) => void): Unsubscribe => {
+      const handler = (_: unknown, evt: ProposalsUpdatedEvent): void => cb(evt)
+      ipcRenderer.on(IpcChannel.ProposalsUpdated, handler)
+      return () => {
+        ipcRenderer.off(IpcChannel.ProposalsUpdated, handler)
+      }
+    }
   },
   // workspace + sessions. multi-tab 데이터 모델 (M3 K~L 청크).
   workspaces: {

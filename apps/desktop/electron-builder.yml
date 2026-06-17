@@ -16,6 +16,11 @@ asarUnpack:
   - resources/**
   # node-pty native binary는 ASAR 안에서 동작 안 함 — unpack 필수
   - node_modules/@homebridge/node-pty-prebuilt-multiarch/**
+# 제3자 라이선스 고지 — 모노레포 루트 NOTICE를 앱 번들 Resources/에 동봉(gc-tree MIT 표기 의무).
+# build:mac:external이 모노레포 전체를 sync하므로 ../../NOTICE가 빌드 샌드박스에서 해소된다.
+extraResources:
+  - from: ../../NOTICE
+    to: NOTICE
 mac:
   # Apple Silicon(arm64) 전용 — Intel(x64) 미지원.
   target:

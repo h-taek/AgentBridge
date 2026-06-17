@@ -3,6 +3,9 @@ import type { CliKind, SessionMeta } from '@shared/ipc'
 import {
   createCompactionScheduler,
   resolveRefineDecisionFromConfig,
+  runProposalTrigger,
+  getGlobalDir,
+  resolveProfile,
   type CompactionScheduler,
   type ManualCompactionResult as CoreManualCompactionResult,
   type MemoryResetOutcome
@@ -12,7 +15,8 @@ import { getWorkspacePaths } from './workspaceStore'
 import { getCoreEnvProbe } from './envProbe'
 import { loadSettings, getCachedSettings } from './settings'
 import { broadcastIrUpdated } from './irBroadcast'
-import { markForcedFallback, probeQuotaIfStale } from './cliQuotaTracker'
+import { broadcastProposalsUpdated } from './proposalBroadcast'
+import { markForcedFallback, probeQuotaIfStale, QUOTA_PROBE_STALE_MS } from './cliQuotaTracker'
 
 // 데스크탑 CompactionScheduler facade — 코어 createCompactionScheduler 위임.
 // 호스트 책임:
@@ -22,10 +26,6 @@ import { markForcedFallback, probeQuotaIfStale } from './cliQuotaTracker'
 //   - quota 부가효과 (onRefineAttempt: markForcedFallback / background probe)
 //   - 알림 — 현재는 no-op (메뉴/Toast 미설치, 추후 추가)
 //   - events.on('ir:updated') → broadcastIrUpdated 변환
-
-// refine 성공 후 "spawn 안 된" CLI 재측정 주기 — 이보다 최근 측정이 있으면 probe 스킵.
-// 실제 spawn된 CLI는 방금 quota를 소비했으므로 maxAge 0(무조건 재측정).
-const QUOTA_PROBE_STALE_MS = 30 * 60_000
 
 export type ManualCompactionResult = CoreManualCompactionResult
 
@@ -41,6 +41,37 @@ function pickActiveModel(ws: {
   if (primary && (primary.kind ?? 'cli') === 'cli') return primary.model
   const cliSession = ws.sessions.find((s) => (s.kind ?? 'cli') === 'cli')
   return cliSession?.model ?? 'claude'
+}
+
+// gc-tree §G5 — compaction 성공 후 자동제안(장기기억) 패스를 백그라운드로 발사.
+// 오케스트레이션(카운터·everyN 게이트·in-flight 가드·분석)은 코어 runProposalTrigger가 담당.
+// 호스트는 자기 설정·activeModel·통지 콜백만 주입. fire-and-forget(compaction 흐름/락을 막지 않음).
+async function fireProposalTrigger(workspaceId: string): Promise<void> {
+  try {
+    const ws = await loadWorkspace(workspaceId)
+    const s = await loadSettings()
+    await runProposalTrigger({
+      workspaceId,
+      workspaceRoot: getWorkspacePaths(workspaceId).dir,
+      globalDir: getGlobalDir(),
+      profileId: resolveProfile(workspaceId),
+      activeModel: pickActiveModel(ws),
+      refineConfig: {
+        policy: s.refineModel,
+        fixedCli: s.refineFixedCli,
+        priorityOrder: s.refinePriorityOrder,
+        useClaude: s.refineUseClaude
+      },
+      envProbe: getCoreEnvProbe(),
+      logger: { log: (m) => log.info(m), warn: (m) => log.warn(m) },
+      timeoutMs: 60_000,
+      everyN: s.proposalEveryN,
+      onUpdated: () => broadcastProposalsUpdated(workspaceId)
+    })
+  } catch (err) {
+    // 호스트 데이터 로딩 실패 가드 — 절대 throw 금지(코어 트리거는 자체적으로 에러를 삼킴).
+    log.warn('Proposal trigger 실패 — 무시', { workspaceId, err: String(err) })
+  }
 }
 
 let _scheduler: CompactionScheduler | null = null
@@ -111,9 +142,12 @@ async function ensureScheduler(): Promise<CompactionScheduler> {
       warn: (m) => log.warn(m)
     }
   })
-  // ir:updated 이벤트 → renderer broadcast
+  // ir:updated 이벤트 → renderer broadcast + 자동제안 백그라운드 트리거.
+  // 자동/수동 compaction 모두 이 이벤트를 emit하므로 두 경로 다 커버. void로 fire-and-forget —
+  // compaction 흐름/락을 막지 않는다.
   sched.events.on('ir:updated', (workspaceId: string) => {
     broadcastIrUpdated({ workspaceId, source: 'auto' })
+    void fireProposalTrigger(workspaceId)
   })
   _scheduler = sched
   return sched

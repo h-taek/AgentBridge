@@ -96,13 +96,16 @@ export async function watchForNewConversationUuid(opts: {
   // 감시 디렉터리 override(테스트용). 기본 ~/.gemini/antigravity-cli/conversations.
   conversationsDir?: string;
   onCaptured: (uuid: string) => void;
-  abortSignal?: AbortSignal;
+  // 데드라인이 없으므로 수명은 전적으로 이 시그널에 매인다 → **필수**(호스트가 PTY exit/패널
+  // dispose에 묶어 넘김). 옵셔널이면 호출부 누락(예: 데스크탑 agyAdapter)을 타입체커가 못 잡아
+  // 워처가 영원히 누수되므로 의도적으로 필수로 둔다.
+  abortSignal: AbortSignal;
   logger?: Logger;
 }): Promise<void> {
   const log = opts.logger ?? noopLogger;
   const pollMs = opts.intervalMs ?? 3000;
   const dir = opts.conversationsDir ?? getConversationsDir();
-  if (opts.abortSignal?.aborted) return;
+  if (opts.abortSignal.aborted) return;
 
   await new Promise<void>((resolve) => {
     let settled = false;
@@ -114,7 +117,7 @@ export async function watchForNewConversationUuid(opts: {
       settled = true;
       if (timer) clearInterval(timer);
       watcher?.stop();
-      opts.abortSignal?.removeEventListener('abort', onAbort);
+      opts.abortSignal.removeEventListener('abort', onAbort);
       resolve();
     };
     const onAbort = (): void => finish();
@@ -149,7 +152,7 @@ export async function watchForNewConversationUuid(opts: {
       }
     };
 
-    opts.abortSignal?.addEventListener('abort', onAbort, { once: true });
+    opts.abortSignal.addEventListener('abort', onAbort, { once: true });
     // 주: OS watch(즉시성). 보조: 저빈도 폴링(디렉터리 미존재·watch 미지원 안전망).
     watcher = createSessionFileWatcher({
       root: dir,

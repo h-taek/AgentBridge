@@ -43,6 +43,7 @@ VS Code settings (`settings.json` or the Settings UI):
 | `agentbridge.refine.fixedCli` | `agy` | CLI to use under the fixed policy |
 | `agentbridge.turns.assistantDetail` | `compact` | Response detail in turns.jsonl: full / compact / minimal |
 | `agentbridge.memory.maxArchiveSnapshots` | `15` | Max number of IR snapshots to keep. Excess is auto-deleted oldest-first |
+| `agentbridge.memory.proposalEnabled` | `true` | Auto-propose long-term memory candidates from conversations. Turn off to disable automatic proposals. |
 
 ## License
 
