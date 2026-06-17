@@ -4,7 +4,7 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 <p align="center"><a href="CHANGELOG.ko.md">한국어</a></p>
 
-## [Unreleased]
+## [0.4.0] — 2026-06-17
 
 ### Added
 
@@ -14,6 +14,8 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 - Sessions restore correctly after restarting the IDE — with Codex or Antigravity chats open, restarting the IDE could reopen them as empty new sessions instead of resuming your previous conversation (closing and reopening the tab worked around it). Restored sessions now resume reliably.
 - Sidebar no longer briefly shows duplicate sessions on restart — during restart the session list could momentarily appear doubled before settling back. The list now updates cleanly.
+- Session hover tooltip no longer shows a misleading "Turns: 0" — the session list's hover tooltip always read "Turns: 0" because per-session turn counts are no longer kept in the session data. The inaccurate line was removed.
+- Background memory refinement could get permanently stuck after updating the Antigravity CLI — refinement rebuilds its isolated environment when the CLI changes, but read-only files the CLI left behind (a Go module cache) blocked the rebuild, so memory stopped updating until the environment was cleared by hand. The rebuild now clears read-only files first and recovers on its own.
 
 ## [0.3.0] — 2026-06-11
 

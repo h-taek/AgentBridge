@@ -4,7 +4,7 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 <p align="center"><a href="CHANGELOG.ko.md">한국어</a></p>
 
-## [Unreleased]
+## [0.4.0] — 2026-06-17
 
 ### Added
 
@@ -17,6 +17,7 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 ### Fixed
 
 - Antigravity usage (quota) is read correctly after its on-screen format changed — Antigravity's `/usage` now shows a multi-group "Models & Quota" layout with decimal percentages, which broke the background usage check (a full quota could be misread as exhausted). The reader was updated to the new format, so Antigravity's remaining usage is reported correctly again.
+- Background memory refinement could get permanently stuck after updating the Antigravity CLI — refinement rebuilds its isolated environment when the CLI changes, but read-only files the CLI left behind (a Go module cache) blocked the rebuild, so memory stopped updating until the environment was cleared by hand. The rebuild now clears read-only files first and recovers on its own.
 
 ## [0.3.0] — 2026-06-11
 
