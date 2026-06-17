@@ -23,7 +23,6 @@ export interface SessionMeta {
   name: string;
   createdAt: string;
   lastActiveAt: string;
-  turnCount: number;
   active: boolean;
   modelSessionId?: string;
 }
@@ -36,7 +35,6 @@ function toLegacy(workspaceId: string, s: CoreSessionMeta): SessionMeta {
     name: s.title ?? CLI_DISPLAY_NAME[s.model],
     createdAt: s.createdAt,
     lastActiveAt: s.lastChattedAt ?? s.createdAt,
-    turnCount: 0,
     active: s.closedAt === null,
     modelSessionId: s.modelSessionId ?? undefined,
   };

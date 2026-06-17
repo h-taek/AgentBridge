@@ -82,7 +82,6 @@ export class SessionItem extends vscode.TreeItem {
     this.tooltip = new vscode.MarkdownString(
       `**${session.name}**\n\n` +
       `Model: ${displayModel}\n\n` +
-      `Turns: ${session.turnCount}\n\n` +
       `Created: ${new Date(session.createdAt).toLocaleString()}\n\n` +
       `Last active: ${new Date(session.lastActiveAt).toLocaleString()}`
     );
