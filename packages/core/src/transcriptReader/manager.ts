@@ -6,17 +6,17 @@
 // 멱등성: cursor(.transcriptCursors.json) + 결정적 turn id 2중 방어(design §D).
 import { promises as fs } from 'fs';
 import { join } from 'path';
-import { appendTurn, readAllTurns, rotateIfNeeded } from '../turnsStore';
-import type { CliKind } from '../shared/cli';
-import type { TurnRecord, TurnsAssistantDetail } from '../shared/turns';
-import type { Logger } from '../interfaces';
-import { noopLogger } from '../interfaces';
-import { EMPTY_CARRY, type ConsumeResult, type ReaderCtx } from './types';
-import { claudeConsume } from './claudeReader';
-import { codexConsume } from './codexReader';
-import { agyConsume } from './agyReader';
-import { readJsonlIncrement } from './watcher';
-import { finalizeCarry } from './util';
+import { appendTurn, readAllTurns, rotateIfNeeded } from '../turnsStore.js';
+import type { CliKind } from '../shared/cli.js';
+import type { TurnRecord, TurnsAssistantDetail } from '../shared/turns.js';
+import type { Logger } from '../interfaces.js';
+import { noopLogger } from '../interfaces.js';
+import { EMPTY_CARRY, type ConsumeResult, type ReaderCtx } from './types.js';
+import { claudeConsume } from './claudeReader.js';
+import { codexConsume } from './codexReader.js';
+import { agyConsume } from './agyReader.js';
+import { readJsonlIncrement } from './watcher.js';
+import { finalizeCarry } from './util.js';
 
 // scheduler 최소 인터페이스 — 기존 CompactionScheduler가 만족(테스트는 fake 주입).
 export interface CaptureSchedulerLike {

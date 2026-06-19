@@ -1,7 +1,7 @@
 // codex jsonl(response_item) → TurnRecord[]. 순수 함수. 단일 스트림.
-import type { TurnRecord } from '../shared/turns';
-import type { Carry, ConsumeResult, ReaderCtx } from './types';
-import { finalizeTurn, hasTurnContent, toolArgString } from './util';
+import type { TurnRecord } from '../shared/turns.js';
+import type { Carry, ConsumeResult, ReaderCtx } from './types.js';
+import { finalizeTurn, hasTurnContent, toolArgString } from './util.js';
 
 interface CodexRecord {
   type?: string;

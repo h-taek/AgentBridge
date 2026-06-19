@@ -3,10 +3,10 @@
 import { promises as fsp } from 'node:fs';
 import { join } from 'node:path';
 
-import { proposalsDir } from './globalPaths';
-import { slugify } from './globalMarkdown';
-import { writeProfileDocs } from './globalStore';
-import { PROPOSAL_CAPS, type ProposalInput, type StoredProposal } from './shared/global';
+import { proposalsDir } from './globalPaths.js';
+import { slugify } from './globalMarkdown.js';
+import { writeProfileDocs } from './globalStore.js';
+import { PROPOSAL_CAPS, type ProposalInput, type StoredProposal } from './shared/global.js';
 
 // (카테고리, 제목) 정규화 키 — 중복 판정 단일 규칙.
 function dedupKey(category: string, title: string): string {

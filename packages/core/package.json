@@ -2,6 +2,7 @@
   "name": "@agentbridge/core",
   "version": "0.0.0",
   "private": true,
+  "type": "module",
   "description": "Shared core logic for AgentBridge desktop app and VS Code extension",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -17,5 +18,8 @@
   "devDependencies": {
     "@types/node": "^20.16.10",
     "typescript": "^5.6.3"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.183"
   }
 }

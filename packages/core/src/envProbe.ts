@@ -7,9 +7,9 @@
 
 import { execSync, execFileSync } from 'child_process';
 import { existsSync } from 'fs';
-import type { CliKind } from './shared/cli';
-import type { Logger } from './interfaces';
-import { noopLogger } from './interfaces';
+import type { CliKind } from './shared/cli.js';
+import type { Logger } from './interfaces.js';
+import { noopLogger } from './interfaces.js';
 
 // 사용자의 기본 로그인 셸. zsh 외(bash/fish 등) 사용자도 CLI를 찾을 수 있게 $SHELL을 따른다
 // (미설정 시 zsh 폴백). 플래그는 -i -l -c 분리 전달 — zsh/bash/fish 모두 호환 (V-22).

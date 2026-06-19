@@ -4,7 +4,7 @@
 // Compaction scheduler가 oldest 청크를 처리해 IR로 흡수하고 turns.jsonl을 rewrite.
 // 최근 N개(`keepRecent`)는 항상 raw 보존 — hook 본문에 inject.
 
-import type { CliKind } from './cli';
+import type { CliKind } from './cli.js';
 
 export type TurnToolCall = {
   // 'Read' | 'Bash' | 'Edit' | 'Write' | 'Grep' | ... (모델별 휴리스틱)

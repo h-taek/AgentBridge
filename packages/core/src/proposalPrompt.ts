@@ -1,6 +1,6 @@
 // 자동제안 추출 프롬프트(§D.1). 입력 = raw 넓은 창(A안) + 기존 프로필 인덱스(중복방지).
 // 본문 영어(LLM 일관성). probe 검증: 느슨한 정의는 ~1/3이 단기 기억으로 누수 → 제외목록·판별테스트 필수.
-import type { TurnRecord } from './shared/turns';
+import type { TurnRecord } from './shared/turns.js';
 
 const CATEGORY_GUIDE = [
   '## Categories (use exactly one of these as `category`)',

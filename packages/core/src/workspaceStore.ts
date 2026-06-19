@@ -20,11 +20,11 @@ import {
   promises as fsp,
 } from 'fs';
 import { join } from 'path';
-import { CLI_DISPLAY_NAME, type CliKind } from './shared/cli';
-import { type Logger, noopLogger } from './interfaces';
-import { deterministicWorkspaceId } from './workspaceId';
-import { withFileLock } from './fileLock';
-import { getStorageRoot } from './storageRoot';
+import { CLI_DISPLAY_NAME, type CliKind } from './shared/cli.js';
+import { type Logger, noopLogger } from './interfaces.js';
+import { deterministicWorkspaceId } from './workspaceId.js';
+import { withFileLock } from './fileLock.js';
+import { getStorageRoot } from './storageRoot.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 

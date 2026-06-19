@@ -7,8 +7,8 @@
 import { promises as fsp } from 'node:fs';
 import { join } from 'node:path';
 
-import { readAllTurns } from './turnsStore';
-import type { TurnRecord } from './shared/turns';
+import { readAllTurns } from './turnsStore.js';
+import type { TurnRecord } from './shared/turns.js';
 
 const CONTEXT_TURNS = 2; // 새 턴 직전 읽기전용 맥락 턴 수
 

@@ -6,9 +6,9 @@
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import type { Logger } from '../interfaces';
-import { noopLogger } from '../interfaces';
-import { createSessionFileWatcher, type SessionFileWatcher } from '../sessionFileWatcher';
+import type { Logger } from '../interfaces.js';
+import { noopLogger } from '../interfaces.js';
+import { createSessionFileWatcher, type SessionFileWatcher } from '../sessionFileWatcher.js';
 
 const CODEX_SESSIONS_ROOT = path.join(os.homedir(), '.codex', 'sessions');
 

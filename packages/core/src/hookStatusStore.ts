@@ -2,7 +2,7 @@
 // 사용자 UI는 'changed' 이벤트를 구독해 현재 사유 목록을 갱신.
 
 import { EventEmitter } from 'events';
-import type { CliKind } from './shared/cli';
+import type { CliKind } from './shared/cli.js';
 
 type Key = string;
 

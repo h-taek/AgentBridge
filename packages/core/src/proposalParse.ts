@@ -1,6 +1,6 @@
 // 헤드리스 제안 출력(JSON 배열) 추출·검증. parse.ts의 IR 파서와 같은 방어 전략:
 // fence/산문 제거 → 첫 balanced 배열 추출 → 항목별 강제 변환 + 유효 카테고리·제목 필수.
-import { GLOBAL_CATEGORIES, type GlobalCategory, type ProposalInput } from './shared/global';
+import { GLOBAL_CATEGORIES, type GlobalCategory, type ProposalInput } from './shared/global.js';
 
 const CATEGORY_SET = new Set<string>(GLOBAL_CATEGORIES);
 

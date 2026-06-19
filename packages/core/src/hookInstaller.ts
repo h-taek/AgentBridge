@@ -8,11 +8,11 @@
 
 import { promises as fsp } from 'fs';
 import { join, dirname } from 'path';
-import type { CliKind } from './shared/cli';
-import { quoteArg } from './shellQuote';
-import { findBlockedGlobalCliConfigDir } from './cliGlobalDirs';
-import type { Logger } from './interfaces';
-import { noopLogger } from './interfaces';
+import type { CliKind } from './shared/cli.js';
+import { quoteArg } from './shellQuote.js';
+import { findBlockedGlobalCliConfigDir } from './cliGlobalDirs.js';
+import type { Logger } from './interfaces.js';
+import { noopLogger } from './interfaces.js';
 
 function assertWorkspaceCwd(cwd: string, label: string): void {
   // 홈 자체 + CLI 글로벌 설정 디렉토리(~/.codex 등) 하위면 거부 — 글로벌 hook 덮어쓰기 방지.

@@ -8,8 +8,8 @@
 //   - 미완성 ANSI tail은 carry로 보관, 다음 청크와 결합.
 //   - in-block watchdog (1초 BLOCK_TIMEOUT_MS) — close tag가 stream에서 누락된 경우 자동 unblock.
 
-import type { Logger } from './interfaces';
-import { noopLogger } from './interfaces';
+import type { Logger } from './interfaces.js';
+import { noopLogger } from './interfaces.js';
 
 const OPEN_TAG = '<agentbridge-context>';
 const CLOSE_TAG = '</agentbridge-context>';

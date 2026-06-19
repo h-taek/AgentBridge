@@ -2,8 +2,8 @@
 // timeout/abort/grace SIGTERM→SIGKILL 처리 포함.
 
 import { spawn, type ChildProcess } from 'child_process';
-import type { Logger } from './interfaces';
-import { noopLogger } from './interfaces';
+import type { Logger } from './interfaces.js';
+import { noopLogger } from './interfaces.js';
 
 export type SpawnRefineResult = {
   assistantText: string;

@@ -7,8 +7,8 @@
 //   - 도구 결과: 도구별 type(LIST_DIRECTORY/VIEW_FILE 등) + content → 직전 도구 호출 summary.
 //   - 턴 끝(즉시 flush): type=PLANNER_RESPONSE + content 있음 + tool_calls 없음 = 사용자에게 보내는 최종 답변.
 //     (라이브 검증: 중간 스텝은 content 없거나 tool_calls 있음 → 오탐 0. thinking은 별도 필드라 content에 안 섞임.)
-import type { Carry, ConsumeResult, ReaderCtx, TurnRecord } from './types';
-import { finalizeTurn, hasTurnContent, toolArgString } from './util';
+import type { Carry, ConsumeResult, ReaderCtx, TurnRecord } from './types.js';
+import { finalizeTurn, hasTurnContent, toolArgString } from './util.js';
 
 interface AgyRecord {
   step_index?: number;

@@ -4,7 +4,7 @@
 import { mkdirSync, symlinkSync, lstatSync, writeFileSync, existsSync, statSync, rmSync, readFileSync, chmodSync, readdirSync } from 'fs';
 import { homedir } from 'os';
 import { join, dirname } from 'path';
-import type { CliKind } from './shared/cli';
+import type { CliKind } from './shared/cli.js';
 
 export type EnsureRefineHomeOptions = {
   rootDir?: string;            // 박스 루트; 기본값 ~/.agentbridge/cli-homes

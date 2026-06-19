@@ -1,7 +1,7 @@
 // claude jsonl 레코드 → TurnRecord[]. 순수 함수.
-import type { TurnRecord } from '../shared/turns';
-import type { Carry, ConsumeResult, OpenTurn, ReaderCtx } from './types';
-import { finalizeTurn, hasTurnContent, toolArgString } from './util';
+import type { TurnRecord } from '../shared/turns.js';
+import type { Carry, ConsumeResult, OpenTurn, ReaderCtx } from './types.js';
+import { finalizeTurn, hasTurnContent, toolArgString } from './util.js';
 
 interface ClaudeRecord {
   type?: string;

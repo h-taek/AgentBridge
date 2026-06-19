@@ -5,14 +5,14 @@ import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
-import type { SpawnOptions } from '../pty/types';
-import type { EnvProbe, ProbeResult } from '../envProbe';
-import type { HookInstaller } from '../hookInstaller';
-import type { HookStatusStore } from '../hookStatusStore';
-import type { Logger } from '../interfaces';
-import { noopLogger } from '../interfaces';
-import { snapshotCodexSessions } from './codexSessionWatcher';
-import { snapshotAgyConversations, resolveResumeArgs } from './agyResume';
+import type { SpawnOptions } from '../pty/types.js';
+import type { EnvProbe, ProbeResult } from '../envProbe.js';
+import type { HookInstaller } from '../hookInstaller.js';
+import type { HookStatusStore } from '../hookStatusStore.js';
+import type { Logger } from '../interfaces.js';
+import { noopLogger } from '../interfaces.js';
+import { snapshotCodexSessions } from './codexSessionWatcher.js';
+import { snapshotAgyConversations, resolveResumeArgs } from './agyResume.js';
 
 export type CliAdapterOptions = {
   envProbe: EnvProbe;

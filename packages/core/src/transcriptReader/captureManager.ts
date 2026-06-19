@@ -5,12 +5,12 @@
 //   - unregister/disposeAll: 진행 중 tick을 비운 뒤 finalize로 carry의 마지막 열린 턴 flush.
 // 멱등성·dedup·하류 트리거는 CaptureSession이 담당(여기선 lifecycle/스케줄링만).
 import { watch, type FSWatcher } from 'fs';
-import type { CliKind } from '../shared/cli';
-import type { TurnsAssistantDetail } from '../shared/turns';
-import type { Logger } from '../interfaces';
-import { noopLogger } from '../interfaces';
-import { CaptureSession, type CaptureSchedulerLike, type CaptureSessionOptions } from './manager';
-import { resolveTranscriptPath } from './resolvePath';
+import type { CliKind } from '../shared/cli.js';
+import type { TurnsAssistantDetail } from '../shared/turns.js';
+import type { Logger } from '../interfaces.js';
+import { noopLogger } from '../interfaces.js';
+import { CaptureSession, type CaptureSchedulerLike, type CaptureSessionOptions } from './manager.js';
+import { resolveTranscriptPath } from './resolvePath.js';
 
 const DEFAULT_POLL_MS = 1000;
 

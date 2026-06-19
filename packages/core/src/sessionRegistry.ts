@@ -10,9 +10,9 @@
 import { promises as fs } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
-import type { CliKind } from './shared/cli';
-import type { Logger } from './interfaces';
-import { noopLogger } from './interfaces';
+import type { CliKind } from './shared/cli.js';
+import type { Logger } from './interfaces.js';
+import { noopLogger } from './interfaces.js';
 
 export async function deleteClaudeNativeSession(sessionId: string, logger: Logger = noopLogger): Promise<void> {
   const root = join(homedir(), '.claude', 'projects');

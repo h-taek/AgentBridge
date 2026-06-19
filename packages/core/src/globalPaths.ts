@@ -1,7 +1,7 @@
 // 글로벌 컨텍스트 경로 레이아웃 — gc-tree paths.ts 이식, profiles/default 모델로 변경.
 // HEAD/branches 없음(§F): v1은 단일 default 프로필.
 import { join } from 'node:path';
-import { getStorageRoot } from './storageRoot';
+import { getStorageRoot } from './storageRoot.js';
 
 export const DEFAULT_PROFILE_ID = 'default';
 

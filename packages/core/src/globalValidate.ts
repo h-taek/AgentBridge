@@ -1,6 +1,6 @@
 // gc-tree update.ts validateContextUpdateInput 이식.
 // 변경: category 필수(7중 하나), slug = 카테고리 내 leaf(슬래시 금지), 길이캡 신규.
-import { GLOBAL_CATEGORIES, DOC_CAPS, type GlobalUpdateInput } from './shared/global';
+import { GLOBAL_CATEGORIES, DOC_CAPS, type GlobalUpdateInput } from './shared/global.js';
 
 const CATS = new Set<string>(GLOBAL_CATEGORIES);
 const ROOT_KEYS = new Set(['docs']);

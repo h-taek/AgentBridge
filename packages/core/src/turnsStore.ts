@@ -11,10 +11,10 @@
 
 import { promises as fs } from 'fs';
 import { join } from 'path';
-import type { TurnRecord } from './shared/turns';
-import { TURNS_ROTATE } from './shared/turns';
-import type { Logger } from './interfaces';
-import { noopLogger } from './interfaces';
+import type { TurnRecord } from './shared/turns.js';
+import { TURNS_ROTATE } from './shared/turns.js';
+import type { Logger } from './interfaces.js';
+import { noopLogger } from './interfaces.js';
 
 // workspaceRoot별 직렬화 큐 — 이전 작업이 끝난 뒤 다음 작업을 실행. 이전 작업의 성공/실패와
 // 무관하게 진행하고, 저장된 tail은 reject되지 않게 해 다음 락이 막히지 않도록 한다.

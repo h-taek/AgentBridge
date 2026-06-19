@@ -1,16 +1,16 @@
 // 여러 CLI를 순서대로 시도해 IR refine을 수행한다. quota/empty/parse-fail은 다음 후보로 fallback.
 // 호스트는 EnvProbe 인스턴스와 refine 순서(refinePolicy 해석 결과)를 인자로 전달한다.
 
-import { runRefineSpawn, type SpawnRefineResult } from './refineHeadless';
-import { parseRefineOutput } from './irModule/parse';
-import { parseProposalOutput } from './proposalParse';
-import type { CliKind } from './shared/cli';
-import type { EnvProbe } from './envProbe';
-import type { Logger } from './interfaces';
-import { noopLogger } from './interfaces';
-import { buildRefineSpawnRequest } from './refineCliArgs';
-import { ensureRefineHome } from './refineHome';
-import { looksLikeQuotaError } from './quotaTracker';
+import { runRefineSpawn, type SpawnRefineResult } from './refineHeadless.js';
+import { parseRefineOutput } from './irModule/parse.js';
+import { parseProposalOutput } from './proposalParse.js';
+import type { CliKind } from './shared/cli.js';
+import type { EnvProbe } from './envProbe.js';
+import type { Logger } from './interfaces.js';
+import { noopLogger } from './interfaces.js';
+import { buildRefineSpawnRequest } from './refineCliArgs.js';
+import { ensureRefineHome } from './refineHome.js';
+import { looksLikeQuotaError } from './quotaTracker.js';
 
 export type RefineModelChoice = {
   spawnedModel: CliKind;

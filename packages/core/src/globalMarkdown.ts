@@ -1,4 +1,4 @@
-import { GLOBAL_CATEGORIES } from './shared/global';
+import { GLOBAL_CATEGORIES } from './shared/global.js';
 
 // gc-tree markdown.ts 이식(MIT). profiles 모델 + 한국어 slug로 변경.
 // 문서 포맷: # 제목 / ## Summary / [## Tags] / [## Index Entries] / ## Details.

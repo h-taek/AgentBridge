@@ -7,7 +7,7 @@
 //   - 모델이 채우는 본문(intent / decisions / files / commands / tests / pending)
 //   - AgentBridge가 채우는 메타(contextId / meta) — refine 후 이 영역은 항상 우리가 덮어씀.
 
-import type { CliKind } from './cli';
+import type { CliKind } from './cli.js';
 
 export type IrFileStatus = 'modified' | 'created' | 'deleted' | 'read';
 export type IrTestStatus = 'passed' | 'failed' | 'pending' | 'skipped';

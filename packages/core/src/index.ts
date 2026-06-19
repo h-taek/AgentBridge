@@ -1,82 +1,82 @@
 // @agentbridge/core — shared logic for the desktop app and the VS Code extension.
 
 // 공유 타입
-export * from './shared/cli';
-export * from './shared/ir';
-export * from './shared/turns';
-export * from './shared/global';
-export * from './globalPaths';
-export * from './globalMarkdown';
-export * from './globalValidate';
-export * from './globalStore';
-export * from './proposalStore';
-export * from './proposalParse';
-export * from './proposalPrompt';
-export * from './proposalCursor';
-export * from './proposalPass';
-export * from './globalSearch';
-export * from './globalInject';
+export * from './shared/cli.js';
+export * from './shared/ir.js';
+export * from './shared/turns.js';
+export * from './shared/global.js';
+export * from './globalPaths.js';
+export * from './globalMarkdown.js';
+export * from './globalValidate.js';
+export * from './globalStore.js';
+export * from './proposalStore.js';
+export * from './proposalParse.js';
+export * from './proposalPrompt.js';
+export * from './proposalCursor.js';
+export * from './proposalPass.js';
+export * from './globalSearch.js';
+export * from './globalInject.js';
 
 // 순수 유틸
-export * from './shellQuote';
-export * from './cliGlobalDirs';
+export * from './shellQuote.js';
+export * from './cliGlobalDirs.js';
 
 // IR module
-export * from './irModule/parse';
-export * from './irModule/prompt';
+export * from './irModule/parse.js';
+export * from './irModule/prompt.js';
 
 // 사이드이펙트 추상화
-export * from './interfaces';
+export * from './interfaces.js';
 
 // 저장소
-export * from './storageRoot';
-export * from './fileLock';
-export * from './workspaceId';
-export * from './turnsStore';
-export * from './irStore';
-export * from './workspaceStore';
-export * from './hookStatusStore';
-export * from './sessionRegistry';
-export * from './sessionOwner';
-export * from './fileTail';
-export * from './transcriptReader/types';
-export * from './transcriptReader/util';
-export * from './transcriptReader/claudeReader';
-export * from './transcriptReader/codexReader';
-export * from './transcriptReader/agyReader';
-export * from './transcriptReader/watcher';
-export * from './transcriptReader/manager';
-export * from './transcriptReader/resolvePath';
-export * from './transcriptReader/captureManager';
-export * from './sessionFileWatcher';
-export * from './ownerWatcher';
+export * from './storageRoot.js';
+export * from './fileLock.js';
+export * from './workspaceId.js';
+export * from './turnsStore.js';
+export * from './irStore.js';
+export * from './workspaceStore.js';
+export * from './hookStatusStore.js';
+export * from './sessionRegistry.js';
+export * from './sessionOwner.js';
+export * from './fileTail.js';
+export * from './transcriptReader/types.js';
+export * from './transcriptReader/util.js';
+export * from './transcriptReader/claudeReader.js';
+export * from './transcriptReader/codexReader.js';
+export * from './transcriptReader/agyReader.js';
+export * from './transcriptReader/watcher.js';
+export * from './transcriptReader/manager.js';
+export * from './transcriptReader/resolvePath.js';
+export * from './transcriptReader/captureManager.js';
+export * from './sessionFileWatcher.js';
+export * from './ownerWatcher.js';
 // attachmentStore는 데스크탑 미사용 (외부 경로 직접 입력 방식) — 2026-06-01 apps/extension/src/core/로 이전.
 // workspaceStore는 sessionRegistry/turnRecorder 통합과 함께 Phase 6에서 재정리 예정 (현재 데스크탑은
 // 자체 824줄 구현 중인데, 그 안 750줄이 sessionRegistry/lock/legacy 마이그레이션이고 진짜 본체는 ~50줄).
 
 // 환경 / PTY
-export * from './envProbe';
-export * from './ptyDisplayFilter';
+export * from './envProbe.js';
+export * from './ptyDisplayFilter.js';
 
 // hook
-export * from './hookInstaller';
+export * from './hookInstaller.js';
 
 // refine
-export * from './refineHeadless';
-export * from './refineDispatcher';
-export * from './refineCliArgs';
-export * from './refineHome';
+export * from './refineHeadless.js';
+export * from './refineDispatcher.js';
+export * from './refineCliArgs.js';
+export * from './refineHome.js';
 
 // compaction
-export * from './compactionScheduler';
+export * from './compactionScheduler.js';
 
 // quota
-export * from './quotaTracker';
+export * from './quotaTracker.js';
 
 // PTY 공용 타입
-export * from './pty/types';
+export * from './pty/types.js';
 
 // CLI 어댑터
-export * from './cliAdapter/index';
-export * from './cliAdapter/codexSessionWatcher';
-export * from './cliAdapter/agyResume';
+export * from './cliAdapter/index.js';
+export * from './cliAdapter/codexSessionWatcher.js';
+export * from './cliAdapter/agyResume.js';

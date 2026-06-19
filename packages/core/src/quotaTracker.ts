@@ -7,9 +7,9 @@
 // PTY spawn 기반 `/usage` `/status` 슬래시 명령 probe는 호스트(desktop) 책임.
 // 코어는 응답 정규식 파싱(extractQuotaPercent) + 상태 저장/severity 계산만.
 
-import type { CliKind } from './shared/cli';
-import type { Logger } from './interfaces';
-import { noopLogger } from './interfaces';
+import type { CliKind } from './shared/cli.js';
+import type { Logger } from './interfaces.js';
+import { noopLogger } from './interfaces.js';
 
 // % used 기반 임계값. agy/codex/claude 동일 적용.
 export const QUOTA_WARN_PERCENT = 80;

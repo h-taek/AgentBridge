@@ -9,7 +9,7 @@
 import { promises as fsp } from 'fs';
 import { join } from 'path';
 import { execFile } from 'child_process';
-import { withFileLock, isPidAlive } from './fileLock';
+import { withFileLock, isPidAlive } from './fileLock.js';
 
 export type OwnerApp = 'desktop' | 'extension';
 

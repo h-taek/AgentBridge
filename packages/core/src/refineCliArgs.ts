@@ -2,7 +2,7 @@
 // 단일 위치 SSOT. 응답 파싱(onLine 콜백)도 함께 정의해 호스트 간 차이 없게 한다.
 
 import { tmpdir } from 'os';
-import type { CliKind } from './shared/cli';
+import type { CliKind } from './shared/cli.js';
 
 export const REFINE_MODEL_HINT: Record<CliKind, string | null> = {
   agy: null,

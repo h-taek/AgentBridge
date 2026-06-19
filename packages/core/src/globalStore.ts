@@ -4,12 +4,12 @@
 import { promises as fsp } from 'node:fs';
 import { join } from 'node:path';
 
-import { withFileLock } from './fileLock';
-import { DEFAULT_PROFILE_ID, profileDir, profilesRoot, profileDocsDir, profileIndexPath } from './globalPaths';
-import { renderIndexMarkdown, renderDocMarkdown, extractTitle, extractSummary, extractIndexEntries } from './globalMarkdown';
-import { validateGlobalUpdateInput } from './globalValidate';
-import type { GlobalUpdateInput } from './shared/global';
-import type { SearchDocRecord } from './globalSearch';
+import { withFileLock } from './fileLock.js';
+import { DEFAULT_PROFILE_ID, profileDir, profilesRoot, profileDocsDir, profileIndexPath } from './globalPaths.js';
+import { renderIndexMarkdown, renderDocMarkdown, extractTitle, extractSummary, extractIndexEntries } from './globalMarkdown.js';
+import { validateGlobalUpdateInput } from './globalValidate.js';
+import type { GlobalUpdateInput } from './shared/global.js';
+import type { SearchDocRecord } from './globalSearch.js';
 
 // v1: 항상 default (vNext에서 workspace→profile 매핑 도입 — §F).
 export function resolveProfile(_workspaceId: string): string {

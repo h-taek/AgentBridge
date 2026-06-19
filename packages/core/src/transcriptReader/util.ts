@@ -1,8 +1,8 @@
 // transcriptReader 공용 헬퍼. ANSI/chrome 휴리스틱 없음 — 깨끗한 텍스트 전제.
-import type { CliKind } from '../shared/cli';
-import type { TurnRecord, TurnsAssistantDetail } from '../shared/turns';
-import { TURN_CAP, TURNS_ASSISTANT_DETAIL_CAP } from '../shared/turns';
-import type { Carry, OpenTurn, ReaderCtx } from './types';
+import type { CliKind } from '../shared/cli.js';
+import type { TurnRecord, TurnsAssistantDetail } from '../shared/turns.js';
+import { TURN_CAP, TURNS_ASSISTANT_DETAIL_CAP } from '../shared/turns.js';
+import type { Carry, OpenTurn, ReaderCtx } from './types.js';
 
 // 플랫폼 중립 UTF-8 byte length (Buffer/TextEncoder 비의존).
 export function utf8ByteLength(s: string): number {

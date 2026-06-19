@@ -7,10 +7,10 @@
 //   - envProbe, gitProbe: 호스트가 인스턴스/콜백 전달
 
 import { EventEmitter } from 'events';
-import type { CliKind } from './shared/cli';
-import type { IR } from './shared/ir';
-import type { TurnRecord } from './shared/turns';
-import { COMPACTION_TRIGGER } from './shared/turns';
+import type { CliKind } from './shared/cli.js';
+import type { IR } from './shared/ir.js';
+import type { TurnRecord } from './shared/turns.js';
+import { COMPACTION_TRIGGER } from './shared/turns.js';
 import {
   readAllTurns,
   dropProcessedTurns,
@@ -21,21 +21,21 @@ import {
   clearArchive,
   sumBytes,
   type StagedArchive,
-} from './turnsStore';
-import { buildCompactionPrompt } from './irModule/prompt';
-import { parseRefineOutput, assembleIR, type GitInfo } from './irModule/parse';
-import { readIR, writeIR, clearIR } from './irStore';
+} from './turnsStore.js';
+import { buildCompactionPrompt } from './irModule/prompt.js';
+import { parseRefineOutput, assembleIR, type GitInfo } from './irModule/parse.js';
+import { readIR, writeIR, clearIR } from './irStore.js';
 import {
   runRefine,
   RefineOffError,
   type RefineDecision,
   type RefineAttemptEvent,
-} from './refineDispatcher';
-import type { EnvProbe } from './envProbe';
-import type { Logger } from './interfaces';
-import { noopLogger } from './interfaces';
-import type { WorkspaceStore } from './workspaceStore';
-import { isPidAlive } from './fileLock';
+} from './refineDispatcher.js';
+import type { EnvProbe } from './envProbe.js';
+import type { Logger } from './interfaces.js';
+import { noopLogger } from './interfaces.js';
+import type { WorkspaceStore } from './workspaceStore.js';
+import { isPidAlive } from './fileLock.js';
 
 const COMPACTION_TIMEOUT_MS = 60_000;
 const LOCK_STALE_MS = 5 * 60 * 1000;

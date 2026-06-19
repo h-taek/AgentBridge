@@ -1,21 +1,21 @@
 // 자동제안 종단 오케스트레이터(§D.1). compaction 후 앱이 호출.
 // runAnalysis 주입 가능 — 기본 = runProposalAnalysis(실제 spawn). 테스트는 가짜 출력 주입.
-import type { EnvProbe } from './envProbe';
-import type { CliKind } from './shared/cli';
-import type { Logger } from './interfaces';
-import { noopLogger } from './interfaces';
+import type { EnvProbe } from './envProbe.js';
+import type { CliKind } from './shared/cli.js';
+import type { Logger } from './interfaces.js';
+import { noopLogger } from './interfaces.js';
 import {
   runProposalAnalysis,
   resolveRefineDecisionFromConfig,
   type RefineDecision,
   type RefineModelChoice,
   type RefinePolicyConfig,
-} from './refineDispatcher';
-import { buildProposalPrompt } from './proposalPrompt';
-import { parseProposalOutput } from './proposalParse';
-import { collectProposalTurns, writeProposalCursor, bumpCompactionCount, shouldRunProposalPass } from './proposalCursor';
-import { writeProposals } from './proposalStore';
-import { readProfileDocs } from './globalStore';
+} from './refineDispatcher.js';
+import { buildProposalPrompt } from './proposalPrompt.js';
+import { parseProposalOutput } from './proposalParse.js';
+import { collectProposalTurns, writeProposalCursor, bumpCompactionCount, shouldRunProposalPass } from './proposalCursor.js';
+import { writeProposals } from './proposalStore.js';
+import { readProfileDocs } from './globalStore.js';
 
 export type RunProposalPassArgs = {
   workspaceRoot: string;

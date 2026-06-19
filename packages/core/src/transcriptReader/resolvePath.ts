@@ -5,7 +5,7 @@
 import { promises as fs } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
-import type { CliKind } from '../shared/cli';
+import type { CliKind } from '../shared/cli.js';
 
 // claude project 디렉토리 인코딩: cwd의 비영숫자 문자를 전부 '-'로. (실측 검증)
 export function encodeClaudeProjectDir(cwd: string): string {

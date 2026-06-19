@@ -1,6 +1,6 @@
 // gc-tree resolve.ts 토큰 스코어러 이식 + 한국어 비파괴 처리(§C.2).
 // 핵심: 파괴하지 말고 추가하라 — 조사 제거는 변이형으로만, 원형 보존.
-import { readProfileDocs } from './globalStore';
+import { readProfileDocs } from './globalStore.js';
 
 const STOP_WORDS = new Set([
   'the', 'a', 'an', 'of', 'to', 'in', 'on', 'for', 'and', 'or', 'is', 'are', 'be',

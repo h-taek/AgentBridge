@@ -1,6 +1,6 @@
 // §G3 주입 측 헬퍼 — hook 입력에서 쿼리 추출 + 검색결과 teaser 렌더.
 // esbuild로 agentbridge-memory.js에 번들된다(옵션 나). 검색 원본은 core 단일 소스 유지.
-import type { SearchMatch } from './globalSearch';
+import type { SearchMatch } from './globalSearch.js';
 
 // hook stdin(JSON)에서 현재 프롬프트 추출. claude는 `prompt`, 다른 host는 필드명이 달라
 // 알려진 후보를 순서대로 시도. JSON이 아니거나 후보 없으면 '' (호출자가 turns로 폴백).

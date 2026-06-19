@@ -1,6 +1,6 @@
 // transcriptReader — 공통 타입. reader는 순수 함수: 증분 raw 단위 + carry → 완료 턴 + 새 carry.
-import type { CliKind } from '../shared/cli';
-import type { TurnRecord, TurnToolCall, TurnsAssistantDetail } from '../shared/turns';
+import type { CliKind } from '../shared/cli.js';
+import type { TurnRecord, TurnToolCall, TurnsAssistantDetail } from '../shared/turns.js';
 
 // 한 세션을 식별하는 호스트 제공 컨텍스트. reader가 TurnRecord 필드를 채우는 데 사용.
 export interface ReaderCtx {

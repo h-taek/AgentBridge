@@ -4,7 +4,7 @@
 
 import { promises as fs } from 'fs';
 import { join } from 'path';
-import type { IR } from './shared/ir';
+import type { IR } from './shared/ir.js';
 
 export async function readIR(workspaceRoot: string): Promise<IR | null> {
   const irPath = join(workspaceRoot, 'ir.json');

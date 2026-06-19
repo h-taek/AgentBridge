@@ -3,7 +3,7 @@
 // readJsonlIncrement: append-only jsonl을 offset부터 증분 읽어 완전한 라인만 JSON으로 파싱한다.
 //   - 마지막 미완성 라인(개행 없음)은 보류: offset을 마지막 개행 다음까지만 전진(다음 호출에 합쳐 재처리).
 //   - 깨진 라인(JSON.parse 실패)은 그것만 skip(전체 중단 없음 — design §F 격리 원칙).
-import { readAppendedBytes } from '../fileTail';
+import { readAppendedBytes } from '../fileTail.js';
 
 export interface JsonlIncrement {
   records: unknown[];

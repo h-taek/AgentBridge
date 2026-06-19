@@ -8,7 +8,7 @@
 
 import type {
   CliKind,
-} from '../shared/cli';
+} from '../shared/cli.js';
 import type {
   IR,
   IrIntent,
@@ -19,8 +19,8 @@ import type {
   IrTest,
   IrTestStatus,
   IrPending,
-} from '../shared/ir';
-import { IR_CAP } from '../shared/ir';
+} from '../shared/ir.js';
+import { IR_CAP } from '../shared/ir.js';
 
 export type ParsedIRBody = Omit<IR, 'contextId' | 'meta'>;
 

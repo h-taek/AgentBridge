@@ -1,7 +1,7 @@
 // PTY spawn 옵션 — 호스트가 실제 node-pty / spawn 호출에 사용.
 
-import type { CliKind } from '../shared/cli';
-import type { CodexSessionSnapshot } from '../cliAdapter/codexSessionWatcher';
+import type { CliKind } from '../shared/cli.js';
+import type { CodexSessionSnapshot } from '../cliAdapter/codexSessionWatcher.js';
 
 export interface SpawnOptions {
   command: string;

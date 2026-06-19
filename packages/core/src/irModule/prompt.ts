@@ -3,10 +3,10 @@
 // 본문은 영어로 작성. LLM 일관성·재현성을 위해 prompt language는 English로 통일.
 // LANGUAGE_RULE에서 IR 본문 자체는 사용자가 사용한 언어를 따라가도록 명시.
 
-import type { CliKind } from '../shared/cli';
-import type { IR } from '../shared/ir';
-import { IR_CAP } from '../shared/ir';
-import type { TurnRecord } from '../shared/turns';
+import type { CliKind } from '../shared/cli.js';
+import type { IR } from '../shared/ir.js';
+import { IR_CAP } from '../shared/ir.js';
+import type { TurnRecord } from '../shared/turns.js';
 
 export type CompactionPromptArgs = {
   fromModel: CliKind;
