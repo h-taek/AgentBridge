@@ -18,13 +18,18 @@ export interface StartOptions {
   workspaceId: string;
   detail?: TurnsAssistantDetail;
   context?: string; // IR/handoff를 systemPrompt로 주입 (후속 증분)
+  resume?: string; // 기존 세션 이어가기 (resume sessionId) — 미지정 시 새 세션
   // 턴 완료 시 호출 — seam(CaptureSession 대체)이 appendTurn으로 영속. Promise면 어댑터가 대기.
   onTurn?: (turn: TurnRecord) => void | Promise<void>;
 }
 
 export interface Session {
   readonly sessionId: string;
+  // 한 턴을 보내고 그 턴의 ChatEvent 스트림을 받는다(델타→완결). 내부는 지속 세션이라 맥락 유지.
+  // 턴은 직렬: 이전 턴이 끝나야 다음 send가 시작된다.
   send(text: string): AsyncIterable<ChatEvent>;
+  interrupt(): Promise<void>; // 진행 중 턴 중단 (streaming-input 전용 — SDK Query.interrupt)
+  end(): Promise<void>; // 입력 스트림을 닫아 세션 종료
 }
 
 export interface AgentAdapter {

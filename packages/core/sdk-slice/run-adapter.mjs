@@ -1,58 +1,57 @@
-// 수직 슬라이스 라이브 증명: claude SDK → ChatEvent → TurnRecord → SdkCapture → turns.jsonl(디스크)
-//   → 하류(turns:updated emit + scheduler.checkAndRun). 키 없이(~/.claude 구독).
+// 1단계 라이브 증명: 지속(멀티턴) 세션 + 델타 스트리밍 + 턴마다 캡처.
 //   (core build 후) node packages/core/sdk-slice/run-adapter.mjs
 import { promises as fs } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { claudeAdapter, SdkCapture, readAllTurns } from '../dist/index.js';
 
-// 기존 CaptureSession 테스트와 동일한 fake scheduler — 하류 입구가 쳐졌는지만 기록.
 function fakeScheduler() {
   const calls = { updated: 0, ran: 0 };
-  return {
-    calls,
-    events: { emit: () => { calls.updated++; } },
-    checkAndRun: async () => { calls.ran++; },
-  };
+  return { calls, events: { emit: () => { calls.updated++; } }, checkAndRun: async () => { calls.ran++; } };
 }
 
-const root = await fs.mkdtemp(join(tmpdir(), 'sdk-slice-'));
+const root = await fs.mkdtemp(join(tmpdir(), 'sdk-p1-'));
 const sched = fakeScheduler();
 const capture = new SdkCapture({
-  workspaceId: 'slice-ws',
-  workspaceRoot: root,
-  workspacePath: process.cwd(),
-  model: 'claude',
-  scheduler: sched,
+  workspaceId: 'p1-ws', workspaceRoot: root, workspacePath: process.cwd(), model: 'claude', scheduler: sched,
 });
 
 const session = await claudeAdapter.start({
-  cwd: process.cwd(),
-  workspaceId: 'slice-ws',
-  detail: 'compact',
-  onTurn: (t) => capture.accept(t), // 어댑터가 await → accept 완료까지 대기
+  cwd: process.cwd(), workspaceId: 'p1-ws', detail: 'compact',
+  onTurn: (t) => capture.accept(t),
 });
 
-console.log('=== claudeAdapter.send (키 없음) ===');
-for await (const e of session.send('Reply with exactly: ADAPTER_OK')) {
-  console.log(' •', e.t, JSON.stringify(e).slice(0, 110));
+// 한 턴을 돌리고 (델타 수, 최종 텍스트)를 모은다.
+async function turn(label, text) {
+  let deltas = 0;
+  let finalText = '';
+  process.stdout.write(`\n[${label}] "${text}"\n  stream: `);
+  for await (const e of session.send(text)) {
+    if (e.t === 'text' && e.final === false) { deltas++; process.stdout.write('·'); }
+    else if (e.t === 'text' && e.final === true) finalText += e.text;
+    else if (e.t === 'thinking') process.stdout.write('~');
+    else if (e.t === 'turn_end') process.stdout.write(` [end:${e.reason}]`);
+  }
+  console.log(`\n  → deltas=${deltas}, final="${finalText.trim().slice(0, 80)}"`);
+  return { deltas, finalText: finalText.trim() };
 }
 
-// onTurn(=capture.accept)은 send 제너레이터 안에서 await됨 → 여기 도달 시 appendTurn 완료.
-const persisted = await readAllTurns(root);
-console.log('\n=== turns.jsonl (디스크에서 재독) ===');
-console.log('workspaceRoot =', root);
-console.log('turns =', persisted.length, JSON.stringify(persisted[0]));
-console.log('\n=== 하류 트리거 ===');
-console.log('turns:updated emit =', sched.calls.updated, '| checkAndRun 호출 =', sched.calls.ran);
+const t1 = await turn('turn1', 'My name is Hyeongtae. Reply with exactly: noted');
+const t2 = await turn('turn2', "What is my name? Reply with only the name, nothing else.");
 
-const ok =
-  persisted.length === 1 &&
-  persisted[0].model === 'claude' &&
-  persisted[0].id.startsWith('claude:') &&
-  sched.calls.updated >= 1 &&
-  sched.calls.ran >= 1;
-console.log('\nSLICE', ok ? 'PASS ✓' : 'FAIL ✗');
+await session.end();
 
+const turns = await readAllTurns(root);
+console.log('\n=== 검증 ===');
+console.log('turns.jsonl 턴 수 =', turns.length, '| sessionId =', session.sessionId);
+console.log('checkAndRun 호출 =', sched.calls.ran);
+
+const multiTurnOK = /hyeongtae/i.test(t2.finalText);   // 2턴이 1턴 맥락을 기억하나
+const streamingOK = t1.deltas > 0 || t2.deltas > 0;    // 델타가 흘렀나(한 방 덤프 아님)
+const captureOK = turns.length === 2 && turns.every((t) => t.id.startsWith('claude:'));
+console.log('멀티턴 맥락 유지 =', multiTurnOK, '| 델타 스트리밍 =', streamingOK, '| 캡처 2턴 =', captureOK);
+
+const ok = multiTurnOK && streamingOK && captureOK;
+console.log('\nPHASE-1', ok ? 'PASS ✓' : 'FAIL ✗');
 await fs.rm(root, { recursive: true, force: true });
 process.exit(ok ? 0 : 1);
