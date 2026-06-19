@@ -80,3 +80,8 @@ export * from './pty/types.js';
 export * from './cliAdapter/index.js';
 export * from './cliAdapter/codexSessionWatcher.js';
 export * from './cliAdapter/agyResume.js';
+
+// SDK 어댑터 (rearch/sdk-gui)
+export * from './sdkAdapter/types.js';
+export * from './sdkAdapter/claudeAdapter.js';
+export * from './sdkAdapter/sdkCapture.js';
