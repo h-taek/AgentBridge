@@ -118,7 +118,7 @@ export class SdkChatPanel {
     }
   }
 
-  private async onMessage(msg: { type: string; text?: string; id?: string; approve?: boolean; mode?: PermissionMode }): Promise<void> {
+  private async onMessage(msg: { type: string; text?: string; id?: string; approve?: boolean; mode?: PermissionMode; level?: string }): Promise<void> {
     if (msg.type === 'send') {
       if (!this.session) return;
       try {
@@ -140,6 +140,10 @@ export class SdkChatPanel {
     } else if (msg.type === 'setModel' && msg.id) {
       await this.session?.setModel(msg.id).catch((err) => {
         output.warn(`SdkChatPanel: setModel 실패 — ${err instanceof Error ? err.message : String(err)}`);
+      });
+    } else if (msg.type === 'setEffort' && msg.level) {
+      await this.session?.setEffort(msg.level).catch((err) => {
+        output.warn(`SdkChatPanel: setEffort 실패 — ${err instanceof Error ? err.message : String(err)}`);
       });
     } else if (msg.type === 'pickImage') {
       await this.handlePickImage();
@@ -209,8 +213,11 @@ export class SdkChatPanel {
   .user .msg{background:var(--vscode-textBlockQuote-background);border-radius:12px;padding:9px 13px;max-width:80%;white-space:pre-wrap}
   .att{display:inline-flex;align-items:center;gap:5px;background:var(--vscode-textBlockQuote-background);border:1px solid var(--vscode-panel-border);border-radius:8px;padding:4px 8px;font-size:11px;color:var(--vscode-descriptionForeground);margin-bottom:5px}
 
-  .item{display:flex;gap:9px}
-  .dot{flex:none;width:7px;height:7px;border-radius:50%;margin-top:7px}
+  .item{display:flex;gap:9px;position:relative}
+  /* 한 턴의 점들을 잇는 옅은 세로선 (다음 점 중심까지) */
+  .item:not(:last-child)::before{content:'';position:absolute;left:3px;top:10px;bottom:-18px;width:1px;background:var(--vscode-panel-border)}
+  .item:has(+ .working)::before,.item:has(+ .worked)::before{display:none}
+  .dot{flex:none;width:7px;height:7px;border-radius:50%;margin-top:7px;position:relative;z-index:1}
   .dot.tool{background:var(--accent)} .dot.text{background:var(--vscode-descriptionForeground);opacity:.6}
   .body{flex:1;min-width:0}
   details.think>summary{cursor:pointer;list-style:none;color:var(--vscode-descriptionForeground);font-size:12px;opacity:.85}
@@ -232,6 +239,8 @@ export class SdkChatPanel {
     -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent;animation:shim 3s linear infinite}
   @keyframes shim{from{background-position:140% 0}to{background-position:-140% 0}}
   .wmeta{color:var(--vscode-descriptionForeground);opacity:.7;font-size:12px}
+  .worked{font-family:var(--vscode-editor-font-family),monospace;color:var(--vscode-descriptionForeground);opacity:.75;font-size:12px;margin-top:2px}
+  .worked .s{color:var(--accent);opacity:.9}
 
   footer{padding:6px 8px 12px}
   .dock{position:relative}
@@ -255,11 +264,11 @@ export class SdkChatPanel {
   .pend{display:inline-flex;align-items:center;gap:6px;background:var(--vscode-badge-background,var(--vscode-textBlockQuote-background));border:1px solid var(--vscode-input-border,var(--vscode-panel-border));border-radius:8px;padding:3px 7px 3px 4px;font-size:11px;color:var(--vscode-foreground)}
   .pend .x{cursor:pointer;opacity:.65;font-size:10px}
   .pend .x:hover{opacity:1}
-  .thumb{width:30px;height:30px;border-radius:5px;object-fit:cover;flex:none;display:block}
-  .att .thumb{width:120px;height:auto;max-height:140px}
+  /* 첨부 칩 = 글씨 한 줄 높이에 맞춤 (#2) */
+  .thumb{height:18px;width:auto;max-width:34px;border-radius:4px;object-fit:cover;flex:none;display:block}
   #input{display:block;width:100%;background:none;border:none;color:var(--vscode-input-foreground);font:inherit;resize:none;outline:none;min-height:44px;max-height:200px;line-height:1.5;overflow-y:auto}
   #input::placeholder{color:var(--vscode-input-placeholderForeground)}
-  .ctrls{display:flex;align-items:center;gap:9px;margin-top:7px}
+  .ctrls{display:flex;align-items:center;gap:9px;margin-top:2px}
   .ic{height:26px;min-width:24px;padding:0 2px;border-radius:7px;border:none;background:none;color:var(--vscode-foreground);cursor:pointer;font-size:17px;font-weight:700;line-height:1}
   .ic:hover{background:var(--vscode-toolbar-hoverBackground)}
   .pill{font-size:12px;font-weight:700;color:var(--vscode-foreground);border:none;border-radius:7px;padding:3px 6px;cursor:pointer}
@@ -268,6 +277,10 @@ export class SdkChatPanel {
   .mitem{padding:5px 10px;border-radius:5px;cursor:pointer;font-size:12px;color:var(--vscode-menu-foreground,var(--vscode-foreground));white-space:nowrap}
   .mitem:hover{background:var(--vscode-menu-selectionBackground,var(--vscode-toolbar-hoverBackground))}
   .mitem.cur{color:var(--accent);font-weight:700}
+  .msep{height:1px;background:var(--vscode-panel-border);margin:5px 4px}
+  .effort{padding:3px 10px 5px}
+  .elbl{font-size:11px;color:var(--vscode-descriptionForeground);margin-bottom:5px;text-transform:capitalize}
+  .erange{width:100%;height:14px;accent-color:var(--accent);cursor:pointer;margin:0}
   #send{height:28px;min-width:32px;padding:0 8px;border-radius:8px;border:none;background:var(--accent);color:#1b1b1d;cursor:pointer;display:inline-flex;align-items:center;justify-content:center}
   #send.stop{background:var(--vscode-inputValidation-errorBorder,#d65b5b);color:#fff}
   .err{color:var(--vscode-errorForeground);font-size:12px;white-space:pre-wrap}
@@ -326,15 +339,25 @@ export class SdkChatPanel {
   const modelPill = document.getElementById('modelPill');
   const modelMenu = document.getElementById('modelMenu');
   var MODELS=[], userPickedModel=false;
+  var EFFORTS=['low','medium','high'], effortIdx=1; // 추론 effort (기본 medium)
+  modelMenu.addEventListener('click', function(e){ e.stopPropagation(); }); // 메뉴 내부 클릭은 닫지 않음(슬라이더용)
   function closeModelMenu(){ modelMenu.style.display='none'; }
   function openModelMenu(){
     if(!MODELS.length) return;
     modelMenu.innerHTML='';
     MODELS.forEach(function(m){
       var it=el('div','mitem'+(m.current?' cur':''), m.label);
-      it.addEventListener('click', function(ev){ ev.stopPropagation(); vscode.postMessage({type:'setModel',id:m.id}); modelPill.textContent=m.label; userPickedModel=true; MODELS.forEach(function(x){x.current=(x.id===m.id);}); closeModelMenu(); });
+      it.addEventListener('click', function(){ vscode.postMessage({type:'setModel',id:m.id}); modelPill.textContent=m.label; userPickedModel=true; MODELS.forEach(function(x){x.current=(x.id===m.id);}); closeModelMenu(); });
       modelMenu.appendChild(it);
     });
+    // effort 슬라이더 (#1b) — claude=/effort 명령 / codex=turn/start.effort
+    modelMenu.appendChild(el('div','msep'));
+    var er=el('div','effort');
+    var lbl=el('div','elbl','Effort · '+EFFORTS[effortIdx]);
+    var rng=document.createElement('input'); rng.type='range'; rng.min='0'; rng.max=String(EFFORTS.length-1); rng.step='1'; rng.value=String(effortIdx); rng.className='erange';
+    rng.addEventListener('input', function(){ effortIdx=parseInt(rng.value,10); lbl.textContent='Effort · '+EFFORTS[effortIdx]; });
+    rng.addEventListener('change', function(){ effortIdx=parseInt(rng.value,10); vscode.postMessage({type:'setEffort',level:EFFORTS[effortIdx]}); });
+    er.appendChild(lbl); er.appendChild(rng); modelMenu.appendChild(er);
     var r=modelPill.getBoundingClientRect();
     modelMenu.style.left=r.left+'px';
     modelMenu.style.bottom=(window.innerHeight-r.top+6)+'px';
@@ -406,15 +429,19 @@ export class SdkChatPanel {
   var STOP_SVG='<svg width="12" height="12" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2.5" fill="currentColor"/></svg>';
   function setBusy(b){ busy=b; input.disabled=b; sendBtn.disabled=false; sendBtn.classList.toggle('stop',b); sendBtn.innerHTML=b?STOP_SVG:SEND_SVG; }
   function newAssistantTurn(){ var t=el('div','turn assistant'); log.appendChild(t); cur={turn:t,textItem:null,raw:'',deltas:0,think:null}; bottom(); }
-  function itemRow(dotCls){ var r=el('div','item'); r.appendChild(el('span','dot '+dotCls)); var b=el('div','body'); r.appendChild(b); cur.turn.appendChild(r); return b; }
+  function itemRow(dotCls){ var r=el('div','item'); r.appendChild(el('span','dot '+dotCls)); var b=el('div','body'); r.appendChild(b);
+    // working 줄이 있으면 그 앞에 끼워 항상 맨 아래에 두기.
+    var anchor=(work&&work.line&&work.line.parentNode===cur.turn)?work.line:null; cur.turn.insertBefore(r,anchor); return b; }
   function closeText(){ if(cur&&cur.textItem){ cur.textItem.innerHTML = md(cur.raw); } cur && (cur.textItem=null, cur.raw=''); }
+  // 생각 블록 종료 시 "Thought for Ns"로 요약 갱신 (#4)
+  function closeThink(){ if(cur&&cur.think&&cur.thinkSummary){ var s=Math.max(1,Math.round((Date.now()-cur.thinkT0)/1000)); cur.thinkSummary.textContent='Thought for '+s+'s'; } if(cur){ cur.think=null; cur.thinkSummary=null; } }
 
   function startWork(){
     if(work) return;
     var line=el('div','working'); var sp=el('span','tspin'); var st=el('span','shim',STATUS.working); var mt=el('span','wmeta','');
     line.appendChild(sp); line.appendChild(st); line.appendChild(mt); cur.turn.appendChild(line);
     work={line:line,st:st,mt:mt,t0:Date.now(),out:0,frame:0};
-    work.spin=setInterval(function(){ var F=' .oO@* '; sp.textContent=F[work.frame%F.length]; work.frame++; tick(); },110);
+    work.spin=setInterval(function(){ var F=' .oO@* '; sp.textContent=F[work.frame%F.length]; work.frame++; tick(); },200);
     tick();
   }
   function tick(){ if(!work) return; var s=Math.floor((Date.now()-work.t0)/1000); work.mt.textContent='('+s+'s'+(work.out?(' · ↑ '+fmt(work.out)+' tokens'):'')+')'; }
@@ -453,25 +480,25 @@ export class SdkChatPanel {
     if(msg.type==='attachAdded'){ PENDING.push({name:msg.name,path:msg.path,dataUrl:msg.dataUrl}); renderChips(); return; }
     if(msg.type!=='event') return;
     var ev=msg.ev;
-    if(ev.t==='session'){ if(ev.model && !userPickedModel){ modelPill.textContent=cleanModel(ev.model); } }
+    if(ev.t==='session'){ if(ev.model){ modelPill.textContent=cleanModel(ev.model); } }
     else if(ev.t==='text' && ev.final===false){
-      if(!cur) newAssistantTurn();
-      if(!cur.textItem){ cur.textItem=itemRow('text'); cur.raw=''; }
-      cur.raw+=ev.text; cur.deltas++; cur.textItem.textContent=cur.raw; setStatus('responding'); bottom();
+      if(!cur) newAssistantTurn(); closeThink();
+      if(!cur.textItem){ cur.textItem=itemRow('text'); cur.textItem.className='body md'; cur.raw=''; }
+      cur.raw+=ev.text; cur.deltas++; cur.textItem.innerHTML=md(cur.raw); setStatus('responding'); bottom();
     }
     else if(ev.t==='text' && ev.final===true){
-      if(!cur) newAssistantTurn();
+      if(!cur) newAssistantTurn(); closeThink();
       if(!cur.textItem){ cur.textItem=itemRow('text'); cur.raw=''; }
       if(cur.deltas===0) cur.raw=ev.text;
       cur.textItem.innerHTML=md(cur.raw); cur.textItem.className='body md'; cur.textItem=null; cur.raw=''; cur.deltas=0; bottom();
     }
     else if(ev.t==='thinking'){
       if(!cur) newAssistantTurn(); closeText();
-      if(!cur.think){ var b=itemRow('text'); var d=el('details','think'); var sm=el('summary',null,'Thinking'); var tx=el('div','tx',''); d.appendChild(sm); d.appendChild(tx); b.appendChild(d); cur.think=tx; }
+      if(!cur.think){ var b=itemRow('text'); var d=el('details','think'); var sm=el('summary',null,'Thinking…'); var tx=el('div','tx',''); d.appendChild(sm); d.appendChild(tx); b.appendChild(d); cur.think=tx; cur.thinkSummary=sm; cur.thinkT0=Date.now(); }
       cur.think.textContent+=ev.text; setStatus('thinking'); bottom();
     }
     else if(ev.t==='tool'){
-      if(!cur) newAssistantTurn(); closeText(); cur.think=null;
+      if(!cur) newAssistantTurn(); closeText(); closeThink();
       var b=itemRow('tool'); var nm=el('div','tname'); nm.textContent=ev.name+' '+(JSON.stringify(ev.input)||'').slice(0,70);
       if(ev.status==='done'){ var ok=el('span','ok','✓'); nm.appendChild(ok); }
       b.appendChild(nm); setStatus('working'); bottom();
@@ -485,7 +512,13 @@ export class SdkChatPanel {
       yes.addEventListener('click', function(){ vscode.postMessage({type:'respondApproval',id:ev.id,approve:true}); box.remove(); });
       acts.appendChild(no); acts.appendChild(yes); box.appendChild(info); box.appendChild(acts); approvalSlot.appendChild(box);
     }
-    else if(ev.t==='turn_end'){ closeText(); stopWork(); setBusy(false); input.focus(); }
+    else if(ev.t==='turn_end'){
+      closeText(); closeThink();
+      // 완료 요약 줄 — Worked for Xs · N tokens (#3)
+      if(work&&cur){ var s=Math.max(1,Math.round((Date.now()-work.t0)/1000)); var tok=work.out;
+        var w=el('div','worked'); w.appendChild(el('span','s','✳')); w.appendChild(document.createTextNode(' Worked for '+s+'s'+(tok?(' · '+fmt(tok)+' tokens'):''))); cur.turn.appendChild(w); }
+      stopWork(); setBusy(false); input.focus(); bottom();
+    }
     else if(ev.t==='error'){ if(!cur) newAssistantTurn(); closeText(); var b=itemRow('text'); b.appendChild(el('div','err','⚠ '+ev.message)); stopWork(); setBusy(false); bottom(); }
   });
 </script>

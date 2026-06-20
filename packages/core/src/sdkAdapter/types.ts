@@ -51,6 +51,8 @@ export interface Session {
   // 모델 선택(6-3). 에이전트 내부 모델 목록 + 전환. claude=Query.supportedModels/setModel / codex=model/list + turn/start 오버라이드.
   listModels(): Promise<ModelOption[]>;
   setModel(id: string): Promise<void>;
+  // 추론 effort 조정. claude=/effort 슬래시 명령(세터 없음) / codex=turn/start.effort 오버라이드.
+  setEffort(level: string): Promise<void>;
   // 'approval' ChatEvent에 대한 응답 — 진행 중 턴이 이 호출까지 멈춰 있다.
   respondApproval(id: string, approve: boolean): void;
   end(): Promise<void>; // 입력 스트림을 닫아 세션 종료

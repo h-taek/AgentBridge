@@ -54,6 +54,7 @@ export const codexAdapter: AgentAdapter = {
     let approvalPolicy = 'on-request'; // 권한 모드(6-2) — 다음 turn/start에 실어 보냄
     let sandboxPolicy: unknown = undefined; // 권한 모드 전환 시에만 설정(미설정=thread/start의 workspace-write)
     let model: string | null = null; // 모델(6-3) — null=codex 기본, 설정 시 다음 turn/start에 오버라이드
+    let effort: string | null = null; // 추론 effort — null=기본, 설정 시 turn/start.effort 오버라이드
 
     const write = (msg: unknown): void => {
       child.stdin?.write(JSON.stringify(msg) + '\n');
@@ -170,6 +171,7 @@ export const codexAdapter: AgentAdapter = {
             approvalPolicy,
             ...(sandboxPolicy ? { sandboxPolicy } : {}),
             ...(model ? { model } : {}),
+            ...(effort ? { effort } : {}),
             input: [{ type: 'text', text, text_elements: [] }],
           })) as { turn?: { id?: string } };
           active.turnId = res?.turn?.id ?? '';
@@ -204,6 +206,9 @@ export const codexAdapter: AgentAdapter = {
       },
       async setModel(id) {
         model = id; // 다음 turn/start부터 적용(서버 오버라이드는 턴 단위).
+      },
+      async setEffort(level) {
+        effort = level; // 다음 turn/start.effort부터 적용.
       },
       respondApproval(id, approve) {
         const rpcReqId = approvals.get(id);

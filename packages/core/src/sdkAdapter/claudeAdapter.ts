@@ -87,6 +87,11 @@ export const claudeAdapter: AgentAdapter = {
               }
             }
           } else if (m.type === 'assistant') {
+            // 실제 해석된 모델(버전 포함, 예: claude-opus-4-8)을 패널 칩에 반영 — 카탈로그 별칭엔 버전이 없음.
+            if (m.message.model && m.message.model !== model) {
+              model = m.message.model;
+              turn.events.push({ t: 'session', sessionId, model });
+            }
             // 턴 고유 키 — 세션 id는 턴마다 같으므로 충돌. assistant 메시지 uuid가 턴별 안정 키
             // (SDK transcript 기준이라 resume 재방출에도 동일 → dedup 멱등).
             if (!turn.open.sourceKey) turn.open.sourceKey = m.uuid;
@@ -176,6 +181,11 @@ export const claudeAdapter: AgentAdapter = {
       async setModel(id) {
         await q.setModel(id);
         selectedModel = id; // 표시용 model(풀 id)은 안 건드림 — 패널 칩은 사용자가 고른 라벨을 유지.
+      },
+      async setEffort(level) {
+        // SDK에 effort 세터가 없음 → /effort 슬래시 명령을 입력 스트림에 흘려보냄.
+        // 활성 턴(ref.current)이 없을 때(유휴) 호출 — 펌프가 ref.current 없으면 명령 이벤트를 버림(렌더 안 됨).
+        input.push({ type: 'user', message: { role: 'user', content: `/effort ${level}` }, parent_tool_use_id: null });
       },
       respondApproval(id, approve) {
         const resolve = approvals.get(id);
