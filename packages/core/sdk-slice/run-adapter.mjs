@@ -3,7 +3,8 @@
 import { promises as fs } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { claudeAdapter, SdkCapture, readAllTurns } from '../dist/index.js';
+import { SdkCapture, readAllTurns } from '../dist/index.js';
+import { claudeAdapter } from '../dist/sdkAdapter/claudeAdapter.js'; // 배럴 비노출 — 전용 경로 로드
 
 function fakeScheduler() {
   const calls = { updated: 0, ran: 0 };

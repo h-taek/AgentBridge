@@ -19,6 +19,7 @@ import { MemoryPanelProvider } from './views/memoryPanel';
 import { ProfilePanelProvider } from './views/profilePanel';
 import { SessionTreeProvider, SessionItem } from './views/sessionTreeView';
 import { ChatPanel, getActivePanel, getAllPanels, chatPanelEvents } from './views/chatPanel';
+import { SdkChatPanel } from './views/sdkChatPanel';
 import { compactionEvents } from './core/compactionScheduler';
 import { registerSession, markSessionClosed, markSessionActive, renameSession, deleteSession } from './core/sessionRegistry';
 import { registerConfigWatcher, getConfig } from './settings/config';
@@ -370,6 +371,18 @@ export function activate(context: vscode.ExtensionContext) {
     openChatPanel(opts, workspaceId);
   });
 
+  // SDK 채팅 패널 (rearch/sdk-gui 2단계 — UI seam 검증, 실험). 기존 PTY ChatPanel과 독립.
+  const sdkChatCmd = vscode.commands.registerCommand('agentbridge.sdkChat', () => {
+    const folderUri = vscode.workspace.workspaceFolders?.[0]?.uri;
+    if (!folderUri) {
+      vscode.window.showWarningMessage(vscode.l10n.t('AgentBridge: Open a workspace folder first.'));
+      return;
+    }
+    const cwd = folderUri.fsPath;
+    const workspaceId = workspaceStore.getOrCreateWorkspaceId(cwd);
+    SdkChatPanel.create(context.extensionUri, cwd, workspaceId);
+  });
+
   // IDE 재시작 시 직전 챗 탭들을 복구 — webview state(sessionId/model/workspaceId)로
   // SpawnOptions 재구성 후 ChatPanel.revive로 기존 panel을 wrap한다. PTY는 새로 spawn되며
   // claude/codex/agy 어댑터가 sessionId 기반 --resume을 알아서 처리.
@@ -414,6 +427,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     newSession, newSessionFromTab, newSessionWithModel, openSessionCmd, selectSessionCmd, refineCmd, resetCmd, renameCmd, deleteCmd,
+    sdkChatCmd,
     output.getOutputChannel(),
   );
 }

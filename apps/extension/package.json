@@ -114,6 +114,10 @@
         "command": "agentbridge.selectSession",
         "title": "%agentbridge.selectSession.title%",
         "icon": "$(history)"
+      },
+      {
+        "command": "agentbridge.sdkChat",
+        "title": "AgentBridge: SDK 채팅 (실험)"
       }
     ],
     "menus": {

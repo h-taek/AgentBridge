@@ -82,6 +82,9 @@ export * from './cliAdapter/codexSessionWatcher.js';
 export * from './cliAdapter/agyResume.js';
 
 // SDK 어댑터 (rearch/sdk-gui)
+// 주의: claudeAdapter는 ESM 전용 SDK(@anthropic-ai/claude-agent-sdk)를 정적 import한다. 배럴에 노출하면
+// 코어를 번들하는 호스트(esbuild/electron-vite)가 SDK를 통째로 끌어들여 CJS require(ESM)로 터진다.
+// 그래서 claudeAdapter는 여기서 export하지 않고, 호스트가 dist/sdkAdapter/claudeAdapter.js를 런타임
+// 동적 import로만 로드한다(공식 클로드 익스텐션과 동일 패턴). 타입은 types.js로 충분히 공개된다.
 export * from './sdkAdapter/types.js';
-export * from './sdkAdapter/claudeAdapter.js';
 export * from './sdkAdapter/sdkCapture.js';
