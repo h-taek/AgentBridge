@@ -23,6 +23,10 @@ export const claudeAdapter: AgentAdapter = {
         cwd: opts.cwd,
         includePartialMessages: true, // 델타 스트리밍(content_block_delta)
         ...(opts.resume ? { resume: opts.resume } : {}),
+        // 맥락 주입(3단계): claude 기본 프리셋 유지 + handoff/IR을 append(통째 교체 아님 — 툴 지침 보존).
+        ...(opts.context
+          ? { systemPrompt: { type: 'preset' as const, preset: 'claude_code' as const, append: opts.context } }
+          : {}),
       },
     });
 

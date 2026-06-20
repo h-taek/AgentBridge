@@ -10,10 +10,30 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { pathToFileURL } from 'url';
-import type { AgentAdapter, ChatEvent, Session } from '@agentbridge/core';
+import type { AgentAdapter, ChatEvent, Session, IR } from '@agentbridge/core';
+// 번들 코어(SDK-free)에서 — 이중로드 규칙: 저장/IR/스케줄러는 번들본 한 사본을 SSOT로.
+import { readIR, SdkCapture } from '@agentbridge/core';
+import { getCompactionScheduler, getWorkspaceStore } from '../core/coreInstances';
 import * as output from '../log/output';
 
 type AdapterModule = { claudeAdapter: AgentAdapter };
+
+// 이전 세션 IR을 어댑터 context(→systemPrompt append)로 주입할 텍스트로 렌더. compaction의 formatCurrentIR과 동형(JSON 블록).
+function formatIRContext(ir: IR | null): string | undefined {
+  if (!ir) return undefined;
+  const body = {
+    intent: ir.intent,
+    decisions: ir.decisions,
+    files: ir.files,
+    commands: ir.commands,
+    tests: ir.tests,
+    pending: ir.pending,
+  };
+  return (
+    '# 이전 세션 인계 (AgentBridge IR)\n\n다음은 이전 대화에서 압축된 작업 맥락이다. 이어서 돕는다.\n\n' +
+    '```json\n' + JSON.stringify(body, null, 2) + '\n```'
+  );
+}
 
 // dev(F5): <repo>/apps/extension → ../../packages/core/dist/sdkAdapter/claudeAdapter.js
 function resolveAdapterPath(extensionPath: string): string {
@@ -54,9 +74,28 @@ export class SdkChatPanel {
     }
 
     try {
+      // 3단계 — 캡처/IR 배선 (모두 번들 코어 = SSOT).
+      const workspaceRoot = getWorkspaceStore().getWorkspacePath(workspaceId);
+      const ir = await readIR(workspaceRoot);
+      const context = formatIRContext(ir); // 이전 IR → systemPrompt append
+      const capture = new SdkCapture({
+        workspaceId,
+        workspaceRoot,
+        workspacePath: cwd,
+        model: 'claude',
+        scheduler: getCompactionScheduler(), // 기존 PTY 경로와 같은 스케줄러 인스턴스
+      });
+
       const mod = (await import(pathToFileURL(adapterPath).href)) as AdapterModule;
-      this.session = await mod.claudeAdapter.start({ cwd, workspaceId, detail: 'compact' });
-      this.post({ type: 'ready', sessionId: this.session.sessionId });
+      this.session = await mod.claudeAdapter.start({
+        cwd,
+        workspaceId,
+        detail: 'compact',
+        context,
+        // onTurn: ESM 어댑터가 만든 plain TurnRecord를 경계 넘겨 번들 코어 캡처로 영속(turns→압축→IR).
+        onTurn: (turn) => capture.accept(turn),
+      });
+      this.post({ type: 'ready', sessionId: this.session.sessionId, injected: Boolean(context) });
     } catch (err) {
       const m = err instanceof Error ? err.message : String(err);
       output.warn(`SdkChatPanel: 세션 시작 실패 — ${m}`);
@@ -80,7 +119,7 @@ export class SdkChatPanel {
     }
   }
 
-  private post(msg: { type: 'ready'; sessionId: string; model?: string } | { type: 'event'; ev: ChatEvent }): void {
+  private post(msg: { type: 'ready'; sessionId: string; model?: string; injected?: boolean } | { type: 'event'; ev: ChatEvent }): void {
     void this.panel.webview.postMessage(msg);
   }
 
@@ -121,6 +160,7 @@ export class SdkChatPanel {
     <span class="title">AgentBridge</span>
     <span class="chip" id="model">claude</span>
     <span class="chip" id="sid">session …</span>
+    <span class="chip" id="ctx"></span>
     <span class="spacer"></span>
     <span class="chip">SDK · 실험</span>
   </header>
@@ -165,6 +205,7 @@ export class SdkChatPanel {
     if (msg.type === 'ready') {
       document.getElementById('sid').textContent = 'session ' + String(msg.sessionId || '').slice(0, 8);
       if (msg.model) document.getElementById('model').textContent = msg.model;
+      if (msg.injected) document.getElementById('ctx').textContent = '📎 맥락 주입됨';
       setBusy(false); input.focus(); return;
     }
     if (msg.type !== 'event') return;
