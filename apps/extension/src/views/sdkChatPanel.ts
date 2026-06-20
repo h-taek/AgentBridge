@@ -44,6 +44,8 @@ function resolveAdapterPath(extensionPath: string): string {
 export class SdkChatPanel {
   private session: Session | null = null;
   private disposed = false;
+  private cwd = '';
+  private workspaceId = '';
 
   private constructor(private readonly panel: vscode.WebviewPanel, private readonly extensionUri: vscode.Uri) {}
 
@@ -73,6 +75,8 @@ export class SdkChatPanel {
   }
 
   private async init(cwd: string, workspaceId: string, model: CliKind): Promise<void> {
+    this.cwd = cwd;
+    this.workspaceId = workspaceId;
     this.panel.webview.html = this.html(this.panel.webview);
     this.panel.webview.onDidReceiveMessage((msg) => void this.onMessage(msg));
     this.panel.onDidDispose(() => {
@@ -114,7 +118,7 @@ export class SdkChatPanel {
     }
   }
 
-  private async onMessage(msg: { type: string; text?: string; id?: string; approve?: boolean; mode?: PermissionMode }): Promise<void> {
+  private async onMessage(msg: { type: string; text?: string; id?: string; approve?: boolean; mode?: PermissionMode; reqId?: string; name?: string; base64?: string }): Promise<void> {
     if (msg.type === 'send') {
       if (!this.session) return;
       try {
@@ -137,10 +141,32 @@ export class SdkChatPanel {
       await this.session?.setModel(msg.id).catch((err) => {
         output.warn(`SdkChatPanel: setModel 실패 — ${err instanceof Error ? err.message : String(err)}`);
       });
+    } else if (msg.type === 'attachSave') {
+      await this.handleAttachSave(String(msg.reqId), String(msg.name ?? 'image'), String(msg.base64 ?? ''));
     }
   }
 
-  private post(msg: { type: 'ready'; sessionId: string; model?: string; injected?: boolean } | { type: 'event'; ev: ChatEvent } | { type: 'models'; list: ModelOption[] }): void {
+  // 첨부 이미지(6-5): webview가 보낸 base64를 프로젝트 .agentbridge/attachments/<sid>/ 아래로 복사하고
+  // cwd-상대경로를 회신한다(에이전트 샌드박스가 프로젝트 내부만 읽으므로). 기존 PTY ChatPanel과 동형.
+  private async handleAttachSave(reqId: string, name: string, base64: string): Promise<void> {
+    try {
+      const { attachmentPathFor, writeAttachment } = await import('../core/attachmentStore');
+      const safeName = (name || 'image').replace(/[\\/]/g, '_').slice(-150);
+      const filename = `${Date.now()}-${safeName}`;
+      const sid = this.session?.sessionId || 'no-session';
+      const absPath = attachmentPathFor(this.workspaceId || 'no-workspace', sid, filename);
+      await writeAttachment(absPath, base64);
+      const rel = path.relative(this.cwd, absPath);
+      const insertPath = rel && !rel.startsWith('..') && !path.isAbsolute(rel) ? rel : absPath;
+      output.log(`SdkChatPanel: attachment 저장 ${absPath} → "${insertPath}"`);
+      this.post({ type: 'attachSaved', reqId, name: safeName, path: insertPath });
+    } catch (err) {
+      output.warn(`SdkChatPanel: attachment 저장 실패 — ${err instanceof Error ? err.message : String(err)}`);
+      this.post({ type: 'attachSaved', reqId, name, path: null });
+    }
+  }
+
+  private post(msg: { type: 'ready'; sessionId: string; model?: string; injected?: boolean } | { type: 'event'; ev: ChatEvent } | { type: 'models'; list: ModelOption[] } | { type: 'attachSaved'; reqId: string; name: string; path: string | null }): void {
     void this.panel.webview.postMessage(msg);
   }
 
@@ -209,7 +235,11 @@ export class SdkChatPanel {
   .ay{background:var(--accent);color:#1b1b1d;font-weight:600} .an{background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground)}
 
   .inbox{position:relative;z-index:2;background:var(--vscode-input-background);border:1px solid var(--vscode-input-border,var(--vscode-panel-border));border-radius:14px;padding:4px 12px 8px}
-  .inbox .chips{display:flex;gap:6px;margin-bottom:6px}
+  .inbox .chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px}
+  .inbox .chips:empty{display:none}
+  .pend{display:inline-flex;align-items:center;gap:6px;background:var(--vscode-badge-background,var(--vscode-textBlockQuote-background));border:1px solid var(--vscode-input-border,var(--vscode-panel-border));border-radius:8px;padding:3px 7px;font-size:11px;color:var(--vscode-foreground)}
+  .pend .x{cursor:pointer;opacity:.65;font-size:10px}
+  .pend .x:hover{opacity:1}
   #input{display:block;width:100%;background:none;border:none;color:var(--vscode-input-foreground);font:inherit;resize:none;outline:none;min-height:26px;max-height:160px;line-height:1.5;overflow-y:auto}
   #input::placeholder{color:var(--vscode-input-placeholderForeground)}
   .ctrls{display:flex;align-items:center;gap:9px;margin-top:7px}
@@ -253,6 +283,7 @@ export class SdkChatPanel {
   </footer>
   <div id="modelMenu" class="menu"></div>
   <div id="slashMenu" class="menu"></div>
+  <input type="file" id="fileInput" accept="image/*" multiple style="display:none" />
 <script nonce="${nonce}">
   const vscode = acquireVsCodeApi();
   const log = document.getElementById('log');
@@ -309,6 +340,30 @@ export class SdkChatPanel {
   slashBtn.addEventListener('click', function(ev){ ev.stopPropagation(); if(slashMenu.style.display==='block') closeSlashMenu(); else openSlashMenu(); });
   document.addEventListener('click', function(){ closeModelMenu(); closeSlashMenu(); });
 
+  // 이미지 첨부(6-5) — + 버튼 → 파일선택 → base64로 읽어 호스트가 프로젝트로 복사 → 경로 회신 → 전송 시 경로 주입.
+  const attachBtn = document.getElementById('attachBtn');
+  const fileInput = document.getElementById('fileInput');
+  const chips = document.getElementById('chips');
+  var PENDING=[], attachReqs={}, attachSeq=0;
+  attachBtn.addEventListener('click', function(){ fileInput.click(); });
+  fileInput.addEventListener('change', function(){
+    var files = fileInput.files ? Array.prototype.slice.call(fileInput.files) : [];
+    files.forEach(function(f){
+      var reader=new FileReader();
+      reader.onload=function(){ var b64=String(reader.result||'').split(',')[1]||''; var reqId='att-'+(++attachSeq); attachReqs[reqId]=f.name; vscode.postMessage({type:'attachSave',reqId:reqId,name:f.name,base64:b64}); };
+      reader.readAsDataURL(f);
+    });
+    fileInput.value='';
+  });
+  function renderChips(){
+    chips.innerHTML='';
+    PENDING.forEach(function(a,i){
+      var c=el('span','pend'); c.appendChild(el('span',null,'🖼 '+a.name));
+      var x=el('span','x','✕'); x.addEventListener('click', function(){ PENDING.splice(i,1); renderChips(); }); c.appendChild(x);
+      chips.appendChild(c);
+    });
+  }
+
   function el(t,c,x){ var e=document.createElement(t); if(c)e.className=c; if(x!=null)e.textContent=x; return e; }
   function bottom(){ log.scrollTop = log.scrollHeight; }
   function esc(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
@@ -353,10 +408,17 @@ export class SdkChatPanel {
   function grow(){ input.style.height='auto'; input.style.height=Math.min(input.scrollHeight,160)+'px'; }
 
   function sendMsg(){
-    var text=input.value.trim(); if(!text||busy) return;
-    var t=el('div','turn user'); t.appendChild(el('div','msg',text)); log.appendChild(t);
-    input.value=''; input.style.height='auto'; setBusy(true); newAssistantTurn(); startWork(); bottom();
-    vscode.postMessage({type:'send',text:text});
+    var text=input.value.trim(); if((!text&&!PENDING.length)||busy) return;
+    var atts=PENDING.slice();
+    // 첨부 경로를 메시지에 주입(샌드박스가 프로젝트 내부만 읽으므로 복사된 경로를 전달).
+    var sent = atts.length ? (text? text+'\\n\\n':'') + atts.map(function(a){return a.path;}).join('\\n') : text;
+    var t=el('div','turn user');
+    atts.forEach(function(a){ t.appendChild(el('span','att','🖼 '+a.name)); });
+    if(text) t.appendChild(el('div','msg',text));
+    log.appendChild(t);
+    input.value=''; input.style.height='auto'; PENDING=[]; renderChips();
+    setBusy(true); newAssistantTurn(); startWork(); bottom();
+    vscode.postMessage({type:'send',text:sent});
   }
   sendBtn.addEventListener('click', function(){ busy? vscode.postMessage({type:'interrupt'}) : sendMsg(); });
   input.addEventListener('keydown', function(e){ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); sendMsg(); } else if(e.key==='Tab'&&e.shiftKey){ e.preventDefault(); cyclePerm(); } });
@@ -371,6 +433,7 @@ export class SdkChatPanel {
       setBusy(false); input.focus(); return;
     }
     if(msg.type==='models'){ MODELS=msg.list||[]; var cur=MODELS.filter(function(m){return m.current;})[0]; if(cur && modelPill.textContent==='Model') modelPill.textContent=cur.label; return; }
+    if(msg.type==='attachSaved'){ var nm=attachReqs[msg.reqId]||msg.name||'image'; delete attachReqs[msg.reqId]; if(msg.path){ PENDING.push({name:nm,path:msg.path}); renderChips(); } return; }
     if(msg.type!=='event') return;
     var ev=msg.ev;
     if(ev.t==='session'){ if(ev.model && !userPickedModel){ modelPill.textContent=cleanModel(ev.model); } }
