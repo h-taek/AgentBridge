@@ -293,11 +293,11 @@ export class SdkChatPanel {
   .mchk{color:var(--accent);font-weight:700;flex:none}
   .mdesc{font-size:11px;color:var(--vscode-descriptionForeground);opacity:.8;margin-top:2px;line-height:1.35}
   .msep{height:1px;background:var(--vscode-panel-border);margin:5px 4px}
-  .effort{padding:3px 10px 7px}
-  .elbl{font-size:11px;color:var(--vscode-descriptionForeground);margin-bottom:6px;text-transform:capitalize}
+  .effort{display:flex;align-items:center;padding:5px 10px 7px}
+  .elbl{font-size:11px;color:var(--vscode-descriptionForeground);text-transform:capitalize;flex:none}
   /* 알약 트랙 + accent 채움(--fill) + 흰색 손잡이, 포커스 노란테 제거 */
   /* 알약 트랙 + 정지점 점 + 흰 손잡이. 트랙(채움+점)은 .ertrack, range는 손잡이/조작만(투명 트랙) */
-  .erwrap{position:relative;height:16px}
+  .erwrap{position:relative;height:16px;width:120px;flex:none;margin-left:auto}
   .ertrack{position:absolute;inset:0;border-radius:999px;background:linear-gradient(to right,var(--accent) 0 var(--fill,50%),var(--vscode-scrollbarSlider-background,#3a3b40) var(--fill,50%) 100%)}
   .edot{position:absolute;top:50%;width:4px;height:4px;border-radius:50%;background:rgba(255,255,255,.45);transform:translate(-50%,-50%)}
   .edot.ultra{background:#b69cf5}
