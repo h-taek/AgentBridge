@@ -9,7 +9,7 @@ import { query, type Query, type SDKUserMessage, type PermissionResult, type Per
 import type { OpenTurn, ReaderCtx } from '../transcriptReader/types.js';
 import { finalizeTurn, toolArgString } from '../transcriptReader/util.js';
 import { AsyncQueue } from './asyncQueue.js';
-import type { AccountUsage, AgentAdapter, ChatEvent, LoginChallenge, PermissionMode, Session, StartOptions, UsageContributors, UsageLimit } from './types.js';
+import type { AccountUsage, AgentAdapter, AgentInfo, ChatEvent, LoginChallenge, McpServerInfo, PermissionMode, Session, StartOptions, UsageContributors, UsageLimit } from './types.js';
 
 // SDK Query의 인증 메서드는 .d.ts에 미노출(런타임 객체엔 존재) → 타입만 보강.
 type AuthQuery = {
@@ -286,6 +286,29 @@ export const claudeAdapter: AgentAdapter = {
           } catch { /* 실험 API 실패 — limits/contributors 생략 */ }
         }
         return { account, limits, contributors };
+      },
+      async listOutputStyles() {
+        const r = (await q.initializationResult()) as unknown as { output_style?: string; available_output_styles?: string[] };
+        return { current: r.output_style ?? 'default', available: r.available_output_styles ?? [] };
+      },
+      async setOutputStyle(style) {
+        await q.applyFlagSettings({ outputStyle: style });
+      },
+      async listMcpServers(): Promise<McpServerInfo[]> {
+        const list = (await q.mcpServerStatus()) as unknown as Array<{ name?: string; status?: string; tools?: unknown }>;
+        return (list ?? []).map((s) => ({
+          name: s.name ?? '',
+          connected: s.status === 'connected',
+          enabled: s.status !== 'disabled',
+          toolCount: Array.isArray(s.tools) ? s.tools.length : s.tools && typeof s.tools === 'object' ? Object.keys(s.tools).length : 0,
+        }));
+      },
+      async setMcpServerEnabled(name, enabled) {
+        await q.toggleMcpServer(name, enabled);
+      },
+      async listAgents(): Promise<AgentInfo[]> {
+        const a = (await q.supportedAgents()) as unknown as Array<{ name?: string; description?: string }>;
+        return (a ?? []).map((x) => ({ name: x.name ?? '', description: x.description }));
       },
       respondApproval(id, approve) {
         const resolve = approvals.get(id);

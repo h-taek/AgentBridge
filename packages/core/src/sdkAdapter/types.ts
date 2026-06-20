@@ -61,6 +61,19 @@ export interface AccountUsage {
   contributors?: { day: UsageContributors; week: UsageContributors }; // claude만(실험). 없으면 표/토글 숨김.
 }
 
+// MCP 서버(설정 2차) — 목록·토글. claude=mcpServerStatus()/toggleMcpServer / codex=mcpServerStatus/list.
+export interface McpServerInfo {
+  name: string;
+  connected: boolean;  // 현재 연결됨
+  enabled: boolean;    // 토글 상태(켜짐)
+  toolCount: number;
+}
+// 에이전트/스킬(설정 2차) — 표시용 목록. claude=supportedAgents() / codex=skills/list.
+export interface AgentInfo {
+  name: string;
+  description?: string;
+}
+
 export interface StartOptions {
   cwd: string;
   workspaceId: string;
@@ -88,6 +101,14 @@ export interface Session {
   setThinking(on: boolean): Promise<void>;
   // 계정·사용량 조회(설정 1차). claude=accountInfo()+usage_EXPERIMENTAL / codex=account/read(+rateLimits).
   getAccountUsage(): Promise<AccountUsage>;
+  // Output styles(설정 1차). claude=initializationResult()+applyFlagSettings({outputStyle}) / codex=미지원(빈 목록).
+  listOutputStyles(): Promise<{ current: string; available: string[] }>;
+  setOutputStyle(style: string): Promise<void>;
+  // MCP 서버(설정 2차). claude=mcpServerStatus()/toggleMcpServer / codex=mcpServerStatus/list(런타임 토글 미지원).
+  listMcpServers(): Promise<McpServerInfo[]>;
+  setMcpServerEnabled(name: string, enabled: boolean): Promise<void>;
+  // 에이전트/스킬 목록(설정 2차, 표시용). claude=supportedAgents() / codex=skills/list.
+  listAgents(): Promise<AgentInfo[]>;
   // 'approval' ChatEvent에 대한 응답 — 진행 중 턴이 이 호출까지 멈춰 있다.
   respondApproval(id: string, approve: boolean): void;
   // 로그인 여부 조회(미로그인=false) — 세션 시작 시 입력 차단/로그인 화면 판단용. claude=accountInfo / codex=account/read.

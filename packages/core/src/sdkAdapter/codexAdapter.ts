@@ -14,7 +14,7 @@ import { createInterface } from 'node:readline';
 import type { OpenTurn, ReaderCtx } from '../transcriptReader/types.js';
 import { finalizeTurn, toolArgString } from '../transcriptReader/util.js';
 import { AsyncQueue } from './asyncQueue.js';
-import type { AccountUsage, AgentAdapter, ChatEvent, LoginChallenge, PermissionMode, Session, StartOptions, UsageLimit } from './types.js';
+import type { AccountUsage, AgentAdapter, AgentInfo, ChatEvent, LoginChallenge, McpServerInfo, PermissionMode, Session, StartOptions, UsageLimit } from './types.js';
 
 type Pending = { resolve: (v: unknown) => void; reject: (e: unknown) => void };
 type ActiveTurn = { events: AsyncQueue<ChatEvent>; open: OpenTurn; turnId: string };
@@ -263,6 +263,32 @@ export const codexAdapter: AgentAdapter = {
             .map((w) => ({ label: codexWindowLabel(w.windowDurationMins), percent: w.usedPercent ?? 0, resetsAt: w.resetsAt ? new Date(w.resetsAt * 1000).toISOString() : null }));
         } catch { /* 미지원/실패 — 계정 정보만 */ }
         return { account, limits }; // codex는 contributors(기여도 분석) 없음
+      },
+      async listOutputStyles() {
+        return { current: '', available: [] }; // codex 미지원(config 기반, 별도 output style 없음)
+      },
+      async setOutputStyle() {
+        // codex 미지원 — no-op
+      },
+      async listMcpServers(): Promise<McpServerInfo[]> {
+        // mcpServerStatus/list: { data: [{ name, serverInfo, tools:{...} }] }
+        const r = (await request('mcpServerStatus/list', {}).catch(() => ({}))) as { data?: Array<{ name?: string; tools?: Record<string, unknown> }> };
+        return (r.data ?? []).map((s) => ({
+          name: s.name ?? '',
+          connected: true,
+          enabled: true,
+          toolCount: s.tools ? Object.keys(s.tools).length : 0,
+        }));
+      },
+      async setMcpServerEnabled() {
+        // codex는 런타임 토글 RPC가 없음(config 편집은 3차 보류) — no-op.
+      },
+      async listAgents(): Promise<AgentInfo[]> {
+        // skills/list: { data: [{ cwd, skills: [{ name, description, interface:{displayName}, enabled }] }] }
+        const r = (await request('skills/list', {}).catch(() => ({}))) as { data?: Array<{ skills?: Array<{ name?: string; description?: string; interface?: { displayName?: string } }> }> };
+        const out: AgentInfo[] = [];
+        for (const g of r.data ?? []) for (const s of g.skills ?? []) out.push({ name: s.interface?.displayName ?? s.name ?? '', description: s.description });
+        return out;
       },
       respondApproval(id, approve) {
         const rpcReqId = approvals.get(id);
