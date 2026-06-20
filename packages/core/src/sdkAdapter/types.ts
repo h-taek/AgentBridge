@@ -17,12 +17,11 @@ export type ChatEvent =
   | { t: 'turn_end'; reason: string }
   | { t: 'error'; message: string };
 
-// 권한 모드(6-2) — Claude Code식 Shift+Tab 3단계.
-//   default      = 위험한 작업은 매번 승인 요청
-//   acceptEdits  = 파일 편집은 자동 승인(나머지는 요청)
-//   plan         = 읽기/계획만, 변경 안 함
-// claude=네이티브 PermissionMode(부분집합) / codex=approvalPolicy로 매핑(다음 turn/start에 오버라이드).
-export type PermissionMode = 'default' | 'acceptEdits' | 'plan';
+// 권한 모드(6-2) — 에이전트별로 모드 세트가 다르다(라벨/개수). 각 어댑터가 자기 id만 처리.
+//   claude(4): default(Ask before edits) · acceptEdits(Edit automatically) · plan(Plan mode) · auto(Auto mode, 모델 분류기)
+//   codex(3) : default(Default permissions) · autoReview(Auto-review) · fullAccess(Full access)
+// claude=네이티브 PermissionMode로 매핑(setPermissionMode) / codex=approvalPolicy+sandboxPolicy로 매핑(turn/start 오버라이드).
+export type PermissionMode = 'default' | 'acceptEdits' | 'plan' | 'auto' | 'autoReview' | 'fullAccess';
 
 // 모델 선택(6-3) — 에이전트(회사) 내부 모델 전환용. id=API 모델값, label=표시명.
 export interface ModelOption {

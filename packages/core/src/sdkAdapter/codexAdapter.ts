@@ -20,12 +20,18 @@ type Pending = { resolve: (v: unknown) => void; reject: (e: unknown) => void };
 type ActiveTurn = { events: AsyncQueue<ChatEvent>; open: OpenTurn; turnId: string };
 type AnyMsg = { id?: number; method?: string; result?: unknown; error?: unknown; params?: Record<string, unknown> };
 
-// 권한 모드 → codex approvalPolicy. plan의 read-only sandbox 강제는 이번 슬라이스 범위 밖(approvalPolicy만).
-const APPROVAL_POLICY: Record<PermissionMode, string> = {
-  default: 'on-request',
-  acceptEdits: 'on-failure',
-  plan: 'untrusted',
-};
+// 권한 모드 → codex approvalPolicy + sandboxPolicy(turn/start 오버라이드). codex TUI의 3개 모드와 동일.
+//   default(Default permissions) · autoReview(Auto-review) · fullAccess(Full access).
+// turn/start.sandboxPolicy는 구조체(SandboxPolicy). 모드 전환 시 항상 명시해 이전 오버라이드를 리셋한다.
+function codexPerm(mode: PermissionMode, cwd: string): { approvalPolicy: string; sandboxPolicy: unknown } | null {
+  const workspaceWrite = { type: 'workspaceWrite', writableRoots: [cwd], networkAccess: false, excludeTmpdirEnvVar: false, excludeSlashTmp: false };
+  switch (mode) {
+    case 'default': return { approvalPolicy: 'on-request', sandboxPolicy: workspaceWrite };
+    case 'autoReview': return { approvalPolicy: 'on-failure', sandboxPolicy: workspaceWrite };
+    case 'fullAccess': return { approvalPolicy: 'never', sandboxPolicy: { type: 'dangerFullAccess' } };
+    default: return null; // claude 전용 모드 — 무시
+  }
+}
 
 const APPROVAL_TITLES: Record<string, string> = {
   'item/commandExecution/requestApproval': '명령 실행 승인',
@@ -45,7 +51,8 @@ export const codexAdapter: AgentAdapter = {
     const approvals = new Map<string, number>(); // approval id(=string rpcId) → 원본 rpc id (응답용)
     const ref: { current: ActiveTurn | null } = { current: null };
     let threadId = opts.resume ?? '';
-    let approvalPolicy = APPROVAL_POLICY.default; // 권한 모드(6-2) — 다음 turn/start에 실어 보냄
+    let approvalPolicy = 'on-request'; // 권한 모드(6-2) — 다음 turn/start에 실어 보냄
+    let sandboxPolicy: unknown = undefined; // 권한 모드 전환 시에만 설정(미설정=thread/start의 workspace-write)
     let model: string | null = null; // 모델(6-3) — null=codex 기본, 설정 시 다음 turn/start에 오버라이드
 
     const write = (msg: unknown): void => {
@@ -157,10 +164,11 @@ export const codexAdapter: AgentAdapter = {
         try {
           ref.current = active; // 응답 전에 잡아둠 — 델타가 turn/start 응답보다 먼저 와도 라우팅됨
           events.push({ t: 'session', sessionId: threadId });
-          // approvalPolicy·model 오버라이드 = 이번 턴+이후 적용(turn/start params). 권한 모드·모델 전환을 다음 턴에 반영.
+          // approvalPolicy·sandboxPolicy·model 오버라이드 = 이번 턴+이후 적용. 권한 모드·모델 전환을 다음 턴에 반영.
           const res = (await request('turn/start', {
             threadId,
             approvalPolicy,
+            ...(sandboxPolicy ? { sandboxPolicy } : {}),
             ...(model ? { model } : {}),
             input: [{ type: 'text', text, text_elements: [] }],
           })) as { turn?: { id?: string } };
@@ -185,7 +193,8 @@ export const codexAdapter: AgentAdapter = {
         if (cur) await request('turn/interrupt', { threadId, turnId: cur.turnId }).catch(() => undefined);
       },
       async setPermissionMode(mode) {
-        approvalPolicy = APPROVAL_POLICY[mode]; // 즉시 적용 아님 — 다음 turn/start부터(서버 오버라이드는 턴 단위).
+        const p = codexPerm(mode, opts.cwd); // 즉시 적용 아님 — 다음 turn/start부터(서버 오버라이드는 턴 단위).
+        if (p) { approvalPolicy = p.approvalPolicy; sandboxPolicy = p.sandboxPolicy; }
       },
       async listModels() {
         const res = (await request('model/list', {})) as { data?: Array<{ model?: string; displayName?: string; hidden?: boolean; isDefault?: boolean }> };

@@ -5,11 +5,19 @@
 // 백그라운드 pump가 SDKMessage→ChatEvent로 매핑해 "현재 턴" 큐에 흘리고, result에서 onTurn(TurnRecord)
 // 방출 후 턴을 닫는다. 턴은 직렬(turnGate)이라 ref.current 하나로 라우팅.
 // 본문 권위값: TurnRecord의 assistantBody는 최종 assistant 메시지에서만 채운다(델타는 라이브 표시용).
-import { query, type Query, type SDKUserMessage, type PermissionResult } from '@anthropic-ai/claude-agent-sdk';
+import { query, type Query, type SDKUserMessage, type PermissionResult, type PermissionMode as SdkPermissionMode } from '@anthropic-ai/claude-agent-sdk';
 import type { OpenTurn, ReaderCtx } from '../transcriptReader/types.js';
 import { finalizeTurn, toolArgString } from '../transcriptReader/util.js';
 import { AsyncQueue } from './asyncQueue.js';
-import type { AgentAdapter, ChatEvent, Session, StartOptions } from './types.js';
+import type { AgentAdapter, ChatEvent, PermissionMode, Session, StartOptions } from './types.js';
+
+// 우리 PermissionMode → SDK PermissionMode. claude가 처리하는 4개만(codex 전용 id는 undefined → 무시).
+const CLAUDE_MODE: Partial<Record<PermissionMode, SdkPermissionMode>> = {
+  default: 'default',
+  acceptEdits: 'acceptEdits',
+  plan: 'plan',
+  auto: 'auto',
+};
 
 type ActiveTurn = { events: AsyncQueue<ChatEvent>; open: OpenTurn };
 
@@ -156,8 +164,8 @@ export const claudeAdapter: AgentAdapter = {
         await q.interrupt();
       },
       async setPermissionMode(mode) {
-        // 우리 PermissionMode('default'|'acceptEdits'|'plan')는 SDK PermissionMode의 부분집합 → 그대로 전달.
-        await q.setPermissionMode(mode);
+        const m = CLAUDE_MODE[mode];
+        if (m) await q.setPermissionMode(m);
       },
       async listModels() {
         // 카탈로그는 별칭(default/opus[1m]/sonnet/haiku) — init의 풀 id와 안 맞으므로 '선택 별칭'으로 현재 표시.

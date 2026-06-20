@@ -118,7 +118,7 @@ export class SdkChatPanel {
     }
   }
 
-  private async onMessage(msg: { type: string; text?: string; id?: string; approve?: boolean; mode?: PermissionMode; reqId?: string; name?: string; base64?: string }): Promise<void> {
+  private async onMessage(msg: { type: string; text?: string; id?: string; approve?: boolean; mode?: PermissionMode }): Promise<void> {
     if (msg.type === 'send') {
       if (!this.session) return;
       try {
@@ -141,38 +141,49 @@ export class SdkChatPanel {
       await this.session?.setModel(msg.id).catch((err) => {
         output.warn(`SdkChatPanel: setModel 실패 — ${err instanceof Error ? err.message : String(err)}`);
       });
-    } else if (msg.type === 'attachSave') {
-      await this.handleAttachSave(String(msg.reqId), String(msg.name ?? 'image'), String(msg.base64 ?? ''));
+    } else if (msg.type === 'pickImage') {
+      await this.handlePickImage();
     }
   }
 
-  // 첨부 이미지(6-5): webview가 보낸 base64를 프로젝트 .agentbridge/attachments/<sid>/ 아래로 복사하고
-  // cwd-상대경로를 회신한다(에이전트 샌드박스가 프로젝트 내부만 읽으므로). 기존 PTY ChatPanel과 동형.
-  private async handleAttachSave(reqId: string, name: string, base64: string): Promise<void> {
-    try {
-      const { attachmentPathFor, writeAttachment } = await import('../core/attachmentStore');
-      const safeName = (name || 'image').replace(/[\\/]/g, '_').slice(-150);
-      const filename = `${Date.now()}-${safeName}`;
-      const sid = this.session?.sessionId || 'no-session';
-      const absPath = attachmentPathFor(this.workspaceId || 'no-workspace', sid, filename);
-      await writeAttachment(absPath, base64);
-      const rel = path.relative(this.cwd, absPath);
-      const insertPath = rel && !rel.startsWith('..') && !path.isAbsolute(rel) ? rel : absPath;
-      output.log(`SdkChatPanel: attachment 저장 ${absPath} → "${insertPath}"`);
-      this.post({ type: 'attachSaved', reqId, name: safeName, path: insertPath });
-    } catch (err) {
-      output.warn(`SdkChatPanel: attachment 저장 실패 — ${err instanceof Error ? err.message : String(err)}`);
-      this.post({ type: 'attachSaved', reqId, name, path: null });
+  // 첨부 이미지(6-5): 호스트 파일 다이얼로그로 이미지 선택 → 프로젝트 .agentbridge/attachments/<sid>/ 아래로 복사하고
+  // cwd-상대경로 + 썸네일용 dataUrl을 회신(에이전트 샌드박스가 프로젝트 내부만 읽으므로). attachmentStore는 기존 PTY와 동형.
+  private async handlePickImage(): Promise<void> {
+    const picks = await vscode.window.showOpenDialog({
+      canSelectMany: true,
+      openLabel: 'Attach',
+      filters: { Images: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg'] },
+    });
+    if (!picks?.length) return;
+    const { attachmentPathFor, writeAttachment } = await import('../core/attachmentStore');
+    for (const uri of picks) {
+      try {
+        const base64 = (await fs.promises.readFile(uri.fsPath)).toString('base64');
+        const name = path.basename(uri.fsPath);
+        const safeName = name.replace(/[\\/]/g, '_').slice(-150);
+        const filename = `${Date.now()}-${safeName}`;
+        const sid = this.session?.sessionId || 'no-session';
+        const absPath = attachmentPathFor(this.workspaceId || 'no-workspace', sid, filename);
+        await writeAttachment(absPath, base64);
+        const rel = path.relative(this.cwd, absPath);
+        const insertPath = rel && !rel.startsWith('..') && !path.isAbsolute(rel) ? rel : absPath;
+        const ext = (name.split('.').pop() || 'png').toLowerCase();
+        const mime = ext === 'jpg' ? 'jpeg' : ext === 'svg' ? 'svg+xml' : ext;
+        output.log(`SdkChatPanel: attachment 저장 ${absPath} → "${insertPath}"`);
+        this.post({ type: 'attachAdded', name: safeName, path: insertPath, dataUrl: `data:image/${mime};base64,${base64}` });
+      } catch (err) {
+        output.warn(`SdkChatPanel: attachment 저장 실패 — ${err instanceof Error ? err.message : String(err)}`);
+      }
     }
   }
 
-  private post(msg: { type: 'ready'; sessionId: string; model?: string; injected?: boolean } | { type: 'event'; ev: ChatEvent } | { type: 'models'; list: ModelOption[] } | { type: 'attachSaved'; reqId: string; name: string; path: string | null }): void {
+  private post(msg: { type: 'ready'; sessionId: string; model?: string; injected?: boolean } | { type: 'event'; ev: ChatEvent } | { type: 'models'; list: ModelOption[] } | { type: 'attachAdded'; name: string; path: string; dataUrl: string }): void {
     void this.panel.webview.postMessage(msg);
   }
 
   private html(_webview: vscode.Webview): string {
     const nonce = makeNonce();
-    const csp = `default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';`;
+    const csp = `default-src 'none'; style-src 'unsafe-inline'; img-src data:; script-src 'nonce-${nonce}';`;
     return `<!doctype html><html lang="en"><head>
 <meta charset="utf-8" />
 <meta http-equiv="Content-Security-Policy" content="${csp}" />
@@ -234,13 +245,19 @@ export class SdkChatPanel {
   .approval button{font:inherit;padding:6px 16px;border-radius:8px;border:none;cursor:pointer}
   .ay{background:var(--accent);color:#1b1b1d;font-weight:600} .an{background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground)}
 
-  .inbox{position:relative;z-index:2;background:var(--vscode-input-background);border:1px solid var(--vscode-input-border,var(--vscode-panel-border));border-radius:14px;padding:4px 12px 8px}
-  .inbox .chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px}
+  /* 입력바 외곽선 = 권한 모드 색(#7). default=포인트색 / edit자동·auto-review=흰색 / plan=파랑 / auto·full=빨강 */
+  .inbox{position:relative;z-index:2;background:var(--vscode-input-background);border:1.5px solid var(--accent);border-radius:14px;padding:12px 12px 8px;transition:border-color .15s}
+  body[data-perm="acceptEdits"] .inbox,body[data-perm="autoReview"] .inbox{border-color:#e8e8e8}
+  body[data-perm="plan"] .inbox{border-color:#5d8af9}
+  body[data-perm="auto"] .inbox,body[data-perm="fullAccess"] .inbox{border-color:#e0564f}
+  .inbox .chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}
   .inbox .chips:empty{display:none}
-  .pend{display:inline-flex;align-items:center;gap:6px;background:var(--vscode-badge-background,var(--vscode-textBlockQuote-background));border:1px solid var(--vscode-input-border,var(--vscode-panel-border));border-radius:8px;padding:3px 7px;font-size:11px;color:var(--vscode-foreground)}
+  .pend{display:inline-flex;align-items:center;gap:6px;background:var(--vscode-badge-background,var(--vscode-textBlockQuote-background));border:1px solid var(--vscode-input-border,var(--vscode-panel-border));border-radius:8px;padding:3px 7px 3px 4px;font-size:11px;color:var(--vscode-foreground)}
   .pend .x{cursor:pointer;opacity:.65;font-size:10px}
   .pend .x:hover{opacity:1}
-  #input{display:block;width:100%;background:none;border:none;color:var(--vscode-input-foreground);font:inherit;resize:none;outline:none;min-height:26px;max-height:160px;line-height:1.5;overflow-y:auto}
+  .thumb{width:30px;height:30px;border-radius:5px;object-fit:cover;flex:none;display:block}
+  .att .thumb{width:120px;height:auto;max-height:140px}
+  #input{display:block;width:100%;background:none;border:none;color:var(--vscode-input-foreground);font:inherit;resize:none;outline:none;min-height:44px;max-height:200px;line-height:1.5;overflow-y:auto}
   #input::placeholder{color:var(--vscode-input-placeholderForeground)}
   .ctrls{display:flex;align-items:center;gap:9px;margin-top:7px}
   .ic{height:26px;min-width:24px;padding:0 2px;border-radius:7px;border:none;background:none;color:var(--vscode-foreground);cursor:pointer;font-size:17px;font-weight:700;line-height:1}
@@ -255,7 +272,7 @@ export class SdkChatPanel {
   #send.stop{background:var(--vscode-inputValidation-errorBorder,#d65b5b);color:#fff}
   .err{color:var(--vscode-errorForeground);font-size:12px;white-space:pre-wrap}
 </style></head>
-<body data-model="claude">
+<body data-model="claude" data-perm="default">
   <header>
     <span class="title">AgentBridge</span>
     <span class="badge" id="badge">claude</span>
@@ -275,7 +292,7 @@ export class SdkChatPanel {
           <button class="ic" id="slashBtn" title="Slash commands"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M16 5L8 19"/></svg></button>
           <span class="pill" id="modelPill" title="Model">Model</span>
           <span class="sp"></span>
-          <span class="pill" id="permPill" title="Permission mode · Shift+Tab">default</span>
+          <span class="pill" id="permPill" title="Permission mode · Shift+Tab">Ask before edits</span>
           <button id="send" title="Send" disabled><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20V6M6 12l6-6 6 6"/></svg></button>
         </div>
       </div>
@@ -283,7 +300,6 @@ export class SdkChatPanel {
   </footer>
   <div id="modelMenu" class="menu"></div>
   <div id="slashMenu" class="menu"></div>
-  <input type="file" id="fileInput" accept="image/*" multiple style="display:none" />
 <script nonce="${nonce}">
   const vscode = acquireVsCodeApi();
   const log = document.getElementById('log');
@@ -294,9 +310,16 @@ export class SdkChatPanel {
   const STATUS = { thinking:'Thinking…', working:'Working…', responding:'Responding…' };
   let cur = null, work = null, busy = false;
 
-  // 권한 모드(6-2) — Shift+Tab / 칩 클릭으로 순환. 호스트가 claude=setPermissionMode / codex=approvalPolicy로 매핑.
-  var PERM=['default','acceptEdits','plan'], PERM_LBL={'default':'default','acceptEdits':'accept edits','plan':'plan'}, permIdx=0;
-  function cyclePerm(){ permIdx=(permIdx+1)%PERM.length; var m=PERM[permIdx]; permPill.textContent=PERM_LBL[m]; vscode.postMessage({type:'setPermissionMode',mode:m}); }
+  // 권한 모드(6-2) — 에이전트별 모드 세트(claude 4 / codex 3). Shift+Tab·칩 클릭으로 순환.
+  // body[data-perm]으로 입력바 외곽선 색 전환. 호스트가 claude=setPermissionMode / codex=approvalPolicy+sandbox로 매핑.
+  var PERM_SETS={
+    claude:[{id:'default',label:'Ask before edits'},{id:'acceptEdits',label:'Edit automatically'},{id:'plan',label:'Plan mode'},{id:'auto',label:'Auto mode'}],
+    codex:[{id:'default',label:'Default permissions'},{id:'autoReview',label:'Auto-review'},{id:'fullAccess',label:'Full access'}]
+  };
+  var permList=PERM_SETS.claude, permIdx=0;
+  function showPerm(){ var m=permList[permIdx]; permPill.textContent=m.label; document.body.dataset.perm=m.id; }
+  function initPerm(model){ permList=PERM_SETS[model]||PERM_SETS.claude; permIdx=0; showPerm(); }
+  function cyclePerm(){ permIdx=(permIdx+1)%permList.length; showPerm(); vscode.postMessage({type:'setPermissionMode',mode:permList[permIdx].id}); }
   permPill.addEventListener('click', cyclePerm);
 
   // 모델 선택(6-3) — 호스트가 listModels로 채운 목록을 칩 클릭 시 팝업으로. 선택 → setModel.
@@ -325,9 +348,11 @@ export class SdkChatPanel {
   var SLASH=[];
   function closeSlashMenu(){ slashMenu.style.display='none'; }
   function openSlashMenu(){
-    if(!SLASH.length) return;
     slashMenu.innerHTML='';
-    SLASH.forEach(function(c){
+    if(!SLASH.length){
+      var hint=el('div','mitem','Send a message first to load commands'); hint.style.opacity='.6'; hint.style.cursor='default';
+      slashMenu.appendChild(hint);
+    } else SLASH.forEach(function(c){
       var it=el('div','mitem','/'+c);
       it.addEventListener('click', function(ev){ ev.stopPropagation(); input.value='/'+c+' '; grow(); input.focus(); closeSlashMenu(); });
       slashMenu.appendChild(it);
@@ -340,25 +365,17 @@ export class SdkChatPanel {
   slashBtn.addEventListener('click', function(ev){ ev.stopPropagation(); if(slashMenu.style.display==='block') closeSlashMenu(); else openSlashMenu(); });
   document.addEventListener('click', function(){ closeModelMenu(); closeSlashMenu(); });
 
-  // 이미지 첨부(6-5) — + 버튼 → 파일선택 → base64로 읽어 호스트가 프로젝트로 복사 → 경로 회신 → 전송 시 경로 주입.
+  // 이미지 첨부(6-5) — + 버튼 → 호스트 파일 다이얼로그 → 프로젝트로 복사 → 경로+썸네일(dataUrl) 회신 → 전송 시 경로 주입.
   const attachBtn = document.getElementById('attachBtn');
-  const fileInput = document.getElementById('fileInput');
   const chips = document.getElementById('chips');
-  var PENDING=[], attachReqs={}, attachSeq=0;
-  attachBtn.addEventListener('click', function(){ fileInput.click(); });
-  fileInput.addEventListener('change', function(){
-    var files = fileInput.files ? Array.prototype.slice.call(fileInput.files) : [];
-    files.forEach(function(f){
-      var reader=new FileReader();
-      reader.onload=function(){ var b64=String(reader.result||'').split(',')[1]||''; var reqId='att-'+(++attachSeq); attachReqs[reqId]=f.name; vscode.postMessage({type:'attachSave',reqId:reqId,name:f.name,base64:b64}); };
-      reader.readAsDataURL(f);
-    });
-    fileInput.value='';
-  });
+  var PENDING=[];
+  attachBtn.addEventListener('click', function(){ vscode.postMessage({type:'pickImage'}); });
+  function thumb(a){ if(!a.dataUrl) return null; var im=document.createElement('img'); im.className='thumb'; im.src=a.dataUrl; return im; }
   function renderChips(){
     chips.innerHTML='';
     PENDING.forEach(function(a,i){
-      var c=el('span','pend'); c.appendChild(el('span',null,'🖼 '+a.name));
+      var c=el('span','pend'); var im=thumb(a); if(im) c.appendChild(im); else c.appendChild(el('span',null,'🖼'));
+      c.appendChild(el('span',null,a.name));
       var x=el('span','x','✕'); x.addEventListener('click', function(){ PENDING.splice(i,1); renderChips(); }); c.appendChild(x);
       chips.appendChild(c);
     });
@@ -413,7 +430,7 @@ export class SdkChatPanel {
     // 첨부 경로를 메시지에 주입(샌드박스가 프로젝트 내부만 읽으므로 복사된 경로를 전달).
     var sent = atts.length ? (text? text+'\\n\\n':'') + atts.map(function(a){return a.path;}).join('\\n') : text;
     var t=el('div','turn user');
-    atts.forEach(function(a){ t.appendChild(el('span','att','🖼 '+a.name)); });
+    atts.forEach(function(a){ var ac=el('span','att'); var im=thumb(a); if(im) ac.appendChild(im); else ac.appendChild(el('span',null,'🖼')); ac.appendChild(el('span',null,a.name)); t.appendChild(ac); });
     if(text) t.appendChild(el('div','msg',text));
     log.appendChild(t);
     input.value=''; input.style.height='auto'; PENDING=[]; renderChips();
@@ -429,11 +446,11 @@ export class SdkChatPanel {
   window.addEventListener('message', function(event){
     var msg=event.data;
     if(msg.type==='ready'){
-      if(msg.model){ document.body.dataset.model=msg.model; document.getElementById('badge').textContent=msg.model; }
+      if(msg.model){ document.body.dataset.model=msg.model; document.getElementById('badge').textContent=msg.model; initPerm(msg.model); }
       setBusy(false); input.focus(); return;
     }
-    if(msg.type==='models'){ MODELS=msg.list||[]; var cur=MODELS.filter(function(m){return m.current;})[0]; if(cur && modelPill.textContent==='Model') modelPill.textContent=cur.label; return; }
-    if(msg.type==='attachSaved'){ var nm=attachReqs[msg.reqId]||msg.name||'image'; delete attachReqs[msg.reqId]; if(msg.path){ PENDING.push({name:nm,path:msg.path}); renderChips(); } return; }
+    if(msg.type==='models'){ MODELS=msg.list||[]; var curM=MODELS.filter(function(m){return m.current;})[0]; if(curM && modelPill.textContent==='Model') modelPill.textContent=curM.label; return; }
+    if(msg.type==='attachAdded'){ PENDING.push({name:msg.name,path:msg.path,dataUrl:msg.dataUrl}); renderChips(); return; }
     if(msg.type!=='event') return;
     var ev=msg.ev;
     if(ev.t==='session'){ if(ev.model && !userPickedModel){ modelPill.textContent=cleanModel(ev.model); } }
