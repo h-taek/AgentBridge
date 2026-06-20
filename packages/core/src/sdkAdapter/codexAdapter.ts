@@ -20,6 +20,13 @@ type Pending = { resolve: (v: unknown) => void; reject: (e: unknown) => void };
 type ActiveTurn = { events: AsyncQueue<ChatEvent>; open: OpenTurn; turnId: string };
 type AnyMsg = { id?: number; method?: string; result?: unknown; error?: unknown; params?: Record<string, unknown> };
 
+const APPROVAL_TITLES: Record<string, string> = {
+  'item/commandExecution/requestApproval': '명령 실행 승인',
+  'item/fileChange/requestApproval': '파일 변경 승인',
+  execCommandApproval: '명령 실행 승인',
+  applyPatchApproval: '파일 변경 승인',
+};
+
 export const codexAdapter: AgentAdapter = {
   id: 'codex',
   async start(opts: StartOptions): Promise<Session> {
@@ -28,6 +35,7 @@ export const codexAdapter: AgentAdapter = {
 
     let rpcId = 0;
     const pending = new Map<number, Pending>();
+    const approvals = new Map<string, number>(); // approval id(=string rpcId) → 원본 rpc id (응답용)
     const ref: { current: ActiveTurn | null } = { current: null };
     let threadId = opts.resume ?? '';
 
@@ -60,10 +68,17 @@ export const codexAdapter: AgentAdapter = {
         }
         return;
       }
-      // 2) 서버→클라 요청(승인) — 5단계 전까지 안전 기본값(denied) 응답 + 이벤트로 노출. TODO 5단계: 실제 승인 UI.
+      // 2) 서버→클라 요청(승인 — 5단계). 'approval' 이벤트로 띄우고 respondApproval(id, approve)까지 대기.
       if (m.method && m.id != null) {
-        ref.current?.events.push({ t: 'tool', id: String(m.id), name: `approval:${m.method}`, input: m.params, status: 'started' });
-        write({ jsonrpc: '2.0', id: m.id, result: { decision: 'denied' } });
+        const id = String(m.id);
+        approvals.set(id, m.id);
+        ref.current?.events.push({
+          t: 'approval',
+          id,
+          title: APPROVAL_TITLES[m.method] ?? m.method,
+          detail: JSON.stringify(m.params ?? {}).slice(0, 300),
+          tool: m.method,
+        });
         return;
       }
       // 3) 알림
@@ -153,6 +168,13 @@ export const codexAdapter: AgentAdapter = {
       async interrupt() {
         const cur = ref.current;
         if (cur) await request('turn/interrupt', { threadId, turnId: cur.turnId }).catch(() => undefined);
+      },
+      respondApproval(id, approve) {
+        const rpcReqId = approvals.get(id);
+        if (rpcReqId != null) {
+          approvals.delete(id);
+          write({ jsonrpc: '2.0', id: rpcReqId, result: { decision: approve ? 'approved' : 'denied' } });
+        }
       },
       async end() {
         try {

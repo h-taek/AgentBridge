@@ -111,7 +111,7 @@ export class SdkChatPanel {
     }
   }
 
-  private async onMessage(msg: { type: string; text?: string }): Promise<void> {
+  private async onMessage(msg: { type: string; text?: string; id?: string; approve?: boolean }): Promise<void> {
     if (msg.type === 'send') {
       if (!this.session) return;
       try {
@@ -124,6 +124,8 @@ export class SdkChatPanel {
       }
     } else if (msg.type === 'interrupt') {
       await this.session?.interrupt().catch(() => { /* nothing in flight */ });
+    } else if (msg.type === 'respondApproval') {
+      this.session?.respondApproval(String(msg.id), Boolean(msg.approve));
     }
   }
 
@@ -153,6 +155,13 @@ export class SdkChatPanel {
   .thinking { font-size:12px; opacity:.65; border-left:2px solid var(--vscode-panel-border); padding:2px 0 2px 8px; white-space:pre-wrap; }
   .tool { font-size:12px; font-family:var(--vscode-editor-font-family),monospace; color:var(--vscode-textLink-foreground);
     background:var(--vscode-textCodeBlock-background); border-radius:5px; padding:3px 7px; }
+  .approval { border:1px solid var(--vscode-inputValidation-warningBorder,#cc9); background:var(--vscode-inputValidation-warningBackground,rgba(200,180,0,.08)); border-radius:7px; padding:8px 10px; }
+  .approval-title { font-weight:600; font-size:12px; }
+  .approval-detail { font-size:11px; opacity:.75; font-family:var(--vscode-editor-font-family),monospace; white-space:pre-wrap; margin:4px 0; max-height:120px; overflow:auto; }
+  .approval-actions { display:flex; gap:6px; margin-top:4px; }
+  .approval-actions button { font:inherit; padding:4px 12px; border-radius:6px; border:1px solid transparent; cursor:pointer; }
+  .ap-yes { background:var(--vscode-button-background); color:var(--vscode-button-foreground); }
+  .ap-no { background:var(--vscode-button-secondaryBackground); color:var(--vscode-button-secondaryForeground); }
   .caret { display:inline-block; width:6px; height:14px; background:var(--vscode-editor-foreground); margin-left:1px; vertical-align:-2px; animation:blink 1s steps(2) infinite; }
   @keyframes blink { 50% { opacity:0; } }
   footer { border-top:1px solid var(--vscode-panel-border); padding:8px 10px; display:flex; gap:6px; align-items:flex-end; }
@@ -229,6 +238,16 @@ export class SdkChatPanel {
       if (cur) { if (!cur.thinking) { cur.thinking = el('div', 'thinking', ''); cur.turn.insertBefore(cur.thinking, cur.bubble); } cur.thinking.textContent += ev.text; bottom(); }
     } else if (ev.t === 'tool') {
       if (cur) { cur.turn.insertBefore(el('div', 'tool', ev.name + '  ' + JSON.stringify(ev.input).slice(0, 80)), cur.bubble); bottom(); }
+    } else if (ev.t === 'approval') {
+      const box = el('div', 'approval');
+      box.appendChild(el('div', 'approval-title', '🔐 ' + ev.title));
+      if (ev.detail) box.appendChild(el('div', 'approval-detail', ev.detail));
+      const row = el('div', 'approval-actions');
+      const yes = el('button', 'ap-yes', '승인'); const no = el('button', 'ap-no', '거부');
+      yes.addEventListener('click', function () { vscode.postMessage({ type: 'respondApproval', id: ev.id, approve: true }); box.remove(); });
+      no.addEventListener('click', function () { vscode.postMessage({ type: 'respondApproval', id: ev.id, approve: false }); box.remove(); });
+      row.appendChild(yes); row.appendChild(no); box.appendChild(row);
+      (cur ? cur.turn : log).appendChild(box); bottom();
     } else if (ev.t === 'turn_end') {
       endTurn();
     } else if (ev.t === 'error') {

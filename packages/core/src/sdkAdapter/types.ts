@@ -10,6 +10,8 @@ export type ChatEvent =
   | { t: 'thinking'; text: string }
   | { t: 'tool'; id: string; name: string; input: unknown; status: 'started' | 'done'; output?: unknown }
   | { t: 'usage'; inputTokens: number; outputTokens: number }
+  // 승인 요청(5단계) — 호스트가 UI로 띄우고 respondApproval(id, approve)로 응답할 때까지 턴이 멈춘다.
+  | { t: 'approval'; id: string; title: string; detail: string; tool: string }
   | { t: 'turn_end'; reason: string }
   | { t: 'error'; message: string };
 
@@ -29,6 +31,8 @@ export interface Session {
   // 턴은 직렬: 이전 턴이 끝나야 다음 send가 시작된다.
   send(text: string): AsyncIterable<ChatEvent>;
   interrupt(): Promise<void>; // 진행 중 턴 중단 (streaming-input 전용 — SDK Query.interrupt)
+  // 'approval' ChatEvent에 대한 응답 — 진행 중 턴이 이 호출까지 멈춰 있다.
+  respondApproval(id: string, approve: boolean): void;
   end(): Promise<void>; // 입력 스트림을 닫아 세션 종료
 }
 

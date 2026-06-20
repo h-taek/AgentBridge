@@ -5,7 +5,7 @@
 // 백그라운드 pump가 SDKMessage→ChatEvent로 매핑해 "현재 턴" 큐에 흘리고, result에서 onTurn(TurnRecord)
 // 방출 후 턴을 닫는다. 턴은 직렬(turnGate)이라 ref.current 하나로 라우팅.
 // 본문 권위값: TurnRecord의 assistantBody는 최종 assistant 메시지에서만 채운다(델타는 라이브 표시용).
-import { query, type Query, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
+import { query, type Query, type SDKUserMessage, type PermissionResult } from '@anthropic-ai/claude-agent-sdk';
 import type { OpenTurn, ReaderCtx } from '../transcriptReader/types.js';
 import { finalizeTurn, toolArgString } from '../transcriptReader/util.js';
 import { AsyncQueue } from './asyncQueue.js';
@@ -17,6 +17,17 @@ export const claudeAdapter: AgentAdapter = {
   id: 'claude',
   async start(opts: StartOptions): Promise<Session> {
     const input = new AsyncQueue<SDKUserMessage>();
+
+    let sessionId = opts.resume ?? '';
+    let model: string | undefined;
+
+    // 현재 진행 중인 턴. 턴 직렬(turnGate)이라 단일 슬롯으로 충분.
+    // 객체 슬롯으로 보관 — IIFE pump에서 `let` 직접 읽기는 enclosing CFA가 never로 좁히는 TS 이슈를 피함.
+    const ref: { current: ActiveTurn | null } = { current: null };
+
+    // 승인 대기 resolver (5단계) — canUseTool이 'approval' 이벤트를 내고 여기 promise를 건다.
+    const approvals = new Map<string, (r: PermissionResult) => void>();
+
     const q: Query = query({
       prompt: input,
       options: {
@@ -27,15 +38,21 @@ export const claudeAdapter: AgentAdapter = {
         ...(opts.context
           ? { systemPrompt: { type: 'preset' as const, preset: 'claude_code' as const, append: opts.context } }
           : {}),
+        // 승인(5단계): 도구 실행 권한 요청 → 'approval' 이벤트 방출 후 respondApproval까지 대기.
+        canUseTool: (toolName, toolInput, o) =>
+          new Promise<PermissionResult>((resolve) => {
+            const id = o.toolUseID;
+            approvals.set(id, resolve);
+            ref.current?.events.push({
+              t: 'approval',
+              id,
+              title: o.title ?? `${toolName} 실행 승인`,
+              detail: o.description ?? toolArgString(toolInput),
+              tool: toolName,
+            });
+          }),
       },
     });
-
-    let sessionId = opts.resume ?? '';
-    let model: string | undefined;
-
-    // 현재 진행 중인 턴. 턴 직렬(turnGate)이라 단일 슬롯으로 충분.
-    // 객체 슬롯으로 보관 — IIFE pump에서 `let` 직접 읽기는 enclosing CFA가 never로 좁히는 TS 이슈를 피함.
-    const ref: { current: ActiveTurn | null } = { current: null };
 
     // 백그라운드 소비 루프.
     const pump = (async () => {
@@ -132,6 +149,13 @@ export const claudeAdapter: AgentAdapter = {
       send,
       async interrupt() {
         await q.interrupt();
+      },
+      respondApproval(id, approve) {
+        const resolve = approvals.get(id);
+        if (resolve) {
+          approvals.delete(id);
+          resolve(approve ? { behavior: 'allow' } : { behavior: 'deny', message: '사용자가 거부함' });
+        }
       },
       async end() {
         input.close();
