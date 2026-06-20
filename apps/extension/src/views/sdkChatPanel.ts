@@ -145,13 +145,14 @@ export class SdkChatPanel {
   body[data-model="codex"]{--accent:#5D8AF9;--accent-bright:#9ab8ff}
   body[data-model="agy"]{--accent:#8e6cef;--accent-bright:#b69cf5}
   *{box-sizing:border-box}
-  body{margin:0;height:100vh;display:flex;flex-direction:column;
-    font:13px/1.6 var(--vscode-font-family);color:var(--vscode-editor-foreground);background:var(--vscode-editor-background)}
-  header{display:flex;gap:8px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--vscode-panel-border)}
-  .title{font-weight:600}
-  .badge{background:var(--accent);color:#1b1b1d;border-radius:999px;padding:2px 8px;font-size:10px;font-weight:800;letter-spacing:.2px;text-transform:capitalize}
+  body{margin:0;padding:0;height:100vh;display:flex;flex-direction:column;
+    font:13px/1.6 var(--vscode-font-family);color:var(--vscode-foreground);background:var(--vscode-sideBar-background,var(--vscode-editor-background))}
+  header{display:flex;gap:7px;align-items:center;padding:1px 10px;border-bottom:1px solid var(--vscode-panel-border)}
+  .title{font-weight:500;font-size:12px}
+  .badge{background:var(--accent);color:#1b1b1d;border-radius:999px;padding:1px 5px;font-size:11px;font-weight:800;letter-spacing:.2px;text-transform:capitalize;line-height:1.35}
   .sp{flex:1}
-  .hbtn{width:28px;height:28px;display:inline-flex;align-items:center;justify-content:center;border:none;background:none;color:var(--vscode-descriptionForeground);cursor:pointer;border-radius:7px}
+  .hbtn{width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;border:none;background:none;color:var(--vscode-foreground);cursor:pointer;border-radius:7px}
+  #newBtn{margin-left:-5px}
   .hbtn:hover{background:var(--vscode-toolbar-hoverBackground)}
 
   #log{flex:1;overflow-y:auto;padding:18px 16px;display:flex;flex-direction:column;gap:16px}
@@ -184,7 +185,7 @@ export class SdkChatPanel {
   @keyframes shim{from{background-position:140% 0}to{background-position:-140% 0}}
   .wmeta{color:var(--vscode-descriptionForeground);opacity:.7;font-size:12px}
 
-  footer{padding:6px 14px 14px}
+  footer{padding:6px 8px 12px}
   .dock{position:relative}
   @keyframes rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
   .approval{position:relative;z-index:1;margin:0 30px -30px;display:flex;flex-direction:column;gap:10px;
@@ -196,15 +197,16 @@ export class SdkChatPanel {
   .approval button{font:inherit;padding:6px 16px;border-radius:8px;border:none;cursor:pointer}
   .ay{background:var(--accent);color:#1b1b1d;font-weight:600} .an{background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground)}
 
-  .inbox{position:relative;z-index:2;background:var(--vscode-input-background);border:1px solid var(--vscode-input-border,var(--vscode-panel-border));border-radius:14px;padding:8px 10px 6px}
+  .inbox{position:relative;z-index:2;background:var(--vscode-input-background);border:1px solid var(--vscode-input-border,var(--vscode-panel-border));border-radius:14px;padding:4px 12px 8px}
   .inbox .chips{display:flex;gap:6px;margin-bottom:6px}
-  #input{width:100%;background:none;border:none;color:var(--vscode-input-foreground);font:inherit;resize:none;outline:none;min-height:24px;max-height:160px}
+  #input{display:block;width:100%;background:none;border:none;color:var(--vscode-input-foreground);font:inherit;resize:none;outline:none;min-height:26px;max-height:160px;line-height:1.5;overflow-y:auto}
   #input::placeholder{color:var(--vscode-input-placeholderForeground)}
-  .ctrls{display:flex;align-items:center;gap:6px;margin-top:5px}
-  .ic{height:26px;min-width:26px;padding:0 6px;border-radius:8px;border:none;background:none;color:var(--vscode-descriptionForeground);cursor:pointer;font-size:13px}
+  .ctrls{display:flex;align-items:center;gap:9px;margin-top:7px}
+  .ic{height:26px;min-width:24px;padding:0 2px;border-radius:7px;border:none;background:none;color:var(--vscode-foreground);cursor:pointer;font-size:17px;font-weight:700;line-height:1}
   .ic:hover{background:var(--vscode-toolbar-hoverBackground)}
-  .pill{font-size:11px;color:var(--vscode-descriptionForeground);border:1px solid var(--vscode-input-border,var(--vscode-panel-border));border-radius:8px;padding:3px 8px;cursor:pointer}
-  #send{height:28px;min-width:28px;border-radius:8px;border:none;background:var(--accent);color:#1b1b1d;cursor:pointer;font-weight:700}
+  .pill{font-size:12px;font-weight:700;color:var(--vscode-foreground);border:none;border-radius:7px;padding:3px 6px;cursor:pointer}
+  .pill:hover{background:var(--vscode-toolbar-hoverBackground)}
+  #send{height:28px;min-width:32px;padding:0 8px;border-radius:8px;border:none;background:var(--accent);color:#1b1b1d;cursor:pointer;display:inline-flex;align-items:center;justify-content:center}
   #send.stop{background:var(--vscode-inputValidation-errorBorder,#d65b5b);color:#fff}
   .err{color:var(--vscode-errorForeground);font-size:12px;white-space:pre-wrap}
 </style></head>
@@ -213,8 +215,8 @@ export class SdkChatPanel {
     <span class="title">AgentBridge</span>
     <span class="badge" id="badge">claude</span>
     <span class="sp"></span>
-    <button class="hbtn" id="histBtn" title="History"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></button>
-    <button class="hbtn" id="newBtn" title="New session"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
+    <button class="hbtn" id="histBtn" title="History"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></button>
+    <button class="hbtn" id="newBtn" title="New session"><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
   </header>
   <div id="log"></div>
   <footer>
@@ -222,14 +224,14 @@ export class SdkChatPanel {
       <div id="approvalSlot"></div>
       <div class="inbox">
         <div class="chips" id="chips"></div>
-        <textarea id="input" placeholder="Message…   (Enter to send · Shift+Enter for newline)" disabled></textarea>
+        <textarea id="input" rows="1" placeholder="Message…  (Enter to send · Shift+Enter newline)" disabled></textarea>
         <div class="ctrls">
-          <button class="ic" id="attachBtn" title="Attach image">＋</button>
-          <button class="ic" id="slashBtn" title="Slash commands">/</button>
+          <button class="ic" id="attachBtn" title="Attach image"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
+          <button class="ic" id="slashBtn" title="Slash commands"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M16 5L8 19"/></svg></button>
           <span class="pill" id="modelPill" title="Model">Model</span>
           <span class="sp"></span>
-          <span class="pill" id="permPill" title="Permission mode · Shift+Tab">🛡 default</span>
-          <button id="send" title="Send" disabled>↑</button>
+          <span class="pill" id="permPill" title="Permission mode · Shift+Tab">default</span>
+          <button id="send" title="Send" disabled><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20V6M6 12l6-6 6 6"/></svg></button>
         </div>
       </div>
     </div>
@@ -264,7 +266,9 @@ export class SdkChatPanel {
   }
   function inline(s){ return s.replace(/\`([^\`]+)\`/g,function(_,c){return '<code>'+esc(c)+'</code>';}).replace(/\\*\\*([^*]+)\\*\\*/g,'<strong>$1</strong>'); }
 
-  function setBusy(b){ busy=b; input.disabled=b; sendBtn.disabled=false; sendBtn.classList.toggle('stop',b); sendBtn.textContent=b?'■':'↑'; }
+  var SEND_SVG='<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20V6M6 12l6-6 6 6"/></svg>';
+  var STOP_SVG='<svg width="12" height="12" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2.5" fill="currentColor"/></svg>';
+  function setBusy(b){ busy=b; input.disabled=b; sendBtn.disabled=false; sendBtn.classList.toggle('stop',b); sendBtn.innerHTML=b?STOP_SVG:SEND_SVG; }
   function newAssistantTurn(){ var t=el('div','turn assistant'); log.appendChild(t); cur={turn:t,textItem:null,raw:'',deltas:0,think:null}; bottom(); }
   function itemRow(dotCls){ var r=el('div','item'); r.appendChild(el('span','dot '+dotCls)); var b=el('div','body'); r.appendChild(b); cur.turn.appendChild(r); return b; }
   function closeText(){ if(cur&&cur.textItem){ cur.textItem.innerHTML = md(cur.raw); } cur && (cur.textItem=null, cur.raw=''); }
@@ -281,15 +285,18 @@ export class SdkChatPanel {
   function setStatus(k){ if(work) work.st.textContent=STATUS[k]; }
   function fmt(n){ return n>=1000? (n/1000).toFixed(1).replace(/\\.0$/,'')+'k' : ''+n; }
   function stopWork(){ if(work){ clearInterval(work.spin); work.line.remove(); work=null; } }
+  function cleanModel(m){ if(!m) return ''; var s=m.replace(/\\[.*?\\]/g,'').replace(/^(claude|codex)-/,''); var p=s.match(/^(opus|sonnet|haiku)-?(\\d+)-?(\\d+)?/i); return p? (p[1].charAt(0).toUpperCase()+p[1].slice(1)+' '+p[2]+(p[3]?'.'+p[3]:'')) : s; }
+  function grow(){ input.style.height='auto'; input.style.height=Math.min(input.scrollHeight,160)+'px'; }
 
   function sendMsg(){
     var text=input.value.trim(); if(!text||busy) return;
     var t=el('div','turn user'); t.appendChild(el('div','msg',text)); log.appendChild(t);
-    input.value=''; setBusy(true); newAssistantTurn(); startWork(); bottom();
+    input.value=''; input.style.height='auto'; setBusy(true); newAssistantTurn(); startWork(); bottom();
     vscode.postMessage({type:'send',text:text});
   }
   sendBtn.addEventListener('click', function(){ busy? vscode.postMessage({type:'interrupt'}) : sendMsg(); });
   input.addEventListener('keydown', function(e){ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); sendMsg(); } });
+  input.addEventListener('input', grow);
   document.getElementById('newBtn').addEventListener('click', function(){ vscode.postMessage({type:'newSession'}); });
   document.getElementById('histBtn').addEventListener('click', function(){ vscode.postMessage({type:'history'}); });
 
@@ -301,7 +308,7 @@ export class SdkChatPanel {
     }
     if(msg.type!=='event') return;
     var ev=msg.ev;
-    if(ev.t==='session'){ if(ev.model){ document.body.dataset.model=ev.model; document.getElementById('badge').textContent=ev.model; } }
+    if(ev.t==='session'){ if(ev.model){ document.getElementById('modelPill').textContent=cleanModel(ev.model); } }
     else if(ev.t==='text' && ev.final===false){
       if(!cur) newAssistantTurn();
       if(!cur.textItem){ cur.textItem=itemRow('text'); cur.raw=''; }
