@@ -9,7 +9,14 @@ import { query, type Query, type SDKUserMessage, type PermissionResult, type Per
 import type { OpenTurn, ReaderCtx } from '../transcriptReader/types.js';
 import { finalizeTurn, toolArgString } from '../transcriptReader/util.js';
 import { AsyncQueue } from './asyncQueue.js';
-import type { AgentAdapter, ChatEvent, PermissionMode, Session, StartOptions } from './types.js';
+import type { AgentAdapter, ChatEvent, LoginChallenge, PermissionMode, Session, StartOptions } from './types.js';
+
+// SDK Query의 인증 메서드는 .d.ts에 미노출(런타임 객체엔 존재) → 타입만 보강.
+type AuthQuery = {
+  claudeAuthenticate(loginWithClaudeAi: boolean): Promise<{ automaticUrl: string; manualUrl: string }>;
+  claudeOAuthCallback(authorizationCode: string, state?: string): Promise<unknown>;
+  claudeOAuthWaitForCompletion(): Promise<unknown>;
+};
 
 // 우리 PermissionMode → SDK PermissionMode. claude가 처리하는 4개만(codex 전용 id는 undefined → 무시).
 const CLAUDE_MODE: Partial<Record<PermissionMode, SdkPermissionMode>> = {
@@ -98,6 +105,8 @@ export const claudeAdapter: AgentAdapter = {
             if (!turn.open.sourceKey) turn.open.sourceKey = m.uuid;
             for (const b of m.message.content) {
               if (b.type === 'text') {
+                // 미로그인 감지 — SDK가 답변 자리에 "Not logged in"을 줌(에러 아님). 호스트가 로그인 화면 표출.
+                if (/not logged in/i.test(b.text)) turn.events.push({ t: 'auth', loggedIn: false });
                 turn.open.assistantParts.push(b.text); // TurnRecord 권위값(델타 아님)
                 turn.events.push({ t: 'text', text: b.text, final: true });
               } else if (b.type === 'tool_use') {
@@ -219,6 +228,28 @@ export const claudeAdapter: AgentAdapter = {
         if (resolve) {
           approvals.delete(id);
           resolve(approve ? { behavior: 'allow' } : { behavior: 'deny', message: '사용자가 거부함' });
+        }
+      },
+      async startLogin(): Promise<LoginChallenge> {
+        // loginWithClaudeAi=true → 구독(Pro/Max) 로그인. SDK가 OAuth URL 2종 반환 + 로컬 콜백서버 기동.
+        const r = await (q as unknown as AuthQuery).claudeAuthenticate(true);
+        return { automaticUrl: r.automaticUrl, manualUrl: r.manualUrl };
+      },
+      async waitLogin() {
+        // 자동 모드 — 콜백서버가 코드 수신→SDK가 토큰 키체인 저장까지 끝나면 resolve.
+        try {
+          await (q as unknown as AuthQuery).claudeOAuthWaitForCompletion();
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      async submitLoginCode(code, state) {
+        try {
+          await (q as unknown as AuthQuery).claudeOAuthCallback(code, state);
+          return true;
+        } catch {
+          return false;
         }
       },
       async end() {

@@ -14,7 +14,7 @@ import { createInterface } from 'node:readline';
 import type { OpenTurn, ReaderCtx } from '../transcriptReader/types.js';
 import { finalizeTurn, toolArgString } from '../transcriptReader/util.js';
 import { AsyncQueue } from './asyncQueue.js';
-import type { AgentAdapter, ChatEvent, PermissionMode, Session, StartOptions } from './types.js';
+import type { AgentAdapter, ChatEvent, LoginChallenge, PermissionMode, Session, StartOptions } from './types.js';
 
 type Pending = { resolve: (v: unknown) => void; reject: (e: unknown) => void };
 type ActiveTurn = { events: AsyncQueue<ChatEvent>; open: OpenTurn; turnId: string };
@@ -55,6 +55,8 @@ export const codexAdapter: AgentAdapter = {
     let sandboxPolicy: unknown = undefined; // 권한 모드 전환 시에만 설정(미설정=thread/start의 workspace-write)
     let model: string | null = null; // 모델(6-3) — null=codex 기본, 설정 시 다음 turn/start에 오버라이드
     let effort: string | null = null; // 추론 effort — null=기본, 설정 시 turn/start.effort 오버라이드
+    let loginWaiter: { loginId: string | null; resolve: (ok: boolean) => void } | null = null; // 로그인 완료 대기
+    let pendingLoginId: string | null = null; // startLogin이 받은 loginId(waitLogin이 매칭)
 
     const write = (msg: unknown): void => {
       child.stdin?.write(JSON.stringify(msg) + '\n');
@@ -100,6 +102,15 @@ export const codexAdapter: AgentAdapter = {
       }
       // 3) 알림
       if (!m.method) return;
+      // 로그인 완료 알림(turn 무관) — waitLogin resolver를 깨운다.
+      if (m.method === 'account/login/completed') {
+        const lp = (m.params ?? {}) as { loginId?: string | null; success?: boolean };
+        if (loginWaiter && (loginWaiter.loginId == null || loginWaiter.loginId === lp.loginId)) {
+          loginWaiter.resolve(Boolean(lp.success));
+          loginWaiter = null;
+        }
+        return;
+      }
       const turn = ref.current;
       const p = (m.params ?? {}) as Record<string, unknown>;
       switch (m.method) {
@@ -231,6 +242,24 @@ export const codexAdapter: AgentAdapter = {
           approvals.delete(id);
           write({ jsonrpc: '2.0', id: rpcReqId, result: { decision: approve ? 'approved' : 'denied' } });
         }
+      },
+      async startLogin(): Promise<LoginChallenge> {
+        // chatgpt OAuth — 응답 authUrl을 브라우저로 열면 codex가 콜백 처리→완료 시 account/login/completed 알림.
+        const res = (await request('account/login/start', { type: 'chatgpt' })) as { loginId?: string | null; authUrl?: string };
+        loginWaiter = null; // 직전 대기 초기화(loginId는 waitLogin이 채움)
+        pendingLoginId = res?.loginId ?? null;
+        const url = res?.authUrl ?? '';
+        return { automaticUrl: url, manualUrl: url };
+      },
+      waitLogin(): Promise<boolean> {
+        // account/login/completed 알림까지 대기(성공 여부 반환).
+        return new Promise((resolve) => {
+          loginWaiter = { loginId: pendingLoginId, resolve };
+        });
+      },
+      async submitLoginCode() {
+        // codex chatgpt 모드는 콜백 코드를 클라가 넘기지 않음(app-server가 자체 콜백 처리) → 미지원.
+        return false;
       },
       async end() {
         try {

@@ -14,8 +14,16 @@ export type ChatEvent =
   | { t: 'commands'; commands: string[] }
   // 승인 요청(5단계) — 호스트가 UI로 띄우고 respondApproval(id, approve)로 응답할 때까지 턴이 멈춘다.
   | { t: 'approval'; id: string; title: string; detail: string; tool: string }
+  // 미로그인 감지(로그인) — 호스트가 로그인 화면을 띄운다. loggedIn:false면 인증 필요.
+  | { t: 'auth'; loggedIn: boolean }
   | { t: 'turn_end'; reason: string }
   | { t: 'error'; message: string };
+
+// 로그인 챌린지 — OAuth URL 2종. automatic=SDK 로컬 콜백서버가 자동 완료 / manual=코드 복붙 폴백.
+export interface LoginChallenge {
+  automaticUrl: string;
+  manualUrl: string;
+}
 
 // 권한 모드(6-2) — 에이전트별로 모드 세트가 다르다(라벨/개수). 각 어댑터가 자기 id만 처리.
 //   claude(4): default(Ask before edits) · acceptEdits(Edit automatically) · plan(Plan mode) · auto(Auto mode, 모델 분류기)
@@ -57,6 +65,10 @@ export interface Session {
   setEffort(level: string): Promise<void>;
   // 'approval' ChatEvent에 대한 응답 — 진행 중 턴이 이 호출까지 멈춰 있다.
   respondApproval(id: string, approve: boolean): void;
+  // 로그인(미로그인 사용자) — claude=q.claudeAuthenticate / codex=account/login/start.
+  startLogin(): Promise<LoginChallenge>;   // OAuth URL 발급(+ 로컬 콜백서버 기동)
+  waitLogin(): Promise<boolean>;           // 자동 모드 완료 대기(콜백서버가 코드 수신→토큰 저장)
+  submitLoginCode(code: string, state?: string): Promise<boolean>; // 수동 폴백(코드 복붙)
   end(): Promise<void>; // 입력 스트림을 닫아 세션 종료
 }
 
