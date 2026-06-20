@@ -118,7 +118,7 @@ export class SdkChatPanel {
     }
   }
 
-  private async onMessage(msg: { type: string; text?: string; id?: string; approve?: boolean; mode?: PermissionMode; level?: string }): Promise<void> {
+  private async onMessage(msg: { type: string; text?: string; id?: string; approve?: boolean; mode?: PermissionMode; level?: string; url?: string }): Promise<void> {
     if (msg.type === 'send') {
       if (!this.session) return;
       try {
@@ -147,6 +147,26 @@ export class SdkChatPanel {
       });
     } else if (msg.type === 'pickImage') {
       await this.handlePickImage();
+    } else if (msg.type === 'login') {
+      await this.handleLogin();
+    } else if (msg.type === 'openExternal' && msg.url) {
+      await vscode.env.openExternal(vscode.Uri.parse(String(msg.url)));
+    }
+  }
+
+  // 로그인(미로그인 사용자): startLogin으로 OAuth URL 받아 브라우저 열고(openExternal), waitLogin으로 완료 대기.
+  // 토큰 저장은 SDK가 키체인에 처리 — 우리는 흐름만 중계.
+  private async handleLogin(): Promise<void> {
+    if (!this.session) return;
+    try {
+      const ch = await this.session.startLogin();
+      await vscode.env.openExternal(vscode.Uri.parse(ch.automaticUrl));
+      this.post({ type: 'loginStarted', manualUrl: ch.manualUrl });
+      const ok = await this.session.waitLogin();
+      this.post({ type: 'loginResult', ok });
+    } catch (err) {
+      output.warn(`SdkChatPanel: login 실패 — ${err instanceof Error ? err.message : String(err)}`);
+      this.post({ type: 'loginResult', ok: false });
     }
   }
 
@@ -181,7 +201,7 @@ export class SdkChatPanel {
     }
   }
 
-  private post(msg: { type: 'ready'; sessionId: string; model?: string; injected?: boolean } | { type: 'event'; ev: ChatEvent } | { type: 'models'; list: ModelOption[] } | { type: 'attachAdded'; name: string; path: string; dataUrl: string }): void {
+  private post(msg: { type: 'ready'; sessionId: string; model?: string; injected?: boolean } | { type: 'event'; ev: ChatEvent } | { type: 'models'; list: ModelOption[] } | { type: 'attachAdded'; name: string; path: string; dataUrl: string } | { type: 'loginStarted'; manualUrl: string } | { type: 'loginResult'; ok: boolean }): void {
     void this.panel.webview.postMessage(msg);
   }
 
@@ -208,7 +228,23 @@ export class SdkChatPanel {
   #newBtn{margin-left:-5px}
   .hbtn:hover{background:var(--vscode-toolbar-hoverBackground)}
 
+  .logwrap{position:relative;flex:1;display:flex;flex-direction:column;min-height:0}
   #log{flex:1;overflow-y:auto;padding:18px 16px;display:flex;flex-direction:column;gap:16px}
+  /* 시작 화면 — 대화 전(빈 채팅)에 #log 위에 겹쳐 중앙 표시. 첫 메시지/대화중이면 숨김. */
+  #welcome{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    background:var(--vscode-sideBar-background,var(--vscode-editor-background))}
+  #welcome.hide{display:none}
+  #welcome .wbox{display:flex;flex-direction:column;align-items:center;pointer-events:auto}
+  .wlogo{width:84px;height:84px;border-radius:23px;display:flex;align-items:center;justify-content:center;
+    background:color-mix(in srgb,var(--accent) 16%,transparent);color:var(--accent)}
+  .wlogo svg{width:50px;height:50px}
+  .wbrand{margin-top:17px;font-size:22px;font-weight:600;letter-spacing:.2px;color:var(--vscode-foreground)}
+  /* 캡션 = 로그인 부제와 같은 회색으로 통일 */
+  .wcap,.wsub{margin-top:8px;font-size:12.5px;color:var(--vscode-descriptionForeground);opacity:.8}
+  .wlogin{margin-top:20px;display:flex;flex-direction:column;align-items:center;gap:9px}
+  .wlbtn{background:var(--accent);color:#1b1b1d;border:none;border-radius:10px;padding:9px 18px;font:inherit;font-weight:600;cursor:pointer}
+  .wlbtn:disabled{opacity:.6;cursor:default}
+  .wmanual{margin-top:6px;font-size:11px;color:var(--vscode-textLink-foreground);cursor:pointer;text-decoration:underline}
   .turn{display:flex;flex-direction:column;gap:8px}
   .turn.assistant{gap:20px}
   .turn.user{align-items:flex-end}
@@ -317,7 +353,21 @@ export class SdkChatPanel {
     <button class="hbtn" id="histBtn" title="History"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></button>
     <button class="hbtn" id="newBtn" title="New session"><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
   </header>
-  <div id="log"></div>
+  <div class="logwrap">
+    <div id="log"></div>
+    <div id="welcome">
+      <div class="wbox">
+        <div class="wlogo" id="wlogo"></div>
+        <div class="wbrand" id="wbrand">Claude</div>
+        <div class="wcap" id="wcap"><span id="wcapco">Claude</span> running on AgentBridge</div>
+        <div class="wlogin" id="wlogin" style="display:none">
+          <button class="wlbtn" id="wlbtn">Log in to <span id="wlco">Claude</span></button>
+          <span class="wsub">Opens your browser · token stored securely</span>
+          <span class="wmanual" id="wmanual" style="display:none">Open the login link manually</span>
+        </div>
+      </div>
+    </div>
+  </div>
   <footer>
     <div class="dock">
       <div id="approvalSlot"></div>
@@ -346,6 +396,26 @@ export class SdkChatPanel {
   const permPill = document.getElementById('permPill');
   const STATUS = { thinking:'Thinking…', working:'Working…', responding:'Responding…' };
   let cur = null, work = null, busy = false;
+
+  // 시작 화면(welcome) — 브랜드 풀네임 + 로고. 대화 전 표시, 첫 메시지/미로그인 분기.
+  const welcome = document.getElementById('welcome');
+  const BRAND = { claude:'Claude', codex:'Codex', agy:'Antigravity' };
+  const W_LOGOS = {
+    claude: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l1.6 6.4L20 7l-4.6 4.8L20 17l-6.4-1.6L12 22l-1.6-6.6L4 17l4.6-5.2L4 7l6.4 1.4z"/></svg>',
+    codex:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="8"/><path d="M12 4v16M4 12h16M6.3 6.3l11.4 11.4M17.7 6.3L6.3 17.7"/></svg>',
+    agy:    '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l9 18H3z"/></svg>'
+  };
+  var welcomeModel='claude', loginManualUrl='';
+  function paintWelcome(m){ welcomeModel=m||welcomeModel; var b=BRAND[welcomeModel]||welcomeModel;
+    document.getElementById('wlogo').innerHTML=W_LOGOS[welcomeModel]||W_LOGOS.claude;
+    document.getElementById('wbrand').textContent=b;
+    document.getElementById('wcapco').textContent=b; document.getElementById('wlco').textContent=b; }
+  function hideWelcome(){ welcome.classList.add('hide'); }
+  function showLoginMode(on){ document.getElementById('wcap').style.display=on?'none':'';
+    document.getElementById('wlogin').style.display=on?'flex':'none'; if(on) welcome.classList.remove('hide'); }
+  document.getElementById('wlbtn').addEventListener('click', function(){
+    var btn=this; btn.disabled=true; btn.textContent='Waiting for browser…'; vscode.postMessage({type:'login'}); });
+  document.getElementById('wmanual').addEventListener('click', function(){ if(loginManualUrl) vscode.postMessage({type:'openExternal',url:loginManualUrl}); });
 
   // 권한 모드(6-2) — 에이전트별 모드 세트(claude 4 / codex 3). Shift+Tab·칩 클릭으로 순환.
   // body[data-perm]으로 입력바 외곽선 색 전환. 호스트가 claude=setPermissionMode / codex=approvalPolicy+sandbox로 매핑.
@@ -511,6 +581,7 @@ export class SdkChatPanel {
     atts.forEach(function(a){ var ac=el('span','att'); var im=thumb(a); if(im) ac.appendChild(im); else ac.appendChild(el('span',null,'🖼')); ac.appendChild(el('span',null,a.name)); t.appendChild(ac); });
     if(text) t.appendChild(el('div','msg',text));
     log.appendChild(t);
+    hideWelcome(); // 첫 메시지 → 시작 화면 숨김
     input.value=''; input.style.height='auto'; PENDING=[]; renderChips();
     setBusy(true); newAssistantTurn(); startWork(); bottom();
     vscode.postMessage({type:'send',text:sent});
@@ -524,14 +595,22 @@ export class SdkChatPanel {
   window.addEventListener('message', function(event){
     var msg=event.data;
     if(msg.type==='ready'){
-      if(msg.model){ document.body.dataset.model=msg.model; document.getElementById('badge').textContent=msg.model; initPerm(msg.model); }
+      if(msg.model){ document.body.dataset.model=msg.model; document.getElementById('badge').textContent=msg.model; initPerm(msg.model); paintWelcome(msg.model); }
       setBusy(false); input.focus(); return;
     }
     if(msg.type==='models'){ MODELS=msg.list||[]; var curM=MODELS.filter(function(m){return m.current;})[0]; if(curM && modelPill.textContent==='Model') modelPill.textContent=curM.label; return; }
     if(msg.type==='attachAdded'){ PENDING.push({name:msg.name,path:msg.path,dataUrl:msg.dataUrl}); renderChips(); return; }
+    if(msg.type==='loginStarted'){ loginManualUrl=msg.manualUrl||''; if(loginManualUrl) document.getElementById('wmanual').style.display='block'; return; }
+    if(msg.type==='loginResult'){
+      var btn=document.getElementById('wlbtn');
+      if(msg.ok){ showLoginMode(false); input.disabled=false; input.focus(); }
+      else { btn.disabled=false; btn.textContent='Log in to '+(BRAND[welcomeModel]||welcomeModel); }
+      return;
+    }
     if(msg.type!=='event') return;
     var ev=msg.ev;
-    if(ev.t==='session'){ if(ev.model){ modelPill.textContent=cleanModel(ev.model); } }
+    if(ev.t==='auth'){ if(ev.loggedIn===false){ stopWork(); setBusy(false); showLoginMode(true); } }
+    else if(ev.t==='session'){ if(ev.model){ modelPill.textContent=cleanModel(ev.model); } }
     else if(ev.t==='text' && ev.final===false){
       if(!cur) newAssistantTurn(); closeThink();
       if(!cur.textItem){ cur.textItem=itemRow('text'); cur.textItem.className='body md'; cur.raw=''; }
