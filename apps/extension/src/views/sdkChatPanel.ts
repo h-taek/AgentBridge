@@ -282,10 +282,16 @@ export class SdkChatPanel {
   .ic:hover{background:var(--vscode-toolbar-hoverBackground)}
   .pill{font-size:12px;font-weight:700;color:var(--vscode-foreground);border:none;border-radius:7px;padding:3px 6px;cursor:pointer}
   .pill:hover{background:var(--vscode-toolbar-hoverBackground)}
-  .menu{position:fixed;display:none;z-index:10;background:var(--vscode-menu-background,var(--vscode-input-background));border:1px solid var(--vscode-menu-border,var(--vscode-input-border,var(--vscode-panel-border)));border-radius:8px;padding:4px;min-width:130px;max-height:260px;overflow-y:auto;box-shadow:0 6px 20px rgba(0,0,0,.4)}
-  .mitem{padding:5px 10px;border-radius:5px;cursor:pointer;font-size:12px;color:var(--vscode-menu-foreground,var(--vscode-foreground));white-space:nowrap}
+  .menu{position:fixed;display:none;z-index:10;background:var(--vscode-menu-background,var(--vscode-input-background));border:1px solid var(--vscode-menu-border,var(--vscode-input-border,var(--vscode-panel-border)));border-radius:8px;padding:4px;min-width:200px;max-width:calc(100vw - 24px);max-height:320px;overflow-y:auto;box-shadow:0 6px 20px rgba(0,0,0,.4)}
+  .mhdr{padding:5px 10px 6px;font-size:11px;color:var(--vscode-descriptionForeground);opacity:.7}
+  .mitem{padding:6px 10px;border-radius:6px;cursor:pointer;color:var(--vscode-menu-foreground,var(--vscode-foreground))}
   .mitem:hover{background:var(--vscode-menu-selectionBackground,var(--vscode-toolbar-hoverBackground))}
-  .mitem.cur{color:var(--accent);font-weight:700}
+  .mitem.cur{background:color-mix(in srgb,var(--accent) 18%,transparent)}
+  .mrow{display:flex;align-items:center;gap:8px}
+  .mname{flex:1;font-size:13px;color:var(--vscode-foreground);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .mitem.cur .mname{font-weight:600}
+  .mchk{color:var(--accent);font-weight:700;flex:none}
+  .mdesc{font-size:11px;color:var(--vscode-descriptionForeground);opacity:.8;margin-top:2px;line-height:1.35}
   .msep{height:1px;background:var(--vscode-panel-border);margin:5px 4px}
   .effort{padding:3px 10px 7px}
   .elbl{font-size:11px;color:var(--vscode-descriptionForeground);margin-bottom:6px;text-transform:capitalize}
@@ -367,8 +373,12 @@ export class SdkChatPanel {
   function openModelMenu(){
     if(!MODELS.length) return;
     modelMenu.innerHTML='';
+    modelMenu.appendChild(el('div','mhdr','Select a model'));
     MODELS.forEach(function(m){
-      var it=el('div','mitem'+(m.current?' cur':''), m.label);
+      var it=el('div','mitem'+(m.current?' cur':''));
+      var row=el('div','mrow'); row.appendChild(el('div','mname',m.label)); if(m.current) row.appendChild(el('span','mchk','✓'));
+      it.appendChild(row);
+      if(m.desc) it.appendChild(el('div','mdesc',m.desc));
       it.addEventListener('click', function(){ vscode.postMessage({type:'setModel',id:m.id}); modelPill.textContent=m.label; userPickedModel=true; MODELS.forEach(function(x){x.current=(x.id===m.id);}); closeModelMenu(); });
       modelMenu.appendChild(it);
     });

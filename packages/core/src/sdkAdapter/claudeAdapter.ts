@@ -196,7 +196,7 @@ export const claudeAdapter: AgentAdapter = {
         return ms.map((m) => {
           const efforts: string[] = m.supportedEffortLevels ? [...m.supportedEffortLevels] : [];
           if (efforts.includes('xhigh')) efforts.push('ultra'); // ultracode = xhigh + 워크플로우(xhigh 지원 모델만)
-          return { id: m.value, label: m.displayName, current: m.value === sel, efforts };
+          return { id: m.value, label: m.displayName, desc: m.description, current: m.value === sel, efforts };
         });
       },
       async setModel(id) {

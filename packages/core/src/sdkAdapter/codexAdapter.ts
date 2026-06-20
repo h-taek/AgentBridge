@@ -207,13 +207,14 @@ export const codexAdapter: AgentAdapter = {
       },
       async listModels() {
         const res = (await request('model/list', {})) as {
-          data?: Array<{ model?: string; displayName?: string; hidden?: boolean; isDefault?: boolean; supportedReasoningEfforts?: Array<{ reasoningEffort?: string }> }>;
+          data?: Array<{ model?: string; displayName?: string; description?: string; hidden?: boolean; isDefault?: boolean; supportedReasoningEfforts?: Array<{ reasoningEffort?: string }> }>;
         };
         return (res?.data ?? [])
           .filter((m) => !m.hidden && m.model)
           .map((m) => ({
             id: m.model as string,
             label: m.displayName ?? (m.model as string),
+            desc: m.description,
             current: model ? m.model === model : Boolean(m.isDefault),
             efforts: (m.supportedReasoningEfforts ?? []).map((e) => e.reasoningEffort).filter((e): e is string => Boolean(e)),
           }));

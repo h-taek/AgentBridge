@@ -27,6 +27,7 @@ export type PermissionMode = 'default' | 'acceptEdits' | 'plan' | 'auto' | 'auto
 export interface ModelOption {
   id: string;
   label: string;
+  desc?: string; // 모델 설명(버전·컨텍스트·용도). 메뉴에서 이름 아래 보조 줄로 표시.
   current?: boolean;
   efforts?: string[]; // 이 모델이 지원하는 effort 레벨(슬라이더 정지점). claude는 끝에 'ultra'(ultracode) 포함 가능.
 }
