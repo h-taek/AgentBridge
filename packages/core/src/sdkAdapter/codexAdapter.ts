@@ -206,10 +206,17 @@ export const codexAdapter: AgentAdapter = {
         if (p) { approvalPolicy = p.approvalPolicy; sandboxPolicy = p.sandboxPolicy; }
       },
       async listModels() {
-        const res = (await request('model/list', {})) as { data?: Array<{ model?: string; displayName?: string; hidden?: boolean; isDefault?: boolean }> };
+        const res = (await request('model/list', {})) as {
+          data?: Array<{ model?: string; displayName?: string; hidden?: boolean; isDefault?: boolean; supportedReasoningEfforts?: Array<{ reasoningEffort?: string }> }>;
+        };
         return (res?.data ?? [])
           .filter((m) => !m.hidden && m.model)
-          .map((m) => ({ id: m.model as string, label: m.displayName ?? (m.model as string), current: model ? m.model === model : Boolean(m.isDefault) }));
+          .map((m) => ({
+            id: m.model as string,
+            label: m.displayName ?? (m.model as string),
+            current: model ? m.model === model : Boolean(m.isDefault),
+            efforts: (m.supportedReasoningEfforts ?? []).map((e) => e.reasoningEffort).filter((e): e is string => Boolean(e)),
+          }));
       },
       async setModel(id) {
         model = id; // 다음 turn/start부터 적용(서버 오버라이드는 턴 단위).

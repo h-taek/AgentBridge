@@ -77,7 +77,7 @@ export class SdkChatPanel {
   private async init(cwd: string, workspaceId: string, model: CliKind): Promise<void> {
     this.cwd = cwd;
     this.workspaceId = workspaceId;
-    this.panel.webview.html = this.html(this.panel.webview);
+    this.panel.webview.html = this.html(model);
     this.panel.webview.onDidReceiveMessage((msg) => void this.onMessage(msg));
     this.panel.onDidDispose(() => {
       this.disposed = true;
@@ -185,7 +185,8 @@ export class SdkChatPanel {
     void this.panel.webview.postMessage(msg);
   }
 
-  private html(_webview: vscode.Webview): string {
+  private html(model: CliKind): string {
+    const permLabel = model === 'codex' ? 'Default permissions' : 'Ask before edits';
     const nonce = makeNonce();
     const csp = `default-src 'none'; style-src 'unsafe-inline'; img-src data:; script-src 'nonce-${nonce}';`;
     return `<!doctype html><html lang="en"><head>
@@ -209,14 +210,14 @@ export class SdkChatPanel {
 
   #log{flex:1;overflow-y:auto;padding:18px 16px;display:flex;flex-direction:column;gap:16px}
   .turn{display:flex;flex-direction:column;gap:8px}
-  .turn.assistant{gap:15px}
+  .turn.assistant{gap:20px}
   .turn.user{align-items:flex-end}
   .user .msg{background:var(--vscode-textBlockQuote-background);border-radius:12px;padding:9px 13px;max-width:80%;white-space:pre-wrap}
   .att{display:inline-flex;align-items:center;gap:5px;background:var(--vscode-textBlockQuote-background);border:1px solid var(--vscode-panel-border);border-radius:8px;padding:4px 8px;font-size:11px;color:var(--vscode-descriptionForeground);margin-bottom:5px}
 
   .item{display:flex;gap:9px;position:relative}
   /* 한 턴의 점들을 잇는 옅은 세로선 (다음 점 중심까지) */
-  .item:not(:last-child)::before{content:'';position:absolute;left:3px;top:10px;bottom:-25px;width:1px;background:var(--vscode-panel-border)}
+  .item:not(:last-child)::before{content:'';position:absolute;left:3px;top:10px;bottom:-30px;width:1px;background:var(--vscode-panel-border)}
   .item:has(+ .working)::before,.item:has(+ .worked)::before{display:none}
   .dot{flex:none;width:7px;height:7px;border-radius:50%;margin-top:7px;position:relative;z-index:1}
   .dot.tool{background:var(--accent)} .dot.text{background:var(--vscode-descriptionForeground);opacity:.6}
@@ -228,11 +229,13 @@ export class SdkChatPanel {
   /* 도구: 볼드 이름 + 설명, 그 아래 IN/OUT 박스 */
   .tname{font-size:13px;color:var(--vscode-descriptionForeground)}
   .tname strong{color:var(--vscode-foreground);font-weight:700;margin-right:7px}
-  .tbox{margin-top:7px;border:1px solid var(--vscode-panel-border);border-radius:8px;overflow:hidden;background:var(--vscode-textCodeBlock-background);font-family:var(--vscode-editor-font-family),monospace;font-size:12px}
-  .trow{display:flex;gap:12px;padding:8px 12px}
-  .trow+.trow{border-top:1px solid var(--vscode-panel-border)}
-  .tlabel{flex:none;width:26px;color:var(--vscode-descriptionForeground);opacity:.55;font-size:11px;padding-top:1px}
-  .tcontent{flex:1;min-width:0;color:var(--vscode-descriptionForeground);white-space:pre-wrap;word-break:break-word;max-height:160px;overflow:auto}
+  .tbox{margin-top:5px;border:1px solid var(--vscode-panel-border);border-radius:7px;overflow:hidden;font-family:var(--vscode-editor-font-family),monospace;font-size:11.5px;
+    background:var(--vscode-textCodeBlock-background);
+    background:color-mix(in srgb,var(--vscode-sideBar-background,var(--vscode-editor-background)) 60%,#000 40%)}
+  .trow{display:flex;gap:10px;padding:6px 10px}
+  .trow+.trow{border-top:1px solid rgba(127,127,127,.3)}
+  .tlabel{flex:none;width:24px;color:var(--vscode-descriptionForeground);opacity:.5;font-size:10.5px;padding-top:2px}
+  .tcontent{flex:1;min-width:0;color:var(--vscode-foreground);opacity:.92;white-space:pre-wrap;word-break:break-word;line-height:1.5;max-height:60px;overflow:auto}
   .md p{margin:0 0 .4em} .md p:last-child{margin:0} .md strong{font-weight:700}
   .md code{background:var(--vscode-textCodeBlock-background);padding:1px 5px;border-radius:4px;font-family:var(--vscode-editor-font-family),monospace;font-size:12px}
   .md pre{background:var(--vscode-textCodeBlock-background);border:1px solid var(--vscode-panel-border);border-radius:8px;padding:10px 12px;overflow-x:auto;margin:.4em 0}
@@ -287,18 +290,23 @@ export class SdkChatPanel {
   .effort{padding:3px 10px 7px}
   .elbl{font-size:11px;color:var(--vscode-descriptionForeground);margin-bottom:6px;text-transform:capitalize}
   /* 알약 트랙 + accent 채움(--fill) + 흰색 손잡이, 포커스 노란테 제거 */
-  .erange{-webkit-appearance:none;appearance:none;width:100%;height:14px;border-radius:999px;outline:none;cursor:pointer;margin:0;
-    background:linear-gradient(to right,var(--accent) 0 var(--fill,33%),var(--vscode-scrollbarSlider-background,#3a3b40) var(--fill,33%) 100%)}
+  /* 알약 트랙 + 정지점 점 + 흰 손잡이. 트랙(채움+점)은 .ertrack, range는 손잡이/조작만(투명 트랙) */
+  .erwrap{position:relative;height:16px}
+  .ertrack{position:absolute;inset:0;border-radius:999px;background:linear-gradient(to right,var(--accent) 0 var(--fill,50%),var(--vscode-scrollbarSlider-background,#3a3b40) var(--fill,50%) 100%)}
+  .edot{position:absolute;top:50%;width:4px;height:4px;border-radius:50%;background:rgba(255,255,255,.45);transform:translate(-50%,-50%)}
+  .edot.ultra{background:#b69cf5}
+  .erange{position:absolute;inset:0;-webkit-appearance:none;appearance:none;width:100%;height:16px;background:transparent;outline:none;cursor:pointer;margin:0;z-index:2}
   .erange:focus{outline:none}
-  .erange::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:16px;height:16px;border-radius:50%;background:#fff;border:none;box-shadow:0 1px 3px rgba(0,0,0,.5)}
+  .erange::-webkit-slider-runnable-track{background:transparent;height:16px}
+  .erange::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:16px;height:16px;border-radius:50%;background:#fff;border:none;box-shadow:0 1px 3px rgba(0,0,0,.5);margin-top:0}
   #send{height:28px;min-width:32px;padding:0 8px;border-radius:8px;border:none;background:var(--accent);color:#1b1b1d;cursor:pointer;display:inline-flex;align-items:center;justify-content:center}
-  #send.stop{background:var(--vscode-inputValidation-errorBorder,#d65b5b);color:#fff}
+  #send.stop{background:var(--vscode-button-secondaryBackground,#6b6b6b);color:#fff}
   .err{color:var(--vscode-errorForeground);font-size:12px;white-space:pre-wrap}
 </style></head>
-<body data-model="claude" data-perm="default">
+<body data-model="${model}" data-perm="default">
   <header>
     <span class="title">AgentBridge</span>
-    <span class="badge" id="badge">claude</span>
+    <span class="badge" id="badge">${model}</span>
     <span class="sp"></span>
     <button class="hbtn" id="histBtn" title="History"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></button>
     <button class="hbtn" id="newBtn" title="New session"><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
@@ -315,7 +323,7 @@ export class SdkChatPanel {
           <button class="ic" id="slashBtn" title="Slash commands"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M16 5L8 19"/></svg></button>
           <span class="pill" id="modelPill" title="Model">Model</span>
           <span class="sp"></span>
-          <span class="pill" id="permPill" title="Permission mode · Shift+Tab">Ask before edits</span>
+          <span class="pill" id="permPill" title="Permission mode · Shift+Tab">${permLabel}</span>
           <button id="send" title="Send" disabled><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20V6M6 12l6-6 6 6"/></svg></button>
         </div>
       </div>
@@ -349,9 +357,11 @@ export class SdkChatPanel {
   const modelPill = document.getElementById('modelPill');
   const modelMenu = document.getElementById('modelMenu');
   var MODELS=[], userPickedModel=false;
-  // 추론 effort — 에이전트별 레벨(claude=low/med/high/xhigh, codex=low/med/high). 기본 medium.
-  var EFFORT_SETS={claude:['low','medium','high','xhigh'],codex:['low','medium','high']};
-  var EFFORTS=EFFORT_SETS.claude, effortIdx=1;
+  // 추론 effort — 레벨은 모델별 API(MODELS[].efforts)에서. 'ultra'=ultracode(보라 점).
+  var effortIdx=-1, userSetEffort=false;
+  function currentEfforts(){ var m=MODELS.filter(function(x){return x.current;})[0]; return (m&&m.efforts)||[]; }
+  function effortLabel(lv){ return lv==='ultra'?'ultracode':lv; }
+  function buildEffortIdx(efforts){ if(effortIdx<0||!userSetEffort){ var mi=efforts.indexOf('medium'); effortIdx=mi>=0?mi:Math.floor((efforts.length-1)/2); } effortIdx=Math.max(0,Math.min(effortIdx,efforts.length-1)); }
   modelMenu.addEventListener('click', function(e){ e.stopPropagation(); }); // 메뉴 내부 클릭은 닫지 않음(슬라이더용)
   function closeModelMenu(){ modelMenu.style.display='none'; }
   function openModelMenu(){
@@ -362,16 +372,25 @@ export class SdkChatPanel {
       it.addEventListener('click', function(){ vscode.postMessage({type:'setModel',id:m.id}); modelPill.textContent=m.label; userPickedModel=true; MODELS.forEach(function(x){x.current=(x.id===m.id);}); closeModelMenu(); });
       modelMenu.appendChild(it);
     });
-    // effort 슬라이더 (#1b) — claude=applyFlagSettings(effortLevel) / codex=turn/start.effort
-    modelMenu.appendChild(el('div','msep'));
-    var er=el('div','effort');
-    var lbl=el('div','elbl','Effort · '+EFFORTS[effortIdx]);
-    var rng=document.createElement('input'); rng.type='range'; rng.min='0'; rng.max=String(EFFORTS.length-1); rng.step='1'; rng.value=String(effortIdx); rng.className='erange';
-    function setFill(){ rng.style.setProperty('--fill',(EFFORTS.length>1?(effortIdx/(EFFORTS.length-1))*100:0)+'%'); }
-    setFill();
-    rng.addEventListener('input', function(){ effortIdx=parseInt(rng.value,10); lbl.textContent='Effort · '+EFFORTS[effortIdx]; setFill(); });
-    rng.addEventListener('change', function(){ effortIdx=parseInt(rng.value,10); vscode.postMessage({type:'setEffort',level:EFFORTS[effortIdx]}); });
-    er.appendChild(lbl); er.appendChild(rng); modelMenu.appendChild(er);
+    // effort 슬라이더 (#1b) — 모델별 레벨(MODELS.efforts) + 정지점 점 + ultra(보라). claude=applyFlagSettings / codex=turn/start.effort
+    var efforts=currentEfforts();
+    if(efforts.length){
+      modelMenu.appendChild(el('div','msep'));
+      buildEffortIdx(efforts);
+      var er=el('div','effort');
+      var lbl=el('div','elbl','Effort · '+effortLabel(efforts[effortIdx]));
+      var wrap=el('div','erwrap'); var track=el('div','ertrack');
+      var n=efforts.length;
+      function pos(i){ return 'calc(8px + '+(n>1?(i/(n-1)):0)+' * (100% - 16px))'; }
+      efforts.forEach(function(lv,i){ var d=el('span','edot'+(lv==='ultra'?' ultra':'')); d.style.left=pos(i); track.appendChild(d); });
+      var rng=document.createElement('input'); rng.type='range'; rng.min='0'; rng.max=String(n-1); rng.step='1'; rng.value=String(effortIdx); rng.className='erange';
+      function setFill(){ track.style.setProperty('--fill',pos(effortIdx)); }
+      setFill();
+      rng.addEventListener('input', function(){ effortIdx=parseInt(rng.value,10); userSetEffort=true; lbl.textContent='Effort · '+effortLabel(efforts[effortIdx]); setFill(); });
+      rng.addEventListener('change', function(){ effortIdx=parseInt(rng.value,10); userSetEffort=true; vscode.postMessage({type:'setEffort',level:efforts[effortIdx]}); });
+      wrap.appendChild(track); wrap.appendChild(rng);
+      er.appendChild(lbl); er.appendChild(wrap); modelMenu.appendChild(er);
+    }
     var r=modelPill.getBoundingClientRect();
     modelMenu.style.left=r.left+'px';
     modelMenu.style.bottom=(window.innerHeight-r.top+6)+'px';
@@ -440,7 +459,7 @@ export class SdkChatPanel {
   function inline(s){ return s.replace(/\`([^\`]+)\`/g,function(_,c){return '<code>'+esc(c)+'</code>';}).replace(/\\*\\*([^*]+)\\*\\*/g,'<strong>$1</strong>'); }
 
   var SEND_SVG='<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20V6M6 12l6-6 6 6"/></svg>';
-  var STOP_SVG='<svg width="12" height="12" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2.5" fill="currentColor"/></svg>';
+  var STOP_SVG='<svg width="15" height="15" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3" fill="currentColor"/></svg>';
   function setBusy(b){ busy=b; input.disabled=b; sendBtn.disabled=false; sendBtn.classList.toggle('stop',b); sendBtn.innerHTML=b?STOP_SVG:SEND_SVG; }
   function newAssistantTurn(){ var t=el('div','turn assistant'); log.appendChild(t); cur={turn:t,textItem:null,raw:'',deltas:0,think:null}; bottom(); }
   function itemRow(dotCls){ var r=el('div','item'); r.appendChild(el('span','dot '+dotCls)); var b=el('div','body'); r.appendChild(b);
@@ -495,7 +514,7 @@ export class SdkChatPanel {
   window.addEventListener('message', function(event){
     var msg=event.data;
     if(msg.type==='ready'){
-      if(msg.model){ document.body.dataset.model=msg.model; document.getElementById('badge').textContent=msg.model; initPerm(msg.model); EFFORTS=EFFORT_SETS[msg.model]||EFFORT_SETS.claude; effortIdx=Math.min(1,EFFORTS.length-1); }
+      if(msg.model){ document.body.dataset.model=msg.model; document.getElementById('badge').textContent=msg.model; initPerm(msg.model); }
       setBusy(false); input.focus(); return;
     }
     if(msg.type==='models'){ MODELS=msg.list||[]; var curM=MODELS.filter(function(m){return m.current;})[0]; if(curM && modelPill.textContent==='Model') modelPill.textContent=curM.label; return; }

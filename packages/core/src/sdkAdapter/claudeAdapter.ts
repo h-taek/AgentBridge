@@ -193,15 +193,25 @@ export const claudeAdapter: AgentAdapter = {
         // 카탈로그는 별칭(default/opus[1m]/sonnet/haiku) — init의 풀 id와 안 맞으므로 '선택 별칭'으로 현재 표시.
         const sel = selectedModel ?? 'default';
         const ms = await q.supportedModels();
-        return ms.map((m) => ({ id: m.value, label: m.displayName, current: m.value === sel }));
+        return ms.map((m) => {
+          const efforts: string[] = m.supportedEffortLevels ? [...m.supportedEffortLevels] : [];
+          if (efforts.includes('xhigh')) efforts.push('ultra'); // ultracode = xhigh + 워크플로우(xhigh 지원 모델만)
+          return { id: m.value, label: m.displayName, current: m.value === sel, efforts };
+        });
       },
       async setModel(id) {
         await q.setModel(id);
         selectedModel = id; // 표시용 model(풀 id)은 안 건드림 — 패널 칩은 사용자가 고른 라벨을 유지.
       },
       async setEffort(level) {
-        // 실제 claude 익스텐션과 동일: flag settings 레이어에 effortLevel 주입(즉시 적용, 스트리밍 전용).
-        await q.applyFlagSettings({ effortLevel: level as 'low' | 'medium' | 'high' | 'xhigh' });
+        // 실제 claude 익스텐션과 동일: flag settings 레이어 주입(즉시 적용, 스트리밍 전용).
+        // 'ultra' = ultracode(xhigh effort + 동적 워크플로우). 그 외는 effortLevel + ultracode 해제.
+        if (level === 'ultra') {
+          await q.applyFlagSettings({ effortLevel: 'xhigh', ultracode: true });
+        } else {
+          // Settings.effortLevel 타입은 xhigh까지지만, 실제 익스텐션은 supportedEffortLevels('max' 포함)를 그대로 전달 → 'max'도 런타임 통과.
+          await q.applyFlagSettings({ effortLevel: level as 'low' | 'medium' | 'high' | 'xhigh', ultracode: false });
+        }
       },
       respondApproval(id, approve) {
         const resolve = approvals.get(id);

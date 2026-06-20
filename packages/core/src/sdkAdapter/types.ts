@@ -28,6 +28,7 @@ export interface ModelOption {
   id: string;
   label: string;
   current?: boolean;
+  efforts?: string[]; // 이 모델이 지원하는 effort 레벨(슬라이더 정지점). claude는 끝에 'ultra'(ultracode) 포함 가능.
 }
 
 export interface StartOptions {
