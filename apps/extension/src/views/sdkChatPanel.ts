@@ -65,7 +65,7 @@ export class SdkChatPanel {
     const adapterPath = resolveAdapterPath(this.extensionUri.fsPath);
     output.log(`SdkChatPanel: claude adapter 경로 = ${adapterPath}`);
     if (!fs.existsSync(adapterPath)) {
-      this.post({ type: 'event', ev: { t: 'error', message: `어댑터를 못 찾음: ${adapterPath} (core build 필요)` } });
+      this.post({ type: 'event', ev: { t: 'error', message: `Adapter not found: ${adapterPath} (build core first)` } });
       return null;
     }
     const mod = (await import(pathToFileURL(adapterPath).href)) as AdapterModule;
@@ -106,8 +106,8 @@ export class SdkChatPanel {
       this.post({ type: 'ready', sessionId: this.session.sessionId, model, injected: Boolean(context) });
     } catch (err) {
       const m = err instanceof Error ? err.message : String(err);
-      output.warn(`SdkChatPanel: 세션 시작 실패 — ${m}`);
-      this.post({ type: 'event', ev: { t: 'error', message: `세션 시작 실패: ${m}` } });
+      output.warn(`SdkChatPanel: session start failed — ${m}`);
+      this.post({ type: 'event', ev: { t: 'error', message: `Session start failed: ${m}` } });
     }
   }
 
@@ -136,123 +136,204 @@ export class SdkChatPanel {
   private html(_webview: vscode.Webview): string {
     const nonce = makeNonce();
     const csp = `default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';`;
-    return `<!doctype html><html lang="ko"><head>
+    return `<!doctype html><html lang="en"><head>
 <meta charset="utf-8" />
 <meta http-equiv="Content-Security-Policy" content="${csp}" />
 <style>
-  * { box-sizing: border-box; }
-  body { margin:0; height:100vh; display:flex; flex-direction:column;
-    font:13px/1.55 var(--vscode-font-family); color:var(--vscode-editor-foreground); background:var(--vscode-editor-background); }
-  header { display:flex; gap:6px; align-items:center; padding:8px 12px; border-bottom:1px solid var(--vscode-panel-border); }
-  header .title { font-weight:600; }
-  header .chip { font-size:11px; opacity:.7; border:1px solid var(--vscode-panel-border); border-radius:9px; padding:0 7px; }
-  header .spacer { flex:1; }
-  #log { flex:1; overflow-y:auto; padding:14px 12px; display:flex; flex-direction:column; gap:12px; }
-  .turn { display:flex; flex-direction:column; gap:3px; }
-  .role { font-size:11px; opacity:.6; }
-  .bubble { padding:8px 11px; border:1px solid var(--vscode-panel-border); border-radius:7px; white-space:pre-wrap; }
-  .user .bubble { background:var(--vscode-textBlockQuote-background); align-self:flex-start; }
-  .thinking { font-size:12px; opacity:.65; border-left:2px solid var(--vscode-panel-border); padding:2px 0 2px 8px; white-space:pre-wrap; }
-  .tool { font-size:12px; font-family:var(--vscode-editor-font-family),monospace; color:var(--vscode-textLink-foreground);
-    background:var(--vscode-textCodeBlock-background); border-radius:5px; padding:3px 7px; }
-  .approval { border:1px solid var(--vscode-inputValidation-warningBorder,#cc9); background:var(--vscode-inputValidation-warningBackground,rgba(200,180,0,.08)); border-radius:7px; padding:8px 10px; }
-  .approval-title { font-weight:600; font-size:12px; }
-  .approval-detail { font-size:11px; opacity:.75; font-family:var(--vscode-editor-font-family),monospace; white-space:pre-wrap; margin:4px 0; max-height:120px; overflow:auto; }
-  .approval-actions { display:flex; gap:6px; margin-top:4px; }
-  .approval-actions button { font:inherit; padding:4px 12px; border-radius:6px; border:1px solid transparent; cursor:pointer; }
-  .ap-yes { background:var(--vscode-button-background); color:var(--vscode-button-foreground); }
-  .ap-no { background:var(--vscode-button-secondaryBackground); color:var(--vscode-button-secondaryForeground); }
-  .caret { display:inline-block; width:6px; height:14px; background:var(--vscode-editor-foreground); margin-left:1px; vertical-align:-2px; animation:blink 1s steps(2) infinite; }
-  @keyframes blink { 50% { opacity:0; } }
-  footer { border-top:1px solid var(--vscode-panel-border); padding:8px 10px; display:flex; gap:6px; align-items:flex-end; }
-  #input { flex:1; resize:none; height:36px; font:inherit; padding:7px 9px; border-radius:7px;
-    color:var(--vscode-input-foreground); background:var(--vscode-input-background); border:1px solid var(--vscode-input-border,transparent); }
-  button { font:inherit; padding:7px 12px; border-radius:7px; cursor:pointer; border:1px solid var(--vscode-button-border,transparent);
-    color:var(--vscode-button-foreground); background:var(--vscode-button-background); }
-  button:disabled { opacity:.5; cursor:default; }
-  #stop { color:var(--vscode-button-secondaryForeground); background:var(--vscode-button-secondaryBackground); }
+  /* 모델 포인트색(기존 앱). data-model로 스위치. transcript 점: 도구=accent / 생각·채팅=회색. */
+  :root{--accent:#d97757;--accent-bright:#f0a88c;--green:#5ec98a}
+  body[data-model="codex"]{--accent:#5D8AF9;--accent-bright:#9ab8ff}
+  body[data-model="agy"]{--accent:#8e6cef;--accent-bright:#b69cf5}
+  *{box-sizing:border-box}
+  body{margin:0;height:100vh;display:flex;flex-direction:column;
+    font:13px/1.6 var(--vscode-font-family);color:var(--vscode-editor-foreground);background:var(--vscode-editor-background)}
+  header{display:flex;gap:8px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--vscode-panel-border)}
+  .title{font-weight:600}
+  .badge{background:var(--accent);color:#1b1b1d;border-radius:999px;padding:2px 8px;font-size:10px;font-weight:800;letter-spacing:.2px;text-transform:capitalize}
+  .sp{flex:1}
+  .hbtn{width:28px;height:28px;display:inline-flex;align-items:center;justify-content:center;border:none;background:none;color:var(--vscode-descriptionForeground);cursor:pointer;border-radius:7px}
+  .hbtn:hover{background:var(--vscode-toolbar-hoverBackground)}
+
+  #log{flex:1;overflow-y:auto;padding:18px 16px;display:flex;flex-direction:column;gap:16px}
+  .turn{display:flex;flex-direction:column;gap:8px}
+  .turn.user{align-items:flex-end}
+  .user .msg{background:var(--vscode-textBlockQuote-background);border-radius:12px;padding:9px 13px;max-width:80%;white-space:pre-wrap}
+  .att{display:inline-flex;align-items:center;gap:5px;background:var(--vscode-textBlockQuote-background);border:1px solid var(--vscode-panel-border);border-radius:8px;padding:4px 8px;font-size:11px;color:var(--vscode-descriptionForeground);margin-bottom:5px}
+
+  .item{display:flex;gap:9px}
+  .dot{flex:none;width:7px;height:7px;border-radius:50%;margin-top:7px}
+  .dot.tool{background:var(--accent)} .dot.text{background:var(--vscode-descriptionForeground);opacity:.6}
+  .body{flex:1;min-width:0}
+  details.think>summary{cursor:pointer;list-style:none;color:var(--vscode-descriptionForeground);font-size:12px;opacity:.85}
+  details.think>summary::-webkit-details-marker{display:none}
+  details.think>summary::after{content:" ▸";font-size:9px} details.think[open]>summary::after{content:" ▾"}
+  details.think .tx{margin-top:4px;color:var(--vscode-descriptionForeground);white-space:pre-wrap;border-left:1px solid var(--vscode-panel-border);padding-left:9px}
+  .tname{font-family:var(--vscode-editor-font-family),monospace;color:var(--vscode-descriptionForeground);font-size:12px}
+  .tname .ok{color:var(--green);font-size:11px;margin-left:5px}
+  .md p{margin:0 0 .4em} .md p:last-child{margin:0} .md strong{font-weight:700}
+  .md code{background:var(--vscode-textCodeBlock-background);padding:1px 5px;border-radius:4px;font-family:var(--vscode-editor-font-family),monospace;font-size:12px}
+  .md pre{background:var(--vscode-textCodeBlock-background);border:1px solid var(--vscode-panel-border);border-radius:8px;padding:10px 12px;overflow-x:auto;margin:.4em 0}
+  .md pre code{background:none;padding:0} .md ul{margin:.3em 0;padding-left:1.3em}
+  .caret{display:inline-block;width:6px;height:13px;background:var(--vscode-editor-foreground);margin-left:1px;vertical-align:-2px;animation:blink 1s steps(2) infinite}
+  @keyframes blink{50%{opacity:0}}
+
+  .working{display:flex;align-items:center;gap:7px;font-size:12px}
+  .tspin{font-family:var(--vscode-editor-font-family),monospace;color:var(--accent);white-space:pre;display:inline-block;min-width:10px;text-align:center}
+  .shim{background:linear-gradient(90deg,var(--accent) 42%,var(--accent-bright) 50%,var(--accent) 58%);background-size:280% 100%;
+    -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent;animation:shim 3s linear infinite}
+  @keyframes shim{from{background-position:140% 0}to{background-position:-140% 0}}
+  .wmeta{color:var(--vscode-descriptionForeground);opacity:.7;font-size:12px}
+
+  footer{padding:6px 14px 14px}
+  .dock{position:relative}
+  @keyframes rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+  .approval{position:relative;z-index:1;margin:0 30px -30px;display:flex;flex-direction:column;gap:10px;
+    border:1px solid var(--accent);background:var(--vscode-editorWidget-background,#23211e);border-radius:12px;
+    padding:11px 14px 40px;box-shadow:0 10px 24px rgba(0,0,0,.5);animation:rise .22s ease}
+  .approval .t{font-weight:600;font-size:12px}
+  .approval .d{font-size:11px;color:var(--vscode-descriptionForeground);font-family:var(--vscode-editor-font-family),monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .approval .aacts{display:flex;gap:7px;justify-content:flex-end}
+  .approval button{font:inherit;padding:6px 16px;border-radius:8px;border:none;cursor:pointer}
+  .ay{background:var(--accent);color:#1b1b1d;font-weight:600} .an{background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground)}
+
+  .inbox{position:relative;z-index:2;background:var(--vscode-input-background);border:1px solid var(--vscode-input-border,var(--vscode-panel-border));border-radius:14px;padding:8px 10px 6px}
+  .inbox .chips{display:flex;gap:6px;margin-bottom:6px}
+  #input{width:100%;background:none;border:none;color:var(--vscode-input-foreground);font:inherit;resize:none;outline:none;min-height:24px;max-height:160px}
+  #input::placeholder{color:var(--vscode-input-placeholderForeground)}
+  .ctrls{display:flex;align-items:center;gap:6px;margin-top:5px}
+  .ic{height:26px;min-width:26px;padding:0 6px;border-radius:8px;border:none;background:none;color:var(--vscode-descriptionForeground);cursor:pointer;font-size:13px}
+  .ic:hover{background:var(--vscode-toolbar-hoverBackground)}
+  .pill{font-size:11px;color:var(--vscode-descriptionForeground);border:1px solid var(--vscode-input-border,var(--vscode-panel-border));border-radius:8px;padding:3px 8px;cursor:pointer}
+  #send{height:28px;min-width:28px;border-radius:8px;border:none;background:var(--accent);color:#1b1b1d;cursor:pointer;font-weight:700}
+  #send.stop{background:var(--vscode-inputValidation-errorBorder,#d65b5b);color:#fff}
+  .err{color:var(--vscode-errorForeground);font-size:12px;white-space:pre-wrap}
 </style></head>
-<body>
+<body data-model="claude">
   <header>
     <span class="title">AgentBridge</span>
-    <span class="chip" id="model">claude</span>
-    <span class="chip" id="sid">session …</span>
-    <span class="chip" id="ctx"></span>
-    <span class="spacer"></span>
-    <span class="chip">SDK · 실험</span>
+    <span class="badge" id="badge">claude</span>
+    <span class="sp"></span>
+    <button class="hbtn" id="histBtn" title="History"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></button>
+    <button class="hbtn" id="newBtn" title="New session"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
   </header>
   <div id="log"></div>
   <footer>
-    <textarea id="input" placeholder="메시지 입력 · Enter 전송" disabled></textarea>
-    <button id="stop" disabled>중단</button>
-    <button id="send" disabled>전송</button>
+    <div class="dock">
+      <div id="approvalSlot"></div>
+      <div class="inbox">
+        <div class="chips" id="chips"></div>
+        <textarea id="input" placeholder="Message…   (Enter to send · Shift+Enter for newline)" disabled></textarea>
+        <div class="ctrls">
+          <button class="ic" id="attachBtn" title="Attach image">＋</button>
+          <button class="ic" id="slashBtn" title="Slash commands">/</button>
+          <span class="pill" id="modelPill" title="Model">Model</span>
+          <span class="sp"></span>
+          <span class="pill" id="permPill" title="Permission mode · Shift+Tab">🛡 default</span>
+          <button id="send" title="Send" disabled>↑</button>
+        </div>
+      </div>
+    </div>
   </footer>
 <script nonce="${nonce}">
   const vscode = acquireVsCodeApi();
   const log = document.getElementById('log');
   const input = document.getElementById('input');
   const sendBtn = document.getElementById('send');
-  const stopBtn = document.getElementById('stop');
-  let cur = null, busy = false;
+  const approvalSlot = document.getElementById('approvalSlot');
+  const STATUS = { thinking:'Thinking…', working:'Working…', responding:'Responding…' };
+  let cur = null, work = null, busy = false;
 
-  function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
-  function bottom() { log.scrollTop = log.scrollHeight; }
-  function addTurn(role, label) { const t = el('div', 'turn ' + role); t.appendChild(el('div', 'role', label)); log.appendChild(t); bottom(); return t; }
-  function startAssistant() {
-    const t = addTurn('assistant', 'claude');
-    const bubble = el('div', 'bubble'), textSpan = el('span', null, ''), caret = el('span', 'caret');
-    bubble.appendChild(textSpan); bubble.appendChild(caret); t.appendChild(bubble);
-    cur = { turn: t, bubble: bubble, textSpan: textSpan, caret: caret, thinking: null, deltas: 0 }; bottom();
+  function el(t,c,x){ var e=document.createElement(t); if(c)e.className=c; if(x!=null)e.textContent=x; return e; }
+  function bottom(){ log.scrollTop = log.scrollHeight; }
+  function esc(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  // 최소 마크다운: 펜스코드 → 인라인코드 → 굵게 → 리스트 → 단락
+  function md(src){
+    var blocks = src.split(/\\n{2,}/), out = [];
+    for (var i=0;i<blocks.length;i++){
+      var b = blocks[i];
+      var fence = b.match(/^\\s*\`\`\`[^\\n]*\\n([\\s\\S]*?)\`\`\`\\s*$/);
+      if (fence){ out.push('<pre><code>'+esc(fence[1])+'</code></pre>'); continue; }
+      var lines = b.split('\\n');
+      if (lines.every(function(l){return /^\\s*[-*]\\s+/.test(l)||l.trim()==='';})){
+        var li = lines.filter(function(l){return l.trim();}).map(function(l){return '<li>'+inline(l.replace(/^\\s*[-*]\\s+/,''))+'</li>';});
+        out.push('<ul>'+li.join('')+'</ul>'); continue;
+      }
+      out.push('<p>'+inline(esc(b)).replace(/\\n/g,'<br>')+'</p>');
+    }
+    return out.join('');
   }
-  function setBusy(b) { busy = b; input.disabled = b; sendBtn.disabled = b; stopBtn.disabled = !b; }
-  function endTurn() { if (cur && cur.caret) cur.caret.remove(); cur = null; setBusy(false); input.focus(); }
-  function sendMsg() {
-    const text = input.value.trim(); if (!text || busy) return;
-    addTurn('user', '나').appendChild(el('div', 'bubble', text));
-    input.value = ''; setBusy(true); startAssistant();
-    vscode.postMessage({ type: 'send', text: text });
+  function inline(s){ return s.replace(/\`([^\`]+)\`/g,function(_,c){return '<code>'+esc(c)+'</code>';}).replace(/\\*\\*([^*]+)\\*\\*/g,'<strong>$1</strong>'); }
+
+  function setBusy(b){ busy=b; input.disabled=b; sendBtn.disabled=false; sendBtn.classList.toggle('stop',b); sendBtn.textContent=b?'■':'↑'; }
+  function newAssistantTurn(){ var t=el('div','turn assistant'); log.appendChild(t); cur={turn:t,textItem:null,raw:'',deltas:0,think:null}; bottom(); }
+  function itemRow(dotCls){ var r=el('div','item'); r.appendChild(el('span','dot '+dotCls)); var b=el('div','body'); r.appendChild(b); cur.turn.appendChild(r); return b; }
+  function closeText(){ if(cur&&cur.textItem){ cur.textItem.innerHTML = md(cur.raw); } cur && (cur.textItem=null, cur.raw=''); }
+
+  function startWork(){
+    if(work) return;
+    var line=el('div','working'); var sp=el('span','tspin'); var st=el('span','shim',STATUS.working); var mt=el('span','wmeta','');
+    line.appendChild(sp); line.appendChild(st); line.appendChild(mt); cur.turn.appendChild(line);
+    work={line:line,st:st,mt:mt,t0:Date.now(),out:0,frame:0};
+    work.spin=setInterval(function(){ var F=' .oO@* '; sp.textContent=F[work.frame%F.length]; work.frame++; tick(); },110);
+    tick();
   }
+  function tick(){ if(!work) return; var s=Math.floor((Date.now()-work.t0)/1000); work.mt.textContent='('+s+'s'+(work.out?(' · ↑ '+fmt(work.out)+' tokens'):'')+')'; }
+  function setStatus(k){ if(work) work.st.textContent=STATUS[k]; }
+  function fmt(n){ return n>=1000? (n/1000).toFixed(1).replace(/\\.0$/,'')+'k' : ''+n; }
+  function stopWork(){ if(work){ clearInterval(work.spin); work.line.remove(); work=null; } }
 
-  sendBtn.addEventListener('click', sendMsg);
-  stopBtn.addEventListener('click', function () { vscode.postMessage({ type: 'interrupt' }); });
-  input.addEventListener('keydown', function (e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMsg(); } });
+  function sendMsg(){
+    var text=input.value.trim(); if(!text||busy) return;
+    var t=el('div','turn user'); t.appendChild(el('div','msg',text)); log.appendChild(t);
+    input.value=''; setBusy(true); newAssistantTurn(); startWork(); bottom();
+    vscode.postMessage({type:'send',text:text});
+  }
+  sendBtn.addEventListener('click', function(){ busy? vscode.postMessage({type:'interrupt'}) : sendMsg(); });
+  input.addEventListener('keydown', function(e){ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); sendMsg(); } });
+  document.getElementById('newBtn').addEventListener('click', function(){ vscode.postMessage({type:'newSession'}); });
+  document.getElementById('histBtn').addEventListener('click', function(){ vscode.postMessage({type:'history'}); });
 
-  window.addEventListener('message', function (event) {
-    const msg = event.data;
-    if (msg.type === 'ready') {
-      document.getElementById('sid').textContent = 'session ' + String(msg.sessionId || '').slice(0, 8);
-      if (msg.model) document.getElementById('model').textContent = msg.model;
-      if (msg.injected) document.getElementById('ctx').textContent = '📎 맥락 주입됨';
+  window.addEventListener('message', function(event){
+    var msg=event.data;
+    if(msg.type==='ready'){
+      if(msg.model){ document.body.dataset.model=msg.model; document.getElementById('badge').textContent=msg.model; }
       setBusy(false); input.focus(); return;
     }
-    if (msg.type !== 'event') return;
-    const ev = msg.ev;
-    if (ev.t === 'session') {
-      document.getElementById('sid').textContent = 'session ' + String(ev.sessionId || '').slice(0, 8);
-      if (ev.model) document.getElementById('model').textContent = ev.model;
-    } else if (ev.t === 'text' && ev.final === false) {
-      if (!cur) startAssistant(); cur.textSpan.textContent += ev.text; cur.deltas++; bottom();
-    } else if (ev.t === 'text' && ev.final === true) {
-      if (cur && cur.deltas === 0) { cur.textSpan.textContent += ev.text; bottom(); }
-    } else if (ev.t === 'thinking') {
-      if (cur) { if (!cur.thinking) { cur.thinking = el('div', 'thinking', ''); cur.turn.insertBefore(cur.thinking, cur.bubble); } cur.thinking.textContent += ev.text; bottom(); }
-    } else if (ev.t === 'tool') {
-      if (cur) { cur.turn.insertBefore(el('div', 'tool', ev.name + '  ' + JSON.stringify(ev.input).slice(0, 80)), cur.bubble); bottom(); }
-    } else if (ev.t === 'approval') {
-      const box = el('div', 'approval');
-      box.appendChild(el('div', 'approval-title', '🔐 ' + ev.title));
-      if (ev.detail) box.appendChild(el('div', 'approval-detail', ev.detail));
-      const row = el('div', 'approval-actions');
-      const yes = el('button', 'ap-yes', '승인'); const no = el('button', 'ap-no', '거부');
-      yes.addEventListener('click', function () { vscode.postMessage({ type: 'respondApproval', id: ev.id, approve: true }); box.remove(); });
-      no.addEventListener('click', function () { vscode.postMessage({ type: 'respondApproval', id: ev.id, approve: false }); box.remove(); });
-      row.appendChild(yes); row.appendChild(no); box.appendChild(row);
-      (cur ? cur.turn : log).appendChild(box); bottom();
-    } else if (ev.t === 'turn_end') {
-      endTurn();
-    } else if (ev.t === 'error') {
-      if (!cur) startAssistant(); cur.textSpan.textContent += '\\n[오류] ' + ev.message; endTurn();
+    if(msg.type!=='event') return;
+    var ev=msg.ev;
+    if(ev.t==='session'){ if(ev.model){ document.body.dataset.model=ev.model; document.getElementById('badge').textContent=ev.model; } }
+    else if(ev.t==='text' && ev.final===false){
+      if(!cur) newAssistantTurn();
+      if(!cur.textItem){ cur.textItem=itemRow('text'); cur.raw=''; }
+      cur.raw+=ev.text; cur.deltas++; cur.textItem.textContent=cur.raw; setStatus('responding'); bottom();
     }
+    else if(ev.t==='text' && ev.final===true){
+      if(!cur) newAssistantTurn();
+      if(!cur.textItem){ cur.textItem=itemRow('text'); cur.raw=''; }
+      if(cur.deltas===0) cur.raw=ev.text;
+      cur.textItem.innerHTML=md(cur.raw); cur.textItem.className='body md'; cur.textItem=null; cur.raw=''; cur.deltas=0; bottom();
+    }
+    else if(ev.t==='thinking'){
+      if(!cur) newAssistantTurn(); closeText();
+      if(!cur.think){ var b=itemRow('text'); var d=el('details','think'); var sm=el('summary',null,'Thinking'); var tx=el('div','tx',''); d.appendChild(sm); d.appendChild(tx); b.appendChild(d); cur.think=tx; }
+      cur.think.textContent+=ev.text; setStatus('thinking'); bottom();
+    }
+    else if(ev.t==='tool'){
+      if(!cur) newAssistantTurn(); closeText(); cur.think=null;
+      var b=itemRow('tool'); var nm=el('div','tname'); nm.textContent=ev.name+' '+(JSON.stringify(ev.input)||'').slice(0,70);
+      if(ev.status==='done'){ var ok=el('span','ok','✓'); nm.appendChild(ok); }
+      b.appendChild(nm); setStatus('working'); bottom();
+    }
+    else if(ev.t==='usage'){ if(work){ work.out=ev.outputTokens; tick(); } }
+    else if(ev.t==='approval'){
+      var box=el('div','approval'); var info=el('div'); info.appendChild(el('div','t','🔐 '+ev.title)); if(ev.detail) info.appendChild(el('div','d',ev.detail));
+      var acts=el('div','aacts'); var no=el('button','an','Deny'); var yes=el('button','ay','Approve');
+      no.addEventListener('click', function(){ vscode.postMessage({type:'respondApproval',id:ev.id,approve:false}); box.remove(); });
+      yes.addEventListener('click', function(){ vscode.postMessage({type:'respondApproval',id:ev.id,approve:true}); box.remove(); });
+      acts.appendChild(no); acts.appendChild(yes); box.appendChild(info); box.appendChild(acts); approvalSlot.appendChild(box);
+    }
+    else if(ev.t==='turn_end'){ closeText(); stopWork(); setBusy(false); input.focus(); }
+    else if(ev.t==='error'){ if(!cur) newAssistantTurn(); closeText(); var b=itemRow('text'); b.appendChild(el('div','err','⚠ '+ev.message)); stopWork(); setBusy(false); bottom(); }
   });
 </script>
 </body></html>`;

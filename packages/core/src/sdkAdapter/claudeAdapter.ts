@@ -90,6 +90,9 @@ export const claudeAdapter: AgentAdapter = {
               }
             }
           } else if (m.type === 'result') {
+            if (m.subtype === 'success') {
+              turn.events.push({ t: 'usage', inputTokens: m.usage.input_tokens ?? 0, outputTokens: m.usage.output_tokens ?? 0 });
+            }
             if (!turn.open.sourceKey) turn.open.sourceKey = m.uuid; // assistant 없던 턴 폴백
             turn.open.lastAt = new Date().toISOString();
             const ctx: ReaderCtx = {
