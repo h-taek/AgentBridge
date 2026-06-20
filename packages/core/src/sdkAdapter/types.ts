@@ -10,6 +10,8 @@ export type ChatEvent =
   | { t: 'thinking'; text: string }
   | { t: 'tool'; id: string; name: string; input: unknown; status: 'started' | 'done'; output?: unknown }
   | { t: 'usage'; inputTokens: number; outputTokens: number }
+  // 슬래시 명령 목록(6-4) — claude init의 slash_commands. 패널 / 버튼 팝업 채움. codex는 미제공(빈 목록).
+  | { t: 'commands'; commands: string[] }
   // 승인 요청(5단계) — 호스트가 UI로 띄우고 respondApproval(id, approve)로 응답할 때까지 턴이 멈춘다.
   | { t: 'approval'; id: string; title: string; detail: string; tool: string }
   | { t: 'turn_end'; reason: string }

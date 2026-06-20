@@ -62,8 +62,9 @@ export const claudeAdapter: AgentAdapter = {
           if (m.type === 'system' && m.subtype === 'init') {
             sessionId = m.session_id;
             model = m.model;
-            // init은 (streaming-input mode) 첫 입력 이후 도착 — 그 시점의 현재 턴에 session 이벤트 방출.
+            // init은 (streaming-input mode) 첫 입력 이후 도착 — 그 시점의 현재 턴에 session/commands 이벤트 방출.
             ref.current?.events.push({ t: 'session', sessionId, model });
+            ref.current?.events.push({ t: 'commands', commands: m.slash_commands ?? [] });
             continue;
           }
           const turn = ref.current;

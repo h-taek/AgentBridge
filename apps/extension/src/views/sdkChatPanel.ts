@@ -217,7 +217,7 @@ export class SdkChatPanel {
   .ic:hover{background:var(--vscode-toolbar-hoverBackground)}
   .pill{font-size:12px;font-weight:700;color:var(--vscode-foreground);border:none;border-radius:7px;padding:3px 6px;cursor:pointer}
   .pill:hover{background:var(--vscode-toolbar-hoverBackground)}
-  .menu{position:fixed;display:none;z-index:10;background:var(--vscode-menu-background,var(--vscode-input-background));border:1px solid var(--vscode-menu-border,var(--vscode-input-border,var(--vscode-panel-border)));border-radius:8px;padding:4px;min-width:130px;box-shadow:0 6px 20px rgba(0,0,0,.4)}
+  .menu{position:fixed;display:none;z-index:10;background:var(--vscode-menu-background,var(--vscode-input-background));border:1px solid var(--vscode-menu-border,var(--vscode-input-border,var(--vscode-panel-border)));border-radius:8px;padding:4px;min-width:130px;max-height:260px;overflow-y:auto;box-shadow:0 6px 20px rgba(0,0,0,.4)}
   .mitem{padding:5px 10px;border-radius:5px;cursor:pointer;font-size:12px;color:var(--vscode-menu-foreground,var(--vscode-foreground));white-space:nowrap}
   .mitem:hover{background:var(--vscode-menu-selectionBackground,var(--vscode-toolbar-hoverBackground))}
   .mitem.cur{color:var(--accent);font-weight:700}
@@ -252,6 +252,7 @@ export class SdkChatPanel {
     </div>
   </footer>
   <div id="modelMenu" class="menu"></div>
+  <div id="slashMenu" class="menu"></div>
 <script nonce="${nonce}">
   const vscode = acquireVsCodeApi();
   const log = document.getElementById('log');
@@ -286,7 +287,27 @@ export class SdkChatPanel {
     modelMenu.style.display='block';
   }
   modelPill.addEventListener('click', function(ev){ ev.stopPropagation(); if(modelMenu.style.display==='block') closeModelMenu(); else openModelMenu(); });
-  document.addEventListener('click', closeModelMenu);
+
+  // 슬래시 명령(6-4) — claude init의 slash_commands를 / 버튼 팝업으로. 선택 시 입력창에 "/cmd " 삽입.
+  const slashBtn = document.getElementById('slashBtn');
+  const slashMenu = document.getElementById('slashMenu');
+  var SLASH=[];
+  function closeSlashMenu(){ slashMenu.style.display='none'; }
+  function openSlashMenu(){
+    if(!SLASH.length) return;
+    slashMenu.innerHTML='';
+    SLASH.forEach(function(c){
+      var it=el('div','mitem','/'+c);
+      it.addEventListener('click', function(ev){ ev.stopPropagation(); input.value='/'+c+' '; grow(); input.focus(); closeSlashMenu(); });
+      slashMenu.appendChild(it);
+    });
+    var r=slashBtn.getBoundingClientRect();
+    slashMenu.style.left=r.left+'px';
+    slashMenu.style.bottom=(window.innerHeight-r.top+6)+'px';
+    slashMenu.style.display='block';
+  }
+  slashBtn.addEventListener('click', function(ev){ ev.stopPropagation(); if(slashMenu.style.display==='block') closeSlashMenu(); else openSlashMenu(); });
+  document.addEventListener('click', function(){ closeModelMenu(); closeSlashMenu(); });
 
   function el(t,c,x){ var e=document.createElement(t); if(c)e.className=c; if(x!=null)e.textContent=x; return e; }
   function bottom(){ log.scrollTop = log.scrollHeight; }
@@ -376,6 +397,7 @@ export class SdkChatPanel {
       b.appendChild(nm); setStatus('working'); bottom();
     }
     else if(ev.t==='usage'){ if(work){ work.out=ev.outputTokens; tick(); } }
+    else if(ev.t==='commands'){ SLASH=ev.commands||[]; }
     else if(ev.t==='approval'){
       var box=el('div','approval'); var info=el('div'); info.appendChild(el('div','t','🔐 '+ev.title)); if(ev.detail) info.appendChild(el('div','d',ev.detail));
       var acts=el('div','aacts'); var no=el('button','an','Deny'); var yes=el('button','ay','Approve');
