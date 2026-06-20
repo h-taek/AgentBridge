@@ -183,9 +183,8 @@ export const claudeAdapter: AgentAdapter = {
         selectedModel = id; // 표시용 model(풀 id)은 안 건드림 — 패널 칩은 사용자가 고른 라벨을 유지.
       },
       async setEffort(level) {
-        // SDK에 effort 세터가 없음 → /effort 슬래시 명령을 입력 스트림에 흘려보냄.
-        // 활성 턴(ref.current)이 없을 때(유휴) 호출 — 펌프가 ref.current 없으면 명령 이벤트를 버림(렌더 안 됨).
-        input.push({ type: 'user', message: { role: 'user', content: `/effort ${level}` }, parent_tool_use_id: null });
+        // 실제 claude 익스텐션과 동일: flag settings 레이어에 effortLevel 주입(즉시 적용, 스트리밍 전용).
+        await q.applyFlagSettings({ effortLevel: level as 'low' | 'medium' | 'high' | 'xhigh' });
       },
       respondApproval(id, approve) {
         const resolve = approvals.get(id);

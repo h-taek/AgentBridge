@@ -239,8 +239,7 @@ export class SdkChatPanel {
     -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent;animation:shim 3s linear infinite}
   @keyframes shim{from{background-position:140% 0}to{background-position:-140% 0}}
   .wmeta{color:var(--vscode-descriptionForeground);opacity:.7;font-size:12px}
-  .worked{font-family:var(--vscode-editor-font-family),monospace;color:var(--vscode-descriptionForeground);opacity:.75;font-size:12px;margin-top:2px}
-  .worked .s{color:var(--accent);opacity:.9}
+  .worked{font-family:var(--vscode-editor-font-family),monospace;color:var(--vscode-descriptionForeground);opacity:.7;font-size:12px;margin-top:2px}
 
   footer{padding:6px 8px 12px}
   .dock{position:relative}
@@ -278,9 +277,13 @@ export class SdkChatPanel {
   .mitem:hover{background:var(--vscode-menu-selectionBackground,var(--vscode-toolbar-hoverBackground))}
   .mitem.cur{color:var(--accent);font-weight:700}
   .msep{height:1px;background:var(--vscode-panel-border);margin:5px 4px}
-  .effort{padding:3px 10px 5px}
-  .elbl{font-size:11px;color:var(--vscode-descriptionForeground);margin-bottom:5px;text-transform:capitalize}
-  .erange{width:100%;height:14px;accent-color:var(--accent);cursor:pointer;margin:0}
+  .effort{padding:3px 10px 7px}
+  .elbl{font-size:11px;color:var(--vscode-descriptionForeground);margin-bottom:6px;text-transform:capitalize}
+  /* 알약 트랙 + accent 채움(--fill) + 흰색 손잡이, 포커스 노란테 제거 */
+  .erange{-webkit-appearance:none;appearance:none;width:100%;height:14px;border-radius:999px;outline:none;cursor:pointer;margin:0;
+    background:linear-gradient(to right,var(--accent) 0 var(--fill,33%),var(--vscode-scrollbarSlider-background,#3a3b40) var(--fill,33%) 100%)}
+  .erange:focus{outline:none}
+  .erange::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:16px;height:16px;border-radius:50%;background:#fff;border:none;box-shadow:0 1px 3px rgba(0,0,0,.5)}
   #send{height:28px;min-width:32px;padding:0 8px;border-radius:8px;border:none;background:var(--accent);color:#1b1b1d;cursor:pointer;display:inline-flex;align-items:center;justify-content:center}
   #send.stop{background:var(--vscode-inputValidation-errorBorder,#d65b5b);color:#fff}
   .err{color:var(--vscode-errorForeground);font-size:12px;white-space:pre-wrap}
@@ -339,7 +342,9 @@ export class SdkChatPanel {
   const modelPill = document.getElementById('modelPill');
   const modelMenu = document.getElementById('modelMenu');
   var MODELS=[], userPickedModel=false;
-  var EFFORTS=['low','medium','high'], effortIdx=1; // 추론 effort (기본 medium)
+  // 추론 effort — 에이전트별 레벨(claude=low/med/high/xhigh, codex=low/med/high). 기본 medium.
+  var EFFORT_SETS={claude:['low','medium','high','xhigh'],codex:['low','medium','high']};
+  var EFFORTS=EFFORT_SETS.claude, effortIdx=1;
   modelMenu.addEventListener('click', function(e){ e.stopPropagation(); }); // 메뉴 내부 클릭은 닫지 않음(슬라이더용)
   function closeModelMenu(){ modelMenu.style.display='none'; }
   function openModelMenu(){
@@ -350,12 +355,14 @@ export class SdkChatPanel {
       it.addEventListener('click', function(){ vscode.postMessage({type:'setModel',id:m.id}); modelPill.textContent=m.label; userPickedModel=true; MODELS.forEach(function(x){x.current=(x.id===m.id);}); closeModelMenu(); });
       modelMenu.appendChild(it);
     });
-    // effort 슬라이더 (#1b) — claude=/effort 명령 / codex=turn/start.effort
+    // effort 슬라이더 (#1b) — claude=applyFlagSettings(effortLevel) / codex=turn/start.effort
     modelMenu.appendChild(el('div','msep'));
     var er=el('div','effort');
     var lbl=el('div','elbl','Effort · '+EFFORTS[effortIdx]);
     var rng=document.createElement('input'); rng.type='range'; rng.min='0'; rng.max=String(EFFORTS.length-1); rng.step='1'; rng.value=String(effortIdx); rng.className='erange';
-    rng.addEventListener('input', function(){ effortIdx=parseInt(rng.value,10); lbl.textContent='Effort · '+EFFORTS[effortIdx]; });
+    function setFill(){ rng.style.setProperty('--fill',(EFFORTS.length>1?(effortIdx/(EFFORTS.length-1))*100:0)+'%'); }
+    setFill();
+    rng.addEventListener('input', function(){ effortIdx=parseInt(rng.value,10); lbl.textContent='Effort · '+EFFORTS[effortIdx]; setFill(); });
     rng.addEventListener('change', function(){ effortIdx=parseInt(rng.value,10); vscode.postMessage({type:'setEffort',level:EFFORTS[effortIdx]}); });
     er.appendChild(lbl); er.appendChild(rng); modelMenu.appendChild(er);
     var r=modelPill.getBoundingClientRect();
@@ -473,7 +480,7 @@ export class SdkChatPanel {
   window.addEventListener('message', function(event){
     var msg=event.data;
     if(msg.type==='ready'){
-      if(msg.model){ document.body.dataset.model=msg.model; document.getElementById('badge').textContent=msg.model; initPerm(msg.model); }
+      if(msg.model){ document.body.dataset.model=msg.model; document.getElementById('badge').textContent=msg.model; initPerm(msg.model); EFFORTS=EFFORT_SETS[msg.model]||EFFORT_SETS.claude; effortIdx=Math.min(1,EFFORTS.length-1); }
       setBusy(false); input.focus(); return;
     }
     if(msg.type==='models'){ MODELS=msg.list||[]; var curM=MODELS.filter(function(m){return m.current;})[0]; if(curM && modelPill.textContent==='Model') modelPill.textContent=curM.label; return; }
@@ -516,7 +523,7 @@ export class SdkChatPanel {
       closeText(); closeThink();
       // 완료 요약 줄 — Worked for Xs · N tokens (#3)
       if(work&&cur){ var s=Math.max(1,Math.round((Date.now()-work.t0)/1000)); var tok=work.out;
-        var w=el('div','worked'); w.appendChild(el('span','s','✳')); w.appendChild(document.createTextNode(' Worked for '+s+'s'+(tok?(' · '+fmt(tok)+' tokens'):''))); cur.turn.appendChild(w); }
+        var w=el('div','worked'); w.textContent='* Worked for '+s+'s'+(tok?(' · '+fmt(tok)+' tokens'):''); cur.turn.appendChild(w); }
       stopWork(); setBusy(false); input.focus(); bottom();
     }
     else if(ev.t==='error'){ if(!cur) newAssistantTurn(); closeText(); var b=itemRow('text'); b.appendChild(el('div','err','⚠ '+ev.message)); stopWork(); setBusy(false); bottom(); }
