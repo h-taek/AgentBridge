@@ -10,7 +10,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { pathToFileURL } from 'url';
-import type { AgentAdapter, ChatEvent, Session, IR, CliKind, PermissionMode, ModelOption } from '@agentbridge/core';
+import type { AgentAdapter, ChatEvent, Session, IR, CliKind, PermissionMode, ModelOption, AccountUsage, McpServerInfo, AgentInfo } from '@agentbridge/core';
 // 번들 코어(SDK-free)에서 — 이중로드 규칙: 저장/IR/스케줄러는 번들본 한 사본을 SSOT로.
 // codexAdapter도 SDK-free라 여기 정적 import(번들). claudeAdapter만 ESM SDK라 런타임 동적 import.
 import { readIR, SdkCapture, codexAdapter } from '@agentbridge/core';
@@ -120,7 +120,7 @@ export class SdkChatPanel {
     }
   }
 
-  private async onMessage(msg: { type: string; text?: string; id?: string; approve?: boolean; mode?: PermissionMode; level?: string; url?: string }): Promise<void> {
+  private async onMessage(msg: { type: string; text?: string; id?: string; approve?: boolean; mode?: PermissionMode; level?: string; url?: string; on?: boolean; style?: string; name?: string; enabled?: boolean }): Promise<void> {
     if (msg.type === 'send') {
       if (!this.session) return;
       try {
@@ -153,7 +153,46 @@ export class SdkChatPanel {
       await this.handleLogin();
     } else if (msg.type === 'openExternal' && msg.url) {
       await vscode.env.openExternal(vscode.Uri.parse(String(msg.url)));
+    } else if (msg.type === 'getUsage') {
+      const data = (await this.session?.getAccountUsage().catch(() => null)) ?? null;
+      this.post({ type: 'usage', data });
+    } else if (msg.type === 'listOutputStyles') {
+      const data = (await this.session?.listOutputStyles().catch(() => null)) ?? null;
+      this.post({ type: 'outputStyles', data });
+    } else if (msg.type === 'setOutputStyle' && msg.style) {
+      await this.session?.setOutputStyle(String(msg.style)).catch(() => { /* ignore */ });
+    } else if (msg.type === 'listMcp') {
+      const data = (await this.session?.listMcpServers().catch(() => [])) ?? [];
+      this.post({ type: 'mcp', data });
+    } else if (msg.type === 'toggleMcp' && msg.name) {
+      await this.session?.setMcpServerEnabled(String(msg.name), Boolean(msg.enabled)).catch(() => { /* ignore */ });
+    } else if (msg.type === 'listAgents') {
+      const data = (await this.session?.listAgents().catch(() => [])) ?? [];
+      this.post({ type: 'agents', data });
+    } else if (msg.type === 'setThinking') {
+      await this.session?.setThinking(Boolean(msg.on)).catch(() => { /* ignore */ });
+    } else if (msg.type === 'compact') {
+      const ok = Boolean(await this.session?.compact().catch(() => false));
+      this.post({ type: 'compacted', ok });
+    } else if (msg.type === 'openTerminal') {
+      const term = vscode.window.createTerminal({ cwd: this.cwd, name: 'AgentBridge' });
+      term.show();
+    } else if (msg.type === 'mentionFile') {
+      await this.handleMentionFile();
     }
+  }
+
+  // Mention file(설정 2차) — 호스트 파일 피커로 프로젝트 파일 선택 → cwd-상대경로를 입력창에 @멘션으로 삽입.
+  private async handleMentionFile(): Promise<void> {
+    const picks = await vscode.window.showOpenDialog({
+      canSelectMany: false,
+      openLabel: 'Mention',
+      defaultUri: vscode.Uri.file(this.cwd),
+    });
+    if (!picks?.length) return;
+    const rel = path.relative(this.cwd, picks[0].fsPath);
+    const insert = rel && !rel.startsWith('..') && !path.isAbsolute(rel) ? rel : picks[0].fsPath;
+    this.post({ type: 'mentionAdded', path: insert });
   }
 
   // 로그인(미로그인 사용자): startLogin으로 OAuth URL 받아 브라우저 열고(openExternal), waitLogin으로 완료 대기.
@@ -203,7 +242,7 @@ export class SdkChatPanel {
     }
   }
 
-  private post(msg: { type: 'ready'; sessionId: string; model?: string; injected?: boolean; loggedIn?: boolean } | { type: 'event'; ev: ChatEvent } | { type: 'models'; list: ModelOption[] } | { type: 'attachAdded'; name: string; path: string; dataUrl: string } | { type: 'loginStarted'; manualUrl: string } | { type: 'loginResult'; ok: boolean }): void {
+  private post(msg: { type: 'ready'; sessionId: string; model?: string; injected?: boolean; loggedIn?: boolean } | { type: 'event'; ev: ChatEvent } | { type: 'models'; list: ModelOption[] } | { type: 'attachAdded'; name: string; path: string; dataUrl: string } | { type: 'loginStarted'; manualUrl: string } | { type: 'loginResult'; ok: boolean } | { type: 'usage'; data: AccountUsage | null } | { type: 'outputStyles'; data: { current: string; available: string[] } | null } | { type: 'mcp'; data: McpServerInfo[] } | { type: 'agents'; data: AgentInfo[] } | { type: 'compacted'; ok: boolean } | { type: 'mentionAdded'; path: string }): void {
     void this.panel.webview.postMessage(msg);
   }
 
@@ -349,6 +388,50 @@ export class SdkChatPanel {
   #send{height:28px;min-width:32px;padding:0 8px;border-radius:8px;border:none;background:var(--accent);color:#1b1b1d;cursor:pointer;display:inline-flex;align-items:center;justify-content:center}
   #send.stop{background:var(--vscode-button-secondaryBackground,#6b6b6b);color:#fff}
   .err{color:var(--vscode-errorForeground);font-size:12px;white-space:pre-wrap}
+
+  /* 설정 메뉴(/ 버튼 통합) — 섹션·토글·서브패널 */
+  .menu.settings{min-width:272px}
+  .ssec{padding:8px 10px 4px;font-size:10px;color:var(--vscode-descriptionForeground);text-transform:uppercase;letter-spacing:.5px;opacity:.7}
+  .ssec:first-child{padding-top:3px}
+  .srow{display:flex;align-items:center;gap:9px}
+  .mico{width:15px;text-align:center;color:var(--vscode-descriptionForeground);font-size:12px;flex:none}
+  .mitem .sname{flex:1;font-size:13px;color:var(--vscode-foreground);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .sval{font-size:11.5px;color:var(--vscode-descriptionForeground);font-family:var(--vscode-editor-font-family),monospace}
+  .schev{color:var(--vscode-descriptionForeground);opacity:.7;font-size:14px;flex:none}
+  .sext{color:var(--vscode-descriptionForeground);font-size:11px;flex:none}
+  /* 토글 스위치 */
+  .tog{flex:none;width:28px;height:16px;border-radius:999px;background:var(--vscode-scrollbarSlider-background,#555);position:relative;cursor:pointer}
+  .tog::after{content:'';position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:#fff;transition:left .12s}
+  .tog.on{background:var(--accent)} .tog.on::after{left:14px}
+  /* 서브패널 */
+  .menu.panel{min-width:288px}
+  .sback{display:flex;align-items:center;padding:4px 8px 7px;color:var(--vscode-descriptionForeground);font-size:12px;border-bottom:1px solid var(--vscode-panel-border);margin-bottom:4px}
+  .sbk{cursor:pointer;color:var(--vscode-textLink-foreground)}
+  .sload{padding:14px 12px;color:var(--vscode-descriptionForeground);font-size:12px;opacity:.7}
+  .skv{display:flex;justify-content:space-between;gap:12px;padding:3px 11px;font-size:12px}
+  .skv .sk{color:var(--vscode-descriptionForeground)} .skv .svv{color:var(--vscode-foreground);text-align:right;word-break:break-word}
+  .surow{display:flex;justify-content:space-between;padding:8px 11px 0;font-size:12.5px}
+  .surow .spct{color:var(--vscode-foreground);font-family:var(--vscode-editor-font-family),monospace}
+  .sbar{height:5px;border-radius:999px;background:var(--vscode-scrollbarSlider-background,#3a3a3a);overflow:hidden;margin:5px 11px 0}
+  .sbar i{display:block;height:100%;border-radius:999px;background:var(--accent)}
+  .sreset{font-size:10px;color:var(--vscode-descriptionForeground);opacity:.8;padding:2px 11px 0}
+  .sseg{display:inline-flex;margin:8px 11px;border:1px solid var(--vscode-panel-border);border-radius:7px;overflow:hidden}
+  .sseg span{padding:3px 13px;font-size:11px;color:var(--vscode-descriptionForeground);cursor:pointer}
+  .sseg span.on{background:color-mix(in srgb,var(--accent) 26%,transparent);color:var(--vscode-foreground)}
+  .sins{padding:7px 11px 1px} .sinsh{font-size:12px;color:var(--vscode-foreground)}
+  .sthead2{padding:9px 11px 3px;font-size:10px;color:var(--vscode-descriptionForeground);text-transform:uppercase;letter-spacing:.5px;opacity:.7}
+  .strow{display:flex;justify-content:space-between;gap:10px;padding:2px 11px;font-size:11.5px}
+  .strow .snm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--vscode-editor-font-family),monospace}
+  .strow .spp{color:var(--vscode-descriptionForeground);flex:none;font-family:var(--vscode-editor-font-family),monospace}
+  .sopt{display:flex;align-items:center;gap:9px;padding:7px 11px;border-radius:6px;cursor:pointer}
+  .sopt:hover{background:var(--vscode-menu-selectionBackground,var(--vscode-toolbar-hoverBackground))}
+  .sopt .sck{color:var(--accent);width:11px;flex:none}
+  .sopt .snm2{flex:1;font-size:13px} .sopt.cur .snm2{font-weight:600}
+  .sopt .sod{font-size:10.5px;color:var(--vscode-descriptionForeground);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px}
+  .ssrv{display:flex;align-items:center;gap:9px;padding:7px 11px}
+  .ssrv .sdot{width:7px;height:7px;border-radius:50%;flex:none}
+  .ssrv .sdot.on{background:var(--green)} .ssrv .sdot.off{background:#5a5a5a}
+  .ssrv .sname{flex:1;font-size:13px} .ssrv .smeta{font-size:10.5px;color:var(--vscode-descriptionForeground);font-family:var(--vscode-editor-font-family),monospace}
 </style></head>
 <body data-model="${model}" data-perm="default">
   <header>
@@ -491,28 +574,101 @@ export class SdkChatPanel {
   }
   modelPill.addEventListener('click', function(ev){ ev.stopPropagation(); if(modelMenu.style.display==='block') closeModelMenu(); else openModelMenu(); });
 
-  // 슬래시 명령(6-4) — claude init의 slash_commands를 / 버튼 팝업으로. 선택 시 입력창에 "/cmd " 삽입.
+  // 설정 + 슬래시 메뉴(원본 앱처럼 / 버튼 하나에 통합). 설정 섹션 + 기존 슬래시 명령 + 서브패널.
   const slashBtn = document.getElementById('slashBtn');
-  const slashMenu = document.getElementById('slashMenu');
-  var SLASH=[];
-  function closeSlashMenu(){ slashMenu.style.display='none'; }
-  function openSlashMenu(){
-    slashMenu.innerHTML='';
-    if(!SLASH.length){
-      var hint=el('div','mitem','Send a message first to load commands'); hint.style.opacity='.6'; hint.style.cursor='default';
-      slashMenu.appendChild(hint);
-    } else SLASH.forEach(function(c){
-      var it=el('div','mitem','/'+c);
-      it.addEventListener('click', function(ev){ ev.stopPropagation(); input.value='/'+c+' '; grow(); input.focus(); closeSlashMenu(); });
-      slashMenu.appendChild(it);
-    });
-    var r=slashBtn.getBoundingClientRect();
-    slashMenu.style.left=r.left+'px';
-    slashMenu.style.bottom=(window.innerHeight-r.top+6)+'px';
-    slashMenu.style.display='block';
+  const settingsMenu = document.getElementById('slashMenu'); // 재사용
+  var SLASH=[], thinkingOn=true;
+  var SUPPORT_URLS={
+    claude:{help:'https://docs.claude.com/en/docs/claude-code/overview',report:'https://github.com/anthropics/claude-code/issues/new'},
+    codex:{help:'https://developers.openai.com/codex',report:'https://github.com/openai/codex/issues/new'},
+    agy:{help:'https://antigravity.google',report:'https://antigravity.google'}
+  };
+  settingsMenu.addEventListener('click', function(e){ e.stopPropagation(); }); // 내부 클릭은 닫지 않음(토글·서브패널)
+  function closeSettingsMenu(){ settingsMenu.style.display='none'; }
+  function placeMenu(){ var r=slashBtn.getBoundingClientRect(); settingsMenu.style.left=r.left+'px'; settingsMenu.style.bottom=(window.innerHeight-r.top+6)+'px'; }
+  function showMenu(){ placeMenu(); settingsMenu.style.display='block'; }
+  function mkToggle(on){ return el('span','tog'+(on?' on':'')); }
+  function mkItem(o){ var it=el('div','mitem'); var row=el('div','srow');
+    if(o.icon!=null) row.appendChild(el('span','mico',o.icon));
+    row.appendChild(el('span','sname',o.label));
+    if(o.val) row.appendChild(el('span','sval',o.val));
+    if(o.trailing) row.appendChild(o.trailing);
+    it.appendChild(row); if(o.onClick) it.addEventListener('click', o.onClick); return it; }
+
+  function openSettingsMenu(){
+    var model=document.body.dataset.model||'claude';
+    settingsMenu.className='menu settings'; settingsMenu.innerHTML='';
+    var f=document.createDocumentFragment();
+    f.appendChild(el('div','ssec','Context'));
+    f.appendChild(mkItem({icon:'@',label:'Mention file…',onClick:function(){ vscode.postMessage({type:'mentionFile'}); closeSettingsMenu(); }}));
+    if(model==='codex') f.appendChild(mkItem({icon:'⤿',label:'Compact conversation',onClick:function(){ vscode.postMessage({type:'compact'}); closeSettingsMenu(); }}));
+    f.appendChild(el('div','ssec','Model'));
+    if(model!=='codex'){ var tog=mkToggle(thinkingOn);
+      f.appendChild(mkItem({icon:'✶',label:'Thinking',trailing:tog,onClick:function(){ thinkingOn=!thinkingOn; tog.className='tog'+(thinkingOn?' on':''); vscode.postMessage({type:'setThinking',on:thinkingOn}); }})); }
+    f.appendChild(mkItem({icon:'◐',label:'Account & usage',trailing:el('span','schev','›'),onClick:function(){ openPanel('account'); }}));
+    f.appendChild(el('div','ssec','Customize'));
+    if(model!=='codex') f.appendChild(mkItem({icon:'✎',label:'Output style',trailing:el('span','schev','›'),onClick:function(){ openPanel('output'); }}));
+    f.appendChild(mkItem({icon:'⊞',label:'Agents & skills',trailing:el('span','schev','›'),onClick:function(){ openPanel('agents'); }}));
+    f.appendChild(mkItem({icon:'⧉',label:'MCP servers',trailing:el('span','schev','›'),onClick:function(){ openPanel('mcp'); }}));
+    f.appendChild(mkItem({icon:'›_',label:'Open in Terminal',trailing:el('span','sext','↗'),onClick:function(){ vscode.postMessage({type:'openTerminal'}); closeSettingsMenu(); }}));
+    f.appendChild(el('div','ssec','Support'));
+    var urls=SUPPORT_URLS[model]||SUPPORT_URLS.claude;
+    f.appendChild(mkItem({icon:'?',label:'View help docs',trailing:el('span','sext','↗'),onClick:function(){ vscode.postMessage({type:'openExternal',url:urls.help}); closeSettingsMenu(); }}));
+    f.appendChild(mkItem({icon:'⚑',label:'Report a problem',trailing:el('span','sext','↗'),onClick:function(){ vscode.postMessage({type:'openExternal',url:urls.report}); closeSettingsMenu(); }}));
+    if(SLASH.length){ f.appendChild(el('div','msep')); f.appendChild(el('div','ssec','Commands'));
+      SLASH.slice(0,8).forEach(function(c){ f.appendChild(mkItem({icon:'/',label:'/'+c,onClick:function(){ input.value='/'+c+' '; grow(); input.focus(); closeSettingsMenu(); }})); });
+      if(SLASH.length>8){ var more=el('div','mitem'); more.style.cssText='opacity:.55;padding-left:34px;font-size:12px'; more.textContent='+ '+(SLASH.length-8)+' more'; f.appendChild(more); } }
+    settingsMenu.appendChild(f); showMenu();
   }
-  slashBtn.addEventListener('click', function(ev){ ev.stopPropagation(); if(slashMenu.style.display==='block') closeSlashMenu(); else openSlashMenu(); });
-  document.addEventListener('click', function(){ closeModelMenu(); closeSlashMenu(); });
+
+  function panelHeader(title){ var h=el('div','sback'); var bk=el('span','sbk','‹ 뒤로'); bk.addEventListener('click', openSettingsMenu); h.appendChild(bk); h.appendChild(el('span',null,' · '+title)); return h; }
+  function openPanel(which){
+    settingsMenu.className='menu settings panel'; settingsMenu.innerHTML='';
+    var titles={account:'Account & Usage',output:'Output style',mcp:'MCP servers',agents:'Agents & skills'};
+    settingsMenu.appendChild(panelHeader(titles[which])); settingsMenu.appendChild(el('div','sload','Loading…'));
+    var reqs={account:'getUsage',output:'listOutputStyles',mcp:'listMcp',agents:'listAgents'};
+    vscode.postMessage({type:reqs[which]}); showMenu();
+  }
+  function panelOpen(){ return settingsMenu.style.display==='block' && settingsMenu.classList.contains('panel'); }
+
+  function behaviorLabel(k){ return ({subagent_heavy:'subagent-heavy sessions',cron:'background/long-running sessions',long_context:'>150k context sessions'})[k]||k; }
+  function relReset(iso){ try{ var ms=new Date(iso).getTime()-Date.now(); if(ms<=0) return 'soon'; var h=Math.floor(ms/3600000); if(h<1) return 'in '+Math.max(1,Math.round(ms/60000))+'m'; if(h<24) return 'in '+h+'h'; return 'in '+Math.round(h/24)+'d'; }catch(e){ return ''; } }
+  function renderContrib(parent,b){ parent.innerHTML=''; parent.appendChild(el('div','ssec',"What's contributing"));
+    (b.behaviors||[]).forEach(function(x){ var d=el('div','sins'); d.appendChild(el('div','sinsh',x.pct+'% — '+behaviorLabel(x.key))); parent.appendChild(d); });
+    function table(t,arr){ if(!arr||!arr.length) return; parent.appendChild(el('div','sthead2',t)); arr.forEach(function(r){ var tr=el('div','strow'); tr.appendChild(el('span','snm',r.name)); tr.appendChild(el('span','spp',r.pct+'%')); parent.appendChild(tr); }); }
+    table('Subagents',b.agents); table('Skills',b.skills); table('Plugins',b.plugins); table('MCP servers',b.mcpServers); }
+  function renderUsage(u){ if(!panelOpen()) return; settingsMenu.innerHTML=''; settingsMenu.appendChild(panelHeader('Account & Usage'));
+    if(!u){ settingsMenu.appendChild(el('div','sload','Unavailable')); return; }
+    var f=document.createDocumentFragment(); f.appendChild(el('div','ssec','Account'));
+    function kv(k,v){ if(!v) return; var r=el('div','skv'); r.appendChild(el('span','sk',k)); r.appendChild(el('span','svv',v)); f.appendChild(r); }
+    kv('Auth method',u.account.authMethod); kv('Email',u.account.email); kv('Organization',u.account.organization); kv('Plan',u.account.plan);
+    if(u.limits&&u.limits.length){ f.appendChild(el('div','msep')); f.appendChild(el('div','ssec','Usage'));
+      u.limits.forEach(function(l){ var row=el('div','surow'); row.appendChild(el('span',null,l.label)); row.appendChild(el('span','spct',l.percent+'%')); f.appendChild(row);
+        var bar=el('div','sbar'); var i=document.createElement('i'); i.style.width=Math.max(0,Math.min(100,l.percent))+'%'; bar.appendChild(i); f.appendChild(bar);
+        if(l.resetsAt) f.appendChild(el('div','sreset','Resets '+relReset(l.resetsAt))); }); }
+    if(u.contributors){ f.appendChild(el('div','msep'));
+      var seg=el('div','sseg'); var dayB=el('span',null,'Day'); var weekB=el('span',null,'Week'); seg.appendChild(dayB); seg.appendChild(weekB); f.appendChild(seg);
+      var body=el('div'); f.appendChild(body);
+      function paint(w){ dayB.className=w==='day'?'on':''; weekB.className=w==='week'?'on':''; renderContrib(body,u.contributors[w]); }
+      dayB.addEventListener('click', function(){ paint('day'); }); weekB.addEventListener('click', function(){ paint('week'); });
+      settingsMenu.appendChild(f); paint('day'); placeMenu(); return; }
+    settingsMenu.appendChild(f); placeMenu(); }
+  function renderOutputStyles(d){ if(!panelOpen()) return; settingsMenu.innerHTML=''; settingsMenu.appendChild(panelHeader('Output style'));
+    if(!d||!d.available||!d.available.length){ settingsMenu.appendChild(el('div','sload','Unavailable')); return; }
+    d.available.forEach(function(name){ var it=el('div','sopt'+(name===d.current?' cur':'')); it.appendChild(el('span','sck',name===d.current?'✓':'')); it.appendChild(el('span','snm2',name));
+      it.addEventListener('click', function(){ vscode.postMessage({type:'setOutputStyle',style:name}); d.current=name; renderOutputStyles(d); }); settingsMenu.appendChild(it); }); placeMenu(); }
+  function renderMcp(list){ if(!panelOpen()) return; settingsMenu.innerHTML=''; settingsMenu.appendChild(panelHeader('MCP servers'));
+    if(!list||!list.length){ settingsMenu.appendChild(el('div','sload','No MCP servers')); return; }
+    var canToggle=(document.body.dataset.model!=='codex');
+    list.forEach(function(s){ var row=el('div','ssrv'); row.appendChild(el('span','sdot'+(s.connected?' on':' off'))); row.appendChild(el('span','sname',s.name)); row.appendChild(el('span','smeta',s.toolCount?(s.toolCount+' tools'):''));
+      if(canToggle){ var tg=mkToggle(s.enabled); tg.addEventListener('click', function(e){ e.stopPropagation(); s.enabled=!s.enabled; tg.className='tog'+(s.enabled?' on':''); vscode.postMessage({type:'toggleMcp',name:s.name,enabled:s.enabled}); }); row.appendChild(tg); }
+      settingsMenu.appendChild(row); }); placeMenu(); }
+  function renderAgents(list){ if(!panelOpen()) return; settingsMenu.innerHTML=''; settingsMenu.appendChild(panelHeader('Agents & skills'));
+    if(!list||!list.length){ settingsMenu.appendChild(el('div','sload','None')); return; }
+    list.forEach(function(a){ var it=el('div','sopt'); it.appendChild(el('span','sck','')); it.appendChild(el('span','snm2',a.name)); if(a.description) it.appendChild(el('span','sod',a.description)); settingsMenu.appendChild(it); }); placeMenu(); }
+
+  slashBtn.addEventListener('click', function(ev){ ev.stopPropagation(); if(settingsMenu.style.display==='block') closeSettingsMenu(); else openSettingsMenu(); });
+  document.addEventListener('click', function(){ closeModelMenu(); closeSettingsMenu(); });
 
   // 이미지 첨부(6-5) — + 버튼 → 호스트 파일 다이얼로그 → 프로젝트로 복사 → 경로+썸네일(dataUrl) 회신 → 전송 시 경로 주입.
   const attachBtn = document.getElementById('attachBtn');
@@ -622,6 +778,12 @@ export class SdkChatPanel {
       else { btn.disabled=false; btn.textContent='Log in to '+(BRAND[welcomeModel]||welcomeModel); }
       return;
     }
+    if(msg.type==='usage'){ renderUsage(msg.data); return; }
+    if(msg.type==='outputStyles'){ renderOutputStyles(msg.data); return; }
+    if(msg.type==='mcp'){ renderMcp(msg.data); return; }
+    if(msg.type==='agents'){ renderAgents(msg.data); return; }
+    if(msg.type==='compacted'){ closeSettingsMenu(); return; }
+    if(msg.type==='mentionAdded'){ var pth=msg.path; input.value=(input.value? input.value.replace(/\\s*$/,'')+' ':'')+'@'+pth+' '; grow(); input.focus(); return; }
     if(msg.type!=='event') return;
     var ev=msg.ev;
     if(ev.t==='auth'){ if(ev.loggedIn===false){ stopWork(); showLoginMode(true); setLoggedOut(true); if(cur&&cur.turn){ cur.turn.remove(); cur=null; } } }
