@@ -104,6 +104,23 @@ export const claudeAdapter: AgentAdapter = {
                 turn.events.push({ t: 'tool', id: b.id, name: b.name, input: b.input, status: 'started' });
               }
             }
+          } else if (m.type === 'user') {
+            // 도구 결과(tool_result) → 'done' 이벤트로 OUT 표시. 우리가 push한 입력은 content가 문자열이라 걸러짐.
+            const content = (m as { message?: { content?: unknown } }).message?.content;
+            if (Array.isArray(content)) {
+              for (const b of content as Array<{ type?: string; tool_use_id?: string; content?: unknown }>) {
+                if (b.type === 'tool_result' && b.tool_use_id) {
+                  const c = b.content;
+                  const out =
+                    typeof c === 'string'
+                      ? c
+                      : Array.isArray(c)
+                        ? c.map((x) => (x && typeof x === 'object' && (x as { type?: string }).type === 'text' ? ((x as { text?: string }).text ?? '') : '')).join('')
+                        : '';
+                  turn.events.push({ t: 'tool', id: b.tool_use_id, name: '', input: undefined, status: 'done', output: out.slice(0, 4000) });
+                }
+              }
+            }
           } else if (m.type === 'result') {
             if (m.subtype === 'success') {
               turn.events.push({ t: 'usage', inputTokens: m.usage.input_tokens ?? 0, outputTokens: m.usage.output_tokens ?? 0 });

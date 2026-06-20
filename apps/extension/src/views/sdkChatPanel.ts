@@ -209,13 +209,14 @@ export class SdkChatPanel {
 
   #log{flex:1;overflow-y:auto;padding:18px 16px;display:flex;flex-direction:column;gap:16px}
   .turn{display:flex;flex-direction:column;gap:8px}
+  .turn.assistant{gap:15px}
   .turn.user{align-items:flex-end}
   .user .msg{background:var(--vscode-textBlockQuote-background);border-radius:12px;padding:9px 13px;max-width:80%;white-space:pre-wrap}
   .att{display:inline-flex;align-items:center;gap:5px;background:var(--vscode-textBlockQuote-background);border:1px solid var(--vscode-panel-border);border-radius:8px;padding:4px 8px;font-size:11px;color:var(--vscode-descriptionForeground);margin-bottom:5px}
 
   .item{display:flex;gap:9px;position:relative}
   /* 한 턴의 점들을 잇는 옅은 세로선 (다음 점 중심까지) */
-  .item:not(:last-child)::before{content:'';position:absolute;left:3px;top:10px;bottom:-18px;width:1px;background:var(--vscode-panel-border)}
+  .item:not(:last-child)::before{content:'';position:absolute;left:3px;top:10px;bottom:-25px;width:1px;background:var(--vscode-panel-border)}
   .item:has(+ .working)::before,.item:has(+ .worked)::before{display:none}
   .dot{flex:none;width:7px;height:7px;border-radius:50%;margin-top:7px;position:relative;z-index:1}
   .dot.tool{background:var(--accent)} .dot.text{background:var(--vscode-descriptionForeground);opacity:.6}
@@ -224,8 +225,14 @@ export class SdkChatPanel {
   details.think>summary::-webkit-details-marker{display:none}
   details.think>summary::after{content:" ▸";font-size:9px} details.think[open]>summary::after{content:" ▾"}
   details.think .tx{margin-top:4px;color:var(--vscode-descriptionForeground);white-space:pre-wrap;border-left:1px solid var(--vscode-panel-border);padding-left:9px}
-  .tname{font-family:var(--vscode-editor-font-family),monospace;color:var(--vscode-descriptionForeground);font-size:12px}
-  .tname .ok{color:var(--green);font-size:11px;margin-left:5px}
+  /* 도구: 볼드 이름 + 설명, 그 아래 IN/OUT 박스 */
+  .tname{font-size:13px;color:var(--vscode-descriptionForeground)}
+  .tname strong{color:var(--vscode-foreground);font-weight:700;margin-right:7px}
+  .tbox{margin-top:7px;border:1px solid var(--vscode-panel-border);border-radius:8px;overflow:hidden;background:var(--vscode-textCodeBlock-background);font-family:var(--vscode-editor-font-family),monospace;font-size:12px}
+  .trow{display:flex;gap:12px;padding:8px 12px}
+  .trow+.trow{border-top:1px solid var(--vscode-panel-border)}
+  .tlabel{flex:none;width:26px;color:var(--vscode-descriptionForeground);opacity:.55;font-size:11px;padding-top:1px}
+  .tcontent{flex:1;min-width:0;color:var(--vscode-descriptionForeground);white-space:pre-wrap;word-break:break-word;max-height:160px;overflow:auto}
   .md p{margin:0 0 .4em} .md p:last-child{margin:0} .md strong{font-weight:700}
   .md code{background:var(--vscode-textCodeBlock-background);padding:1px 5px;border-radius:4px;font-family:var(--vscode-editor-font-family),monospace;font-size:12px}
   .md pre{background:var(--vscode-textCodeBlock-background);border:1px solid var(--vscode-panel-border);border-radius:8px;padding:10px 12px;overflow-x:auto;margin:.4em 0}
@@ -457,6 +464,14 @@ export class SdkChatPanel {
   function stopWork(){ if(work){ clearInterval(work.spin); work.line.remove(); work=null; } }
   function cleanModel(m){ if(!m) return ''; var s=m.replace(/\\[.*?\\]/g,'').replace(/^(claude|codex)-/,''); var p=s.match(/^(opus|sonnet|haiku)-?(\\d+)-?(\\d+)?/i); return p? (p[1].charAt(0).toUpperCase()+p[1].slice(1)+' '+p[2]+(p[3]?'.'+p[3]:'')) : s; }
   function grow(){ input.style.height='auto'; input.style.height=Math.min(input.scrollHeight,160)+'px'; }
+  // 도구 표시용 — 설명(Bash 등의 description) + IN 본문(command/file_path/pattern…)
+  function toolDesc(input){ return (input&&typeof input==='object'&&input.description)?String(input.description):''; }
+  function toolIn(input){ if(input==null) return ''; if(typeof input==='string') return input;
+    if(input.command!=null) return Array.isArray(input.command)?input.command.join(' '):String(input.command);
+    if(input.file_path) return String(input.file_path);
+    if(input.pattern) return String(input.pattern)+(input.path?(' · '+input.path):'');
+    if(input.url) return String(input.url);
+    var s=JSON.stringify(input); return s.length>240?s.slice(0,240)+'…':s; }
 
   function sendMsg(){
     var text=input.value.trim(); if((!text&&!PENDING.length)||busy) return;
@@ -505,10 +520,23 @@ export class SdkChatPanel {
       cur.think.textContent+=ev.text; setStatus('thinking'); bottom();
     }
     else if(ev.t==='tool'){
-      if(!cur) newAssistantTurn(); closeText(); closeThink();
-      var b=itemRow('tool'); var nm=el('div','tname'); nm.textContent=ev.name+' '+(JSON.stringify(ev.input)||'').slice(0,70);
-      if(ev.status==='done'){ var ok=el('span','ok','✓'); nm.appendChild(ok); }
-      b.appendChild(nm); setStatus('working'); bottom();
+      if(!cur) newAssistantTurn();
+      if(!cur.tools) cur.tools={};
+      // started(또는 처음 보는 id) → 헤더 + IN 박스 생성
+      if(!cur.tools[ev.id]){
+        closeText(); closeThink();
+        var b=itemRow('tool'); var nm=el('div','tname'); nm.appendChild(el('strong',null,ev.name||'Tool'));
+        var dsc=toolDesc(ev.input); if(dsc) nm.appendChild(el('span','tdesc',dsc));
+        b.appendChild(nm);
+        var box=el('div','tbox'); var inTxt=toolIn(ev.input);
+        if(inTxt){ var ir=el('div','trow'); ir.appendChild(el('span','tlabel','IN')); ir.appendChild(el('div','tcontent',inTxt)); box.appendChild(ir); }
+        b.appendChild(box); cur.tools[ev.id]={box:box,hasOut:false}; setStatus('working'); bottom();
+      }
+      // done → OUT 박스 채움
+      if(ev.status==='done'){
+        var t=cur.tools[ev.id]; var out=ev.output!=null?(typeof ev.output==='string'?ev.output:JSON.stringify(ev.output)):'';
+        if(t&&!t.hasOut&&out.trim()){ var orr=el('div','trow'); orr.appendChild(el('span','tlabel','OUT')); orr.appendChild(el('div','tcontent',out)); t.box.appendChild(orr); t.hasOut=true; bottom(); }
+      }
     }
     else if(ev.t==='usage'){ if(work){ work.out=ev.outputTokens; tick(); } }
     else if(ev.t==='commands'){ SLASH=ev.commands||[]; }

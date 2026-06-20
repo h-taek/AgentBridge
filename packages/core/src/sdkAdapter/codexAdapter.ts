@@ -110,13 +110,20 @@ export const codexAdapter: AgentAdapter = {
           if (turn && typeof p.delta === 'string') turn.events.push({ t: 'thinking', text: p.delta });
           break;
         case 'item/completed': {
-          const item = p.item as { type?: string; text?: string; id?: string; command?: unknown } | undefined;
+          const item = p.item as { type?: string; text?: string; id?: string; command?: string; aggregatedOutput?: string } | undefined;
           if (turn && item?.type === 'agentMessage' && typeof item.text === 'string') {
             turn.open.assistantParts.push(item.text); // TurnRecord 권위본
             turn.events.push({ t: 'text', text: item.text, final: true });
           } else if (turn && item?.type === 'commandExecution') {
-            turn.open.toolCalls.push({ tool: 'exec', arg: toolArgString(item.command ?? item) });
-            turn.events.push({ t: 'tool', id: String(item.id ?? ''), name: 'exec', input: item.command ?? item, status: 'done' });
+            turn.open.toolCalls.push({ tool: 'Shell', arg: toolArgString(item.command ?? item) });
+            turn.events.push({
+              t: 'tool',
+              id: String(item.id ?? ''),
+              name: 'Shell',
+              input: { command: item.command },
+              status: 'done',
+              output: typeof item.aggregatedOutput === 'string' ? item.aggregatedOutput.slice(0, 4000) : undefined,
+            });
           }
           break;
         }
