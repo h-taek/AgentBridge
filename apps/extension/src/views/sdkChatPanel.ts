@@ -10,7 +10,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { pathToFileURL } from 'url';
-import type { AgentAdapter, ChatEvent, Session, IR, CliKind, PermissionMode } from '@agentbridge/core';
+import type { AgentAdapter, ChatEvent, Session, IR, CliKind, PermissionMode, ModelOption } from '@agentbridge/core';
 // 번들 코어(SDK-free)에서 — 이중로드 규칙: 저장/IR/스케줄러는 번들본 한 사본을 SSOT로.
 // codexAdapter도 SDK-free라 여기 정적 import(번들). claudeAdapter만 ESM SDK라 런타임 동적 import.
 import { readIR, SdkCapture, codexAdapter } from '@agentbridge/core';
@@ -104,6 +104,9 @@ export class SdkChatPanel {
         onTurn: (turn) => capture.accept(turn),
       });
       this.post({ type: 'ready', sessionId: this.session.sessionId, model, injected: Boolean(context) });
+      // 6-3: 에이전트 내부 모델 목록을 받아 패널 모델 칩 메뉴를 채운다(실패해도 채팅엔 영향 없음).
+      const models = await this.session.listModels().catch(() => [] as ModelOption[]);
+      if (models.length) this.post({ type: 'models', list: models });
     } catch (err) {
       const m = err instanceof Error ? err.message : String(err);
       output.warn(`SdkChatPanel: session start failed — ${m}`);
@@ -130,10 +133,14 @@ export class SdkChatPanel {
       await this.session?.setPermissionMode(msg.mode).catch((err) => {
         output.warn(`SdkChatPanel: setPermissionMode 실패 — ${err instanceof Error ? err.message : String(err)}`);
       });
+    } else if (msg.type === 'setModel' && msg.id) {
+      await this.session?.setModel(msg.id).catch((err) => {
+        output.warn(`SdkChatPanel: setModel 실패 — ${err instanceof Error ? err.message : String(err)}`);
+      });
     }
   }
 
-  private post(msg: { type: 'ready'; sessionId: string; model?: string; injected?: boolean } | { type: 'event'; ev: ChatEvent }): void {
+  private post(msg: { type: 'ready'; sessionId: string; model?: string; injected?: boolean } | { type: 'event'; ev: ChatEvent } | { type: 'models'; list: ModelOption[] }): void {
     void this.panel.webview.postMessage(msg);
   }
 
@@ -210,6 +217,10 @@ export class SdkChatPanel {
   .ic:hover{background:var(--vscode-toolbar-hoverBackground)}
   .pill{font-size:12px;font-weight:700;color:var(--vscode-foreground);border:none;border-radius:7px;padding:3px 6px;cursor:pointer}
   .pill:hover{background:var(--vscode-toolbar-hoverBackground)}
+  .menu{position:fixed;display:none;z-index:10;background:var(--vscode-menu-background,var(--vscode-input-background));border:1px solid var(--vscode-menu-border,var(--vscode-input-border,var(--vscode-panel-border)));border-radius:8px;padding:4px;min-width:130px;box-shadow:0 6px 20px rgba(0,0,0,.4)}
+  .mitem{padding:5px 10px;border-radius:5px;cursor:pointer;font-size:12px;color:var(--vscode-menu-foreground,var(--vscode-foreground));white-space:nowrap}
+  .mitem:hover{background:var(--vscode-menu-selectionBackground,var(--vscode-toolbar-hoverBackground))}
+  .mitem.cur{color:var(--accent);font-weight:700}
   #send{height:28px;min-width:32px;padding:0 8px;border-radius:8px;border:none;background:var(--accent);color:#1b1b1d;cursor:pointer;display:inline-flex;align-items:center;justify-content:center}
   #send.stop{background:var(--vscode-inputValidation-errorBorder,#d65b5b);color:#fff}
   .err{color:var(--vscode-errorForeground);font-size:12px;white-space:pre-wrap}
@@ -240,6 +251,7 @@ export class SdkChatPanel {
       </div>
     </div>
   </footer>
+  <div id="modelMenu" class="menu"></div>
 <script nonce="${nonce}">
   const vscode = acquireVsCodeApi();
   const log = document.getElementById('log');
@@ -254,6 +266,27 @@ export class SdkChatPanel {
   var PERM=['default','acceptEdits','plan'], PERM_LBL={'default':'default','acceptEdits':'accept edits','plan':'plan'}, permIdx=0;
   function cyclePerm(){ permIdx=(permIdx+1)%PERM.length; var m=PERM[permIdx]; permPill.textContent=PERM_LBL[m]; vscode.postMessage({type:'setPermissionMode',mode:m}); }
   permPill.addEventListener('click', cyclePerm);
+
+  // 모델 선택(6-3) — 호스트가 listModels로 채운 목록을 칩 클릭 시 팝업으로. 선택 → setModel.
+  const modelPill = document.getElementById('modelPill');
+  const modelMenu = document.getElementById('modelMenu');
+  var MODELS=[], userPickedModel=false;
+  function closeModelMenu(){ modelMenu.style.display='none'; }
+  function openModelMenu(){
+    if(!MODELS.length) return;
+    modelMenu.innerHTML='';
+    MODELS.forEach(function(m){
+      var it=el('div','mitem'+(m.current?' cur':''), m.label);
+      it.addEventListener('click', function(ev){ ev.stopPropagation(); vscode.postMessage({type:'setModel',id:m.id}); modelPill.textContent=m.label; userPickedModel=true; MODELS.forEach(function(x){x.current=(x.id===m.id);}); closeModelMenu(); });
+      modelMenu.appendChild(it);
+    });
+    var r=modelPill.getBoundingClientRect();
+    modelMenu.style.left=r.left+'px';
+    modelMenu.style.bottom=(window.innerHeight-r.top+6)+'px';
+    modelMenu.style.display='block';
+  }
+  modelPill.addEventListener('click', function(ev){ ev.stopPropagation(); if(modelMenu.style.display==='block') closeModelMenu(); else openModelMenu(); });
+  document.addEventListener('click', closeModelMenu);
 
   function el(t,c,x){ var e=document.createElement(t); if(c)e.className=c; if(x!=null)e.textContent=x; return e; }
   function bottom(){ log.scrollTop = log.scrollHeight; }
@@ -316,9 +349,10 @@ export class SdkChatPanel {
       if(msg.model){ document.body.dataset.model=msg.model; document.getElementById('badge').textContent=msg.model; }
       setBusy(false); input.focus(); return;
     }
+    if(msg.type==='models'){ MODELS=msg.list||[]; var cur=MODELS.filter(function(m){return m.current;})[0]; if(cur && modelPill.textContent==='Model') modelPill.textContent=cur.label; return; }
     if(msg.type!=='event') return;
     var ev=msg.ev;
-    if(ev.t==='session'){ if(ev.model){ document.getElementById('modelPill').textContent=cleanModel(ev.model); } }
+    if(ev.t==='session'){ if(ev.model && !userPickedModel){ modelPill.textContent=cleanModel(ev.model); } }
     else if(ev.t==='text' && ev.final===false){
       if(!cur) newAssistantTurn();
       if(!cur.textItem){ cur.textItem=itemRow('text'); cur.raw=''; }

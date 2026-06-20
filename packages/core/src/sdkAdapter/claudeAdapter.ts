@@ -19,7 +19,8 @@ export const claudeAdapter: AgentAdapter = {
     const input = new AsyncQueue<SDKUserMessage>();
 
     let sessionId = opts.resume ?? '';
-    let model: string | undefined;
+    let model: string | undefined; // init이 주는 해석된 모델(표시용 — 풀 id)
+    let selectedModel: string | undefined; // 명시 선택한 별칭(없으면 'default'가 활성)
 
     // 현재 진행 중인 턴. 턴 직렬(turnGate)이라 단일 슬롯으로 충분.
     // 객체 슬롯으로 보관 — IIFE pump에서 `let` 직접 읽기는 enclosing CFA가 never로 좁히는 TS 이슈를 피함.
@@ -156,6 +157,16 @@ export const claudeAdapter: AgentAdapter = {
       async setPermissionMode(mode) {
         // 우리 PermissionMode('default'|'acceptEdits'|'plan')는 SDK PermissionMode의 부분집합 → 그대로 전달.
         await q.setPermissionMode(mode);
+      },
+      async listModels() {
+        // 카탈로그는 별칭(default/opus[1m]/sonnet/haiku) — init의 풀 id와 안 맞으므로 '선택 별칭'으로 현재 표시.
+        const sel = selectedModel ?? 'default';
+        const ms = await q.supportedModels();
+        return ms.map((m) => ({ id: m.value, label: m.displayName, current: m.value === sel }));
+      },
+      async setModel(id) {
+        await q.setModel(id);
+        selectedModel = id; // 표시용 model(풀 id)은 안 건드림 — 패널 칩은 사용자가 고른 라벨을 유지.
       },
       respondApproval(id, approve) {
         const resolve = approvals.get(id);

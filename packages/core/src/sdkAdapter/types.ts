@@ -22,6 +22,13 @@ export type ChatEvent =
 // claude=네이티브 PermissionMode(부분집합) / codex=approvalPolicy로 매핑(다음 turn/start에 오버라이드).
 export type PermissionMode = 'default' | 'acceptEdits' | 'plan';
 
+// 모델 선택(6-3) — 에이전트(회사) 내부 모델 전환용. id=API 모델값, label=표시명.
+export interface ModelOption {
+  id: string;
+  label: string;
+  current?: boolean;
+}
+
 export interface StartOptions {
   cwd: string;
   workspaceId: string;
@@ -40,6 +47,9 @@ export interface Session {
   interrupt(): Promise<void>; // 진행 중 턴 중단 (streaming-input 전용 — SDK Query.interrupt)
   // 권한 모드 전환(6-2). claude=즉시 적용(Query.setPermissionMode) / codex=다음 턴부터 적용(turn/start 오버라이드).
   setPermissionMode(mode: PermissionMode): Promise<void>;
+  // 모델 선택(6-3). 에이전트 내부 모델 목록 + 전환. claude=Query.supportedModels/setModel / codex=model/list + turn/start 오버라이드.
+  listModels(): Promise<ModelOption[]>;
+  setModel(id: string): Promise<void>;
   // 'approval' ChatEvent에 대한 응답 — 진행 중 턴이 이 호출까지 멈춰 있다.
   respondApproval(id: string, approve: boolean): void;
   end(): Promise<void>; // 입력 스트림을 닫아 세션 종료

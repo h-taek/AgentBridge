@@ -46,6 +46,7 @@ export const codexAdapter: AgentAdapter = {
     const ref: { current: ActiveTurn | null } = { current: null };
     let threadId = opts.resume ?? '';
     let approvalPolicy = APPROVAL_POLICY.default; // 권한 모드(6-2) — 다음 turn/start에 실어 보냄
+    let model: string | null = null; // 모델(6-3) — null=codex 기본, 설정 시 다음 turn/start에 오버라이드
 
     const write = (msg: unknown): void => {
       child.stdin?.write(JSON.stringify(msg) + '\n');
@@ -156,8 +157,13 @@ export const codexAdapter: AgentAdapter = {
         try {
           ref.current = active; // 응답 전에 잡아둠 — 델타가 turn/start 응답보다 먼저 와도 라우팅됨
           events.push({ t: 'session', sessionId: threadId });
-          // approvalPolicy 오버라이드 = 이번 턴+이후 적용(turn/start params). 권한 모드 전환을 다음 턴에 반영.
-          const res = (await request('turn/start', { threadId, approvalPolicy, input: [{ type: 'text', text, text_elements: [] }] })) as { turn?: { id?: string } };
+          // approvalPolicy·model 오버라이드 = 이번 턴+이후 적용(turn/start params). 권한 모드·모델 전환을 다음 턴에 반영.
+          const res = (await request('turn/start', {
+            threadId,
+            approvalPolicy,
+            ...(model ? { model } : {}),
+            input: [{ type: 'text', text, text_elements: [] }],
+          })) as { turn?: { id?: string } };
           active.turnId = res?.turn?.id ?? '';
           open.sourceKey = active.turnId; // 턴 고유 키 (deterministicTurnId)
           for await (const ev of events) yield ev;
@@ -180,6 +186,15 @@ export const codexAdapter: AgentAdapter = {
       },
       async setPermissionMode(mode) {
         approvalPolicy = APPROVAL_POLICY[mode]; // 즉시 적용 아님 — 다음 turn/start부터(서버 오버라이드는 턴 단위).
+      },
+      async listModels() {
+        const res = (await request('model/list', {})) as { data?: Array<{ model?: string; displayName?: string; hidden?: boolean; isDefault?: boolean }> };
+        return (res?.data ?? [])
+          .filter((m) => !m.hidden && m.model)
+          .map((m) => ({ id: m.model as string, label: m.displayName ?? (m.model as string), current: model ? m.model === model : Boolean(m.isDefault) }));
+      },
+      async setModel(id) {
+        model = id; // 다음 turn/start부터 적용(서버 오버라이드는 턴 단위).
       },
       respondApproval(id, approve) {
         const rpcReqId = approvals.get(id);
