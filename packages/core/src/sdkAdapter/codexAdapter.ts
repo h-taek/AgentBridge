@@ -290,6 +290,11 @@ export const codexAdapter: AgentAdapter = {
         for (const g of r.data ?? []) for (const s of g.skills ?? []) out.push({ name: s.interface?.displayName ?? s.name ?? '', description: s.description });
         return out;
       },
+      async compact() {
+        if (!threadId) return false;
+        await request('thread/compact/start', { threadId }).catch(() => undefined);
+        return true; // codex 공식 압축 RPC
+      },
       respondApproval(id, approve) {
         const rpcReqId = approvals.get(id);
         if (rpcReqId != null) {

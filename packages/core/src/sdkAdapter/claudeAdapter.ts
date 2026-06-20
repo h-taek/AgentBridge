@@ -310,6 +310,9 @@ export const claudeAdapter: AgentAdapter = {
         const a = (await q.supportedAgents()) as unknown as Array<{ name?: string; description?: string }>;
         return (a ?? []).map((x) => ({ name: x.name ?? '', description: x.description }));
       },
+      async compact() {
+        return false; // claude SDK 0.3.x엔 압축 API 없음(/compact는 TUI 전용) — UI에서 비활성.
+      },
       respondApproval(id, approve) {
         const resolve = approvals.get(id);
         if (resolve) {
