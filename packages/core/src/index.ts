@@ -88,3 +88,5 @@ export * from './cliAdapter/agyResume.js';
 // 동적 import로만 로드한다(공식 클로드 익스텐션과 동일 패턴). 타입은 types.js로 충분히 공개된다.
 export * from './sdkAdapter/types.js';
 export * from './sdkAdapter/sdkCapture.js';
+// codexAdapter는 SDK-free(child_process+JSON)라 배럴 OK — 호스트가 정적 import. (claudeAdapter만 ESM SDK라 비노출)
+export * from './sdkAdapter/codexAdapter.js';

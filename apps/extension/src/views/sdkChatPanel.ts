@@ -10,9 +10,10 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { pathToFileURL } from 'url';
-import type { AgentAdapter, ChatEvent, Session, IR } from '@agentbridge/core';
+import type { AgentAdapter, ChatEvent, Session, IR, CliKind } from '@agentbridge/core';
 // 번들 코어(SDK-free)에서 — 이중로드 규칙: 저장/IR/스케줄러는 번들본 한 사본을 SSOT로.
-import { readIR, SdkCapture } from '@agentbridge/core';
+// codexAdapter도 SDK-free라 여기 정적 import(번들). claudeAdapter만 ESM SDK라 런타임 동적 import.
+import { readIR, SdkCapture, codexAdapter } from '@agentbridge/core';
 import { getCompactionScheduler, getWorkspaceStore } from '../core/coreInstances';
 import * as output from '../log/output';
 
@@ -46,19 +47,32 @@ export class SdkChatPanel {
 
   private constructor(private readonly panel: vscode.WebviewPanel, private readonly extensionUri: vscode.Uri) {}
 
-  static create(extensionUri: vscode.Uri, cwd: string, workspaceId: string): SdkChatPanel {
+  static create(extensionUri: vscode.Uri, cwd: string, workspaceId: string, model: CliKind): SdkChatPanel {
     const panel = vscode.window.createWebviewPanel(
       'agentbridge.sdkChat',
-      'AgentBridge · SDK 채팅',
+      `AgentBridge · SDK 채팅 (${model})`,
       vscode.ViewColumn.Active,
       { enableScripts: true, retainContextWhenHidden: true },
     );
     const inst = new SdkChatPanel(panel, extensionUri);
-    void inst.init(cwd, workspaceId);
+    void inst.init(cwd, workspaceId, model);
     return inst;
   }
 
-  private async init(cwd: string, workspaceId: string): Promise<void> {
+  // claude=ESM SDK라 dist 동적 import / codex=SDK-free라 번들 정적. 못 찾으면 웹뷰 에러 + null.
+  private async loadAdapter(model: CliKind): Promise<AgentAdapter | null> {
+    if (model === 'codex') return codexAdapter;
+    const adapterPath = resolveAdapterPath(this.extensionUri.fsPath);
+    output.log(`SdkChatPanel: claude adapter 경로 = ${adapterPath}`);
+    if (!fs.existsSync(adapterPath)) {
+      this.post({ type: 'event', ev: { t: 'error', message: `어댑터를 못 찾음: ${adapterPath} (core build 필요)` } });
+      return null;
+    }
+    const mod = (await import(pathToFileURL(adapterPath).href)) as AdapterModule;
+    return mod.claudeAdapter;
+  }
+
+  private async init(cwd: string, workspaceId: string, model: CliKind): Promise<void> {
     this.panel.webview.html = this.html(this.panel.webview);
     this.panel.webview.onDidReceiveMessage((msg) => void this.onMessage(msg));
     this.panel.onDidDispose(() => {
@@ -66,36 +80,30 @@ export class SdkChatPanel {
       void this.session?.end().catch(() => { /* already gone */ });
     });
 
-    const adapterPath = resolveAdapterPath(this.extensionUri.fsPath);
-    output.log(`SdkChatPanel: adapter 경로 = ${adapterPath}`);
-    if (!fs.existsSync(adapterPath)) {
-      this.post({ type: 'event', ev: { t: 'error', message: `어댑터를 못 찾음: ${adapterPath} (core build 필요)` } });
-      return;
-    }
-
     try {
       // 3단계 — 캡처/IR 배선 (모두 번들 코어 = SSOT).
       const workspaceRoot = getWorkspaceStore().getWorkspacePath(workspaceId);
       const ir = await readIR(workspaceRoot);
-      const context = formatIRContext(ir); // 이전 IR → systemPrompt append
+      const context = formatIRContext(ir); // 이전 IR → systemPrompt/developerInstructions로 주입
       const capture = new SdkCapture({
         workspaceId,
         workspaceRoot,
         workspacePath: cwd,
-        model: 'claude',
+        model,
         scheduler: getCompactionScheduler(), // 기존 PTY 경로와 같은 스케줄러 인스턴스
       });
 
-      const mod = (await import(pathToFileURL(adapterPath).href)) as AdapterModule;
-      this.session = await mod.claudeAdapter.start({
+      const adapter = await this.loadAdapter(model);
+      if (!adapter) return; // 에러는 loadAdapter가 이미 post
+      this.session = await adapter.start({
         cwd,
         workspaceId,
         detail: 'compact',
         context,
-        // onTurn: ESM 어댑터가 만든 plain TurnRecord를 경계 넘겨 번들 코어 캡처로 영속(turns→압축→IR).
+        // onTurn: 어댑터가 만든 plain TurnRecord를 경계 넘겨 번들 코어 캡처로 영속(turns→압축→IR).
         onTurn: (turn) => capture.accept(turn),
       });
-      this.post({ type: 'ready', sessionId: this.session.sessionId, injected: Boolean(context) });
+      this.post({ type: 'ready', sessionId: this.session.sessionId, model, injected: Boolean(context) });
     } catch (err) {
       const m = err instanceof Error ? err.message : String(err);
       output.warn(`SdkChatPanel: 세션 시작 실패 — ${m}`);
