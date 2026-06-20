@@ -247,7 +247,7 @@ export class SdkChatPanel {
   /* 캡션 = 로그인 부제와 같은 회색으로 통일 */
   .wcap,.wsub{margin-top:8px;font-size:12.5px;color:var(--vscode-descriptionForeground);opacity:.8}
   .wlogin{margin-top:20px;display:flex;flex-direction:column;align-items:center;gap:9px}
-  .wlbtn{background:var(--accent);color:#1b1b1d;border:none;border-radius:10px;padding:9px 18px;font:inherit;font-weight:600;cursor:pointer}
+  .wlbtn{background:var(--accent);color:#1b1b1d;border:none;border-radius:7px;padding:6px 18px;font:inherit;font-weight:600;cursor:pointer}
   .wlbtn:disabled{opacity:.6;cursor:default}
   .wmanual{margin-top:6px;font-size:11px;color:var(--vscode-textLink-foreground);cursor:pointer;text-decoration:underline}
   .turn{display:flex;flex-direction:column;gap:8px}
