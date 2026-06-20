@@ -15,6 +15,13 @@ export type ChatEvent =
   | { t: 'turn_end'; reason: string }
   | { t: 'error'; message: string };
 
+// 권한 모드(6-2) — Claude Code식 Shift+Tab 3단계.
+//   default      = 위험한 작업은 매번 승인 요청
+//   acceptEdits  = 파일 편집은 자동 승인(나머지는 요청)
+//   plan         = 읽기/계획만, 변경 안 함
+// claude=네이티브 PermissionMode(부분집합) / codex=approvalPolicy로 매핑(다음 turn/start에 오버라이드).
+export type PermissionMode = 'default' | 'acceptEdits' | 'plan';
+
 export interface StartOptions {
   cwd: string;
   workspaceId: string;
@@ -31,6 +38,8 @@ export interface Session {
   // 턴은 직렬: 이전 턴이 끝나야 다음 send가 시작된다.
   send(text: string): AsyncIterable<ChatEvent>;
   interrupt(): Promise<void>; // 진행 중 턴 중단 (streaming-input 전용 — SDK Query.interrupt)
+  // 권한 모드 전환(6-2). claude=즉시 적용(Query.setPermissionMode) / codex=다음 턴부터 적용(turn/start 오버라이드).
+  setPermissionMode(mode: PermissionMode): Promise<void>;
   // 'approval' ChatEvent에 대한 응답 — 진행 중 턴이 이 호출까지 멈춰 있다.
   respondApproval(id: string, approve: boolean): void;
   end(): Promise<void>; // 입력 스트림을 닫아 세션 종료

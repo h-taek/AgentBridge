@@ -10,7 +10,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { pathToFileURL } from 'url';
-import type { AgentAdapter, ChatEvent, Session, IR, CliKind } from '@agentbridge/core';
+import type { AgentAdapter, ChatEvent, Session, IR, CliKind, PermissionMode } from '@agentbridge/core';
 // 번들 코어(SDK-free)에서 — 이중로드 규칙: 저장/IR/스케줄러는 번들본 한 사본을 SSOT로.
 // codexAdapter도 SDK-free라 여기 정적 import(번들). claudeAdapter만 ESM SDK라 런타임 동적 import.
 import { readIR, SdkCapture, codexAdapter } from '@agentbridge/core';
@@ -111,7 +111,7 @@ export class SdkChatPanel {
     }
   }
 
-  private async onMessage(msg: { type: string; text?: string; id?: string; approve?: boolean }): Promise<void> {
+  private async onMessage(msg: { type: string; text?: string; id?: string; approve?: boolean; mode?: PermissionMode }): Promise<void> {
     if (msg.type === 'send') {
       if (!this.session) return;
       try {
@@ -126,6 +126,10 @@ export class SdkChatPanel {
       await this.session?.interrupt().catch(() => { /* nothing in flight */ });
     } else if (msg.type === 'respondApproval') {
       this.session?.respondApproval(String(msg.id), Boolean(msg.approve));
+    } else if (msg.type === 'setPermissionMode' && msg.mode) {
+      await this.session?.setPermissionMode(msg.mode).catch((err) => {
+        output.warn(`SdkChatPanel: setPermissionMode 실패 — ${err instanceof Error ? err.message : String(err)}`);
+      });
     }
   }
 
@@ -242,8 +246,14 @@ export class SdkChatPanel {
   const input = document.getElementById('input');
   const sendBtn = document.getElementById('send');
   const approvalSlot = document.getElementById('approvalSlot');
+  const permPill = document.getElementById('permPill');
   const STATUS = { thinking:'Thinking…', working:'Working…', responding:'Responding…' };
   let cur = null, work = null, busy = false;
+
+  // 권한 모드(6-2) — Shift+Tab / 칩 클릭으로 순환. 호스트가 claude=setPermissionMode / codex=approvalPolicy로 매핑.
+  var PERM=['default','acceptEdits','plan'], PERM_LBL={'default':'default','acceptEdits':'accept edits','plan':'plan'}, permIdx=0;
+  function cyclePerm(){ permIdx=(permIdx+1)%PERM.length; var m=PERM[permIdx]; permPill.textContent=PERM_LBL[m]; vscode.postMessage({type:'setPermissionMode',mode:m}); }
+  permPill.addEventListener('click', cyclePerm);
 
   function el(t,c,x){ var e=document.createElement(t); if(c)e.className=c; if(x!=null)e.textContent=x; return e; }
   function bottom(){ log.scrollTop = log.scrollHeight; }
@@ -295,7 +305,7 @@ export class SdkChatPanel {
     vscode.postMessage({type:'send',text:text});
   }
   sendBtn.addEventListener('click', function(){ busy? vscode.postMessage({type:'interrupt'}) : sendMsg(); });
-  input.addEventListener('keydown', function(e){ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); sendMsg(); } });
+  input.addEventListener('keydown', function(e){ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); sendMsg(); } else if(e.key==='Tab'&&e.shiftKey){ e.preventDefault(); cyclePerm(); } });
   input.addEventListener('input', grow);
   document.getElementById('newBtn').addEventListener('click', function(){ vscode.postMessage({type:'newSession'}); });
   document.getElementById('histBtn').addEventListener('click', function(){ vscode.postMessage({type:'history'}); });

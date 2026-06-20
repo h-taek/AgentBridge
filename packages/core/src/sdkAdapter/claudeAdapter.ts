@@ -153,6 +153,10 @@ export const claudeAdapter: AgentAdapter = {
       async interrupt() {
         await q.interrupt();
       },
+      async setPermissionMode(mode) {
+        // 우리 PermissionMode('default'|'acceptEdits'|'plan')는 SDK PermissionMode의 부분집합 → 그대로 전달.
+        await q.setPermissionMode(mode);
+      },
       respondApproval(id, approve) {
         const resolve = approvals.get(id);
         if (resolve) {

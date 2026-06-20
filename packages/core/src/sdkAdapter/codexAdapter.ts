@@ -14,11 +14,18 @@ import { createInterface } from 'node:readline';
 import type { OpenTurn, ReaderCtx } from '../transcriptReader/types.js';
 import { finalizeTurn, toolArgString } from '../transcriptReader/util.js';
 import { AsyncQueue } from './asyncQueue.js';
-import type { AgentAdapter, ChatEvent, Session, StartOptions } from './types.js';
+import type { AgentAdapter, ChatEvent, PermissionMode, Session, StartOptions } from './types.js';
 
 type Pending = { resolve: (v: unknown) => void; reject: (e: unknown) => void };
 type ActiveTurn = { events: AsyncQueue<ChatEvent>; open: OpenTurn; turnId: string };
 type AnyMsg = { id?: number; method?: string; result?: unknown; error?: unknown; params?: Record<string, unknown> };
+
+// 권한 모드 → codex approvalPolicy. plan의 read-only sandbox 강제는 이번 슬라이스 범위 밖(approvalPolicy만).
+const APPROVAL_POLICY: Record<PermissionMode, string> = {
+  default: 'on-request',
+  acceptEdits: 'on-failure',
+  plan: 'untrusted',
+};
 
 const APPROVAL_TITLES: Record<string, string> = {
   'item/commandExecution/requestApproval': '명령 실행 승인',
@@ -38,6 +45,7 @@ export const codexAdapter: AgentAdapter = {
     const approvals = new Map<string, number>(); // approval id(=string rpcId) → 원본 rpc id (응답용)
     const ref: { current: ActiveTurn | null } = { current: null };
     let threadId = opts.resume ?? '';
+    let approvalPolicy = APPROVAL_POLICY.default; // 권한 모드(6-2) — 다음 turn/start에 실어 보냄
 
     const write = (msg: unknown): void => {
       child.stdin?.write(JSON.stringify(msg) + '\n');
@@ -129,7 +137,7 @@ export const codexAdapter: AgentAdapter = {
     const startRes = (await request('thread/start', {
       model: null,
       cwd: opts.cwd,
-      approvalPolicy: 'on-request',
+      approvalPolicy,
       sandbox: 'workspace-write',
       ...(opts.context ? { developerInstructions: opts.context } : {}),
     })) as { thread?: { id?: string } };
@@ -148,7 +156,8 @@ export const codexAdapter: AgentAdapter = {
         try {
           ref.current = active; // 응답 전에 잡아둠 — 델타가 turn/start 응답보다 먼저 와도 라우팅됨
           events.push({ t: 'session', sessionId: threadId });
-          const res = (await request('turn/start', { threadId, input: [{ type: 'text', text, text_elements: [] }] })) as { turn?: { id?: string } };
+          // approvalPolicy 오버라이드 = 이번 턴+이후 적용(turn/start params). 권한 모드 전환을 다음 턴에 반영.
+          const res = (await request('turn/start', { threadId, approvalPolicy, input: [{ type: 'text', text, text_elements: [] }] })) as { turn?: { id?: string } };
           active.turnId = res?.turn?.id ?? '';
           open.sourceKey = active.turnId; // 턴 고유 키 (deterministicTurnId)
           for await (const ev of events) yield ev;
@@ -168,6 +177,9 @@ export const codexAdapter: AgentAdapter = {
       async interrupt() {
         const cur = ref.current;
         if (cur) await request('turn/interrupt', { threadId, turnId: cur.turnId }).catch(() => undefined);
+      },
+      async setPermissionMode(mode) {
+        approvalPolicy = APPROVAL_POLICY[mode]; // 즉시 적용 아님 — 다음 turn/start부터(서버 오버라이드는 턴 단위).
       },
       respondApproval(id, approve) {
         const rpcReqId = approvals.get(id);
