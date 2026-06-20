@@ -9,7 +9,7 @@ import { query, type Query, type SDKUserMessage, type PermissionResult, type Per
 import type { OpenTurn, ReaderCtx } from '../transcriptReader/types.js';
 import { finalizeTurn, toolArgString } from '../transcriptReader/util.js';
 import { AsyncQueue } from './asyncQueue.js';
-import type { AgentAdapter, ChatEvent, LoginChallenge, PermissionMode, Session, StartOptions } from './types.js';
+import type { AccountUsage, AgentAdapter, ChatEvent, LoginChallenge, PermissionMode, Session, StartOptions, UsageContributors, UsageLimit } from './types.js';
 
 // SDK Query의 인증 메서드는 .d.ts에 미노출(런타임 객체엔 존재) → 타입만 보강.
 type AuthQuery = {
@@ -17,6 +17,46 @@ type AuthQuery = {
   claudeOAuthCallback(authorizationCode: string, state?: string): Promise<unknown>;
   claudeOAuthWaitForCompletion(): Promise<unknown>;
 };
+
+// accountInfo()의 실제 응답(라이브 probe 확정) — .d.ts 타입이 일부 필드만 노출하므로 보강.
+type AccountInfo = { email?: string; organization?: string; subscriptionType?: string; apiProvider?: string; tokenSource?: string };
+
+// 사용량 — 실험 API(usage_EXPERIMENTAL…). 이름이 길고 버전 간 바뀔 수 있어 방어적으로만 사용.
+type RawBreakdown = {
+  behaviors?: Array<{ key?: string; pct?: number }>;
+  agents?: Array<{ name?: string; pct?: number }>;
+  skills?: Array<{ name?: string; pct?: number }>;
+  plugins?: Array<{ name?: string; pct?: number }>;
+  mcp_servers?: Array<{ name?: string; pct?: number }>;
+};
+type ExpUsage = {
+  rate_limits?: { limits?: Array<{ kind?: string; percent?: number; resets_at?: string | null; scope?: { model?: { display_name?: string } } }> };
+  behaviors?: { day?: RawBreakdown; week?: RawBreakdown };
+};
+type UsageQuery = { usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET(): Promise<ExpUsage> };
+
+// Thinking 토글 ON 예산(OFF=0). 공식 익스텐션 Thinking 토글에 대응(확장 사고 활성).
+const THINKING_ON_BUDGET = 31_999;
+
+// rate_limits.limits[].kind → 화면 라벨.
+function limitLabel(l: { kind?: string; scope?: { model?: { display_name?: string } } }): string {
+  switch (l.kind) {
+    case 'session': return 'Session (5hr)';
+    case 'weekly_all': return 'Weekly (7 day)';
+    case 'weekly_scoped': return `Weekly ${l.scope?.model?.display_name ?? ''}`.trim();
+    default: return l.kind ?? '';
+  }
+}
+function mapBreakdown(b: RawBreakdown | undefined): UsageContributors {
+  const pick = (a?: Array<{ name?: string; pct?: number }>) => (a ?? []).map((x) => ({ name: x.name ?? '', pct: x.pct ?? 0 }));
+  return {
+    behaviors: (b?.behaviors ?? []).map((x) => ({ key: x.key ?? '', pct: x.pct ?? 0 })),
+    agents: pick(b?.agents),
+    skills: pick(b?.skills),
+    plugins: pick(b?.plugins),
+    mcpServers: pick(b?.mcp_servers),
+  };
+}
 
 // 우리 PermissionMode → SDK PermissionMode. claude가 처리하는 4개만(codex 전용 id는 undefined → 무시).
 const CLAUDE_MODE: Partial<Record<PermissionMode, SdkPermissionMode>> = {
@@ -222,6 +262,30 @@ export const claudeAdapter: AgentAdapter = {
           // Settings.effortLevel 타입은 xhigh까지지만, 실제 익스텐션은 supportedEffortLevels('max' 포함)를 그대로 전달 → 'max'도 런타임 통과.
           await q.applyFlagSettings({ effortLevel: level as 'low' | 'medium' | 'high' | 'xhigh', ultracode: false });
         }
+      },
+      async setThinking(on) {
+        await q.setMaxThinkingTokens(on ? THINKING_ON_BUDGET : 0);
+      },
+      async getAccountUsage(): Promise<AccountUsage> {
+        const info = (await q.accountInfo().catch(() => ({}))) as unknown as AccountInfo;
+        const account = {
+          authMethod: info.apiProvider === 'firstParty' ? 'Claude AI' : info.apiProvider,
+          email: info.email,
+          organization: info.organization,
+          plan: info.subscriptionType,
+        };
+        let limits: UsageLimit[] = [];
+        let contributors: AccountUsage['contributors'];
+        // 실험 API — 없거나 던지면 계정 정보만 반환(화면은 USAGE 섹션을 숨김).
+        const usageFn = (q as unknown as UsageQuery).usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET;
+        if (typeof usageFn === 'function') {
+          try {
+            const u = await usageFn.call(q as unknown as UsageQuery);
+            limits = (u.rate_limits?.limits ?? []).map((l) => ({ label: limitLabel(l), percent: l.percent ?? 0, resetsAt: l.resets_at ?? null }));
+            if (u.behaviors) contributors = { day: mapBreakdown(u.behaviors.day), week: mapBreakdown(u.behaviors.week) };
+          } catch { /* 실험 API 실패 — limits/contributors 생략 */ }
+        }
+        return { account, limits, contributors };
       },
       respondApproval(id, approve) {
         const resolve = approvals.get(id);

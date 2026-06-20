@@ -40,6 +40,27 @@ export interface ModelOption {
   efforts?: string[]; // 이 모델이 지원하는 effort 레벨(슬라이더 정지점). claude는 끝에 'ultra'(ultracode) 포함 가능.
 }
 
+// 계정·사용량(설정 1차) — Account & Usage 화면.
+//   claude = accountInfo() + usage_EXPERIMENTAL_…() / codex = account/read + account/rateLimits/read.
+export interface UsageLimit {
+  label: string;            // 'Session (5hr)' · 'Weekly (7 day)' · 'Weekly Sonnet' …
+  percent: number;          // 0–100
+  resetsAt: string | null;  // ISO 시각 / null=해당 없음
+}
+// "What's contributing to your limits usage?" — claude 실험 API의 behaviors(day/week). 미지원 에이전트는 생략.
+export interface UsageContributors {
+  behaviors: Array<{ key: string; pct: number }>;   // subagent_heavy · cron · long_context …
+  agents: Array<{ name: string; pct: number }>;
+  skills: Array<{ name: string; pct: number }>;
+  plugins: Array<{ name: string; pct: number }>;
+  mcpServers: Array<{ name: string; pct: number }>;
+}
+export interface AccountUsage {
+  account: { authMethod?: string; email?: string; organization?: string; plan?: string };
+  limits: UsageLimit[];
+  contributors?: { day: UsageContributors; week: UsageContributors }; // claude만(실험). 없으면 표/토글 숨김.
+}
+
 export interface StartOptions {
   cwd: string;
   workspaceId: string;
@@ -63,6 +84,10 @@ export interface Session {
   setModel(id: string): Promise<void>;
   // 추론 effort 조정. claude=/effort 슬래시 명령(세터 없음) / codex=turn/start.effort 오버라이드.
   setEffort(level: string): Promise<void>;
+  // Thinking 토글(설정 1차). claude=setMaxThinkingTokens(on?기본예산:0) / codex=effort에 통합(no-op).
+  setThinking(on: boolean): Promise<void>;
+  // 계정·사용량 조회(설정 1차). claude=accountInfo()+usage_EXPERIMENTAL / codex=account/read(+rateLimits).
+  getAccountUsage(): Promise<AccountUsage>;
   // 'approval' ChatEvent에 대한 응답 — 진행 중 턴이 이 호출까지 멈춰 있다.
   respondApproval(id: string, approve: boolean): void;
   // 로그인 여부 조회(미로그인=false) — 세션 시작 시 입력 차단/로그인 화면 판단용. claude=accountInfo / codex=account/read.

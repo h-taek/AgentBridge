@@ -14,7 +14,7 @@ import { createInterface } from 'node:readline';
 import type { OpenTurn, ReaderCtx } from '../transcriptReader/types.js';
 import { finalizeTurn, toolArgString } from '../transcriptReader/util.js';
 import { AsyncQueue } from './asyncQueue.js';
-import type { AgentAdapter, ChatEvent, LoginChallenge, PermissionMode, Session, StartOptions } from './types.js';
+import type { AccountUsage, AgentAdapter, ChatEvent, LoginChallenge, PermissionMode, Session, StartOptions, UsageLimit } from './types.js';
 
 type Pending = { resolve: (v: unknown) => void; reject: (e: unknown) => void };
 type ActiveTurn = { events: AsyncQueue<ChatEvent>; open: OpenTurn; turnId: string };
@@ -31,6 +31,15 @@ function codexPerm(mode: PermissionMode, cwd: string): { approvalPolicy: string;
     case 'fullAccess': return { approvalPolicy: 'never', sandboxPolicy: { type: 'dangerFullAccess' } };
     default: return null; // claude 전용 모드 — 무시
   }
+}
+
+// account/rateLimits/read의 윈도우 — primary(5hr)/secondary(weekly). resetsAt=unix초.
+type CodexWindow = { usedPercent?: number; windowDurationMins?: number; resetsAt?: number };
+function codexWindowLabel(mins?: number): string {
+  if (mins === 300) return 'Session (5hr)';
+  if (mins === 10080) return 'Weekly (7 day)';
+  if (mins && mins >= 1440) return `Weekly (${Math.round(mins / 1440)} day)`;
+  return mins ? `Session (${Math.round(mins / 60)}hr)` : 'Usage';
 }
 
 const APPROVAL_TITLES: Record<string, string> = {
@@ -235,6 +244,25 @@ export const codexAdapter: AgentAdapter = {
       },
       async setEffort(level) {
         effort = level; // 다음 turn/start.effort부터 적용.
+      },
+      async setThinking() {
+        // codex는 thinking을 effort로 통합 — 별도 토글 없음(no-op).
+      },
+      async getAccountUsage(): Promise<AccountUsage> {
+        // 계정 — account/read: { account: { type:'chatgpt', email, planType }, requiresOpenaiAuth } (라이브 probe 확정).
+        const acc = (await request('account/read', {}).catch(() => null)) as { account?: { email?: string; planType?: string } } | null;
+        const ai = acc?.account ?? {};
+        const plan = ai.planType ? `ChatGPT ${ai.planType.charAt(0).toUpperCase()}${ai.planType.slice(1)}` : undefined;
+        const account = { authMethod: 'ChatGPT', email: ai.email, plan };
+        // 사용량 한도 — account/rateLimits/read: { rateLimits: { primary, secondary } }. window=5hr/weekly, resetsAt=unix초.
+        let limits: UsageLimit[] = [];
+        try {
+          const rl = (await request('account/rateLimits/read', {})) as { rateLimits?: { primary?: CodexWindow; secondary?: CodexWindow } };
+          limits = [rl.rateLimits?.primary, rl.rateLimits?.secondary]
+            .filter((w): w is CodexWindow => Boolean(w))
+            .map((w) => ({ label: codexWindowLabel(w.windowDurationMins), percent: w.usedPercent ?? 0, resetsAt: w.resetsAt ? new Date(w.resetsAt * 1000).toISOString() : null }));
+        } catch { /* 미지원/실패 — 계정 정보만 */ }
+        return { account, limits }; // codex는 contributors(기여도 분석) 없음
       },
       respondApproval(id, approve) {
         const rpcReqId = approvals.get(id);
