@@ -282,7 +282,7 @@ export class SdkChatPanel {
   .ic:hover{background:var(--vscode-toolbar-hoverBackground)}
   .pill{font-size:12px;font-weight:700;color:var(--vscode-foreground);border:none;border-radius:7px;padding:3px 6px;cursor:pointer}
   .pill:hover{background:var(--vscode-toolbar-hoverBackground)}
-  .menu{position:fixed;display:none;z-index:10;background:var(--vscode-menu-background,var(--vscode-input-background));border:1px solid var(--vscode-menu-border,var(--vscode-input-border,var(--vscode-panel-border)));border-radius:8px;padding:4px;min-width:200px;max-width:calc(100vw - 24px);max-height:320px;overflow-y:auto;box-shadow:0 6px 20px rgba(0,0,0,.4)}
+  .menu{position:fixed;display:none;z-index:10;background:var(--vscode-menu-background,var(--vscode-input-background));border:1px solid var(--vscode-menu-border,var(--vscode-input-border,var(--vscode-panel-border)));border-radius:8px;padding:4px;min-width:200px;max-width:calc(100vw - 24px);max-height:min(460px,calc(100vh - 56px));overflow-y:auto;box-shadow:0 6px 20px rgba(0,0,0,.4)}
   .mhdr{padding:5px 10px 6px;font-size:11px;color:var(--vscode-descriptionForeground);opacity:.7}
   .mitem{padding:6px 10px;border-radius:6px;cursor:pointer;color:var(--vscode-menu-foreground,var(--vscode-foreground))}
   .mitem:hover{background:var(--vscode-menu-selectionBackground,var(--vscode-toolbar-hoverBackground))}

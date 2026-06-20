@@ -88,7 +88,8 @@ export const claudeAdapter: AgentAdapter = {
             }
           } else if (m.type === 'assistant') {
             // 실제 해석된 모델(버전 포함, 예: claude-opus-4-8)을 패널 칩에 반영 — 카탈로그 별칭엔 버전이 없음.
-            if (m.message.model && m.message.model !== model) {
+            // 슬래시 명령(/usage 등) 응답은 합성 메시지라 model이 '<synthetic>' → 실제 'claude…' 모델만 반영.
+            if (m.message.model && m.message.model.startsWith('claude') && m.message.model !== model) {
               model = m.message.model;
               turn.events.push({ t: 'session', sessionId, model });
             }
