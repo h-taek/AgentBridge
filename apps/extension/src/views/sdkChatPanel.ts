@@ -107,7 +107,9 @@ export class SdkChatPanel {
         // onTurn: 어댑터가 만든 plain TurnRecord를 경계 넘겨 번들 코어 캡처로 영속(turns→압축→IR).
         onTurn: (turn) => capture.accept(turn),
       });
-      this.post({ type: 'ready', sessionId: this.session.sessionId, model, injected: Boolean(context) });
+      // 미로그인 여부를 send 없이 미리 확인 → 미로그인이면 패널이 처음부터 로그인 화면 + 입력 차단.
+      const loggedIn = await this.session.checkAuth().catch(() => true);
+      this.post({ type: 'ready', sessionId: this.session.sessionId, model, injected: Boolean(context), loggedIn });
       // 6-3: 에이전트 내부 모델 목록을 받아 패널 모델 칩 메뉴를 채운다(실패해도 채팅엔 영향 없음).
       const models = await this.session.listModels().catch(() => [] as ModelOption[]);
       if (models.length) this.post({ type: 'models', list: models });
@@ -201,7 +203,7 @@ export class SdkChatPanel {
     }
   }
 
-  private post(msg: { type: 'ready'; sessionId: string; model?: string; injected?: boolean } | { type: 'event'; ev: ChatEvent } | { type: 'models'; list: ModelOption[] } | { type: 'attachAdded'; name: string; path: string; dataUrl: string } | { type: 'loginStarted'; manualUrl: string } | { type: 'loginResult'; ok: boolean }): void {
+  private post(msg: { type: 'ready'; sessionId: string; model?: string; injected?: boolean; loggedIn?: boolean } | { type: 'event'; ev: ChatEvent } | { type: 'models'; list: ModelOption[] } | { type: 'attachAdded'; name: string; path: string; dataUrl: string } | { type: 'loginStarted'; manualUrl: string } | { type: 'loginResult'; ok: boolean }): void {
     void this.panel.webview.postMessage(msg);
   }
 
@@ -231,13 +233,16 @@ export class SdkChatPanel {
   .logwrap{position:relative;flex:1;display:flex;flex-direction:column;min-height:0}
   #log{flex:1;overflow-y:auto;padding:18px 16px;display:flex;flex-direction:column;gap:16px}
   /* 시작 화면 — 대화 전(빈 채팅)에 #log 위에 겹쳐 중앙 표시. 첫 메시지/대화중이면 숨김. */
-  #welcome{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  #welcome{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
     background:var(--vscode-sideBar-background,var(--vscode-editor-background))}
   #welcome.hide{display:none}
-  #welcome .wbox{display:flex;flex-direction:column;align-items:center;pointer-events:auto}
-  .wlogo{width:84px;height:84px;border-radius:23px;display:flex;align-items:center;justify-content:center;
-    background:color-mix(in srgb,var(--accent) 16%,transparent);color:var(--accent)}
-  .wlogo svg{width:50px;height:50px}
+  /* 상단 중앙 — AgentBridge 로고(앱 에셋) + 텍스트. 회색 칸은 currentColor라 테마(dark/light) 자동 대응 */
+  .wtop{display:flex;align-items:center;gap:6px;padding-top:22px;color:var(--vscode-foreground)}
+  .wtop .abtext{font-size:13px;font-weight:600;letter-spacing:.2px}
+  #welcome .wbox{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:auto}
+  /* 원본 브랜드 로고 그대로(배경 박스 없음). claude는 단색이라 accent 따름, codex/agy는 자체 색. */
+  .wlogo{display:flex;align-items:center;justify-content:center;color:var(--accent)}
+  .wlogo svg{width:96px;height:96px}
   .wbrand{margin-top:17px;font-size:22px;font-weight:600;letter-spacing:.2px;color:var(--vscode-foreground)}
   /* 캡션 = 로그인 부제와 같은 회색으로 통일 */
   .wcap,.wsub{margin-top:8px;font-size:12.5px;color:var(--vscode-descriptionForeground);opacity:.8}
@@ -356,6 +361,10 @@ export class SdkChatPanel {
   <div class="logwrap">
     <div id="log"></div>
     <div id="welcome">
+      <div class="wtop">
+        <svg viewBox="0 0 409 386" width="16" height="15"><rect y="279" width="103" height="107" fill="#DD7A5A" fill-opacity="0.8"/><rect x="51" y="186" width="103" height="107" fill="#9471F5" fill-opacity="0.8"/><rect x="154" width="103" height="107" fill="currentColor"/><rect x="203" y="93" width="103" height="107" fill="currentColor"/><rect x="257" y="186" width="103" height="107" fill="currentColor"/><rect x="306" y="279" width="103" height="107" fill="currentColor"/><rect x="103" y="93" width="103" height="107" fill="#628EFE" fill-opacity="0.8"/></svg>
+        <span class="abtext">AgentBridge</span>
+      </div>
       <div class="wbox">
         <div class="wlogo" id="wlogo"></div>
         <div class="wbrand" id="wbrand">Claude</div>
@@ -400,10 +409,11 @@ export class SdkChatPanel {
   // 시작 화면(welcome) — 브랜드 풀네임 + 로고. 대화 전 표시, 첫 메시지/미로그인 분기.
   const welcome = document.getElementById('welcome');
   const BRAND = { claude:'Claude', codex:'Codex', agy:'Antigravity' };
+  // 공식 브랜드 로고(사용자 제공 에셋). claude=단색(currentColor=accent) / codex,agy=자체 색 그대로.
   const W_LOGOS = {
-    claude: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l1.6 6.4L20 7l-4.6 4.8L20 17l-6.4-1.6L12 22l-1.6-6.6L4 17l4.6-5.2L4 7l6.4 1.4z"/></svg>',
-    codex:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="8"/><path d="M12 4v16M4 12h16M6.3 6.3l11.4 11.4M17.7 6.3L6.3 17.7"/></svg>',
-    agy:    '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l9 18H3z"/></svg>'
+    claude: '<svg viewBox="0 0 100 100" fill="currentColor"><path d="m19.6 66.5 19.7-11 .3-1-.3-.5h-1l-3.3-.2-11.2-.3L14 53l-9.5-.5-2.4-.5L0 49l.2-1.5 2-1.3 2.9.2 6.3.5 9.5.6 6.9.4L38 49.1h1.6l.2-.7-.5-.4-.4-.4L29 41l-10.6-7-5.6-4.1-3-2-1.5-2-.6-4.2 2.7-3 3.7.3.9.2 3.7 2.9 8 6.1L37 36l1.5 1.2.6-.4.1-.3-.7-1.1L33 25l-6-10.4-2.7-4.3-.7-2.6c-.3-1-.4-2-.4-3l3-4.2L28 0l4.2.6L33.8 2l2.6 6 4.1 9.3L47 29.9l2 3.8 1 3.4.3 1h.7v-.5l.5-7.2 1-8.7 1-11.2.3-3.2 1.6-3.8 3-2L61 2.6l2 2.9-.3 1.8-1.1 7.7L59 27.1l-1.5 8.2h.9l1-1.1 4.1-5.4 6.9-8.6 3-3.5L77 13l2.3-1.8h4.3l3.1 4.7-1.4 4.9-4.4 5.6-3.7 4.7-5.3 7.1-3.2 5.7.3.4h.7l12-2.6 6.4-1.1 7.6-1.3 3.5 1.6.4 1.6-1.4 3.4-8.2 2-9.6 2-14.3 3.3-.2.1.2.3 6.4.6 2.8.2h6.8l12.6 1 3.3 2 1.9 2.7-.3 2-5.1 2.6-6.8-1.6-16-3.8-5.4-1.3h-.8v.4l4.6 4.5 8.3 7.5L89 80.1l.5 2.4-1.3 2-1.4-.2-9.2-7-3.6-3-8-6.8h-.5v.7l1.8 2.7 9.8 14.7.5 4.5-.7 1.4-2.6 1-2.7-.6-5.8-8-6-9-4.7-8.2-.5.4-2.9 30.2-1.3 1.5-3 1.2-2.5-2-1.4-3 1.4-6.2 1.6-8 1.3-6.4 1.2-7.9.7-2.6v-.2H49L43 72l-9 12.3-7.2 7.6-1.7.7-3-1.5.3-2.8L24 86l10-12.8 6-7.9 4-4.6-.1-.5h-.3L17.2 77.4l-4.7.6-2-2 .2-3 1-1 8-5.5Z"/></svg>',
+    codex:  '<svg viewBox="0 0 9 9" fill="none"><path d="M3.03191 0.172167C3.39319 0.023523 3.7865 -0.030181 4.17441 0.0161665C4.67441 0.0736665 5.11991 0.286167 5.51091 0.653667C5.51591 0.658667 5.52291 0.662167 5.52941 0.664167C5.53647 0.665904 5.54385 0.665904 5.55091 0.664167C6.05923 0.532896 6.59731 0.581475 7.07391 0.801667L7.09741 0.812666L7.15541 0.841167C7.65429 1.09402 8.04342 1.52067 8.24941 2.04067C8.35391 2.29567 8.40591 2.56117 8.40691 2.83817C8.41442 3.04417 8.39185 3.25017 8.33991 3.44967C8.33735 3.45974 8.33738 3.47029 8.34 3.48035C8.34263 3.4904 8.34775 3.49963 8.35491 3.50717C8.65191 3.81067 8.84891 4.17217 8.94641 4.59217C9.09091 5.30467 8.94291 5.94717 8.50291 6.51917L8.43491 6.60217C8.14349 6.93574 7.761 7.17695 7.33441 7.29617C7.32515 7.29888 7.31666 7.30373 7.30962 7.31033C7.30259 7.31694 7.2972 7.3251 7.29391 7.33417C7.19841 7.60967 7.10241 7.84567 6.92391 8.08117C6.47391 8.67467 5.81291 9.00417 5.06841 9.00017C4.47491 8.99717 3.94891 8.78017 3.48991 8.34917C3.483 8.3427 3.4745 8.33819 3.46528 8.33608C3.45606 8.33397 3.44644 8.33435 3.43741 8.33717C3.24341 8.39967 3.04741 8.40867 2.83541 8.40617C2.49774 8.40346 2.16514 8.32377 1.86291 8.17317C1.54632 8.01629 1.27069 7.78773 1.05791 7.50567C0.981908 7.40467 0.906408 7.30967 0.850908 7.19717C0.775141 7.04279 0.713231 6.88199 0.665908 6.71667C0.566008 6.34048 0.563599 5.94504 0.658908 5.56767C0.662042 5.55869 0.663069 5.54911 0.661908 5.53967C0.660196 5.53039 0.655446 5.52195 0.648408 5.51567C0.417442 5.28189 0.240911 5.00002 0.131408 4.69017C0.0585831 4.49931 0.0162322 4.29818 0.00590778 4.09417C-0.0122568 3.82546 0.0115281 3.55556 0.0764078 3.29417C0.244908 2.73817 0.567408 2.30167 1.04291 1.98517C1.14891 1.91467 1.24941 1.85967 1.34341 1.82017C1.45091 1.77567 1.55841 1.73817 1.66641 1.70667C1.67413 1.70427 1.68113 1.70001 1.6868 1.69425C1.69247 1.68849 1.69663 1.68142 1.69891 1.67367C1.78091 1.37919 1.92194 1.10446 2.11341 0.866166C2.35477 0.559671 2.67114 0.320634 3.03191 0.172167ZM4.77291 5.45467C4.69165 5.45922 4.61522 5.49471 4.55931 5.55385C4.5034 5.61299 4.47225 5.69128 4.47225 5.77267C4.47225 5.85405 4.5034 5.93235 4.55931 5.99148C4.61522 6.05062 4.69165 6.08611 4.77291 6.09067H6.59091C6.63417 6.09309 6.67747 6.08667 6.71816 6.07178C6.75885 6.0569 6.79608 6.03387 6.82756 6.0041C6.85905 5.97433 6.88413 5.93846 6.90127 5.89866C6.91841 5.85887 6.92725 5.81599 6.92725 5.77267C6.92725 5.72934 6.91841 5.68647 6.90127 5.64667C6.88413 5.60688 6.85905 5.571 6.82756 5.54123C6.79608 5.51146 6.75885 5.48843 6.71816 5.47355C6.67747 5.45866 6.63417 5.45224 6.59091 5.45467H4.77291ZM2.73091 3.11517C2.68764 3.04469 2.61865 2.99381 2.53854 2.97328C2.45844 2.95275 2.37348 2.96419 2.30165 3.00517C2.22982 3.04615 2.17675 3.11346 2.15366 3.19287C2.13056 3.27228 2.13926 3.35756 2.17791 3.43067L2.81391 4.54267L2.18091 5.61067C2.1596 5.64662 2.14558 5.68641 2.13966 5.72778C2.13373 5.76914 2.13601 5.81127 2.14636 5.85176C2.15671 5.89225 2.17494 5.9303 2.2 5.96374C2.22506 5.99718 2.25646 6.02536 2.29241 6.04667C2.32836 6.06797 2.36815 6.08199 2.40952 6.08792C2.45088 6.09385 2.49301 6.09157 2.5335 6.08121C2.57399 6.07086 2.61204 6.05263 2.64548 6.02758C2.67892 6.00252 2.7071 5.97112 2.72841 5.93517L3.45541 4.70767C3.48407 4.65931 3.4994 4.60422 3.49984 4.548C3.50028 4.49179 3.48581 4.43647 3.45791 4.38767L2.73091 3.11517Z" fill="url(#cdxg)"/><defs><linearGradient id="cdxg" x1="4.5" y1="0" x2="4.5" y2="9" gradientUnits="userSpaceOnUse"><stop stop-color="#B1A7FF"/><stop offset="0.5" stop-color="#7A9DFF"/><stop offset="1" stop-color="#3941FF"/></linearGradient></defs></svg>',
+    agy:    '<svg viewBox="0 0 24 24"><mask height="23" id="agm" maskUnits="userSpaceOnUse" width="24" x="0" y="1"><path d="M21.751 22.607c1.34 1.005 3.35.335 1.508-1.508C17.73 15.74 18.904 1 12.037 1 5.17 1 6.342 15.74.815 21.1c-2.01 2.009.167 2.511 1.507 1.506 5.192-3.517 4.857-9.714 9.715-9.714 4.857 0 4.522 6.197 9.714 9.715z" fill="#fff"/></mask><g mask="url(#agm)"><path d="M-1.018-3.992c-.408 3.591 2.686 6.89 6.91 7.37 4.225.48 7.98-2.043 8.387-5.633.408-3.59-2.686-6.89-6.91-7.37-4.225-.479-7.98 2.043-8.387 5.633z" fill="#FFE432"/><path d="M15.269 7.747c1.058 4.557 5.691 7.374 10.348 6.293 4.657-1.082 7.575-5.653 6.516-10.21-1.058-4.556-5.691-7.374-10.348-6.292-4.657 1.082-7.575 5.653-6.516 10.21z" fill="#FC413D"/><path d="M-12.443 10.804c1.338 4.703 7.36 7.11 13.453 5.378 6.092-1.733 9.947-6.95 8.61-11.652C8.282-.173 2.26-2.58-3.833-.848-9.925.884-13.78 6.1-12.443 10.804z" fill="#00B95C"/><path d="M9.932 27.617c1.04 4.482 5.384 7.303 9.7 6.3 4.316-1.002 6.971-5.448 5.93-9.93-1.04-4.483-5.384-7.304-9.7-6.301-4.316 1.002-6.971 5.448-5.93 9.93z" fill="#3186FF"/><path d="M2.572-8.185C.392-3.329 2.778 2.472 7.9 4.771c5.122 2.3 11.042.227 13.222-4.63 2.18-4.855-.205-10.656-5.327-12.955-5.122-2.3-11.042-.227-13.222 4.63z" fill="#FBBC04"/><path d="M18.163 9.077c5.81 3.93 12.502 4.19 14.946.577 2.443-3.612-.287-9.727-6.098-13.658-5.81-3.931-12.502-4.19-14.946-.577-2.443 3.612.287 9.727 6.098 13.658z" fill="#FC413D"/></g></svg>'
   };
   var welcomeModel='claude', loginManualUrl='';
   function paintWelcome(m){ welcomeModel=m||welcomeModel; var b=BRAND[welcomeModel]||welcomeModel;
@@ -413,6 +423,9 @@ export class SdkChatPanel {
   function hideWelcome(){ welcome.classList.add('hide'); }
   function showLoginMode(on){ document.getElementById('wcap').style.display=on?'none':'';
     document.getElementById('wlogin').style.display=on?'flex':'none'; if(on) welcome.classList.remove('hide'); }
+  // 미로그인이면 입력 자체를 막아 "보냈는데 안 사라짐"이 안 생기게. 로그인 성공 시 해제.
+  function setLoggedOut(on){ input.disabled=on; sendBtn.disabled=on;
+    input.placeholder = on ? 'Log in to start chatting…' : 'Message…  (Enter to send · Shift+Enter newline)'; }
   document.getElementById('wlbtn').addEventListener('click', function(){
     var btn=this; btn.disabled=true; btn.textContent='Waiting for browser…'; vscode.postMessage({type:'login'}); });
   document.getElementById('wmanual').addEventListener('click', function(){ if(loginManualUrl) vscode.postMessage({type:'openExternal',url:loginManualUrl}); });
@@ -596,20 +609,22 @@ export class SdkChatPanel {
     var msg=event.data;
     if(msg.type==='ready'){
       if(msg.model){ document.body.dataset.model=msg.model; document.getElementById('badge').textContent=msg.model; initPerm(msg.model); paintWelcome(msg.model); }
-      setBusy(false); input.focus(); return;
+      if(msg.loggedIn===false){ showLoginMode(true); setLoggedOut(true); }
+      else { setBusy(false); input.focus(); }
+      return;
     }
     if(msg.type==='models'){ MODELS=msg.list||[]; var curM=MODELS.filter(function(m){return m.current;})[0]; if(curM && modelPill.textContent==='Model') modelPill.textContent=curM.label; return; }
     if(msg.type==='attachAdded'){ PENDING.push({name:msg.name,path:msg.path,dataUrl:msg.dataUrl}); renderChips(); return; }
     if(msg.type==='loginStarted'){ loginManualUrl=msg.manualUrl||''; if(loginManualUrl) document.getElementById('wmanual').style.display='block'; return; }
     if(msg.type==='loginResult'){
       var btn=document.getElementById('wlbtn');
-      if(msg.ok){ showLoginMode(false); input.disabled=false; input.focus(); }
+      if(msg.ok){ showLoginMode(false); setLoggedOut(false); setBusy(false); input.focus(); }
       else { btn.disabled=false; btn.textContent='Log in to '+(BRAND[welcomeModel]||welcomeModel); }
       return;
     }
     if(msg.type!=='event') return;
     var ev=msg.ev;
-    if(ev.t==='auth'){ if(ev.loggedIn===false){ stopWork(); setBusy(false); showLoginMode(true); } }
+    if(ev.t==='auth'){ if(ev.loggedIn===false){ stopWork(); showLoginMode(true); setLoggedOut(true); if(cur&&cur.turn){ cur.turn.remove(); cur=null; } } }
     else if(ev.t==='session'){ if(ev.model){ modelPill.textContent=cleanModel(ev.model); } }
     else if(ev.t==='text' && ev.final===false){
       if(!cur) newAssistantTurn(); closeThink();

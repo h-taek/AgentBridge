@@ -243,6 +243,15 @@ export const codexAdapter: AgentAdapter = {
           write({ jsonrpc: '2.0', id: rpcReqId, result: { decision: approve ? 'approved' : 'denied' } });
         }
       },
+      async checkAuth() {
+        // account/read로 로그인 여부 추정. 응답 구조 미확정이라 보수적: 에러면 미로그인(false), 응답 있으면 로그인.
+        try {
+          const a = (await request('account/read', {})) as { account?: unknown; email?: string } | null;
+          return Boolean(a && (a.account || a.email));
+        } catch {
+          return true; // 조회 실패 시 차단하지 않음
+        }
+      },
       async startLogin(): Promise<LoginChallenge> {
         // chatgpt OAuth — 응답 authUrl을 브라우저로 열면 codex가 콜백 처리→완료 시 account/login/completed 알림.
         const res = (await request('account/login/start', { type: 'chatgpt' })) as { loginId?: string | null; authUrl?: string };

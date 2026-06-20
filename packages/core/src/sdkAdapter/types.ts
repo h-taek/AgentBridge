@@ -65,6 +65,8 @@ export interface Session {
   setEffort(level: string): Promise<void>;
   // 'approval' ChatEvent에 대한 응답 — 진행 중 턴이 이 호출까지 멈춰 있다.
   respondApproval(id: string, approve: boolean): void;
+  // 로그인 여부 조회(미로그인=false) — 세션 시작 시 입력 차단/로그인 화면 판단용. claude=accountInfo / codex=account/read.
+  checkAuth(): Promise<boolean>;
   // 로그인(미로그인 사용자) — claude=q.claudeAuthenticate / codex=account/login/start.
   startLogin(): Promise<LoginChallenge>;   // OAuth URL 발급(+ 로컬 콜백서버 기동)
   waitLogin(): Promise<boolean>;           // 자동 모드 완료 대기(콜백서버가 코드 수신→토큰 저장)

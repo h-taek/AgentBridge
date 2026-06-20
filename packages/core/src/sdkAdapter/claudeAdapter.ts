@@ -230,6 +230,15 @@ export const claudeAdapter: AgentAdapter = {
           resolve(approve ? { behavior: 'allow' } : { behavior: 'deny', message: '사용자가 거부함' });
         }
       },
+      async checkAuth() {
+        // accountInfo는 입력(첫 메시지) 없이도 호출됨. 미로그인=tokenSource:'none'(email 없음).
+        try {
+          const a = await q.accountInfo();
+          return Boolean(a.email) || (Boolean(a.tokenSource) && a.tokenSource !== 'none');
+        } catch {
+          return true; // 조회 실패 시 차단하지 않음(로그인된 것으로 가정)
+        }
+      },
       async startLogin(): Promise<LoginChallenge> {
         // loginWithClaudeAi=true → 구독(Pro/Max) 로그인. SDK가 OAuth URL 2종 반환 + 로컬 콜백서버 기동.
         const r = await (q as unknown as AuthQuery).claudeAuthenticate(true);
