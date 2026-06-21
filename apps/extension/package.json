@@ -41,7 +41,7 @@
     "onWebviewPanel:agentbridge.chat",
     "onWebviewPanel:agentbridge.sdkChat"
   ],
-  "main": "./out/extension.js",
+  "main": "./out/extension.mjs",
   "contributes": {
     "viewsContainers": {
       "activitybar": [

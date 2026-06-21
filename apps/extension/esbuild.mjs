@@ -25,11 +25,13 @@ const watch = process.argv.includes('--watch');
 const options = {
   entryPoints: ['src/extension.ts'],
   bundle: true,
-  outfile: 'out/extension.js',
+  outfile: 'out/extension.mjs',
   platform: 'node',
-  format: 'cjs',
+  format: 'esm',
   target: 'node20',
   external: ['vscode', 'node-pty'],
+  // ESM 출력엔 require가 없다 — node-pty 해석에 쓰는 require.resolve를 위해 createRequire로 shim.
+  banner: { js: "import { createRequire } from 'module'; const require = createRequire(import.meta.url);" },
   sourcemap: !production,
   minify: production,
   logLevel: 'info',
