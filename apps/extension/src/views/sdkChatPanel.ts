@@ -15,6 +15,8 @@ import type { AgentAdapter, ChatEvent, Session, IR, CliKind, PermissionMode, Mod
 // codexAdapter도 SDK-free라 여기 정적 import(번들). claudeAdapter만 ESM SDK라 런타임 동적 import.
 import { readIR, SdkCapture, codexAdapter, resolveTranscriptPath, resolveContext } from '@agentbridge/core';
 import { getCompactionScheduler, getWorkspaceStore, getHookInstaller } from '../core/coreInstances';
+import { chatHeaderHtml, CHAT_HEADER_CSS, chatHeaderScript } from './chatHeader';
+import { getSessions, renameSession, deleteSession, type SessionMeta } from '../core/sessionRegistry';
 import * as output from '../log/output';
 
 type AdapterModule = { claudeAdapter: AgentAdapter };
@@ -240,7 +242,7 @@ export class SdkChatPanel {
     if (irPresent || mem > 0) this.post({ type: 'inject', ir: irPresent, mem });
   }
 
-  private async onMessage(msg: { type: string; text?: string; id?: string; approve?: boolean; mode?: PermissionMode; level?: string; url?: string; on?: boolean; style?: string; name?: string; enabled?: boolean; query?: string; base64?: string }): Promise<void> {
+  private async onMessage(msg: { type: string; text?: string; id?: string; approve?: boolean; mode?: PermissionMode; level?: string; url?: string; on?: boolean; style?: string; name?: string; enabled?: boolean; query?: string; base64?: string; workspaceId?: string; sessionId?: string; model?: string }): Promise<void> {
     if (msg.type === 'send') {
       if (!this.session) return;
       void this.computeInjectLabel(String(msg.text ?? '')); // 이번 턴 주입 상태 라벨(IR·장기메모리 수)
@@ -312,13 +314,70 @@ export class SdkChatPanel {
     } else if (msg.type === 'searchFiles') {
       await this.handleSearchFiles(String(msg.query ?? ''));
     } else if (msg.type === 'newSession') {
-      // /clear·New(＋) — 현재 세션 종료 후 새 세션. 웹뷰는 'cleared'로 채팅 로그를 비운다.
+      // /clear — 현재 세션 종료 후 인플레이스로 새 세션(같은 탭). 웹뷰는 'cleared'로 채팅 로그를 비운다.
       // 채팅 화면은 비우되 IR 핸드오프는 유지 주입(AgentBridge의 핵심 — 맥락 연속성).
+      // (헤더 ＋ 버튼은 더 이상 이걸 쓰지 않음 — modelPanel로 새 탭 세션. newSessionWithModel 참고.)
       await this.session?.end().catch(() => { /* already gone */ });
       this.session = null;
       this.post({ type: 'cleared' });
       await this.startSession(true);
+    } else if (msg.type === 'getSessions') {
+      await this.handleGetSessions();
+    } else if (msg.type === 'openSession') {
+      await this.handleOpenSession(String(msg.workspaceId ?? ''), String(msg.sessionId ?? ''));
+    } else if (msg.type === 'renameSession') {
+      await this.handleRenameSession(String(msg.workspaceId ?? ''), String(msg.sessionId ?? ''));
+    } else if (msg.type === 'deleteSession') {
+      await this.handleDeleteSession(String(msg.workspaceId ?? ''), String(msg.sessionId ?? ''));
+    } else if (msg.type === 'newSessionWithModel' && msg.model) {
+      await vscode.commands.executeCommand('agentbridge.newSessionWithModel', msg.model);
     }
+  }
+
+  // 세션 목록(🕐 오버레이) — PTY ChatPanel과 동일 계약. 이 워크스페이스의 모든 세션을 웹뷰로 회신.
+  private async handleGetSessions(): Promise<void> {
+    const sessions = await getSessions(this.workspaceId);
+    this.post({ type: 'sessions', sessions });
+  }
+
+  // 소유권 검증(V-29) — 웹뷰 메시지는 세션을 "지목"만, 실데이터는 호스트 저장소에서. 이 패널 워크스페이스 세션만 통과.
+  private async resolveOwnedSession(workspaceId: string, sessionId: string): Promise<SessionMeta | null> {
+    if (workspaceId !== this.workspaceId) {
+      output.warn('SdkChatPanel: webview 메시지의 workspaceId가 패널 워크스페이스와 불일치 — 무시');
+      return null;
+    }
+    const sessions = await getSessions(this.workspaceId);
+    const session = sessions.find((s) => s.sessionId === sessionId) ?? null;
+    if (!session) output.warn('SdkChatPanel: webview 메시지가 지목한 세션이 워크스페이스에 없음 — 무시');
+    return session;
+  }
+
+  private async handleOpenSession(workspaceId: string, sessionId: string): Promise<void> {
+    const session = await this.resolveOwnedSession(workspaceId, sessionId);
+    if (!session) return;
+    await vscode.commands.executeCommand('agentbridge.openSession', session);
+  }
+
+  private async handleRenameSession(workspaceId: string, sessionId: string): Promise<void> {
+    const session = await this.resolveOwnedSession(workspaceId, sessionId);
+    if (!session) return;
+    const newName = await vscode.window.showInputBox({ prompt: vscode.l10n.t('Session name'), value: session.name });
+    if (newName === undefined) return;
+    await renameSession(workspaceId, sessionId, newName);
+    await this.handleGetSessions();
+  }
+
+  private async handleDeleteSession(workspaceId: string, sessionId: string): Promise<void> {
+    const session = await this.resolveOwnedSession(workspaceId, sessionId);
+    if (!session) return;
+    // 확인 모달엔 메시지가 주장한 이름이 아니라 저장소의 실제 이름을 띄운다(이름표 바꿔치기 차단).
+    const answer = await vscode.window.showWarningMessage(vscode.l10n.t('Delete session "{0}"?', session.name), { modal: true }, vscode.l10n.t('Delete'));
+    if (answer !== vscode.l10n.t('Delete')) return;
+    const activePanel = SdkChatPanel.getActivePanel(sessionId);
+    if (activePanel && activePanel !== this) activePanel.dispose();
+    await deleteSession(workspaceId, sessionId);
+    if (!this.disposed) await this.handleGetSessions();
+    if (activePanel === this) this.panel.dispose();
   }
 
   // @ 멘션 자동완성 — cwd 기준 파일명 부분일치 검색(node_modules 등 제외), cwd-상대경로 회신.
@@ -398,7 +457,7 @@ export class SdkChatPanel {
     this.post({ type: 'attachAdded', name: safeName, path: insertPath, dataUrl: `data:image/${mime};base64,${base64}` });
   }
 
-  private post(msg: { type: 'ready'; sessionId: string; model?: string; injected?: boolean; loggedIn?: boolean } | { type: 'event'; ev: ChatEvent } | { type: 'models'; list: ModelOption[] } | { type: 'attachAdded'; name: string; path: string; dataUrl: string } | { type: 'loginStarted'; manualUrl: string } | { type: 'loginResult'; ok: boolean } | { type: 'usage'; data: AccountUsage | null } | { type: 'outputStyles'; data: { current: string; available: string[] } | null } | { type: 'mcp'; data: McpServerInfo[] } | { type: 'agents'; data: AgentInfo[] } | { type: 'compacted'; ok: boolean } | { type: 'mentionAdded'; path: string } | { type: 'slash'; list: string[] } | { type: 'files'; list: string[] } | { type: 'cleared' } | { type: 'inject'; ir: boolean; mem: number } | { type: 'restore'; turns: Array<{ user: string; items: Array<{ type: string; text?: string; name?: string; arg?: string }> }> }): void {
+  private post(msg: { type: 'ready'; sessionId: string; model?: string; injected?: boolean; loggedIn?: boolean } | { type: 'event'; ev: ChatEvent } | { type: 'models'; list: ModelOption[] } | { type: 'attachAdded'; name: string; path: string; dataUrl: string } | { type: 'loginStarted'; manualUrl: string } | { type: 'loginResult'; ok: boolean } | { type: 'usage'; data: AccountUsage | null } | { type: 'outputStyles'; data: { current: string; available: string[] } | null } | { type: 'mcp'; data: McpServerInfo[] } | { type: 'agents'; data: AgentInfo[] } | { type: 'compacted'; ok: boolean } | { type: 'mentionAdded'; path: string } | { type: 'slash'; list: string[] } | { type: 'files'; list: string[] } | { type: 'cleared' } | { type: 'inject'; ir: boolean; mem: number } | { type: 'restore'; turns: Array<{ user: string; items: Array<{ type: string; text?: string; name?: string; arg?: string }> }> } | { type: 'sessions'; sessions: SessionMeta[] }): void {
     void this.panel.webview.postMessage(msg);
   }
 
@@ -427,13 +486,7 @@ export class SdkChatPanel {
   *{box-sizing:border-box}
   body{margin:0;padding:0;height:100vh;display:flex;flex-direction:column;
     font:13px/1.6 var(--vscode-font-family);color:var(--vscode-foreground);background:var(--vscode-sideBar-background,var(--vscode-editor-background))}
-  header{display:flex;gap:7px;align-items:center;padding:1px 10px;border-bottom:1px solid var(--vscode-panel-border)}
-  .title{font-weight:500;font-size:12px}
-  .badge{background:var(--accent);color:#1b1b1d;border-radius:999px;padding:1px 5px;font-size:11px;font-weight:800;letter-spacing:.2px;text-transform:capitalize;line-height:1.35}
-  .sp{flex:1}
-  .hbtn{width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;border:none;background:none;color:var(--vscode-foreground);cursor:pointer;border-radius:7px}
-  #newBtn{margin-left:-5px}
-  .hbtn:hover{background:var(--vscode-toolbar-hoverBackground)}
+  ${CHAT_HEADER_CSS}
 
   .logwrap{position:relative;flex:1;display:flex;flex-direction:column;min-height:0}
   #log{flex:1;overflow-y:auto;padding:18px 16px;display:flex;flex-direction:column;gap:16px}
@@ -617,13 +670,7 @@ export class SdkChatPanel {
   .ssrv .sname{flex:1;font-size:13px} .ssrv .smeta{font-size:10.5px;color:var(--vscode-descriptionForeground);font-family:var(--vscode-editor-font-family),monospace}
 </style></head>
 <body data-model="${model}" data-perm="default">
-  <header>
-    <span class="title">AgentBridge</span>
-    <span class="badge" id="badge">${model}</span>
-    <span class="sp"></span>
-    <button class="hbtn" id="histBtn" title="History"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></button>
-    <button class="hbtn" id="newBtn" title="New session"><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
-  </header>
+  ${chatHeaderHtml(model)}
   <div class="logwrap">
     <div id="log"></div>
     <div id="welcome">
@@ -1062,8 +1109,7 @@ export class SdkChatPanel {
   input.addEventListener('scroll', function(){ inhl.scrollTop=input.scrollTop; });
   input.addEventListener('blur', function(){ setTimeout(closeAc, 120); });
   input.addEventListener('keyup', function(e){ if(e.key==='ArrowLeft'||e.key==='ArrowRight') updateAc(); });
-  document.getElementById('newBtn').addEventListener('click', function(){ vscode.postMessage({type:'newSession'}); });
-  document.getElementById('histBtn').addEventListener('click', function(){ vscode.postMessage({type:'history'}); });
+  ${chatHeaderScript(JSON.stringify(this.sessionId))}
 
   window.addEventListener('message', function(event){
     var msg=event.data;
