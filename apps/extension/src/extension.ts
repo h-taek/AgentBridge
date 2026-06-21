@@ -238,6 +238,18 @@ export function activate(context: vscode.ExtensionContext) {
     SdkChatPanel.revive(context.extensionUri, panel, cwd, workspaceId, model, sessionId, sdkChatOpts(workspaceId, model, sessionId, modelSessionId, title));
   }
 
+  // chatMode 토글 디스패처 — 설정값에 따라 SDK 패널 또는 PTY 패널을 연다(둘 다 보존, 라우팅만 분기).
+  // PTY: buildOpts로 SpawnOptions 구성 → ChatPanel.create(복원 경로와 동일 빌더). 닫힘 시 markSessionClosed.
+  async function openChat(cwd: string, workspaceId: string, model: CliKind, sessionId: string, modelSessionId?: string, title?: string): Promise<void> {
+    if (getConfig().chatMode === 'pty') {
+      const opts = { ...(await buildOpts(model, cwd, workspaceId, sessionId, modelSessionId)), terminalName: title ?? CLI_DISPLAY_NAME[model] };
+      const chat = ChatPanel.create(context.extensionUri, opts);
+      chat.onDispose(() => { void markSessionClosed(workspaceId, sessionId).then(() => sessionTree.refresh()); });
+    } else {
+      openSdkChat(cwd, workspaceId, model, sessionId, modelSessionId, title);
+    }
+  }
+
   // --- Commands ---
   const newSession = vscode.commands.registerCommand('agentbridge.newSession', async () => {
     const picked = await vscode.window.showQuickPick<ModelChoice>(
@@ -269,7 +281,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     if (model === 'codex') notifications.notifyCodexHooksTrust();
 
-    openSdkChat(cwd, workspaceId, model, sessionId, undefined, CLI_DISPLAY_NAME[model]);
+    await openChat(cwd, workspaceId, model, sessionId, undefined, CLI_DISPLAY_NAME[model]);
   });
 
   const openSessionCmd = vscode.commands.registerCommand('agentbridge.openSession', async (session: SessionMeta) => {
@@ -298,7 +310,7 @@ export function activate(context: vscode.ExtensionContext) {
     // 옛 세션 폴백 — PTY 시절 claude는 resume id를 sessionId 칸에 넣고 modelSessionId는 비웠다.
     // modelSessionId 없으면 sessionId로 폴백(claude만; codex는 항상 modelSessionId=thread id 보유).
     const resumeId = session.modelSessionId ?? (session.model === 'claude' ? session.sessionId : undefined);
-    openSdkChat(cwd, session.workspaceId, session.model, session.sessionId, resumeId, session.name);
+    await openChat(cwd, session.workspaceId, session.model, session.sessionId, resumeId, session.name);
   });
 
   const selectSessionCmd = vscode.commands.registerCommand('agentbridge.selectSession', async () => {
@@ -392,7 +404,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     if (model === 'codex') notifications.notifyCodexHooksTrust();
 
-    openSdkChat(cwd, workspaceId, model, sessionId, undefined, CLI_DISPLAY_NAME[model]);
+    await openChat(cwd, workspaceId, model, sessionId, undefined, CLI_DISPLAY_NAME[model]);
   });
 
   // IDE 재시작 시 직전 챗 탭들을 복구 — webview state(sessionId/model/workspaceId)로

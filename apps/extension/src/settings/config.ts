@@ -3,6 +3,7 @@ import type { CliKind } from '../shared/types';
 
 type RefinePolicy = 'priority' | 'fixed' | 'active' | 'off';
 type AssistantDetail = 'full' | 'compact' | 'minimal';
+type ChatMode = 'sdk' | 'pty';
 
 export interface AgentBridgeConfig {
   refinePolicy: RefinePolicy;
@@ -10,6 +11,7 @@ export interface AgentBridgeConfig {
   refineFixedCli: CliKind;
   refineUseClaude: boolean;
   assistantDetail: AssistantDetail;
+  chatMode: ChatMode;
   maxArchiveSnapshots: number;
   proposalEveryN: number;
 }
@@ -28,6 +30,7 @@ function read(): AgentBridgeConfig {
     refineFixedCli: cfg.get<CliKind>('refine.fixedCli', 'agy'),
     refineUseClaude: cfg.get<boolean>('refine.useClaude', true),
     assistantDetail: cfg.get<AssistantDetail>('turns.assistantDetail', 'compact'),
+    chatMode: cfg.get<ChatMode>('chat.mode', 'sdk'),
     maxArchiveSnapshots: Math.max(5, cfg.get<number>('memory.maxArchiveSnapshots', 15)),
     proposalEveryN: cfg.get<boolean>('memory.proposalEnabled', true) ? PROPOSAL_EVERY_N : 0,
   };

@@ -167,6 +167,19 @@
     "configuration": {
       "title": "AgentBridge",
       "properties": {
+        "agentbridge.chat.mode": {
+          "type": "string",
+          "enum": [
+            "sdk",
+            "pty"
+          ],
+          "enumDescriptions": [
+            "GUI chat powered by the agent SDK (rich rendering, structured turns).",
+            "Terminal chat running the agent CLI in a PTY (classic)."
+          ],
+          "default": "sdk",
+          "description": "Chat engine for AgentBridge sessions — 'sdk' = GUI (default), 'pty' = terminal CLI. Takes effect on the next session you open."
+        },
         "agentbridge.refine.policy": {
           "type": "string",
           "enum": [
