@@ -13,9 +13,11 @@ import { pathToFileURL } from 'url';
 import type { AgentAdapter, ChatEvent, Session, IR, CliKind, PermissionMode, ModelOption, AccountUsage, McpServerInfo, AgentInfo } from '@agentbridge/core';
 // 번들 코어(SDK-free)에서 — 이중로드 규칙: 저장/IR/스케줄러는 번들본 한 사본을 SSOT로.
 // codexAdapter도 SDK-free라 여기 정적 import(번들). claudeAdapter만 ESM SDK라 런타임 동적 import.
-import { readIR, SdkCapture, codexAdapter, resolveTranscriptPath, resolveContext } from '@agentbridge/core';
+import { readIR, SdkCapture, codexAdapter, resolveTranscriptPath, resolveContext, acquireOwnership, readForeignOwner, releaseOwnership } from '@agentbridge/core';
 import { getCompactionScheduler, getWorkspaceStore, getHookInstaller } from '../core/coreInstances';
+import { getSessionDir } from '../core/workspaceStore';
 import { chatHeaderHtml, CHAT_HEADER_CSS, chatHeaderScript } from './chatHeader';
+import { chatPanelEvents } from './chatPanel';
 import { getSessions, renameSession, deleteSession, type SessionMeta } from '../core/sessionRegistry';
 import { createGroupLocker } from './groupLock';
 import * as output from '../log/output';
@@ -65,6 +67,8 @@ export class SdkChatPanel {
   private lastModelSession = ''; // 마지막으로 보고한 모델 세션 id(중복 영속 방지)
   // 에디터 그룹 자동 잠금(PTY와 동일) — 처음 active 시 그룹 잠가 탐색기 파일이 챗을 덮지 않게.
   private readonly groupLocker = createGroupLocker({ executeCommand: (cmd) => vscode.commands.executeCommand(cmd), warn: (msg) => output.warn(msg) });
+  private ownerDir: string | null = null; // 소유권 가드용 세션 디렉토리(owner.json) — #1
+  private deletedExternally = false; // 세션 삭제 시 set → dispose에서 markSessionClosed 중복 방지 — #7
 
   private constructor(private readonly panel: vscode.WebviewPanel, private readonly extensionUri: vscode.Uri) {}
 
@@ -122,8 +126,16 @@ export class SdkChatPanel {
   }
 
   reveal(): void { this.panel.reveal(); }
-  markDeleted(): void { /* SDK 패널은 별도 삭제 전 처리 불필요(현재) */ }
+  markDeleted(): void { this.deletedExternally = true; } // #7
   dispose(): void { this.panel.dispose(); }
+
+  // 앱/익스텐션 종료(deactivate) 시 — session.end()를 await해 깔끔히 종료(#3, V-07).
+  // SDK 캡처는 턴마다 즉시 영속(accept→appendTurn)이라 버퍼된 마지막 턴 없음 — end만 await.
+  async disposeAndFlush(): Promise<void> {
+    if (this.disposed) return;
+    await this.session?.end().catch(() => { /* already gone */ });
+    this.dispose();
+  }
 
   // 새 세션 첫 메시지에서 자동 제목 1회 — claude=generateSessionTitle / codex(null)=첫 메시지 잘라서. 호스트가 renameSession.
   private async maybeAutoTitle(firstMessage: string): Promise<void> {
@@ -186,14 +198,33 @@ export class SdkChatPanel {
     this.model = model;
     this.panel.webview.html = this.html(model);
     this.panel.webview.onDidReceiveMessage((msg) => void this.onMessage(msg));
-    this.panel.onDidChangeViewState((e) => this.groupLocker.onViewState(e.webviewPanel.active));
-    this.groupLocker.onViewState(this.panel.active);
+    // 활성화 시: 에디터그룹 잠금(#6) + 사이드바 트리 선택 동기화(#4, chatPanelEvents 재사용).
+    const onActive = (active: boolean) => {
+      this.groupLocker.onViewState(active);
+      if (active && this.sessionId) chatPanelEvents.fire({ sessionId: this.sessionId });
+    };
+    this.panel.onDidChangeViewState((e) => onActive(e.webviewPanel.active));
+    onActive(this.panel.active);
     this.panel.onDidDispose(() => {
       this.disposed = true;
       SdkChatPanel.activePanels.delete(this.sessionId);
+      if (this.ownerDir) { void releaseOwnership(this.ownerDir).catch(() => { /* best-effort */ }); this.ownerDir = null; } // #1
       void this.session?.end().catch(() => { /* already gone */ });
-      this.onDisposeCb?.();
+      if (!this.deletedExternally) this.onDisposeCb?.(); // 삭제로 닫히면 markSessionClosed 생략(#7)
     });
+    // 소유권 가드(#1, PTY와 동일 core 함수) — 다른 앱(데스크탑/타 익스텐션)이 이 세션 라이브 소유 중이면 시작 차단.
+    if (this.workspaceId && this.sessionId) {
+      const dir = getSessionDir(this.workspaceId, this.sessionId);
+      const foreign = await readForeignOwner(dir);
+      if (foreign) {
+        const appName = foreign.app === 'desktop' ? vscode.l10n.t('the desktop app') : vscode.l10n.t('the other extension');
+        output.log(`SdkChatPanel: 시작 거부 — 외부 소유(${appName}, pid=${foreign.pid})`);
+        this.post({ type: 'event', ev: { t: 'error', message: vscode.l10n.t('This session is in use by {0}. Close it there, then reopen this tab.', appName) } });
+        return;
+      }
+      this.ownerDir = dir;
+      void acquireOwnership(dir, { app: 'extension', cols: 0, rows: 0 }).catch((err) => output.warn(`owner.json acquire 실패: ${String(err)}`));
+    }
     await this.startSession(true, this.resumeId);
   }
 
@@ -317,6 +348,8 @@ export class SdkChatPanel {
         const insert = rel && !rel.startsWith('..') && !path.isAbsolute(rel) ? rel : abs;
         this.post({ type: 'mentionAdded', path: insert });
       }
+    } else if (msg.type === 'log') {
+      output.log(`[sdk webview] ${String(msg.text ?? '')}`); // #8 — 웹뷰 디버그 로그 통로(PTY 파리티)
     } else if (msg.type === 'login') {
       await this.handleLogin();
     } else if (msg.type === 'openExternal' && msg.url) {
@@ -1035,7 +1068,9 @@ export class SdkChatPanel {
       }); })); })(dt.items[k]); } }
     if(imgs.length||pending.length||Object.keys(paths).length) e.preventDefault();
     imgs.forEach(sendImageFile);
-    Promise.all(pending).then(function(){ var list=Object.keys(paths); if(list.length) vscode.postMessage({type:'mentionPaths',paths:list}); });
+    Promise.all(pending).then(function(){ var list=Object.keys(paths);
+      if(list.length) vscode.postMessage({type:'mentionPaths',paths:list});
+      else if(!imgs.length) vscode.postMessage({type:'log',text:'drop: no paths — types='+JSON.stringify(Array.from(dt.types||[]))}); });
   });
   function thumb(a){ if(!a.dataUrl) return null; var im=document.createElement('img'); im.className='thumb'; im.src=a.dataUrl; return im; }
   function renderChips(){
