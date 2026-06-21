@@ -351,7 +351,7 @@ export class SdkChatPanel {
     this.post({ type: 'attachAdded', name: safeName, path: insertPath, dataUrl: `data:image/${mime};base64,${base64}` });
   }
 
-  private post(msg: { type: 'ready'; sessionId: string; model?: string; injected?: boolean; loggedIn?: boolean } | { type: 'event'; ev: ChatEvent } | { type: 'models'; list: ModelOption[] } | { type: 'attachAdded'; name: string; path: string; dataUrl: string } | { type: 'loginStarted'; manualUrl: string } | { type: 'loginResult'; ok: boolean } | { type: 'usage'; data: AccountUsage | null } | { type: 'outputStyles'; data: { current: string; available: string[] } | null } | { type: 'mcp'; data: McpServerInfo[] } | { type: 'agents'; data: AgentInfo[] } | { type: 'compacted'; ok: boolean } | { type: 'mentionAdded'; path: string } | { type: 'slash'; list: string[] } | { type: 'files'; list: string[] } | { type: 'cleared' } | { type: 'restore'; turns: Array<{ user: string; assistant: string; tools: Array<{ name: string; arg: string }> }> }): void {
+  private post(msg: { type: 'ready'; sessionId: string; model?: string; injected?: boolean; loggedIn?: boolean } | { type: 'event'; ev: ChatEvent } | { type: 'models'; list: ModelOption[] } | { type: 'attachAdded'; name: string; path: string; dataUrl: string } | { type: 'loginStarted'; manualUrl: string } | { type: 'loginResult'; ok: boolean } | { type: 'usage'; data: AccountUsage | null } | { type: 'outputStyles'; data: { current: string; available: string[] } | null } | { type: 'mcp'; data: McpServerInfo[] } | { type: 'agents'; data: AgentInfo[] } | { type: 'compacted'; ok: boolean } | { type: 'mentionAdded'; path: string } | { type: 'slash'; list: string[] } | { type: 'files'; list: string[] } | { type: 'cleared' } | { type: 'restore'; turns: Array<{ user: string; items: Array<{ type: string; text?: string; name?: string; arg?: string }> }> }): void {
     void this.panel.webview.postMessage(msg);
   }
 
@@ -908,16 +908,18 @@ export class SdkChatPanel {
   }
   function inline(s){ return s.replace(/\`([^\`]+)\`/g,function(_,c){return '<code>'+esc(c)+'</code>';}).replace(/\\*\\*([^*]+)\\*\\*/g,'<strong>$1</strong>'); }
 
-  // 재개 시 이전 대화 복원 — user/assistant 말풍선 + 도구 호출(이름+요약, IN/OUT 박스 없이)을 그리고 시작화면 숨김.
+  // 재개 시 이전 대화 복원 — user 말풍선 + assistant의 텍스트/도구를 '나온 순서대로'(흐름 보존) 그리고 시작화면 숨김.
   function renderRestore(turns){
     if(!turns||!turns.length) return;
     hideWelcome();
     turns.forEach(function(t){
       if(t.user&&t.user.trim()){ var ut=el('div','turn user'); ut.appendChild(el('div','msg',t.user)); log.appendChild(ut); }
-      var tools=t.tools||[];
-      if((t.assistant&&t.assistant.trim())||tools.length){ var at=el('div','turn assistant');
-        if(t.assistant&&t.assistant.trim()){ var it=el('div','item'); it.appendChild(el('span','dot text')); var bd=el('div','body md'); bd.innerHTML=md(t.assistant); it.appendChild(bd); at.appendChild(it); }
-        tools.forEach(function(tl){ var ti=el('div','item'); ti.appendChild(el('span','dot tool')); var nm=el('div','tname'); nm.appendChild(el('strong',null,tl.name)); if(tl.arg) nm.appendChild(el('span','tdesc',tl.arg)); ti.appendChild(nm); at.appendChild(ti); });
+      var items=t.items||[];
+      if(items.length){ var at=el('div','turn assistant');
+        items.forEach(function(it){
+          if(it.type==='text'){ if(!it.text||!it.text.trim()) return; var r=el('div','item'); r.appendChild(el('span','dot text')); var bd=el('div','body md'); bd.innerHTML=md(it.text); r.appendChild(bd); at.appendChild(r); }
+          else { var r2=el('div','item'); r2.appendChild(el('span','dot tool')); var nm=el('div','tname'); nm.appendChild(el('strong',null,it.name)); if(it.arg) nm.appendChild(el('span','tdesc',it.arg)); r2.appendChild(nm); at.appendChild(r2); }
+        });
         log.appendChild(at);
       }
     });
@@ -1079,9 +1081,9 @@ export class SdkChatPanel {
   }
 }
 
-// ── 트랜스크립트 복원 파서 (display 전용 — IR 리더와 분리). user/assistant 텍스트 + 도구 호출(이름+요약)만 추출. ──
-type RestoreTool = { name: string; arg: string };
-type RestoreTurn = { user: string; assistant: string; tools: RestoreTool[] };
+// ── 트랜스크립트 복원 파서 (display 전용 — IR 리더와 분리). 텍스트/도구를 '나온 순서대로' items에 담아 원래 흐름 보존. ──
+type RestoreItem = { type: 'text'; text: string } | { type: 'tool'; name: string; arg: string };
+type RestoreTurn = { user: string; items: RestoreItem[] };
 
 // 도구 입력 → 한 줄 요약(command/file_path/pattern…). codex는 arguments가 JSON 문자열.
 function toolArgSummary(input: unknown): string {
@@ -1093,20 +1095,26 @@ function toolArgSummary(input: unknown): string {
   if (v == null) return '';
   return (Array.isArray(v) ? v.join(' ') : String(v)).slice(0, 200);
 }
+// 연속 텍스트는 합치고, 도구가 끼면 새 항목 — 그래서 텍스트-도구-텍스트 흐름이 그대로 남는다.
+function pushText(items: RestoreItem[], text: string, sep: string): void {
+  const last = items[items.length - 1];
+  if (last && last.type === 'text') last.text += sep + text;
+  else items.push({ type: 'text', text });
+}
 
-// claude: type 'user'(content=string) / type 'assistant'(content 배열: text 블록 + tool_use). thinking 제외.
+// claude: type 'user'(content=string) / type 'assistant'(content 배열: text·tool_use를 순서대로). thinking 제외. tool_result(content=배열 user)는 skip.
 function parseClaudeTranscript(records: Array<Record<string, unknown>>): RestoreTurn[] {
   const turns: RestoreTurn[] = [];
   let cur: RestoreTurn | null = null;
   for (const r of records) {
     const msg = r.message as { role?: string; content?: unknown } | undefined;
     if (r.type === 'user' && typeof msg?.content === 'string') {
-      if (msg.content.trim()) { if (cur) turns.push(cur); cur = { user: msg.content, assistant: '', tools: [] }; }
+      if (msg.content.trim()) { if (cur) turns.push(cur); cur = { user: msg.content, items: [] }; }
     } else if (r.type === 'assistant' && Array.isArray(msg?.content)) {
-      if (!cur) cur = { user: '', assistant: '', tools: [] };
+      if (!cur) cur = { user: '', items: [] };
       for (const b of msg.content as Array<{ type?: string; text?: string; name?: string; input?: unknown }>) {
-        if (b.type === 'text' && b.text) cur.assistant += b.text;
-        else if (b.type === 'tool_use' && b.name) cur.tools.push({ name: b.name, arg: toolArgSummary(b.input) });
+        if (b.type === 'text' && b.text) pushText(cur.items, b.text, '');
+        else if (b.type === 'tool_use' && b.name) cur.items.push({ type: 'tool', name: b.name, arg: toolArgSummary(b.input) });
       }
     }
   }
@@ -1114,20 +1122,20 @@ function parseClaudeTranscript(records: Array<Record<string, unknown>>): Restore
   return turns;
 }
 
-// codex rollout: event_msg(user_message/agent_message)=실제 대화(response_item엔 AGENTS.md 주입 섞임) + response_item/function_call=도구.
+// codex rollout: event_msg(user_message/agent_message)=대화, response_item/function_call=도구 — 모두 나온 순서대로 items에.
 function parseCodexTranscript(records: Array<Record<string, unknown>>): RestoreTurn[] {
   const turns: RestoreTurn[] = [];
   let cur: RestoreTurn | null = null;
   for (const r of records) {
     const p = r.payload as { type?: string; message?: unknown; name?: string; arguments?: unknown } | undefined;
     if (r.type === 'event_msg' && p?.type === 'user_message' && typeof p.message === 'string') {
-      if (p.message.trim()) { if (cur) turns.push(cur); cur = { user: p.message, assistant: '', tools: [] }; }
+      if (p.message.trim()) { if (cur) turns.push(cur); cur = { user: p.message, items: [] }; }
     } else if (r.type === 'event_msg' && p?.type === 'agent_message' && typeof p.message === 'string') {
-      if (!cur) cur = { user: '', assistant: '', tools: [] };
-      if (p.message.trim()) cur.assistant += (cur.assistant ? '\n\n' : '') + p.message;
+      if (!cur) cur = { user: '', items: [] };
+      if (p.message.trim()) pushText(cur.items, p.message, '\n\n');
     } else if (r.type === 'response_item' && p?.type === 'function_call' && p.name) {
-      if (!cur) cur = { user: '', assistant: '', tools: [] };
-      cur.tools.push({ name: p.name, arg: toolArgSummary(p.arguments) });
+      if (!cur) cur = { user: '', items: [] };
+      cur.items.push({ type: 'tool', name: p.name, arg: toolArgSummary(p.arguments) });
     }
   }
   if (cur) turns.push(cur);
