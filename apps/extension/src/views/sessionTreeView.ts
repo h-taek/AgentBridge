@@ -17,7 +17,7 @@ function ensureDotIcon(model: string, closed: boolean): vscode.Uri {
   if (!dotIconDir) return vscode.Uri.file('');
   const color = MODEL_DOT_COLOR[model] ?? '#888';
   const opacity = closed ? '0.4' : '1';
-  const key = `dot-${model}${closed ? '-closed' : ''}.svg`;
+  const key = `${model}${closed ? '-closed' : ''}.svg`;
   const filePath = join(dotIconDir, key);
   if (!existsSync(filePath)) {
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><circle cx="8" cy="8" r="3.5" fill="${color}" opacity="${opacity}"/></svg>`;
