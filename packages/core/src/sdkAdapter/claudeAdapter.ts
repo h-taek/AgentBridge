@@ -313,6 +313,11 @@ export const claudeAdapter: AgentAdapter = {
       async compact() {
         return false; // claude SDK 0.3.x엔 압축 API 없음(/compact는 TUI 전용) — UI에서 비활성.
       },
+      async listCommands() {
+        // 첫 send 전에도 동작(라이브 확인) — 전체 슬래시 명령 이름.
+        const cmds = (await q.supportedCommands().catch(() => [])) as unknown as Array<{ name?: string }>;
+        return cmds.map((c) => c.name ?? '').filter(Boolean);
+      },
       respondApproval(id, approve) {
         const resolve = approvals.get(id);
         if (resolve) {

@@ -113,6 +113,9 @@ export class SdkChatPanel {
       // 6-3: 에이전트 내부 모델 목록을 받아 패널 모델 칩 메뉴를 채운다(실패해도 채팅엔 영향 없음).
       const models = await this.session.listModels().catch(() => [] as ModelOption[]);
       if (models.length) this.post({ type: 'models', list: models });
+      // 슬래시 명령을 첫 send 전에 미리 채워 / 메뉴에 바로 보이게 (claude=전체 목록 / codex=빈 목록).
+      const cmds = await this.session.listCommands().catch(() => [] as string[]);
+      if (cmds.length) this.post({ type: 'slash', list: cmds });
     } catch (err) {
       const m = err instanceof Error ? err.message : String(err);
       output.warn(`SdkChatPanel: session start failed — ${m}`);
@@ -242,7 +245,7 @@ export class SdkChatPanel {
     }
   }
 
-  private post(msg: { type: 'ready'; sessionId: string; model?: string; injected?: boolean; loggedIn?: boolean } | { type: 'event'; ev: ChatEvent } | { type: 'models'; list: ModelOption[] } | { type: 'attachAdded'; name: string; path: string; dataUrl: string } | { type: 'loginStarted'; manualUrl: string } | { type: 'loginResult'; ok: boolean } | { type: 'usage'; data: AccountUsage | null } | { type: 'outputStyles'; data: { current: string; available: string[] } | null } | { type: 'mcp'; data: McpServerInfo[] } | { type: 'agents'; data: AgentInfo[] } | { type: 'compacted'; ok: boolean } | { type: 'mentionAdded'; path: string }): void {
+  private post(msg: { type: 'ready'; sessionId: string; model?: string; injected?: boolean; loggedIn?: boolean } | { type: 'event'; ev: ChatEvent } | { type: 'models'; list: ModelOption[] } | { type: 'attachAdded'; name: string; path: string; dataUrl: string } | { type: 'loginStarted'; manualUrl: string } | { type: 'loginResult'; ok: boolean } | { type: 'usage'; data: AccountUsage | null } | { type: 'outputStyles'; data: { current: string; available: string[] } | null } | { type: 'mcp'; data: McpServerInfo[] } | { type: 'agents'; data: AgentInfo[] } | { type: 'compacted'; ok: boolean } | { type: 'mentionAdded'; path: string } | { type: 'slash'; list: string[] }): void {
     void this.panel.webview.postMessage(msg);
   }
 
@@ -567,6 +570,14 @@ export class SdkChatPanel {
       wrap.appendChild(track); wrap.appendChild(rng);
       er.appendChild(lbl); er.appendChild(wrap); modelMenu.appendChild(er);
     }
+    // Thinking 토글(#4) — 모델 메뉴 안, effort 슬라이더 바로 아래. claude 계열만(codex는 effort에 통합).
+    if(document.body.dataset.model!=='codex'){
+      modelMenu.appendChild(el('div','msep'));
+      var tkr=el('div','effort'); tkr.appendChild(el('div','elbl','Thinking'));
+      var tkt=mkToggle(thinkingOn); tkt.style.marginLeft='auto';
+      tkt.addEventListener('click', function(e){ e.stopPropagation(); thinkingOn=!thinkingOn; tkt.className='tog'+(thinkingOn?' on':''); vscode.postMessage({type:'setThinking',on:thinkingOn}); });
+      tkr.appendChild(tkt); modelMenu.appendChild(tkr);
+    }
     var r=modelPill.getBoundingClientRect();
     modelMenu.style.left=r.left+'px';
     modelMenu.style.bottom=(window.innerHeight-r.top+6)+'px';
@@ -603,8 +614,6 @@ export class SdkChatPanel {
     f.appendChild(mkItem({icon:'@',label:'Mention file…',onClick:function(){ vscode.postMessage({type:'mentionFile'}); closeSettingsMenu(); }}));
     if(model==='codex') f.appendChild(mkItem({icon:'⤿',label:'Compact conversation',onClick:function(){ vscode.postMessage({type:'compact'}); closeSettingsMenu(); }}));
     f.appendChild(el('div','ssec','Model'));
-    if(model!=='codex'){ var tog=mkToggle(thinkingOn);
-      f.appendChild(mkItem({icon:'✶',label:'Thinking',trailing:tog,onClick:function(){ thinkingOn=!thinkingOn; tog.className='tog'+(thinkingOn?' on':''); vscode.postMessage({type:'setThinking',on:thinkingOn}); }})); }
     f.appendChild(mkItem({icon:'◐',label:'Account & usage',trailing:el('span','schev','›'),onClick:function(){ openPanel('account'); }}));
     f.appendChild(el('div','ssec','Customize'));
     if(model!=='codex') f.appendChild(mkItem({icon:'✎',label:'Output style',trailing:el('span','schev','›'),onClick:function(){ openPanel('output'); }}));
@@ -616,12 +625,11 @@ export class SdkChatPanel {
     f.appendChild(mkItem({icon:'?',label:'View help docs',trailing:el('span','sext','↗'),onClick:function(){ vscode.postMessage({type:'openExternal',url:urls.help}); closeSettingsMenu(); }}));
     f.appendChild(mkItem({icon:'⚑',label:'Report a problem',trailing:el('span','sext','↗'),onClick:function(){ vscode.postMessage({type:'openExternal',url:urls.report}); closeSettingsMenu(); }}));
     if(SLASH.length){ f.appendChild(el('div','msep')); f.appendChild(el('div','ssec','Commands'));
-      SLASH.slice(0,8).forEach(function(c){ f.appendChild(mkItem({icon:'/',label:'/'+c,onClick:function(){ input.value='/'+c+' '; grow(); input.focus(); closeSettingsMenu(); }})); });
-      if(SLASH.length>8){ var more=el('div','mitem'); more.style.cssText='opacity:.55;padding-left:34px;font-size:12px'; more.textContent='+ '+(SLASH.length-8)+' more'; f.appendChild(more); } }
+      SLASH.forEach(function(c){ f.appendChild(mkItem({icon:'/',label:'/'+c,onClick:function(){ input.value='/'+c+' '; grow(); input.focus(); closeSettingsMenu(); }})); }); }
     settingsMenu.appendChild(f); showMenu();
   }
 
-  function panelHeader(title){ var h=el('div','sback'); var bk=el('span','sbk','‹ 뒤로'); bk.addEventListener('click', openSettingsMenu); h.appendChild(bk); h.appendChild(el('span',null,' · '+title)); return h; }
+  function panelHeader(title){ var h=el('div','sback'); var bk=el('span','sbk','‹ Back'); bk.addEventListener('click', openSettingsMenu); h.appendChild(bk); h.appendChild(el('span',null,' · '+title)); return h; }
   function openPanel(which){
     settingsMenu.className='menu settings panel'; settingsMenu.innerHTML='';
     var titles={account:'Account & Usage',output:'Output style',mcp:'MCP servers',agents:'Agents & skills'};
@@ -782,6 +790,7 @@ export class SdkChatPanel {
     if(msg.type==='outputStyles'){ renderOutputStyles(msg.data); return; }
     if(msg.type==='mcp'){ renderMcp(msg.data); return; }
     if(msg.type==='agents'){ renderAgents(msg.data); return; }
+    if(msg.type==='slash'){ SLASH=msg.list||[]; return; }
     if(msg.type==='compacted'){ closeSettingsMenu(); return; }
     if(msg.type==='mentionAdded'){ var pth=msg.path; input.value=(input.value? input.value.replace(/\\s*$/,'')+' ':'')+'@'+pth+' '; grow(); input.focus(); return; }
     if(msg.type!=='event') return;

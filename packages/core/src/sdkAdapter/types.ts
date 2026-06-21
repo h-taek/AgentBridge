@@ -111,6 +111,8 @@ export interface Session {
   listAgents(): Promise<AgentInfo[]>;
   // 대화 압축(설정 2차). codex=thread/compact/start(true) / claude=압축 API 없음(false → UI 비활성).
   compact(): Promise<boolean>;
+  // 슬래시 명령 목록 — 첫 send 전에도 메뉴에 표시. claude=supportedCommands() / codex=없음([]).
+  listCommands(): Promise<string[]>;
   // 'approval' ChatEvent에 대한 응답 — 진행 중 턴이 이 호출까지 멈춰 있다.
   respondApproval(id: string, approve: boolean): void;
   // 로그인 여부 조회(미로그인=false) — 세션 시작 시 입력 차단/로그인 화면 판단용. claude=accountInfo / codex=account/read.

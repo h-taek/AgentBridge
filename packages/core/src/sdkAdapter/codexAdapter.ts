@@ -295,6 +295,9 @@ export const codexAdapter: AgentAdapter = {
         await request('thread/compact/start', { threadId }).catch(() => undefined);
         return true; // codex 공식 압축 RPC
       },
+      async listCommands() {
+        return []; // codex app-server는 claude식 슬래시 명령 목록 미제공
+      },
       respondApproval(id, approve) {
         const rpcReqId = approvals.get(id);
         if (rpcReqId != null) {
