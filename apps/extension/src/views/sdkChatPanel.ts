@@ -466,7 +466,7 @@ export class SdkChatPanel {
   .item{display:flex;gap:9px;position:relative}
   /* 한 턴의 점들을 잇는 옅은 세로선 (다음 점 중심까지) */
   .item:not(:last-child)::before{content:'';position:absolute;left:3px;top:10px;bottom:-30px;width:1px;background:var(--vscode-panel-border)}
-  .item:has(+ .working)::before,.item:has(+ .worked)::before{display:none}
+  .item:has(+ .working)::before,.item:has(+ .worked)::before,.item:has(+ .copybtn)::before{display:none}
   .dot{flex:none;width:7px;height:7px;border-radius:50%;margin-top:7px;position:relative;z-index:1}
   .dot.tool{background:var(--accent)} .dot.text{background:var(--vscode-descriptionForeground);opacity:.6}
   .body{flex:1;min-width:0}
@@ -484,7 +484,10 @@ export class SdkChatPanel {
   .trow+.trow{border-top:1px solid rgba(127,127,127,.3)}
   .tlabel{flex:none;width:24px;color:var(--vscode-descriptionForeground);opacity:.5;font-size:10.5px;padding-top:2px}
   .tcontent{flex:1;min-width:0;color:var(--vscode-foreground);opacity:.92;white-space:pre-wrap;word-break:break-word;line-height:1.5;max-height:60px;overflow:auto}
-  .md p{margin:0 0 .4em} .md p:last-child{margin:0} .md strong{font-weight:700}
+  .md{line-height:1.72} .md p{margin:0 0 .7em} .md p:last-child{margin:0} .md strong{font-weight:700}
+  .copybtn{display:inline-flex;align-items:center;align-self:flex-start;margin-top:-10px;margin-left:16px;background:none;border:none;color:var(--vscode-descriptionForeground);opacity:.4;cursor:pointer;padding:4px;border-radius:5px;line-height:1}
+  .copybtn svg{width:15px;height:15px}
+  .copybtn:hover{opacity:.9;background:var(--vscode-toolbar-hoverBackground)}
   .md code{background:var(--vscode-textCodeBlock-background);padding:1px 5px;border-radius:4px;font-family:var(--vscode-editor-font-family),monospace;font-size:12px}
   .md pre{background:var(--vscode-textCodeBlock-background);border:1px solid var(--vscode-panel-border);border-radius:8px;padding:10px 12px;overflow-x:auto;margin:.4em 0}
   .md pre code{background:none;padding:0} .md ul{margin:.3em 0;padding-left:1.3em}
@@ -945,17 +948,24 @@ export class SdkChatPanel {
   function esc(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
   // 최소 마크다운: 펜스코드 → 인라인코드 → 굵게 → 리스트 → 단락
   function md(src){
-    var blocks = src.split(/\\n{2,}/), out = [];
-    for (var i=0;i<blocks.length;i++){
-      var b = blocks[i];
-      var fence = b.match(/^\\s*\`\`\`[^\\n]*\\n([\\s\\S]*?)\`\`\`\\s*$/);
-      if (fence){ out.push('<pre><code>'+esc(fence[1])+'</code></pre>'); continue; }
-      var lines = b.split('\\n');
-      if (lines.every(function(l){return /^\\s*[-*]\\s+/.test(l)||l.trim()==='';})){
-        var li = lines.filter(function(l){return l.trim();}).map(function(l){return '<li>'+inline(l.replace(/^\\s*[-*]\\s+/,''))+'</li>';});
+    // 라인 기반 — 펜스 코드블록은 내부 빈 줄·미완(스트리밍)에도 한 블록으로 안전하게 처리.
+    var lines = src.split('\\n'), out = [], i = 0;
+    while (i < lines.length){
+      if (/^\\s*\`\`\`/.test(lines[i])){
+        var code = []; i++;
+        while (i < lines.length && !/^\\s*\`\`\`\\s*$/.test(lines[i])){ code.push(lines[i]); i++; }
+        i++; // 닫는 \`\`\`
+        out.push('<pre><code>'+esc(code.join('\\n'))+'</code></pre>'); continue;
+      }
+      if (/^\\s*[-*]\\s+/.test(lines[i])){
+        var li = [];
+        while (i < lines.length && /^\\s*[-*]\\s+/.test(lines[i])){ li.push('<li>'+inline(esc(lines[i].replace(/^\\s*[-*]\\s+/,'')))+'</li>'); i++; }
         out.push('<ul>'+li.join('')+'</ul>'); continue;
       }
-      out.push('<p>'+inline(esc(b)).replace(/\\n/g,'<br>')+'</p>');
+      if (!lines[i].trim()){ i++; continue; }
+      var para = [];
+      while (i < lines.length && lines[i].trim() && !/^\\s*\`\`\`/.test(lines[i]) && !/^\\s*[-*]\\s+/.test(lines[i])){ para.push(lines[i]); i++; }
+      out.push('<p>'+inline(esc(para.join('\\n'))).replace(/\\n/g,'<br>')+'</p>');
     }
     return out.join('');
   }
@@ -968,11 +978,12 @@ export class SdkChatPanel {
     turns.forEach(function(t){
       if(t.user&&t.user.trim()){ var ut=el('div','turn user'); ut.appendChild(el('div','msg',t.user)); log.appendChild(ut); }
       var items=t.items||[];
-      if(items.length){ var at=el('div','turn assistant');
+      if(items.length){ var at=el('div','turn assistant'); var turnRaw='';
         items.forEach(function(it){
-          if(it.type==='text'){ if(!it.text||!it.text.trim()) return; var r=el('div','item'); r.appendChild(el('span','dot text')); var bd=el('div','body md'); bd.innerHTML=md(it.text); r.appendChild(bd); at.appendChild(r); }
+          if(it.type==='text'){ if(!it.text||!it.text.trim()) return; var r=el('div','item'); r.appendChild(el('span','dot text')); var bd=el('div','body md'); bd.innerHTML=md(it.text); r.appendChild(bd); at.appendChild(r); turnRaw=(turnRaw?turnRaw+'\\n\\n':'')+it.text; }
           else { var r2=el('div','item'); r2.appendChild(el('span','dot tool')); var nm=el('div','tname'); nm.appendChild(el('strong',null,it.name)); if(it.arg) nm.appendChild(el('span','tdesc',it.arg)); r2.appendChild(nm); at.appendChild(r2); }
         });
+        addTurnCopyBtn(at, turnRaw);
         log.appendChild(at);
       }
     });
@@ -982,11 +993,20 @@ export class SdkChatPanel {
   var SEND_SVG='<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20V6M6 12l6-6 6 6"/></svg>';
   var STOP_SVG='<svg width="15" height="15" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3" fill="currentColor"/></svg>';
   function setBusy(b){ busy=b; input.disabled=b; sendBtn.disabled=false; sendBtn.classList.toggle('stop',b); sendBtn.innerHTML=b?STOP_SVG:SEND_SVG; }
-  function newAssistantTurn(){ var t=el('div','turn assistant'); log.appendChild(t); cur={turn:t,textItem:null,raw:'',deltas:0,think:null}; bottom(); }
+  var COPY_SVG='<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>';
+  var CHECK_SVG='<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>';
+  // 답변(턴)당 1개 복사 버튼 — 그 답변의 모든 텍스트(원본 마크다운)를 합쳐 복사. 클릭 시 체크 아이콘 1초 후 원복.
+  function addTurnCopyBtn(turnEl, raw){
+    if(!turnEl || !raw || !raw.trim()) return;
+    var btn=el('button','copybtn'); btn.title='Copy answer'; btn.innerHTML=COPY_SVG;
+    btn.addEventListener('click', function(e){ e.stopPropagation(); navigator.clipboard.writeText(raw); btn.innerHTML=CHECK_SVG; setTimeout(function(){ btn.innerHTML=COPY_SVG; },1000); });
+    turnEl.appendChild(btn);
+  }
+  function newAssistantTurn(){ var t=el('div','turn assistant'); log.appendChild(t); cur={turn:t,textItem:null,raw:'',fullRaw:'',deltas:0,think:null}; bottom(); }
   function itemRow(dotCls){ var r=el('div','item'); r.appendChild(el('span','dot '+dotCls)); var b=el('div','body'); r.appendChild(b);
     // working 줄이 있으면 그 앞에 끼워 항상 맨 아래에 두기.
     var anchor=(work&&work.line&&work.line.parentNode===cur.turn)?work.line:null; cur.turn.insertBefore(r,anchor); return b; }
-  function closeText(){ if(cur&&cur.textItem){ cur.textItem.innerHTML = md(cur.raw); } cur && (cur.textItem=null, cur.raw=''); }
+  function closeText(){ if(cur&&cur.textItem){ cur.textItem.innerHTML = md(cur.raw); if(cur.raw&&cur.raw.trim()) cur.fullRaw=(cur.fullRaw?cur.fullRaw+'\\n\\n':'')+cur.raw; } cur && (cur.textItem=null, cur.raw=''); }
   // 생각 블록 종료 시 "Thought for Ns"로 요약 갱신 (#4)
   function closeThink(){ if(cur&&cur.think&&cur.thinkSummary){ var s=Math.max(1,Math.round((Date.now()-cur.thinkT0)/1000)); cur.thinkSummary.textContent='Thought for '+s+'s'; } if(cur){ cur.think=null; cur.thinkSummary=null; } }
 
@@ -1096,7 +1116,7 @@ export class SdkChatPanel {
       if(!cur) newAssistantTurn(); closeThink();
       if(!cur.textItem){ cur.textItem=itemRow('text'); cur.raw=''; }
       if(cur.deltas===0) cur.raw=ev.text;
-      cur.textItem.innerHTML=md(cur.raw); cur.textItem.className='body md'; cur.textItem=null; cur.raw=''; cur.deltas=0; bottom();
+      cur.textItem.innerHTML=md(cur.raw); cur.textItem.className='body md'; if(cur.raw&&cur.raw.trim()) cur.fullRaw=(cur.fullRaw?cur.fullRaw+'\\n\\n':'')+cur.raw; cur.textItem=null; cur.raw=''; cur.deltas=0; bottom();
     }
     else if(ev.t==='thinking'){
       if(!cur) newAssistantTurn(); closeText();
@@ -1136,6 +1156,7 @@ export class SdkChatPanel {
       // 완료 요약 줄 — Worked for Xs · N tokens (#3)
       if(work&&cur){ var s=Math.max(1,Math.round((Date.now()-work.t0)/1000)); var tok=work.out;
         var w=el('div','worked'); w.textContent='* Worked for '+s+'s'+(tok?(' · '+fmt(tok)+' tokens'):''); cur.turn.appendChild(w); }
+      if(cur&&cur.fullRaw&&cur.fullRaw.trim()) addTurnCopyBtn(cur.turn, cur.fullRaw);
       stopWork(); setBusy(false); input.focus(); bottom();
     }
     else if(ev.t==='error'){ if(!cur) newAssistantTurn(); closeText(); var b=itemRow('text'); b.appendChild(el('div','err','⚠ '+ev.message)); stopWork(); setBusy(false); bottom(); }
