@@ -276,7 +276,10 @@ export function activate(context: vscode.ExtensionContext) {
 
     await markSessionActive(session.workspaceId, session.sessionId);
     sessionTree.refresh();
-    openSdkChat(cwd, session.workspaceId, session.model, session.sessionId, session.modelSessionId);
+    // 옛 세션 폴백 — PTY 시절 claude는 resume id를 sessionId 칸에 넣고 modelSessionId는 비웠다.
+    // modelSessionId 없으면 sessionId로 폴백(claude만; codex는 항상 modelSessionId=thread id 보유).
+    const resumeId = session.modelSessionId ?? (session.model === 'claude' ? session.sessionId : undefined);
+    openSdkChat(cwd, session.workspaceId, session.model, session.sessionId, resumeId);
   });
 
   const selectSessionCmd = vscode.commands.registerCommand('agentbridge.selectSession', async () => {

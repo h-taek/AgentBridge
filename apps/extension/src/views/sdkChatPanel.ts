@@ -113,8 +113,7 @@ export class SdkChatPanel {
         if (!t) continue;
         try { records.push(JSON.parse(t) as Record<string, unknown>); } catch { /* 깨진 줄 skip */ }
       }
-      const msgs = this.model === 'codex' ? parseCodexTranscript(records) : parseClaudeTranscript(records);
-      const turns = msgsToTurns(msgs);
+      const turns = this.model === 'codex' ? parseCodexTranscript(records) : parseClaudeTranscript(records);
       if (turns.length) this.post({ type: 'restore', turns });
     } catch (err) {
       output.warn(`SdkChatPanel: transcript 복원 실패 — ${err instanceof Error ? err.message : String(err)}`);
@@ -352,7 +351,7 @@ export class SdkChatPanel {
     this.post({ type: 'attachAdded', name: safeName, path: insertPath, dataUrl: `data:image/${mime};base64,${base64}` });
   }
 
-  private post(msg: { type: 'ready'; sessionId: string; model?: string; injected?: boolean; loggedIn?: boolean } | { type: 'event'; ev: ChatEvent } | { type: 'models'; list: ModelOption[] } | { type: 'attachAdded'; name: string; path: string; dataUrl: string } | { type: 'loginStarted'; manualUrl: string } | { type: 'loginResult'; ok: boolean } | { type: 'usage'; data: AccountUsage | null } | { type: 'outputStyles'; data: { current: string; available: string[] } | null } | { type: 'mcp'; data: McpServerInfo[] } | { type: 'agents'; data: AgentInfo[] } | { type: 'compacted'; ok: boolean } | { type: 'mentionAdded'; path: string } | { type: 'slash'; list: string[] } | { type: 'files'; list: string[] } | { type: 'cleared' } | { type: 'restore'; turns: Array<{ user: string; assistant: string }> }): void {
+  private post(msg: { type: 'ready'; sessionId: string; model?: string; injected?: boolean; loggedIn?: boolean } | { type: 'event'; ev: ChatEvent } | { type: 'models'; list: ModelOption[] } | { type: 'attachAdded'; name: string; path: string; dataUrl: string } | { type: 'loginStarted'; manualUrl: string } | { type: 'loginResult'; ok: boolean } | { type: 'usage'; data: AccountUsage | null } | { type: 'outputStyles'; data: { current: string; available: string[] } | null } | { type: 'mcp'; data: McpServerInfo[] } | { type: 'agents'; data: AgentInfo[] } | { type: 'compacted'; ok: boolean } | { type: 'mentionAdded'; path: string } | { type: 'slash'; list: string[] } | { type: 'files'; list: string[] } | { type: 'cleared' } | { type: 'restore'; turns: Array<{ user: string; assistant: string; tools: Array<{ name: string; arg: string }> }> }): void {
     void this.panel.webview.postMessage(msg);
   }
 
@@ -402,7 +401,7 @@ export class SdkChatPanel {
   .turn{display:flex;flex-direction:column;gap:8px}
   .turn.assistant{gap:20px}
   .turn.user{align-items:flex-end}
-  .user .msg{background:var(--vscode-textBlockQuote-background);border-radius:12px;padding:9px 13px;max-width:80%;white-space:pre-wrap}
+  .user .msg{background:var(--vscode-textBlockQuote-background);border-radius:12px;padding:4px 13px;max-width:80%;white-space:pre-wrap}
   .att{display:inline-flex;align-items:center;gap:5px;background:var(--vscode-textBlockQuote-background);border:1px solid var(--vscode-panel-border);border-radius:8px;padding:4px 8px;font-size:11px;color:var(--vscode-descriptionForeground);margin-bottom:5px}
 
   .item{display:flex;gap:9px;position:relative}
@@ -909,14 +908,18 @@ export class SdkChatPanel {
   }
   function inline(s){ return s.replace(/\`([^\`]+)\`/g,function(_,c){return '<code>'+esc(c)+'</code>';}).replace(/\\*\\*([^*]+)\\*\\*/g,'<strong>$1</strong>'); }
 
-  // 재개 시 이전 대화 복원 — 저장된 턴(user/assistant)을 말풍선으로 그리고 시작화면을 숨긴다.
+  // 재개 시 이전 대화 복원 — user/assistant 말풍선 + 도구 호출(이름+요약, IN/OUT 박스 없이)을 그리고 시작화면 숨김.
   function renderRestore(turns){
     if(!turns||!turns.length) return;
     hideWelcome();
     turns.forEach(function(t){
       if(t.user&&t.user.trim()){ var ut=el('div','turn user'); ut.appendChild(el('div','msg',t.user)); log.appendChild(ut); }
-      if(t.assistant&&t.assistant.trim()){ var at=el('div','turn assistant'); var it=el('div','item'); it.appendChild(el('span','dot text'));
-        var bd=el('div','body md'); bd.innerHTML=md(t.assistant); it.appendChild(bd); at.appendChild(it); log.appendChild(at); }
+      var tools=t.tools||[];
+      if((t.assistant&&t.assistant.trim())||tools.length){ var at=el('div','turn assistant');
+        if(t.assistant&&t.assistant.trim()){ var it=el('div','item'); it.appendChild(el('span','dot text')); var bd=el('div','body md'); bd.innerHTML=md(t.assistant); it.appendChild(bd); at.appendChild(it); }
+        tools.forEach(function(tl){ var ti=el('div','item'); ti.appendChild(el('span','dot tool')); var nm=el('div','tname'); nm.appendChild(el('strong',null,tl.name)); if(tl.arg) nm.appendChild(el('span','tdesc',tl.arg)); ti.appendChild(nm); at.appendChild(ti); });
+        log.appendChild(at);
+      }
     });
     bottom();
   }
@@ -1076,58 +1079,55 @@ export class SdkChatPanel {
   }
 }
 
-// ── 트랜스크립트 복원 파서 (display 전용 — IR 리더와 분리). 네이티브 JSONL의 user/assistant 텍스트만 추출. ──
-type DisplayMsg = { role: 'user' | 'assistant'; text: string };
+// ── 트랜스크립트 복원 파서 (display 전용 — IR 리더와 분리). user/assistant 텍스트 + 도구 호출(이름+요약)만 추출. ──
+type RestoreTool = { name: string; arg: string };
+type RestoreTurn = { user: string; assistant: string; tools: RestoreTool[] };
 
-// claude(SDK/CLI 공통): type 'user'(content=string) / type 'assistant'(content=배열, text 블록만). thinking·tool_use는 제외.
-function parseClaudeTranscript(records: Array<Record<string, unknown>>): DisplayMsg[] {
-  const out: DisplayMsg[] = [];
+// 도구 입력 → 한 줄 요약(command/file_path/pattern…). codex는 arguments가 JSON 문자열.
+function toolArgSummary(input: unknown): string {
+  let o: unknown = input;
+  if (typeof o === 'string') { try { o = JSON.parse(o); } catch { return (o as string).slice(0, 160); } }
+  if (!o || typeof o !== 'object') return '';
+  const r = o as Record<string, unknown>;
+  const v = r.command ?? r.cmd ?? r.file_path ?? r.path ?? r.pattern ?? r.url ?? r.description;
+  if (v == null) return '';
+  return (Array.isArray(v) ? v.join(' ') : String(v)).slice(0, 200);
+}
+
+// claude: type 'user'(content=string) / type 'assistant'(content 배열: text 블록 + tool_use). thinking 제외.
+function parseClaudeTranscript(records: Array<Record<string, unknown>>): RestoreTurn[] {
+  const turns: RestoreTurn[] = [];
+  let cur: RestoreTurn | null = null;
   for (const r of records) {
     const msg = r.message as { role?: string; content?: unknown } | undefined;
     if (r.type === 'user' && typeof msg?.content === 'string') {
-      if (msg.content.trim()) out.push({ role: 'user', text: msg.content });
+      if (msg.content.trim()) { if (cur) turns.push(cur); cur = { user: msg.content, assistant: '', tools: [] }; }
     } else if (r.type === 'assistant' && Array.isArray(msg?.content)) {
-      const text = (msg.content as Array<{ type?: string; text?: string }>)
-        .filter((b) => b.type === 'text')
-        .map((b) => b.text ?? '')
-        .join('');
-      if (text.trim()) out.push({ role: 'assistant', text });
+      if (!cur) cur = { user: '', assistant: '', tools: [] };
+      for (const b of msg.content as Array<{ type?: string; text?: string; name?: string; input?: unknown }>) {
+        if (b.type === 'text' && b.text) cur.assistant += b.text;
+        else if (b.type === 'tool_use' && b.name) cur.tools.push({ name: b.name, arg: toolArgSummary(b.input) });
+      }
     }
   }
-  return out;
+  if (cur) turns.push(cur);
+  return turns;
 }
 
-// codex rollout: event_msg의 user_message/agent_message.message가 실제 대화 텍스트(깔끔).
-//   response_item user엔 codex가 주입하는 AGENTS.md·환경 컨텍스트가 섞여 있어 event_msg를 쓴다.
-function parseCodexTranscript(records: Array<Record<string, unknown>>): DisplayMsg[] {
-  const out: DisplayMsg[] = [];
+// codex rollout: event_msg(user_message/agent_message)=실제 대화(response_item엔 AGENTS.md 주입 섞임) + response_item/function_call=도구.
+function parseCodexTranscript(records: Array<Record<string, unknown>>): RestoreTurn[] {
+  const turns: RestoreTurn[] = [];
+  let cur: RestoreTurn | null = null;
   for (const r of records) {
-    if (r.type !== 'event_msg') continue;
-    const p = r.payload as { type?: string; message?: unknown } | undefined;
-    if (p?.type === 'user_message' && typeof p.message === 'string') {
-      if (p.message.trim()) out.push({ role: 'user', text: p.message });
-    } else if (p?.type === 'agent_message' && typeof p.message === 'string') {
-      if (p.message.trim()) out.push({ role: 'assistant', text: p.message });
-    }
-  }
-  return out;
-}
-
-// 평탄한 메시지 목록 → {user, assistant} 턴. 연속 중복(codex가 user를 두 번 기록)은 1회만.
-function msgsToTurns(msgs: DisplayMsg[]): Array<{ user: string; assistant: string }> {
-  const turns: Array<{ user: string; assistant: string }> = [];
-  let cur: { user: string; assistant: string } | null = null;
-  let prev = '';
-  for (const m of msgs) {
-    const key = m.role + ':' + m.text;
-    if (key === prev) continue;
-    prev = key;
-    if (m.role === 'user') {
-      if (cur) turns.push(cur);
-      cur = { user: m.text, assistant: '' };
-    } else {
-      if (!cur) cur = { user: '', assistant: '' };
-      cur.assistant += (cur.assistant ? '\n\n' : '') + m.text;
+    const p = r.payload as { type?: string; message?: unknown; name?: string; arguments?: unknown } | undefined;
+    if (r.type === 'event_msg' && p?.type === 'user_message' && typeof p.message === 'string') {
+      if (p.message.trim()) { if (cur) turns.push(cur); cur = { user: p.message, assistant: '', tools: [] }; }
+    } else if (r.type === 'event_msg' && p?.type === 'agent_message' && typeof p.message === 'string') {
+      if (!cur) cur = { user: '', assistant: '', tools: [] };
+      if (p.message.trim()) cur.assistant += (cur.assistant ? '\n\n' : '') + p.message;
+    } else if (r.type === 'response_item' && p?.type === 'function_call' && p.name) {
+      if (!cur) cur = { user: '', assistant: '', tools: [] };
+      cur.tools.push({ name: p.name, arg: toolArgSummary(p.arguments) });
     }
   }
   if (cur) turns.push(cur);
