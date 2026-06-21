@@ -69,14 +69,17 @@ export class SdkChatPanel {
     workspaceId: string,
     model: CliKind,
     sessionId: string,
-    opts?: { resume?: string; onModelSession?: (modelSessionId: string) => void; onDispose?: () => void; onTitle?: (title: string) => void },
+    opts?: { resume?: string; title?: string; onModelSession?: (modelSessionId: string) => void; onDispose?: () => void; onTitle?: (title: string) => void },
   ): SdkChatPanel {
     const panel = vscode.window.createWebviewPanel(
       'agentbridge.sdkChat',
-      `AgentBridge · ${model}`,
+      opts?.title || `AgentBridge · ${model}`,
       vscode.ViewColumn.Active,
       { enableScripts: true, retainContextWhenHidden: true },
     );
+    // 탭 아이콘 = 각 에이전트 정식 로고 SVG(media/logos/<model>.svg).
+    const logo = vscode.Uri.joinPath(extensionUri, 'media', 'logos', `${model}.svg`);
+    panel.iconPath = { light: logo, dark: logo };
     const inst = new SdkChatPanel(panel, extensionUri);
     inst.sessionId = sessionId;
     inst.resumeId = opts?.resume;
@@ -101,7 +104,7 @@ export class SdkChatPanel {
     if (!first) return;
     const suggested = await this.session?.suggestTitle(first).catch(() => null);
     const title = (suggested ?? first.slice(0, 60)).trim();
-    if (title) this.onTitleCb?.(title);
+    if (title) { this.panel.title = title; this.onTitleCb?.(title); } // 탭 제목도 즉시 갱신
   }
 
   // 에이전트 세션 id를 modelSessionId로 영속(다음 open 시 resume). 빈 값/중복은 무시.

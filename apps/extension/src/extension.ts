@@ -211,9 +211,10 @@ export function activate(context: vscode.ExtensionContext) {
 
   // --- Helper: open SDK chat panel for a session (seam — 세션 명령이 PTY 대신 SDK 패널을 연다) ---
   // 패널이 시작 후 에이전트 세션 id를 modelSessionId로 보고 → 영속(다음 open 시 resume). 닫히면 markSessionClosed.
-  function openSdkChat(cwd: string, workspaceId: string, model: CliKind, sessionId: string, modelSessionId?: string): void {
+  function openSdkChat(cwd: string, workspaceId: string, model: CliKind, sessionId: string, modelSessionId?: string, title?: string): void {
     SdkChatPanel.create(context.extensionUri, cwd, workspaceId, model, sessionId, {
       resume: modelSessionId,
+      title, // 탭 제목 = 세션 이름(신규는 기본명, 재개는 저장된 이름)
       onModelSession: (mid) => { void setModelSessionId(workspaceId, sessionId, mid); },
       onDispose: () => { void markSessionClosed(workspaceId, sessionId).then(() => sessionTree.refresh()); },
       // 첫 메시지 자동 제목 — 아직 기본 이름(CLI 표시명)일 때만 적용(사용자 rename은 보존).
@@ -261,7 +262,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     if (model === 'codex') notifications.notifyCodexHooksTrust();
 
-    openSdkChat(cwd, workspaceId, model, sessionId);
+    openSdkChat(cwd, workspaceId, model, sessionId, undefined, CLI_DISPLAY_NAME[model]);
   });
 
   const openSessionCmd = vscode.commands.registerCommand('agentbridge.openSession', async (session: SessionMeta) => {
@@ -290,7 +291,7 @@ export function activate(context: vscode.ExtensionContext) {
     // 옛 세션 폴백 — PTY 시절 claude는 resume id를 sessionId 칸에 넣고 modelSessionId는 비웠다.
     // modelSessionId 없으면 sessionId로 폴백(claude만; codex는 항상 modelSessionId=thread id 보유).
     const resumeId = session.modelSessionId ?? (session.model === 'claude' ? session.sessionId : undefined);
-    openSdkChat(cwd, session.workspaceId, session.model, session.sessionId, resumeId);
+    openSdkChat(cwd, session.workspaceId, session.model, session.sessionId, resumeId, session.name);
   });
 
   const selectSessionCmd = vscode.commands.registerCommand('agentbridge.selectSession', async () => {
@@ -384,7 +385,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     if (model === 'codex') notifications.notifyCodexHooksTrust();
 
-    openSdkChat(cwd, workspaceId, model, sessionId);
+    openSdkChat(cwd, workspaceId, model, sessionId, undefined, CLI_DISPLAY_NAME[model]);
   });
 
   // SDK 채팅 패널 (rearch/sdk-gui — 실험). 기존 PTY ChatPanel과 독립. claude=in-process SDK / codex=app-server.
@@ -407,7 +408,7 @@ export function activate(context: vscode.ExtensionContext) {
     const sessionId = randomUUID();
     await registerSession(workspaceId, sessionId, picked.model);
     sessionTree.refresh();
-    openSdkChat(cwd, workspaceId, picked.model, sessionId);
+    openSdkChat(cwd, workspaceId, picked.model, sessionId, undefined, CLI_DISPLAY_NAME[picked.model]);
   });
 
   // IDE 재시작 시 직전 챗 탭들을 복구 — webview state(sessionId/model/workspaceId)로
