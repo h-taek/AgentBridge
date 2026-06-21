@@ -271,7 +271,7 @@ function renderRecentTurns(turns) {
   return lines.join('\n')
 }
 
-function buildAdditionalContext(ir, recentTurns, workspaceId, globalBlock, wsDir) {
+function buildAdditionalContext(ir, recentTurns, workspaceId, globalBlock) {
   // architecture §15.5 본문 — 글로벌 메모리(장기) + IR 압축 메모리 + 최근 raw turn.
   const hasTurns = Array.isArray(recentTurns) && recentTurns.length > 0
   const hasGlobal = !!(globalBlock && globalBlock.trim())
@@ -319,20 +319,9 @@ function buildAdditionalContext(ir, recentTurns, workspaceId, globalBlock, wsDir
     parts.push('')
   }
   if (hasTurns) {
-    parts.push('## Recent conversation (raw, last ' + recentTurns.length + ' turns)')
-    parts.push(renderRecentTurns(recentTurns))
-  }
-  // 입력 한도를 낮게 유지하려고 최근 3턴/요약본만 주입한다. 더 깊은 맥락이 필요하면 모델이 직접 읽도록 위치를 안내.
-  if (wsDir) {
-    parts.push('')
-    parts.push(
-      '> Only the most recent turns and a compacted summary are injected each turn (to keep input small). ' +
-        'If you need earlier conversation or fuller context, read `' +
-        wsDir +
-        '/turns.jsonl` (all turns) and `' +
-        wsDir +
-        '/archive/` (older IR snapshots) directly.'
-    )
+    // 가장 최근 턴을 맨 위로 — 주입 블록이 한도 초과로 잘려도 최신 턴(연속성)이 살아남게.
+    parts.push('## Recent conversation (raw, last ' + recentTurns.length + ' turns, newest first)')
+    parts.push(renderRecentTurns(recentTurns.slice().reverse()))
   }
   parts.push('</agentbridge-context>')
   return parts.join('\n')
@@ -398,7 +387,15 @@ async function main() {
     globalBlock = ''
   }
 
-  const additionalContext = buildAdditionalContext(ir, recentTurns, parsed.workspace, globalBlock, wsDir)
+  // 주입 블록을 9KB(UTF-8) 이하로 유지 — 초과하면 가장 오래된 turn부터 빼고 다시 만든다(최신 턴은 보존).
+  // (codex 훅 바인딩 한도 ~10KB·claude ~10,000자 회피. turn만 줄이고 IR/장기메모리는 건드리지 않음.)
+  const INJECT_BYTE_LIMIT = 9 * 1024
+  let injTurns = recentTurns
+  let additionalContext = buildAdditionalContext(ir, injTurns, parsed.workspace, globalBlock)
+  while (Buffer.byteLength(additionalContext, 'utf8') > INJECT_BYTE_LIMIT && injTurns.length > 0) {
+    injTurns = injTurns.slice(1) // 배열 앞 = 가장 오래된 턴 → 제거
+    additionalContext = buildAdditionalContext(ir, injTurns, parsed.workspace, globalBlock)
+  }
   process.stdout.write(
     JSON.stringify(buildHookOutput(parsed.agent, parsed.event, additionalContext))
   )
