@@ -1,19 +1,17 @@
-// SDK 채팅 패널 (rearch/sdk-gui 2단계 — UI seam 검증용, 실험).
-// 기존 PTY ChatPanel은 그대로 두고 별도 명령(agentbridge.sdkChat)으로만 뜨는 독립 패널.
+// SDK 채팅 패널 — 각 에이전트를 SDK/app-server로 구동하는 GUI 채팅(PTY ChatPanel과 토글 병행).
 //
-// ESM 전용 claude SDK를 어떻게 호스트(CJS)에 싣나:
-//   esbuild가 코어를 CJS로 번들에 인라인하므로, SDK를 직접 import하면 require(ESM)로 터진다.
-//   → SDK를 만지는 claudeAdapter만 "런타임 파일경로 동적 import"로 in-process 로드(변수 specifier라
-//     번들러가 require로 못 바꾼다). 공식 클로드 익스텐션도 같은 CJS+동적 import 방식.
-//   캡처/저장은 이 경계 밖(번들 코어 한 사본)에서 하므로 모듈 이중 로드의 상태 충돌은 없다(3단계).
+// claude SDK(@anthropic-ai/claude-agent-sdk)는 ESM 전용 + 자기 CLI를 디스크서 spawn한다.
+//   익스텐션이 ESM 번들(out/extension.mjs)이라 claudeAdapter를 평범하게 정적 import.
+//   SDK 자체는 esbuild external(번들 인라인 시 디스크 경로 해석 깨짐) → 런타임에 node_modules에서 해석
+//   (dev=워크스페이스 / 패키징=벤더본). codexAdapter는 SDK-free라 배럴에서 정적 import.
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
-import { pathToFileURL } from 'url';
 import type { AgentAdapter, ChatEvent, Session, IR, CliKind, PermissionMode, ModelOption, AccountUsage, McpServerInfo, AgentInfo } from '@agentbridge/core';
-// 번들 코어(SDK-free)에서 — 이중로드 규칙: 저장/IR/스케줄러는 번들본 한 사본을 SSOT로.
-// codexAdapter도 SDK-free라 여기 정적 import(번들). claudeAdapter만 ESM SDK라 런타임 동적 import.
+// 번들 코어(SDK-free 배럴) — 저장/IR/스케줄러는 번들본 한 사본을 SSOT로. codexAdapter도 SDK-free라 배럴 정적 import.
 import { readIR, SdkCapture, codexAdapter, resolveTranscriptPath, resolveContext, acquireOwnership, readForeignOwner, releaseOwnership } from '@agentbridge/core';
+// claudeAdapter는 ESM SDK를 만져 배럴 비노출(코어 테스트/데스크탑 보호) — 서브경로 정적 import. SDK는 esbuild external.
+import { claudeAdapter } from '@agentbridge/core/dist/sdkAdapter/claudeAdapter.js';
 import { getCompactionScheduler, getWorkspaceStore, getHookInstaller } from '../core/coreInstances';
 import { getSessionDir } from '../core/workspaceStore';
 import { chatHeaderHtml, CHAT_HEADER_CSS, chatHeaderScript } from './chatHeader';
@@ -21,8 +19,6 @@ import { chatPanelEvents } from './chatPanel';
 import { getSessions, renameSession, deleteSession, type SessionMeta } from '../core/sessionRegistry';
 import { createGroupLocker } from './groupLock';
 import * as output from '../log/output';
-
-type AdapterModule = { claudeAdapter: AgentAdapter };
 
 // 이전 세션 IR을 어댑터 context(→systemPrompt append)로 주입할 텍스트로 렌더. compaction의 formatCurrentIR과 동형(JSON 블록).
 function formatIRContext(ir: IR | null): string | undefined {
@@ -39,11 +35,6 @@ function formatIRContext(ir: IR | null): string | undefined {
     '# 이전 세션 인계 (AgentBridge IR)\n\n다음은 이전 대화에서 압축된 작업 맥락이다. 이어서 돕는다.\n\n' +
     '```json\n' + JSON.stringify(body, null, 2) + '\n```'
   );
-}
-
-// dev(F5): <repo>/apps/extension → ../../packages/core/dist/sdkAdapter/claudeAdapter.js
-function resolveAdapterPath(extensionPath: string): string {
-  return path.join(extensionPath, '..', '..', 'packages', 'core', 'dist', 'sdkAdapter', 'claudeAdapter.js');
 }
 
 export class SdkChatPanel {
@@ -179,17 +170,9 @@ export class SdkChatPanel {
     }
   }
 
-  // claude=ESM SDK라 dist 동적 import / codex=SDK-free라 번들 정적. 못 찾으면 웹뷰 에러 + null.
-  private async loadAdapter(model: CliKind): Promise<AgentAdapter | null> {
-    if (model === 'codex') return codexAdapter;
-    const adapterPath = resolveAdapterPath(this.extensionUri.fsPath);
-    output.log(`SdkChatPanel: claude adapter 경로 = ${adapterPath}`);
-    if (!fs.existsSync(adapterPath)) {
-      this.post({ type: 'event', ev: { t: 'error', message: `Adapter not found: ${adapterPath} (build core first)` } });
-      return null;
-    }
-    const mod = (await import(pathToFileURL(adapterPath).href)) as AdapterModule;
-    return mod.claudeAdapter;
+  // 둘 다 정적 import(번들). claude는 ESM SDK를 external로 두고 런타임 해석.
+  private loadAdapter(model: CliKind): AgentAdapter {
+    return model === 'codex' ? codexAdapter : claudeAdapter;
   }
 
   private async init(cwd: string, workspaceId: string, model: CliKind): Promise<void> {
@@ -256,8 +239,7 @@ export class SdkChatPanel {
         scheduler: getCompactionScheduler(), // 기존 PTY 경로와 같은 스케줄러 인스턴스
       });
 
-      const adapter = await this.loadAdapter(this.model);
-      if (!adapter) return; // 에러는 loadAdapter가 이미 post
+      const adapter = this.loadAdapter(this.model);
       this.session = await adapter.start({
         cwd: this.cwd,
         workspaceId: this.workspaceId,

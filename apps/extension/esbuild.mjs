@@ -29,7 +29,7 @@ const options = {
   platform: 'node',
   format: 'esm',
   target: 'node20',
-  external: ['vscode', 'node-pty'],
+  external: ['vscode', 'node-pty', '@anthropic-ai/claude-agent-sdk'],
   // ESM 출력엔 require가 없다 — node-pty 해석에 쓰는 require.resolve를 위해 createRequire로 shim.
   banner: { js: "import { createRequire } from 'module'; const require = createRequire(import.meta.url);" },
   sourcemap: !production,
