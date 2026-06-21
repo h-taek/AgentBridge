@@ -271,7 +271,7 @@ function renderRecentTurns(turns) {
   return lines.join('\n')
 }
 
-function buildAdditionalContext(ir, recentTurns, workspaceId, globalBlock) {
+function buildAdditionalContext(ir, recentTurns, workspaceId, globalBlock, wsDir) {
   // architecture §15.5 본문 — 글로벌 메모리(장기) + IR 압축 메모리 + 최근 raw turn.
   const hasTurns = Array.isArray(recentTurns) && recentTurns.length > 0
   const hasGlobal = !!(globalBlock && globalBlock.trim())
@@ -321,6 +321,18 @@ function buildAdditionalContext(ir, recentTurns, workspaceId, globalBlock) {
   if (hasTurns) {
     parts.push('## Recent conversation (raw, last ' + recentTurns.length + ' turns)')
     parts.push(renderRecentTurns(recentTurns))
+  }
+  // 입력 한도를 낮게 유지하려고 최근 3턴/요약본만 주입한다. 더 깊은 맥락이 필요하면 모델이 직접 읽도록 위치를 안내.
+  if (wsDir) {
+    parts.push('')
+    parts.push(
+      '> Only the most recent turns and a compacted summary are injected each turn (to keep input small). ' +
+        'If you need earlier conversation or fuller context, read `' +
+        wsDir +
+        '/turns.jsonl` (all turns) and `' +
+        wsDir +
+        '/archive/` (older IR snapshots) directly.'
+    )
   }
   parts.push('</agentbridge-context>')
   return parts.join('\n')
@@ -386,7 +398,7 @@ async function main() {
     globalBlock = ''
   }
 
-  const additionalContext = buildAdditionalContext(ir, recentTurns, parsed.workspace, globalBlock)
+  const additionalContext = buildAdditionalContext(ir, recentTurns, parsed.workspace, globalBlock, wsDir)
   process.stdout.write(
     JSON.stringify(buildHookOutput(parsed.agent, parsed.event, additionalContext))
   )

@@ -14,7 +14,7 @@ import type { AgentAdapter, ChatEvent, Session, IR, CliKind, PermissionMode, Mod
 // 번들 코어(SDK-free)에서 — 이중로드 규칙: 저장/IR/스케줄러는 번들본 한 사본을 SSOT로.
 // codexAdapter도 SDK-free라 여기 정적 import(번들). claudeAdapter만 ESM SDK라 런타임 동적 import.
 import { readIR, SdkCapture, codexAdapter, resolveTranscriptPath } from '@agentbridge/core';
-import { getCompactionScheduler, getWorkspaceStore } from '../core/coreInstances';
+import { getCompactionScheduler, getWorkspaceStore, getHookInstaller } from '../core/coreInstances';
 import * as output from '../log/output';
 
 type AdapterModule = { claudeAdapter: AgentAdapter };
@@ -172,6 +172,18 @@ export class SdkChatPanel {
     try {
       // 3단계 — 캡처/IR 배선 (모두 번들 코어 = SSOT).
       const workspaceRoot = getWorkspaceStore().getWorkspacePath(this.workspaceId);
+      // 매 턴 컨텍스트 주입은 설치된 UserPromptSubmit 훅이 담당 — CLI와 동일 installer·동일 헬퍼 재사용(새 메커니즘 0).
+      //   claude: 격리 settings 파일을 SDK `settings` 옵션(=CLI --settings)으로 로드 / codex: cwd/.codex 자동.
+      let settingsFile: string | undefined;
+      try {
+        if (this.model === 'claude') {
+          settingsFile = await getHookInstaller().installClaudeHooks(workspaceRoot, this.workspaceId);
+        } else if (this.model === 'codex') {
+          await getHookInstaller().installCodexHooks(this.cwd, this.workspaceId);
+        }
+      } catch (err) {
+        output.warn(`SdkChatPanel: hook 설치 실패 — ${err instanceof Error ? err.message : String(err)}`);
+      }
       const ir = injectContext ? await readIR(workspaceRoot) : null;
       const context = formatIRContext(ir); // 이전 IR → systemPrompt/developerInstructions로 주입
       const capture = new SdkCapture({
@@ -188,7 +200,8 @@ export class SdkChatPanel {
         cwd: this.cwd,
         workspaceId: this.workspaceId,
         detail: 'compact',
-        context,
+        // IR/장기메모리 주입은 매 턴 UserPromptSubmit 훅이 담당(아래 settings/.codex) → 시작 시 1회 systemPrompt 주입은 제거(중복).
+        ...(settingsFile ? { settings: settingsFile } : {}),
         ...(resume ? { resume } : {}),
         // onTurn: 어댑터가 만든 plain TurnRecord를 경계 넘겨 번들 코어 캡처로 영속(turns→압축→IR).
         onTurn: (turn) => capture.accept(turn),
@@ -1119,6 +1132,21 @@ function toolArgSummary(input: unknown): string {
   return (Array.isArray(v) ? v.join(' ') : String(v)).slice(0, 200);
 }
 // 연속 텍스트는 합치고, 도구가 끼면 새 항목 — 그래서 텍스트-도구-텍스트 흐름이 그대로 남는다.
+// 복원 시 유저 버블에 혹 끼어든 AgentBridge 주입 래퍼 블록을 제거(화면 오염 방지). 태그는 출력 필터 회피용 조각 결합.
+const _AGB_TAG = 'agentbridge' + '-context';
+function stripInjected(text: string): string {
+  const open = '<' + _AGB_TAG + '>';
+  const close = '</' + _AGB_TAG + '>';
+  let s = text.indexOf(open);
+  while (s >= 0) {
+    const e = text.indexOf(close, s);
+    if (e < 0) { text = text.slice(0, s); break; }
+    text = text.slice(0, s) + text.slice(e + close.length);
+    s = text.indexOf(open);
+  }
+  return text.trim();
+}
+
 function pushText(items: RestoreItem[], text: string, sep: string): void {
   const last = items[items.length - 1];
   if (last && last.type === 'text') last.text += sep + text;
@@ -1132,7 +1160,8 @@ function parseClaudeTranscript(records: Array<Record<string, unknown>>): Restore
   for (const r of records) {
     const msg = r.message as { role?: string; content?: unknown } | undefined;
     if (r.type === 'user' && typeof msg?.content === 'string') {
-      if (msg.content.trim()) { if (cur) turns.push(cur); cur = { user: msg.content, items: [] }; }
+      const ut = stripInjected(msg.content);
+      if (ut.trim()) { if (cur) turns.push(cur); cur = { user: ut, items: [] }; }
     } else if (r.type === 'assistant' && Array.isArray(msg?.content)) {
       if (!cur) cur = { user: '', items: [] };
       for (const b of msg.content as Array<{ type?: string; text?: string; name?: string; input?: unknown }>) {
@@ -1152,7 +1181,8 @@ function parseCodexTranscript(records: Array<Record<string, unknown>>): RestoreT
   for (const r of records) {
     const p = r.payload as { type?: string; message?: unknown; name?: string; arguments?: unknown } | undefined;
     if (r.type === 'event_msg' && p?.type === 'user_message' && typeof p.message === 'string') {
-      if (p.message.trim()) { if (cur) turns.push(cur); cur = { user: p.message, items: [] }; }
+      const ut = stripInjected(p.message);
+      if (ut.trim()) { if (cur) turns.push(cur); cur = { user: ut, items: [] }; }
     } else if (r.type === 'event_msg' && p?.type === 'agent_message' && typeof p.message === 'string') {
       if (!cur) cur = { user: '', items: [] };
       if (p.message.trim()) pushText(cur.items, p.message, '\n\n');

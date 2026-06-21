@@ -1,4 +1,4 @@
-// 공통 어댑터 정규화 모델. 전체 설계 = docs/sdk/02_adapter_interface.md.
+// 공통 어댑터 정규화 모델. 전체 설계 = docs/sdk/spec/02_adapter_interface.md.
 // v1: start/send + onTurn(TurnRecord)만. onApproval·interrupt·listCommands/runCommand는 후속 증분.
 import type { CliKind } from '../shared/cli.js';
 import type { TurnRecord, TurnsAssistantDetail } from '../shared/turns.js';
@@ -79,6 +79,7 @@ export interface StartOptions {
   workspaceId: string;
   detail?: TurnsAssistantDetail;
   context?: string; // IR/handoff를 systemPrompt로 주입 (후속 증분)
+  settings?: string; // claude 격리 settings 파일 경로(= CLI --settings). UserPromptSubmit 훅을 매 턴 발사.
   resume?: string; // 기존 세션 이어가기 (resume sessionId) — 미지정 시 새 세션
   // 턴 완료 시 호출 — seam(CaptureSession 대체)이 appendTurn으로 영속. Promise면 어댑터가 대기.
   onTurn?: (turn: TurnRecord) => void | Promise<void>;

@@ -89,6 +89,9 @@ export const claudeAdapter: AgentAdapter = {
       options: {
         cwd: opts.cwd,
         includePartialMessages: true, // 델타 스트리밍(content_block_delta)
+        // CLI의 --settings와 동일 — 워크스페이스 격리 settings(.../claude-settings.json)를 로드해
+        // 그 안의 UserPromptSubmit 훅(agentbridge-memory.js)을 매 턴 발사 → IR+장기메모리를 additionalContext로 주입.
+        ...(opts.settings ? { settings: opts.settings } : {}),
         ...(opts.resume ? { resume: opts.resume } : {}),
         // 맥락 주입(3단계): claude 기본 프리셋 유지 + handoff/IR을 append(통째 교체 아님 — 툴 지침 보존).
         ...(opts.context
