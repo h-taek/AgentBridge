@@ -192,10 +192,11 @@ export class SdkChatPanel {
       await this.handleSearchFiles(String(msg.query ?? ''));
     } else if (msg.type === 'newSession') {
       // /clear·New(＋) — 현재 세션 종료 후 새 세션. 웹뷰는 'cleared'로 채팅 로그를 비운다.
+      // 채팅 화면은 비우되 IR 핸드오프는 유지 주입(AgentBridge의 핵심 — 맥락 연속성).
       await this.session?.end().catch(() => { /* already gone */ });
       this.session = null;
       this.post({ type: 'cleared' });
-      await this.startSession(false); // 클린 슬레이트(이전 IR 미주입)
+      await this.startSession(true);
     }
   }
 
