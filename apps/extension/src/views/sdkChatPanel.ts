@@ -46,6 +46,7 @@ export class SdkChatPanel {
   private disposed = false;
   private cwd = '';
   private workspaceId = '';
+  private model: CliKind = 'claude';
 
   private constructor(private readonly panel: vscode.WebviewPanel, private readonly extensionUri: vscode.Uri) {}
 
@@ -77,31 +78,36 @@ export class SdkChatPanel {
   private async init(cwd: string, workspaceId: string, model: CliKind): Promise<void> {
     this.cwd = cwd;
     this.workspaceId = workspaceId;
+    this.model = model;
     this.panel.webview.html = this.html(model);
     this.panel.webview.onDidReceiveMessage((msg) => void this.onMessage(msg));
     this.panel.onDidDispose(() => {
       this.disposed = true;
       void this.session?.end().catch(() => { /* already gone */ });
     });
+    await this.startSession(true);
+  }
 
+  // 세션 생성(최초 init + /clear·New 재시작에서 공용). injectContext=false면 이전 IR 주입 없이 클린 슬레이트(/clear).
+  private async startSession(injectContext: boolean): Promise<void> {
     try {
       // 3단계 — 캡처/IR 배선 (모두 번들 코어 = SSOT).
-      const workspaceRoot = getWorkspaceStore().getWorkspacePath(workspaceId);
-      const ir = await readIR(workspaceRoot);
+      const workspaceRoot = getWorkspaceStore().getWorkspacePath(this.workspaceId);
+      const ir = injectContext ? await readIR(workspaceRoot) : null;
       const context = formatIRContext(ir); // 이전 IR → systemPrompt/developerInstructions로 주입
       const capture = new SdkCapture({
-        workspaceId,
+        workspaceId: this.workspaceId,
         workspaceRoot,
-        workspacePath: cwd,
-        model,
+        workspacePath: this.cwd,
+        model: this.model,
         scheduler: getCompactionScheduler(), // 기존 PTY 경로와 같은 스케줄러 인스턴스
       });
 
-      const adapter = await this.loadAdapter(model);
+      const adapter = await this.loadAdapter(this.model);
       if (!adapter) return; // 에러는 loadAdapter가 이미 post
       this.session = await adapter.start({
-        cwd,
-        workspaceId,
+        cwd: this.cwd,
+        workspaceId: this.workspaceId,
         detail: 'compact',
         context,
         // onTurn: 어댑터가 만든 plain TurnRecord를 경계 넘겨 번들 코어 캡처로 영속(turns→압축→IR).
@@ -109,7 +115,7 @@ export class SdkChatPanel {
       });
       // 미로그인 여부를 send 없이 미리 확인 → 미로그인이면 패널이 처음부터 로그인 화면 + 입력 차단.
       const loggedIn = await this.session.checkAuth().catch(() => true);
-      this.post({ type: 'ready', sessionId: this.session.sessionId, model, injected: Boolean(context), loggedIn });
+      this.post({ type: 'ready', sessionId: this.session.sessionId, model: this.model, injected: Boolean(context), loggedIn });
       // 6-3: 에이전트 내부 모델 목록을 받아 패널 모델 칩 메뉴를 채운다(실패해도 채팅엔 영향 없음).
       const models = await this.session.listModels().catch(() => [] as ModelOption[]);
       if (models.length) this.post({ type: 'models', list: models });
@@ -184,6 +190,12 @@ export class SdkChatPanel {
       await this.handleMentionFile();
     } else if (msg.type === 'searchFiles') {
       await this.handleSearchFiles(String(msg.query ?? ''));
+    } else if (msg.type === 'newSession') {
+      // /clear·New(＋) — 현재 세션 종료 후 새 세션. 웹뷰는 'cleared'로 채팅 로그를 비운다.
+      await this.session?.end().catch(() => { /* already gone */ });
+      this.session = null;
+      this.post({ type: 'cleared' });
+      await this.startSession(false); // 클린 슬레이트(이전 IR 미주입)
     }
   }
 
@@ -260,7 +272,7 @@ export class SdkChatPanel {
     }
   }
 
-  private post(msg: { type: 'ready'; sessionId: string; model?: string; injected?: boolean; loggedIn?: boolean } | { type: 'event'; ev: ChatEvent } | { type: 'models'; list: ModelOption[] } | { type: 'attachAdded'; name: string; path: string; dataUrl: string } | { type: 'loginStarted'; manualUrl: string } | { type: 'loginResult'; ok: boolean } | { type: 'usage'; data: AccountUsage | null } | { type: 'outputStyles'; data: { current: string; available: string[] } | null } | { type: 'mcp'; data: McpServerInfo[] } | { type: 'agents'; data: AgentInfo[] } | { type: 'compacted'; ok: boolean } | { type: 'mentionAdded'; path: string } | { type: 'slash'; list: string[] } | { type: 'files'; list: string[] }): void {
+  private post(msg: { type: 'ready'; sessionId: string; model?: string; injected?: boolean; loggedIn?: boolean } | { type: 'event'; ev: ChatEvent } | { type: 'models'; list: ModelOption[] } | { type: 'attachAdded'; name: string; path: string; dataUrl: string } | { type: 'loginStarted'; manualUrl: string } | { type: 'loginResult'; ok: boolean } | { type: 'usage'; data: AccountUsage | null } | { type: 'outputStyles'; data: { current: string; available: string[] } | null } | { type: 'mcp'; data: McpServerInfo[] } | { type: 'agents'; data: AgentInfo[] } | { type: 'compacted'; ok: boolean } | { type: 'mentionAdded'; path: string } | { type: 'slash'; list: string[] } | { type: 'files'; list: string[] } | { type: 'cleared' }): void {
     void this.panel.webview.postMessage(msg);
   }
 
@@ -703,7 +715,7 @@ export class SdkChatPanel {
       settingsMenu.appendChild(row); }); placeMenu(); }
   function renderAgents(list){ if(!panelOpen()) return; settingsMenu.innerHTML=''; settingsMenu.appendChild(panelHeader('Agents & skills'));
     if(!list||!list.length){ settingsMenu.appendChild(el('div','sload','None')); return; }
-    list.forEach(function(a){ var it=el('div','sopt'); it.appendChild(el('span','sck','')); it.appendChild(el('span','snm2',a.name)); if(a.description) it.appendChild(el('span','sod',a.description)); settingsMenu.appendChild(it); }); placeMenu(); }
+    list.forEach(function(a){ var it=el('div','sopt'); it.appendChild(el('span','snm2',a.name)); if(a.description) it.appendChild(el('span','sod',a.description)); settingsMenu.appendChild(it); }); placeMenu(); }
 
   slashBtn.addEventListener('click', function(ev){ ev.stopPropagation(); if(settingsMenu.style.display==='block') closeSettingsMenu(); else openSettingsMenu(); });
   document.addEventListener('click', function(){ closeModelMenu(); closeSettingsMenu(); closeAc(); });
@@ -889,6 +901,7 @@ export class SdkChatPanel {
     if(msg.type==='agents'){ renderAgents(msg.data); return; }
     if(msg.type==='slash'){ SLASH=msg.list||[]; return; }
     if(msg.type==='files'){ if(AC.mode==='file'){ AC.items=(msg.list||[]).map(function(p){return {name:p};}); AC.idx=0; renderAc(); } return; }
+    if(msg.type==='cleared'){ stopWork(); cur=null; log.innerHTML=''; closeSettingsMenu(); closeAc(); input.value=''; renderHL(); welcome.classList.remove('hide'); return; }
     if(msg.type==='compacted'){ closeSettingsMenu(); return; }
     if(msg.type==='mentionAdded'){ var pth=msg.path; input.value=(input.value? input.value.replace(/\\s*$/,'')+' ':'')+'@'+pth+' '; grow(); renderHL(); input.focus(); return; }
     if(msg.type!=='event') return;
