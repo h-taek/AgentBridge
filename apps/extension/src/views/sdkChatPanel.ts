@@ -13,7 +13,7 @@ import { pathToFileURL } from 'url';
 import type { AgentAdapter, ChatEvent, Session, IR, CliKind, PermissionMode, ModelOption, AccountUsage, McpServerInfo, AgentInfo } from '@agentbridge/core';
 // 번들 코어(SDK-free)에서 — 이중로드 규칙: 저장/IR/스케줄러는 번들본 한 사본을 SSOT로.
 // codexAdapter도 SDK-free라 여기 정적 import(번들). claudeAdapter만 ESM SDK라 런타임 동적 import.
-import { readIR, SdkCapture, codexAdapter, resolveTranscriptPath } from '@agentbridge/core';
+import { readIR, SdkCapture, codexAdapter, resolveTranscriptPath, resolveContext } from '@agentbridge/core';
 import { getCompactionScheduler, getWorkspaceStore, getHookInstaller } from '../core/coreInstances';
 import * as output from '../log/output';
 
@@ -226,9 +226,24 @@ export class SdkChatPanel {
     }
   }
 
+  // 주입 라벨용 — 이번 메시지로 들어갈 IR 유무 + 장기메모리 수를 훅과 동일한 globalSearch로 산출(별도 검색이지만 같은 쿼리라 같은 수).
+  private async computeInjectLabel(text: string): Promise<void> {
+    const workspaceRoot = getWorkspaceStore().getWorkspacePath(this.workspaceId);
+    let irPresent = false;
+    try { irPresent = Boolean(await readIR(workspaceRoot)); } catch { /* IR 없음 */ }
+    let mem = 0;
+    try {
+      const userData = path.dirname(path.dirname(workspaceRoot)); // <userData>/workspaces/<id> → <userData>
+      const matches = await resolveContext(path.join(userData, 'global'), 'default', text, { topN: 5 });
+      mem = matches.length;
+    } catch { /* 글로벌 메모리 미설정 등 */ }
+    if (irPresent || mem > 0) this.post({ type: 'inject', ir: irPresent, mem });
+  }
+
   private async onMessage(msg: { type: string; text?: string; id?: string; approve?: boolean; mode?: PermissionMode; level?: string; url?: string; on?: boolean; style?: string; name?: string; enabled?: boolean; query?: string; base64?: string }): Promise<void> {
     if (msg.type === 'send') {
       if (!this.session) return;
+      void this.computeInjectLabel(String(msg.text ?? '')); // 이번 턴 주입 상태 라벨(IR·장기메모리 수)
       try {
         for await (const ev of this.session.send(String(msg.text ?? ''))) {
           if (this.disposed) break;
@@ -383,7 +398,7 @@ export class SdkChatPanel {
     this.post({ type: 'attachAdded', name: safeName, path: insertPath, dataUrl: `data:image/${mime};base64,${base64}` });
   }
 
-  private post(msg: { type: 'ready'; sessionId: string; model?: string; injected?: boolean; loggedIn?: boolean } | { type: 'event'; ev: ChatEvent } | { type: 'models'; list: ModelOption[] } | { type: 'attachAdded'; name: string; path: string; dataUrl: string } | { type: 'loginStarted'; manualUrl: string } | { type: 'loginResult'; ok: boolean } | { type: 'usage'; data: AccountUsage | null } | { type: 'outputStyles'; data: { current: string; available: string[] } | null } | { type: 'mcp'; data: McpServerInfo[] } | { type: 'agents'; data: AgentInfo[] } | { type: 'compacted'; ok: boolean } | { type: 'mentionAdded'; path: string } | { type: 'slash'; list: string[] } | { type: 'files'; list: string[] } | { type: 'cleared' } | { type: 'restore'; turns: Array<{ user: string; items: Array<{ type: string; text?: string; name?: string; arg?: string }> }> }): void {
+  private post(msg: { type: 'ready'; sessionId: string; model?: string; injected?: boolean; loggedIn?: boolean } | { type: 'event'; ev: ChatEvent } | { type: 'models'; list: ModelOption[] } | { type: 'attachAdded'; name: string; path: string; dataUrl: string } | { type: 'loginStarted'; manualUrl: string } | { type: 'loginResult'; ok: boolean } | { type: 'usage'; data: AccountUsage | null } | { type: 'outputStyles'; data: { current: string; available: string[] } | null } | { type: 'mcp'; data: McpServerInfo[] } | { type: 'agents'; data: AgentInfo[] } | { type: 'compacted'; ok: boolean } | { type: 'mentionAdded'; path: string } | { type: 'slash'; list: string[] } | { type: 'files'; list: string[] } | { type: 'cleared' } | { type: 'inject'; ir: boolean; mem: number } | { type: 'restore'; turns: Array<{ user: string; items: Array<{ type: string; text?: string; name?: string; arg?: string }> }> }): void {
     void this.panel.webview.postMessage(msg);
   }
 
@@ -444,6 +459,8 @@ export class SdkChatPanel {
   .turn.assistant{gap:20px}
   .turn.user{align-items:flex-end}
   .user .msg{background:var(--vscode-textBlockQuote-background);border-radius:12px;padding:4px 13px;max-width:80%;white-space:pre-wrap}
+  /* 주입 상태 라벨 — 유저 버블 바로 아래 작은 회색 한 줄(매 턴 IR·장기메모리 수). */
+  .inj{font-size:11px;color:var(--vscode-descriptionForeground);font-family:var(--vscode-editor-font-family),monospace;margin-top:-8px;opacity:.85}
   .att{display:inline-flex;align-items:center;gap:5px;background:var(--vscode-textBlockQuote-background);border:1px solid var(--vscode-panel-border);border-radius:8px;padding:4px 8px;font-size:11px;color:var(--vscode-descriptionForeground);margin-bottom:5px}
 
   .item{display:flex;gap:9px;position:relative}
@@ -1053,6 +1070,17 @@ export class SdkChatPanel {
     if(msg.type==='files'){ if(AC.mode==='file'){ AC.items=(msg.list||[]).map(function(p){return {name:p};}); AC.idx=0; renderAc(); } return; }
     if(msg.type==='cleared'){ stopWork(); cur=null; log.innerHTML=''; closeSettingsMenu(); closeAc(); input.value=''; renderHL(); welcome.classList.remove('hide'); return; }
     if(msg.type==='restore'){ renderRestore(msg.turns); return; }
+    if(msg.type==='inject'){
+      var ip=[]; if(msg.ir) ip.push('IR'); if(msg.mem>0) ip.push(msg.mem+' memory');
+      if(ip.length){
+        var us=log.querySelectorAll('.turn.user'); var lu=us[us.length-1];
+        if(lu && !(lu.nextElementSibling && lu.nextElementSibling.classList.contains('inj'))){
+          var lab=el('div','inj'); lab.textContent='↳ Injected · '+ip.join(', ');
+          lu.insertAdjacentElement('afterend', lab);
+        }
+      }
+      return;
+    }
     if(msg.type==='compacted'){ closeSettingsMenu(); return; }
     if(msg.type==='mentionAdded'){ var pth=msg.path; input.value=(input.value? input.value.replace(/\\s*$/,'')+' ':'')+'@'+pth+' '; grow(); renderHL(); input.focus(); return; }
     if(msg.type!=='event') return;
