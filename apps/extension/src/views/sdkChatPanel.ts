@@ -129,7 +129,7 @@ export class SdkChatPanel {
     }
   }
 
-  private async onMessage(msg: { type: string; text?: string; id?: string; approve?: boolean; mode?: PermissionMode; level?: string; url?: string; on?: boolean; style?: string; name?: string; enabled?: boolean; query?: string }): Promise<void> {
+  private async onMessage(msg: { type: string; text?: string; id?: string; approve?: boolean; mode?: PermissionMode; level?: string; url?: string; on?: boolean; style?: string; name?: string; enabled?: boolean; query?: string; base64?: string }): Promise<void> {
     if (msg.type === 'send') {
       if (!this.session) return;
       try {
@@ -158,6 +158,13 @@ export class SdkChatPanel {
       });
     } else if (msg.type === 'pickImage') {
       await this.handlePickImage();
+    } else if (msg.type === 'attachBytes' && msg.base64) {
+      // 붙여넣기/드롭 — 웹뷰가 보낸 이미지 바이트를 picker와 동일하게 프로젝트에 저장.
+      try {
+        await this.saveAttachment(String(msg.name || `pasted-${Date.now()}.png`), String(msg.base64));
+      } catch (err) {
+        output.warn(`SdkChatPanel: paste/drop 첨부 실패 — ${err instanceof Error ? err.message : String(err)}`);
+      }
     } else if (msg.type === 'login') {
       await this.handleLogin();
     } else if (msg.type === 'openExternal' && msg.url) {
@@ -242,8 +249,7 @@ export class SdkChatPanel {
     }
   }
 
-  // 첨부 이미지(6-5): 호스트 파일 다이얼로그로 이미지 선택 → 프로젝트 .agentbridge/attachments/<sid>/ 아래로 복사하고
-  // cwd-상대경로 + 썸네일용 dataUrl을 회신(에이전트 샌드박스가 프로젝트 내부만 읽으므로). attachmentStore는 기존 PTY와 동형.
+  // 첨부 이미지(6-5): 호스트 파일 다이얼로그로 이미지 선택 → saveAttachment로 프로젝트에 복사.
   private async handlePickImage(): Promise<void> {
     const picks = await vscode.window.showOpenDialog({
       canSelectMany: true,
@@ -251,26 +257,31 @@ export class SdkChatPanel {
       filters: { Images: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg'] },
     });
     if (!picks?.length) return;
-    const { attachmentPathFor, writeAttachment } = await import('../core/attachmentStore');
     for (const uri of picks) {
       try {
         const base64 = (await fs.promises.readFile(uri.fsPath)).toString('base64');
-        const name = path.basename(uri.fsPath);
-        const safeName = name.replace(/[\\/]/g, '_').slice(-150);
-        const filename = `${Date.now()}-${safeName}`;
-        const sid = this.session?.sessionId || 'no-session';
-        const absPath = attachmentPathFor(this.workspaceId || 'no-workspace', sid, filename);
-        await writeAttachment(absPath, base64);
-        const rel = path.relative(this.cwd, absPath);
-        const insertPath = rel && !rel.startsWith('..') && !path.isAbsolute(rel) ? rel : absPath;
-        const ext = (name.split('.').pop() || 'png').toLowerCase();
-        const mime = ext === 'jpg' ? 'jpeg' : ext === 'svg' ? 'svg+xml' : ext;
-        output.log(`SdkChatPanel: attachment 저장 ${absPath} → "${insertPath}"`);
-        this.post({ type: 'attachAdded', name: safeName, path: insertPath, dataUrl: `data:image/${mime};base64,${base64}` });
+        await this.saveAttachment(path.basename(uri.fsPath), base64);
       } catch (err) {
         output.warn(`SdkChatPanel: attachment 저장 실패 — ${err instanceof Error ? err.message : String(err)}`);
       }
     }
+  }
+
+  // 이미지 바이트를 프로젝트 .agentbridge/attachments/<sid>/ 아래로 쓰고, cwd-상대경로 + 썸네일 dataUrl을 회신.
+  // 에이전트 샌드박스가 프로젝트 내부만 읽으므로 항상 프로젝트 안에 쓴다. picker·paste·drop 공용 경로.
+  private async saveAttachment(name: string, base64: string): Promise<void> {
+    const { attachmentPathFor, writeAttachment } = await import('../core/attachmentStore');
+    const safeName = name.replace(/[\\/]/g, '_').slice(-150);
+    const filename = `${Date.now()}-${safeName}`;
+    const sid = this.session?.sessionId || 'no-session';
+    const absPath = attachmentPathFor(this.workspaceId || 'no-workspace', sid, filename);
+    await writeAttachment(absPath, base64);
+    const rel = path.relative(this.cwd, absPath);
+    const insertPath = rel && !rel.startsWith('..') && !path.isAbsolute(rel) ? rel : absPath;
+    const ext = (safeName.split('.').pop() || 'png').toLowerCase();
+    const mime = ext === 'jpg' ? 'jpeg' : ext === 'svg' ? 'svg+xml' : ext;
+    output.log(`SdkChatPanel: attachment 저장 ${absPath} → "${insertPath}"`);
+    this.post({ type: 'attachAdded', name: safeName, path: insertPath, dataUrl: `data:image/${mime};base64,${base64}` });
   }
 
   private post(msg: { type: 'ready'; sessionId: string; model?: string; injected?: boolean; loggedIn?: boolean } | { type: 'event'; ev: ChatEvent } | { type: 'models'; list: ModelOption[] } | { type: 'attachAdded'; name: string; path: string; dataUrl: string } | { type: 'loginStarted'; manualUrl: string } | { type: 'loginResult'; ok: boolean } | { type: 'usage'; data: AccountUsage | null } | { type: 'outputStyles'; data: { current: string; available: string[] } | null } | { type: 'mcp'; data: McpServerInfo[] } | { type: 'agents'; data: AgentInfo[] } | { type: 'compacted'; ok: boolean } | { type: 'mentionAdded'; path: string } | { type: 'slash'; list: string[] } | { type: 'files'; list: string[] } | { type: 'cleared' }): void {
@@ -783,6 +794,21 @@ export class SdkChatPanel {
   const chips = document.getElementById('chips');
   var PENDING=[];
   attachBtn.addEventListener('click', function(){ vscode.postMessage({type:'pickImage'}); });
+  // 이미지 붙여넣기/드롭 → 바이트를 호스트로 보내 + 버튼과 동일 파이프라인(프로젝트 저장→경로 주입)에 합류.
+  function sendImageFile(file){ if(!file||!file.type||file.type.indexOf('image/')!==0) return;
+    var reader=new FileReader();
+    reader.onload=function(){ var s=String(reader.result||''); var ci=s.indexOf(','); var b64=ci>=0?s.slice(ci+1):s;
+      var ext=(file.type.split('/')[1]||'png').replace('jpeg','jpg').replace('svg+xml','svg');
+      var name=file.name||('pasted-'+Date.now()+'.'+ext);
+      vscode.postMessage({type:'attachBytes',name:name,base64:b64}); };
+    reader.readAsDataURL(file); }
+  input.addEventListener('paste', function(e){ var items=(e.clipboardData&&e.clipboardData.items)||[]; var had=false;
+    for(var i=0;i<items.length;i++){ if(items[i].type&&items[i].type.indexOf('image/')===0){ var f=items[i].getAsFile(); if(f){ sendImageFile(f); had=true; } } }
+    if(had) e.preventDefault(); });
+  ['dragenter','dragover'].forEach(function(ev){ document.addEventListener(ev, function(e){ e.preventDefault(); }); });
+  document.addEventListener('drop', function(e){ var files=(e.dataTransfer&&e.dataTransfer.files)||[]; var imgs=[];
+    for(var i=0;i<files.length;i++){ if(files[i].type&&files[i].type.indexOf('image/')===0) imgs.push(files[i]); }
+    if(imgs.length){ e.preventDefault(); imgs.forEach(sendImageFile); } });
   function thumb(a){ if(!a.dataUrl) return null; var im=document.createElement('img'); im.className='thumb'; im.src=a.dataUrl; return im; }
   function renderChips(){
     chips.innerHTML='';
