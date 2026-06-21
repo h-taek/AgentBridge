@@ -388,29 +388,6 @@ export function activate(context: vscode.ExtensionContext) {
     openSdkChat(cwd, workspaceId, model, sessionId, undefined, CLI_DISPLAY_NAME[model]);
   });
 
-  // SDK 채팅 패널 (rearch/sdk-gui — 실험). 기존 PTY ChatPanel과 독립. claude=in-process SDK / codex=app-server.
-  const sdkChatCmd = vscode.commands.registerCommand('agentbridge.sdkChat', async () => {
-    const folderUri = vscode.workspace.workspaceFolders?.[0]?.uri;
-    if (!folderUri) {
-      vscode.window.showWarningMessage(vscode.l10n.t('AgentBridge: Open a workspace folder first.'));
-      return;
-    }
-    const picked = await vscode.window.showQuickPick<vscode.QuickPickItem & { model: CliKind }>(
-      [
-        { label: 'Claude', description: 'claude-agent-sdk (in-process)', model: 'claude' },
-        { label: 'Codex', description: 'codex app-server (JSON-RPC)', model: 'codex' },
-      ],
-      { placeHolder: vscode.l10n.t('SDK 채팅 — 모델 선택') },
-    );
-    if (!picked) return;
-    const cwd = folderUri.fsPath;
-    const workspaceId = workspaceStore.getOrCreateWorkspaceId(cwd);
-    const sessionId = randomUUID();
-    await registerSession(workspaceId, sessionId, picked.model);
-    sessionTree.refresh();
-    openSdkChat(cwd, workspaceId, picked.model, sessionId, undefined, CLI_DISPLAY_NAME[picked.model]);
-  });
-
   // IDE 재시작 시 직전 챗 탭들을 복구 — webview state(sessionId/model/workspaceId)로
   // SpawnOptions 재구성 후 ChatPanel.revive로 기존 panel을 wrap한다. PTY는 새로 spawn되며
   // claude/codex/agy 어댑터가 sessionId 기반 --resume을 알아서 처리.
@@ -455,7 +432,6 @@ export function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     newSession, newSessionFromTab, newSessionWithModel, openSessionCmd, selectSessionCmd, refineCmd, resetCmd, renameCmd, deleteCmd,
-    sdkChatCmd,
     output.getOutputChannel(),
   );
 }

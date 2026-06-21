@@ -57,7 +57,7 @@ export const CHAT_HEADER_CSS = `
   .sp-search-wrap{position:relative}
   .sp-search-wrap svg{position:absolute;left:8px;top:50%;transform:translateY(-50%);width:14px;height:14px;fill:var(--vscode-descriptionForeground);pointer-events:none}
   .sp-list{overflow-y:auto;max-height:320px;padding:4px 0}
-  .sp-item{display:flex;align-items:center;gap:8px;padding:6px 12px;cursor:pointer;font-size:12px;color:var(--vscode-foreground)}
+  .sp-item{display:flex;align-items:center;gap:8px;padding:3px 12px;min-height:26px;cursor:pointer;font-size:12px;color:var(--vscode-foreground)}
   .sp-item:hover{background:var(--vscode-list-hoverBackground,rgba(255,255,255,0.06))}
   .sp-item.active{background:var(--vscode-list-activeSelectionBackground,#094771)}
   .sp-item-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -65,7 +65,7 @@ export const CHAT_HEADER_CSS = `
   .sp-item-actions{display:none;gap:2px}
   .sp-item:hover .sp-item-actions{display:flex}
   .sp-item:hover .sp-item-desc{display:none}
-  .sp-item-actions button{background:transparent;border:none;color:var(--vscode-descriptionForeground);cursor:pointer;width:24px;height:24px;border-radius:4px;display:flex;align-items:center;justify-content:center;padding:0}
+  .sp-item-actions button{background:transparent;border:none;color:var(--vscode-descriptionForeground);cursor:pointer;width:20px;height:20px;border-radius:4px;display:flex;align-items:center;justify-content:center;padding:0}
   .sp-item-actions button:hover{background:rgba(255,255,255,0.1);color:var(--vscode-foreground)}
   .sp-item-actions button svg{width:14px;height:14px;fill:currentColor}
   .sp-empty{padding:20px;text-align:center;color:var(--vscode-descriptionForeground);font-size:12px}
@@ -73,7 +73,7 @@ export const CHAT_HEADER_CSS = `
   .sp-overlay.open{display:block}
   .model-panel{display:none;position:absolute;top:100%;right:8px;width:180px;background:var(--vscode-editorWidget-background,#252526);border:1px solid var(--vscode-widget-border,#444);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,0.4);z-index:100;overflow:hidden;padding:4px 0}
   .model-panel.open{display:block}
-  .mp-item{display:flex;align-items:center;gap:6px;padding:7px 10px;cursor:pointer;font-size:12px;color:var(--vscode-foreground)}
+  .mp-item{display:flex;align-items:center;gap:6px;padding:4px 10px;cursor:pointer;font-size:12px;color:var(--vscode-foreground)}
   .mp-item:hover{background:var(--vscode-list-hoverBackground,rgba(255,255,255,0.06))}
   .mp-item-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
   .mp-item-name{flex:1}
@@ -113,7 +113,7 @@ export function chatHeaderScript(ownSessionIdJs: string): string {
         + '<span class="sp-item-desc">'+esc(desc)+'</span>'
         + '<div class="sp-item-actions">'
         + '<button class="sp-rename" title="Rename"><svg viewBox="0 0 16 16"><path d="M13.23 1h-1.46L3.52 9.25l-.16.22L1 13.59 2.41 15l4.12-2.36.22-.16L15 4.23V2.77L13.23 1zM2.41 13.59l1.51-3 1.45 1.45-2.96 1.55zm3.83-2.06L4.47 9.76l6.69-6.69 1.77 1.77-6.69 6.69z"/></svg></button>'
-        + '<button class="sp-delete" title="Delete"><svg viewBox="0 0 16 16"><path d="M10 3h3v1h-1v9l-1 1H5l-1-1V4H3V3h3l1-1h2l1 1zM9 3H7l-.5.5h3L9 3zm0 4v5H8V7h1zm-3 0v5h1V7H6z"/></svg></button>'
+        + '<button class="sp-delete" title="Delete"><svg viewBox="0 0 16 16"><path d="M14 2H10C10 0.897 9.103 0 8 0C6.897 0 6 0.897 6 2H2C1.724 2 1.5 2.224 1.5 2.5C1.5 2.776 1.724 3 2 3H2.54L3.349 12.708C3.456 13.994 4.55 15 5.84 15H10.159C11.449 15 12.543 13.993 12.65 12.708L13.459 3H13.999C14.275 3 14.499 2.776 14.499 2.5C14.499 2.224 14.275 2 13.999 2H14ZM8 1C8.551 1 9 1.449 9 2H7C7 1.449 7.449 1 8 1ZM11.655 12.625C11.591 13.396 10.934 14 10.16 14H5.841C5.067 14 4.41 13.396 4.346 12.625L3.544 3H12.458L11.656 12.625H11.655ZM7 5.5V11.5C7 11.776 6.776 12 6.5 12C6.224 12 6 11.776 6 11.5V5.5C6 5.224 6.224 5 6.5 5C6.776 5 7 5.224 7 5.5ZM10 5.5V11.5C10 11.776 9.776 12 9.5 12C9.224 12 9 11.776 9 11.5V5.5C9 5.224 9.224 5 9.5 5C9.776 5 10 5.224 10 5.5Z"/></svg></button>'
         + '</div></div>';
     }).join('');
   }
