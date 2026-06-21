@@ -21,7 +21,8 @@ import { SessionTreeProvider, SessionItem } from './views/sessionTreeView';
 import { ChatPanel, getActivePanel, getAllPanels, chatPanelEvents } from './views/chatPanel';
 import { SdkChatPanel } from './views/sdkChatPanel';
 import { compactionEvents } from './core/compactionScheduler';
-import { registerSession, markSessionClosed, markSessionActive, renameSession, deleteSession } from './core/sessionRegistry';
+import { randomUUID } from 'node:crypto';
+import { registerSession, markSessionClosed, markSessionActive, renameSession, deleteSession, setModelSessionId } from './core/sessionRegistry';
 import { registerConfigWatcher, getConfig } from './settings/config';
 import * as notifications from './core/notifications';
 import { CLI_DISPLAY_NAME, type CliKind } from './shared/types';
@@ -208,12 +209,13 @@ export function activate(context: vscode.ExtensionContext) {
     },
   });
 
-  // --- Helper: open chat panel for a session ---
-  function openChatPanel(opts: SpawnOptions, workspaceId: string): void {
-    const chat = ChatPanel.create(context.extensionUri, opts);
-    chat.onDispose(async () => {
-      await markSessionClosed(workspaceId, opts.sessionId!);
-      sessionTree.refresh();
+  // --- Helper: open SDK chat panel for a session (seam — 세션 명령이 PTY 대신 SDK 패널을 연다) ---
+  // 패널이 시작 후 에이전트 세션 id를 modelSessionId로 보고 → 영속(다음 open 시 resume). 닫히면 markSessionClosed.
+  function openSdkChat(cwd: string, workspaceId: string, model: CliKind, sessionId: string, modelSessionId?: string): void {
+    SdkChatPanel.create(context.extensionUri, cwd, workspaceId, model, sessionId, {
+      resume: modelSessionId,
+      onModelSession: (mid) => { void setModelSessionId(workspaceId, sessionId, mid); },
+      onDispose: () => { void markSessionClosed(workspaceId, sessionId).then(() => sessionTree.refresh()); },
     });
   }
 
@@ -240,19 +242,20 @@ export function activate(context: vscode.ExtensionContext) {
     const cwd = folderUri.fsPath;
     const workspaceId = workspaceStore.getOrCreateWorkspaceId(cwd);
 
-    const opts = await buildOpts(model, cwd, workspaceId);
-    output.log(`New session [${model}]: ${opts.terminalName} cwd=${cwd} workspaceId=${workspaceId}`);
+    const sessionId = randomUUID();
+    output.log(`New SDK session [${model}]: ${sessionId} cwd=${cwd} workspaceId=${workspaceId}`);
 
-    await registerSession(workspaceId, opts.sessionId!, model);
+    await registerSession(workspaceId, sessionId, model);
     sessionTree.refresh();
 
     if (model === 'codex') notifications.notifyCodexHooksTrust();
 
-    openChatPanel(opts, workspaceId);
+    openSdkChat(cwd, workspaceId, model, sessionId);
   });
 
   const openSessionCmd = vscode.commands.registerCommand('agentbridge.openSession', async (session: SessionMeta) => {
-    const existing = getActivePanel(session.sessionId);
+    // 전환기 — SDK 패널 우선, 없으면 복원된 PTY 패널도 확인(둘 중 열린 게 있으면 reveal).
+    const existing = SdkChatPanel.getActivePanel(session.sessionId) ?? getActivePanel(session.sessionId);
     if (existing) {
       existing.reveal();
       return;
@@ -271,10 +274,9 @@ export function activate(context: vscode.ExtensionContext) {
       return;
     }
 
-    const opts = await buildOpts(session.model, cwd, session.workspaceId, session.sessionId, session.modelSessionId);
     await markSessionActive(session.workspaceId, session.sessionId);
     sessionTree.refresh();
-    openChatPanel(opts, session.workspaceId);
+    openSdkChat(cwd, session.workspaceId, session.model, session.sessionId, session.modelSessionId);
   });
 
   const selectSessionCmd = vscode.commands.registerCommand('agentbridge.selectSession', async () => {
@@ -332,7 +334,7 @@ export function activate(context: vscode.ExtensionContext) {
       vscode.l10n.t('Delete'),
     );
     if (answer !== vscode.l10n.t('Delete')) return;
-    const activePanel = getActivePanel(session.sessionId);
+    const activePanel = SdkChatPanel.getActivePanel(session.sessionId) ?? getActivePanel(session.sessionId);
     if (activePanel) {
       activePanel.markDeleted();
       activePanel.dispose();
@@ -360,15 +362,15 @@ export function activate(context: vscode.ExtensionContext) {
     const cwd = folderUri.fsPath;
     const workspaceId = workspaceStore.getOrCreateWorkspaceId(cwd);
 
-    const opts = await buildOpts(model, cwd, workspaceId);
-    output.log(`New session [${model}]: ${opts.terminalName} cwd=${cwd} workspaceId=${workspaceId}`);
+    const sessionId = randomUUID();
+    output.log(`New SDK session [${model}]: ${sessionId} cwd=${cwd} workspaceId=${workspaceId}`);
 
-    await registerSession(workspaceId, opts.sessionId!, model);
+    await registerSession(workspaceId, sessionId, model);
     sessionTree.refresh();
 
     if (model === 'codex') notifications.notifyCodexHooksTrust();
 
-    openChatPanel(opts, workspaceId);
+    openSdkChat(cwd, workspaceId, model, sessionId);
   });
 
   // SDK 채팅 패널 (rearch/sdk-gui — 실험). 기존 PTY ChatPanel과 독립. claude=in-process SDK / codex=app-server.
@@ -388,7 +390,10 @@ export function activate(context: vscode.ExtensionContext) {
     if (!picked) return;
     const cwd = folderUri.fsPath;
     const workspaceId = workspaceStore.getOrCreateWorkspaceId(cwd);
-    SdkChatPanel.create(context.extensionUri, cwd, workspaceId, picked.model);
+    const sessionId = randomUUID();
+    await registerSession(workspaceId, sessionId, picked.model);
+    sessionTree.refresh();
+    openSdkChat(cwd, workspaceId, picked.model, sessionId);
   });
 
   // IDE 재시작 시 직전 챗 탭들을 복구 — webview state(sessionId/model/workspaceId)로

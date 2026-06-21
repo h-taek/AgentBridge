@@ -48,19 +48,45 @@ export class SdkChatPanel {
   private workspaceId = '';
   private model: CliKind = 'claude';
 
+  // 세션 통합(seam) — AgentBridge sessionId로 레지스트리·트리에 물린다(PTY ChatPanel과 동일 계약).
+  private static activePanels = new Map<string, SdkChatPanel>();
+  static getActivePanel(sessionId: string): SdkChatPanel | undefined { return SdkChatPanel.activePanels.get(sessionId); }
+  static getAllPanels(): SdkChatPanel[] { return Array.from(SdkChatPanel.activePanels.values()); }
+
+  private sessionId = '';
+  private resumeId: string | undefined; // 이전 세션 이어가기(claude session_id / codex thread id)
+  private onModelSessionCb: ((modelSessionId: string) => void) | undefined; // 시작 후 에이전트 세션 id 보고(영속용)
+  private onDisposeCb: (() => void) | undefined; // 패널 닫힘 알림(호스트가 markSessionClosed)
+
   private constructor(private readonly panel: vscode.WebviewPanel, private readonly extensionUri: vscode.Uri) {}
 
-  static create(extensionUri: vscode.Uri, cwd: string, workspaceId: string, model: CliKind): SdkChatPanel {
+  static create(
+    extensionUri: vscode.Uri,
+    cwd: string,
+    workspaceId: string,
+    model: CliKind,
+    sessionId: string,
+    opts?: { resume?: string; onModelSession?: (modelSessionId: string) => void; onDispose?: () => void },
+  ): SdkChatPanel {
     const panel = vscode.window.createWebviewPanel(
       'agentbridge.sdkChat',
-      `AgentBridge · SDK 채팅 (${model})`,
+      `AgentBridge · ${model}`,
       vscode.ViewColumn.Active,
       { enableScripts: true, retainContextWhenHidden: true },
     );
     const inst = new SdkChatPanel(panel, extensionUri);
+    inst.sessionId = sessionId;
+    inst.resumeId = opts?.resume;
+    inst.onModelSessionCb = opts?.onModelSession;
+    inst.onDisposeCb = opts?.onDispose;
+    SdkChatPanel.activePanels.set(sessionId, inst);
     void inst.init(cwd, workspaceId, model);
     return inst;
   }
+
+  reveal(): void { this.panel.reveal(); }
+  markDeleted(): void { /* SDK 패널은 별도 삭제 전 처리 불필요(현재) */ }
+  dispose(): void { this.panel.dispose(); }
 
   // claude=ESM SDK라 dist 동적 import / codex=SDK-free라 번들 정적. 못 찾으면 웹뷰 에러 + null.
   private async loadAdapter(model: CliKind): Promise<AgentAdapter | null> {
@@ -83,13 +109,16 @@ export class SdkChatPanel {
     this.panel.webview.onDidReceiveMessage((msg) => void this.onMessage(msg));
     this.panel.onDidDispose(() => {
       this.disposed = true;
+      SdkChatPanel.activePanels.delete(this.sessionId);
       void this.session?.end().catch(() => { /* already gone */ });
+      this.onDisposeCb?.();
     });
-    await this.startSession(true);
+    await this.startSession(true, this.resumeId);
   }
 
   // 세션 생성(최초 init + /clear·New 재시작에서 공용). injectContext=false면 이전 IR 주입 없이 클린 슬레이트(/clear).
-  private async startSession(injectContext: boolean): Promise<void> {
+  // resume=이전 modelSessionId면 그 세션을 이어간다(최초 open만; /clear는 resume 없이 새로).
+  private async startSession(injectContext: boolean, resume?: string): Promise<void> {
     try {
       // 3단계 — 캡처/IR 배선 (모두 번들 코어 = SSOT).
       const workspaceRoot = getWorkspaceStore().getWorkspacePath(this.workspaceId);
@@ -110,9 +139,12 @@ export class SdkChatPanel {
         workspaceId: this.workspaceId,
         detail: 'compact',
         context,
+        ...(resume ? { resume } : {}),
         // onTurn: 어댑터가 만든 plain TurnRecord를 경계 넘겨 번들 코어 캡처로 영속(turns→압축→IR).
         onTurn: (turn) => capture.accept(turn),
       });
+      // 에이전트가 만든 세션 id(claude session_id / codex thread id)를 modelSessionId로 영속 → 다음 open 시 resume.
+      this.onModelSessionCb?.(this.session.sessionId);
       // 미로그인 여부를 send 없이 미리 확인 → 미로그인이면 패널이 처음부터 로그인 화면 + 입력 차단.
       const loggedIn = await this.session.checkAuth().catch(() => true);
       this.post({ type: 'ready', sessionId: this.session.sessionId, model: this.model, injected: Boolean(context), loggedIn });
