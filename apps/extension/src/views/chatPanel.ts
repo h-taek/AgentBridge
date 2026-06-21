@@ -16,7 +16,8 @@ import {
   releaseOwnership,
   readForeignOwner,
 } from '@agentbridge/core';
-import { CLI_DISPLAY_NAME, type CliKind } from '../shared/types';
+import { type CliKind } from '../shared/types';
+import { chatHeaderHtml, CHAT_HEADER_CSS, chatHeaderScript } from './chatHeader';
 import { quoteCommandLine } from '../shared/shellQuote';
 import type { SpawnOptions } from '../pty/types';
 import { createGroupLocker, type GroupLocker } from './groupLock';
@@ -541,7 +542,7 @@ export class ChatPanel {
       vscode.Uri.joinPath(this.extensionUri, 'out', 'vendor', '@xterm', 'addon-unicode11', 'lib', 'addon-unicode11.js'),
     );
     const nonce = getNonce();
-    const modelLabel = this.opts.model ? CLI_DISPLAY_NAME[this.opts.model].toUpperCase() : 'CLI';
+    const model = this.opts.model ?? 'claude';
 
     // VS Code 재시작 시 panel을 복구하기 위한 최소 state. serializer.deserializeWebviewPanel에서
     // 다시 받아 buildOpts로 재구성한다.
@@ -575,192 +576,10 @@ export class ChatPanel {
       flex-direction: column;
       height: 100vh;
     }
-    .header {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 2px 12px;
-      background: var(--vscode-panel-background, var(--vscode-editor-background, #1e1e1e));
-      border-bottom: 1px solid var(--vscode-panel-border, var(--vscode-editorGroupHeader-tabsBorder, #333));
-      flex-shrink: 0;
-      position: relative;
-    }
-    .header .model-badge {
-      font-size: 11px;
-      font-weight: 600;
-      padding: 2px 8px;
-      border-radius: 10px;
-      background: var(--vscode-badge-background);
-      color: var(--vscode-badge-foreground);
-    }
-    .header .session-name {
-      font-size: 12px;
-      color: var(--vscode-foreground);
-      flex: 1;
-    }
-    .header-actions { display: flex; gap: 4px; }
-    .header-actions button {
-      background: transparent;
-      border: none;
-      color: var(--vscode-descriptionForeground);
-      cursor: pointer;
-      width: 28px;
-      height: 28px;
-      border-radius: 4px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 0;
-    }
-    .header-actions button:hover {
-      background: var(--vscode-toolbar-hoverBackground, rgba(255,255,255,0.1));
-      color: var(--vscode-foreground);
-    }
-    .header-actions button svg { width: 22px; height: 22px; fill: currentColor; }
-    .header-actions button.btn-new svg { width: 18px; height: 18px; }
-
-    /* Session dropdown panel */
-    .session-panel {
-      display: none;
-      position: absolute;
-      top: 100%;
-      right: 8px;
-      width: 320px;
-      max-height: 400px;
-      background: var(--vscode-editorWidget-background, #252526);
-      border: 1px solid var(--vscode-widget-border, #444);
-      border-radius: 8px;
-      box-shadow: 0 8px 24px rgba(0,0,0,0.4);
-      z-index: 100;
-      overflow: hidden;
-      flex-direction: column;
-    }
-    .session-panel.open { display: flex; }
-    .sp-search {
-      padding: 8px;
-      border-bottom: 1px solid var(--vscode-widget-border, #333);
-    }
-    .sp-search input {
-      width: 100%;
-      padding: 6px 8px 6px 28px;
-      border: 1px solid var(--vscode-input-border, #444);
-      border-radius: 6px;
-      background: var(--vscode-input-background, #1e1e1e);
-      color: var(--vscode-input-foreground, #ccc);
-      font-size: 12px;
-      outline: none;
-    }
-    .sp-search input:focus { border-color: var(--vscode-focusBorder, #007fd4); }
-    .sp-search-wrap {
-      position: relative;
-    }
-    .sp-search-wrap svg {
-      position: absolute;
-      left: 8px;
-      top: 50%;
-      transform: translateY(-50%);
-      width: 14px;
-      height: 14px;
-      fill: var(--vscode-descriptionForeground);
-      pointer-events: none;
-    }
-    .sp-list {
-      overflow-y: auto;
-      max-height: 320px;
-      padding: 4px 0;
-    }
-    .sp-item {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 6px 12px;
-      cursor: pointer;
-      font-size: 12px;
-      color: var(--vscode-foreground);
-    }
-    .sp-item:hover { background: var(--vscode-list-hoverBackground, rgba(255,255,255,0.06)); }
-    .sp-item.active { background: var(--vscode-list-activeSelectionBackground, #094771); }
-    .sp-item-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .sp-item-desc {
-      font-size: 11px;
-      color: var(--vscode-descriptionForeground);
-      white-space: nowrap;
-    }
-    .sp-item-actions {
-      display: none;
-      gap: 2px;
-    }
-    .sp-item:hover .sp-item-actions { display: flex; }
-    .sp-item:hover .sp-item-desc { display: none; }
-    .sp-item-actions button {
-      background: transparent;
-      border: none;
-      color: var(--vscode-descriptionForeground);
-      cursor: pointer;
-      width: 24px;
-      height: 24px;
-      border-radius: 4px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 0;
-    }
-    .sp-item-actions button:hover {
-      background: rgba(255,255,255,0.1);
-      color: var(--vscode-foreground);
-    }
-    .sp-item-actions button svg { width: 14px; height: 14px; fill: currentColor; }
-    .sp-empty {
-      padding: 20px;
-      text-align: center;
-      color: var(--vscode-descriptionForeground);
-      font-size: 12px;
-    }
-    .sp-overlay {
-      display: none;
-      position: fixed;
-      inset: 0;
-      z-index: 99;
-    }
-    .sp-overlay.open { display: block; }
-
-    /* New session model panel */
-    .model-panel {
-      display: none;
-      position: absolute;
-      top: 100%;
-      right: 8px;
-      width: 180px;
-      background: var(--vscode-editorWidget-background, #252526);
-      border: 1px solid var(--vscode-widget-border, #444);
-      border-radius: 8px;
-      box-shadow: 0 8px 24px rgba(0,0,0,0.4);
-      z-index: 100;
-      overflow: hidden;
-      padding: 4px 0;
-    }
-    .model-panel.open { display: block; }
-    .mp-item {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      padding: 7px 10px;
-      cursor: pointer;
-      font-size: 12px;
-      color: var(--vscode-foreground);
-    }
-    .mp-item:hover { background: var(--vscode-list-hoverBackground, rgba(255,255,255,0.06)); }
-    .mp-item-dot {
-      width: 7px;
-      height: 7px;
-      border-radius: 50%;
-      flex-shrink: 0;
-    }
-    .mp-item-name { flex: 1; }
-    .mp-item-desc {
-      font-size: 11px;
-      color: var(--vscode-descriptionForeground);
-    }
+    :root{--accent:#d97757;--accent-bright:#f0a88c;--green:#5ec98a}
+    body[data-model="codex"]{--accent:#5D8AF9;--accent-bright:#9ab8ff}
+    body[data-model="agy"]{--accent:#8e6cef;--accent-bright:#b69cf5}
+    ${CHAT_HEADER_CSS}
 
     #terminal-container {
       flex: 1;
@@ -786,46 +605,8 @@ export class ChatPanel {
     .xterm-viewport { background-color: inherit !important; }
   </style>
 </head>
-<body>
-  <div class="sp-overlay" id="spOverlay"></div>
-  <div class="header">
-    <span class="model-badge">${escapeHtml(modelLabel)}</span>
-    <span class="session-name">${escapeHtml(this.opts.terminalName)}</span>
-    <div class="header-actions">
-      <button id="btnSelectSession" title="Select session">
-        <svg viewBox="0 0 16 16"><path d="M13.5 8a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0ZM8 3.5a4.5 4.5 0 1 0 0 9 4.5 4.5 0 0 0 0-9ZM8.5 5v2.793l1.854 1.853-.708.708L7.5 8.207V5h1Z"/></svg>
-      </button>
-      <button id="btnNewSession" class="btn-new" title="New session">
-        <svg viewBox="0 0 16 16"><path d="M8 1a.5.5 0 0 1 .5.5V7h5.5a.5.5 0 0 1 0 1H8.5v5.5a.5.5 0 0 1-1 0V8H2a.5.5 0 0 1 0-1h5.5V1.5A.5.5 0 0 1 8 1Z"/></svg>
-      </button>
-    </div>
-    <div class="session-panel" id="sessionPanel">
-      <div class="sp-search">
-        <div class="sp-search-wrap">
-          <svg viewBox="0 0 16 16"><path d="M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85zm-5.242.156a5 5 0 1 1 0-10 5 5 0 0 1 0 10z"/></svg>
-          <input type="text" id="spSearchInput" placeholder="Search sessions..." />
-        </div>
-      </div>
-      <div class="sp-list" id="spList"></div>
-    </div>
-    <div class="model-panel" id="modelPanel">
-      <div class="mp-item" data-model="claude">
-        <span class="mp-item-dot" style="background:#d97757"></span>
-        <span class="mp-item-name">Claude</span>
-        <span class="mp-item-desc">Anthropic</span>
-      </div>
-      <div class="mp-item" data-model="codex">
-        <span class="mp-item-dot" style="background:#5D8AF9"></span>
-        <span class="mp-item-name">Codex</span>
-        <span class="mp-item-desc">OpenAI</span>
-      </div>
-      <div class="mp-item" data-model="agy">
-        <span class="mp-item-dot" style="background:#8e6cef"></span>
-        <span class="mp-item-name">Antigravity</span>
-        <span class="mp-item-desc">Google</span>
-      </div>
-    </div>
-  </div>
+<body data-model="${model}">
+  ${chatHeaderHtml(model)}
   <div id="terminal-container"></div>
 
   <script nonce="${nonce}" src="${xtermJs}"></script>
@@ -1125,113 +906,12 @@ export class ChatPanel {
       fitAddon.fit();
     });
 
-    // --- Panels ---
-    const sessionPanel = document.getElementById('sessionPanel');
-    const modelPanel = document.getElementById('modelPanel');
-    const spOverlay = document.getElementById('spOverlay');
-    const spList = document.getElementById('spList');
-    const spSearchInput = document.getElementById('spSearchInput');
-    let allSessions = [];
-
-    function togglePanel(open) {
-      const isOpen = open !== undefined ? open : !sessionPanel.classList.contains('open');
-      modelPanel.classList.remove('open');
-      sessionPanel.classList.toggle('open', isOpen);
-      spOverlay.classList.toggle('open', isOpen);
-      if (isOpen) {
-        spSearchInput.value = '';
-        vscode.postMessage({ type: 'getSessions' });
-        setTimeout(() => spSearchInput.focus(), 50);
-      }
-    }
-
-    function renderSessions(sessions) {
-      if (sessions.length === 0) {
-        spList.innerHTML = '<div class="sp-empty">No sessions found</div>';
-        return;
-      }
-      spList.innerHTML = sessions.map(s => {
-        const desc = s.active ? 'active' : (s.lastActiveAt || '');
-        return '<div class="sp-item' + (s.sessionId === ${ownSessionIdJs} ? ' active' : '') + '" data-sid="' + esc(s.sessionId) + '" data-wid="' + esc(s.workspaceId) + '" data-model="' + esc(s.model) + '">'
-          + '<span class="sp-item-name">' + esc(s.name) + '</span>'
-          + '<span class="sp-item-desc">' + esc(desc) + '</span>'
-          + '<div class="sp-item-actions">'
-          + '<button class="sp-rename" title="Rename"><svg viewBox="0 0 16 16"><path d="M13.23 1h-1.46L3.52 9.25l-.16.22L1 13.59 2.41 15l4.12-2.36.22-.16L15 4.23V2.77L13.23 1zM2.41 13.59l1.51-3 1.45 1.45-2.96 1.55zm3.83-2.06L4.47 9.76l6.69-6.69 1.77 1.77-6.69 6.69z"/></svg></button>'
-          + '<button class="sp-delete" title="Delete"><svg viewBox="0 0 16 16"><path d="M10 3h3v1h-1v9l-1 1H5l-1-1V4H3V3h3l1-1h2l1 1zM9 3H7l-.5.5h3L9 3zm0 4v5H8V7h1zm-3 0v5h1V7H6z"/></svg></button>'
-          + '</div></div>';
-      }).join('');
-    }
-
-    function esc(s) {
-      // 요소 내용뿐 아니라 속성 값(data-*)에도 쓰이므로 따옴표까지 무력화 (V-28).
-      if (!s) return '';
-      return String(s)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
-    }
-
-    document.getElementById('btnSelectSession').addEventListener('click', (e) => {
-      e.stopPropagation();
-      togglePanel();
-    });
-    spOverlay.addEventListener('click', () => { togglePanel(false); toggleModelPanel(false); });
-
-    spSearchInput.addEventListener('input', () => {
-      const q = spSearchInput.value.toLowerCase();
-      const filtered = q ? allSessions.filter(s => s.name.toLowerCase().includes(q)) : allSessions;
-      renderSessions(filtered);
-    });
-
-    spList.addEventListener('click', (e) => {
-      const item = e.target.closest('.sp-item');
-      if (!item) return;
-      const renameBtn = e.target.closest('.sp-rename');
-      const deleteBtn = e.target.closest('.sp-delete');
-      if (renameBtn) {
-        vscode.postMessage({ type: 'renameSession', sessionId: item.dataset.sid, workspaceId: item.dataset.wid, currentName: item.querySelector('.sp-item-name').textContent });
-        return;
-      }
-      if (deleteBtn) {
-        vscode.postMessage({ type: 'deleteSession', sessionId: item.dataset.sid, workspaceId: item.dataset.wid, name: item.querySelector('.sp-item-name').textContent });
-        return;
-      }
-      vscode.postMessage({ type: 'openSession', sessionId: item.dataset.sid, workspaceId: item.dataset.wid, model: item.dataset.model });
-      togglePanel(false);
-    });
-
-    // --- Model panel ---
-    function toggleModelPanel(open) {
-      const isOpen = open !== undefined ? open : !modelPanel.classList.contains('open');
-      sessionPanel.classList.remove('open');
-      modelPanel.classList.toggle('open', isOpen);
-      spOverlay.classList.toggle('open', isOpen);
-    }
-
-    document.getElementById('btnNewSession').addEventListener('click', (e) => {
-      e.stopPropagation();
-      toggleModelPanel();
-    });
-
-    modelPanel.addEventListener('click', (e) => {
-      const item = e.target.closest('.mp-item');
-      if (!item) return;
-      vscode.postMessage({ type: 'newSessionWithModel', model: item.dataset.model });
-      toggleModelPanel(false);
-    });
+    ${chatHeaderScript(ownSessionIdJs)}
 
     window.addEventListener('message', (e) => {
       const msg = e.data;
       if (msg.type === 'output') {
         term.write(msg.data);
-      }
-      if (msg.type === 'sessions') {
-        allSessions = msg.sessions || [];
-        const q = spSearchInput.value.toLowerCase();
-        const filtered = q ? allSessions.filter(s => s.name.toLowerCase().includes(q)) : allSessions;
-        renderSessions(filtered);
       }
     });
 
@@ -1245,16 +925,4 @@ export class ChatPanel {
 function getNonce(): string {
   // CSP nonce는 예측 불가능해야 하므로 Math.random()이 아닌 crypto 난수 사용
   return randomBytes(16).toString('base64');
-}
-
-// 호스트 쪽 HTML 이스케이프 — webview HTML 템플릿에 끼워 넣는 표시값은 모두 이 함수를 거친다.
-// 현재 끼워 넣는 값(CLI_DISPLAY_NAME enum, terminalName)은 코드가 만드는 고정값이지만,
-// 값의 출처가 바뀌어도 안전하도록 방어 계층을 유지한다 (V-28).
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
 }
