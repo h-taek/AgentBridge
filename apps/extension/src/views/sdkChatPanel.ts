@@ -94,6 +94,30 @@ export class SdkChatPanel {
     return inst;
   }
 
+  // IDE 재시작 복원 — VS Code가 넘겨준 기존 panel을 wrap(새로 만들지 않음). 나머지는 create와 동일.
+  static revive(
+    extensionUri: vscode.Uri,
+    panel: vscode.WebviewPanel,
+    cwd: string,
+    workspaceId: string,
+    model: CliKind,
+    sessionId: string,
+    opts?: { resume?: string; title?: string; onModelSession?: (modelSessionId: string) => void; onDispose?: () => void; onTitle?: (title: string) => void },
+  ): SdkChatPanel {
+    const logo = vscode.Uri.joinPath(extensionUri, 'media', 'logos', `${model}.svg`);
+    panel.iconPath = { light: logo, dark: logo };
+    const inst = new SdkChatPanel(panel, extensionUri);
+    inst.sessionId = sessionId;
+    inst.resumeId = opts?.resume;
+    inst.onModelSessionCb = opts?.onModelSession;
+    inst.onDisposeCb = opts?.onDispose;
+    inst.onTitleCb = opts?.onTitle;
+    inst.titlePending = false; // 복원은 기존 세션 — 자동제목 안 함
+    SdkChatPanel.activePanels.set(sessionId, inst);
+    void inst.init(cwd, workspaceId, model);
+    return inst;
+  }
+
   reveal(): void { this.panel.reveal(); }
   markDeleted(): void { /* SDK 패널은 별도 삭제 전 처리 불필요(현재) */ }
   dispose(): void { this.panel.dispose(); }
@@ -713,6 +737,7 @@ export class SdkChatPanel {
   <div id="acMenu" class="menu"></div>
 <script nonce="${nonce}">
   const vscode = acquireVsCodeApi();
+  vscode.setState({ sessionId: ${JSON.stringify(this.sessionId)}, model: ${JSON.stringify(model)}, workspaceId: ${JSON.stringify(this.workspaceId)} }); // IDE 재시작 복원용 — 직렬화기가 이 값으로 패널 재구성
   const log = document.getElementById('log');
   const input = document.getElementById('input');
   const sendBtn = document.getElementById('send');

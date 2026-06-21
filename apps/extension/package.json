@@ -38,7 +38,8 @@
   ],
   "icon": "media/icon.png",
   "activationEvents": [
-    "onWebviewPanel:agentbridge.chat"
+    "onWebviewPanel:agentbridge.chat",
+    "onWebviewPanel:agentbridge.sdkChat"
   ],
   "main": "./out/extension.js",
   "contributes": {

@@ -211,24 +211,31 @@ export function activate(context: vscode.ExtensionContext) {
 
   // --- Helper: open SDK chat panel for a session (seam — 세션 명령이 PTY 대신 SDK 패널을 연다) ---
   // 패널이 시작 후 에이전트 세션 id를 modelSessionId로 보고 → 영속(다음 open 시 resume). 닫히면 markSessionClosed.
-  function openSdkChat(cwd: string, workspaceId: string, model: CliKind, sessionId: string, modelSessionId?: string, title?: string): void {
-    SdkChatPanel.create(context.extensionUri, cwd, workspaceId, model, sessionId, {
+  function sdkChatOpts(workspaceId: string, model: CliKind, sessionId: string, modelSessionId?: string, title?: string) {
+    return {
       resume: modelSessionId,
       title, // 탭 제목 = 세션 이름(신규는 기본명, 재개는 저장된 이름)
-      onModelSession: (mid) => { void setModelSessionId(workspaceId, sessionId, mid); },
+      onModelSession: (mid: string) => { void setModelSessionId(workspaceId, sessionId, mid); },
       onDispose: () => { void markSessionClosed(workspaceId, sessionId).then(() => sessionTree.refresh()); },
       // 첫 메시지 자동 제목 — 아직 기본 이름(CLI 표시명)일 때만 적용(사용자 rename은 보존).
-      onTitle: (title) => {
+      onTitle: (newTitle: string) => {
         void (async () => {
           const sessions = await getSessions(workspaceId);
           const s = sessions.find((x) => x.sessionId === sessionId);
           if (s && s.name === CLI_DISPLAY_NAME[model]) {
-            await renameSession(workspaceId, sessionId, title);
+            await renameSession(workspaceId, sessionId, newTitle);
             sessionTree.refresh();
           }
         })();
       },
-    });
+    };
+  }
+  function openSdkChat(cwd: string, workspaceId: string, model: CliKind, sessionId: string, modelSessionId?: string, title?: string): void {
+    SdkChatPanel.create(context.extensionUri, cwd, workspaceId, model, sessionId, sdkChatOpts(workspaceId, model, sessionId, modelSessionId, title));
+  }
+  // IDE 재시작 복원 — VS Code가 넘겨준 기존 panel을 wrap.
+  function reviveSdkChat(panel: vscode.WebviewPanel, cwd: string, workspaceId: string, model: CliKind, sessionId: string, modelSessionId?: string, title?: string): void {
+    SdkChatPanel.revive(context.extensionUri, panel, cwd, workspaceId, model, sessionId, sdkChatOpts(workspaceId, model, sessionId, modelSessionId, title));
   }
 
   // --- Commands ---
@@ -429,6 +436,27 @@ export function activate(context: vscode.ExtensionContext) {
     },
   };
   context.subscriptions.push(vscode.window.registerWebviewPanelSerializer('agentbridge.chat', serializer));
+
+  // IDE 재시작 시 SDK 챗 탭 복구 — webview state(sessionId/model/workspaceId)로 SdkChatPanel.revive.
+  // modelSessionId는 PTY와 동일하게 레지스트리(SSOT)에서 최신값을 읽는다(webview state는 stale).
+  const sdkSerializer: vscode.WebviewPanelSerializer = {
+    async deserializeWebviewPanel(panel: vscode.WebviewPanel, state: unknown): Promise<void> {
+      const s = state as { sessionId?: string; model?: CliKind; workspaceId?: string } | null;
+      if (!s || !s.sessionId || !s.model || !s.workspaceId) { panel.dispose(); return; }
+      const folder = vscode.workspace.workspaceFolders?.[0]?.uri;
+      if (!folder) { panel.dispose(); return; }
+      const availability = checkAvailability(s.model);
+      if (!availability.found) { notifications.notifyCliNotFound(availability.name); panel.dispose(); return; }
+      const sessions = await getSessions(s.workspaceId);
+      const meta = sessions.find((m) => m.sessionId === s.sessionId);
+      const resumeId = meta?.modelSessionId ?? (s.model === 'claude' ? s.sessionId : undefined);
+      if (pendingResetDone) await pendingResetDone;
+      await markSessionActive(s.workspaceId, s.sessionId);
+      sessionTree.refresh();
+      reviveSdkChat(panel, folder.fsPath, s.workspaceId, s.model, s.sessionId, resumeId, meta?.name);
+    },
+  };
+  context.subscriptions.push(vscode.window.registerWebviewPanelSerializer('agentbridge.sdkChat', sdkSerializer));
 
   context.subscriptions.push(
     newSession, newSessionFromTab, newSessionWithModel, openSessionCmd, selectSessionCmd, refineCmd, resetCmd, renameCmd, deleteCmd,
