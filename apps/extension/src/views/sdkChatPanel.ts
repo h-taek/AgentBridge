@@ -13,7 +13,7 @@ import { pathToFileURL } from 'url';
 import type { AgentAdapter, ChatEvent, Session, IR, CliKind, PermissionMode, ModelOption, AccountUsage, McpServerInfo, AgentInfo } from '@agentbridge/core';
 // 번들 코어(SDK-free)에서 — 이중로드 규칙: 저장/IR/스케줄러는 번들본 한 사본을 SSOT로.
 // codexAdapter도 SDK-free라 여기 정적 import(번들). claudeAdapter만 ESM SDK라 런타임 동적 import.
-import { readIR, SdkCapture, codexAdapter, readAllTurns } from '@agentbridge/core';
+import { readIR, SdkCapture, codexAdapter, resolveTranscriptPath } from '@agentbridge/core';
 import { getCompactionScheduler, getWorkspaceStore } from '../core/coreInstances';
 import * as output from '../log/output';
 
@@ -97,16 +97,25 @@ export class SdkChatPanel {
     }
   }
 
-  // 재개 시 이전 대화를 webview로 보내 시작화면 대신 렌더. 턴 기록은 sessionId(=modelSessionId)로 필터.
-  // 어시스턴트 본문은 compact cap(~5K자)이라 매우 긴 답변은 잘릴 수 있음(에이전트 맥락은 resume로 온전).
+  // 재개 시 이전 대화를 webview로 보내 시작화면 대신 렌더.
+  // 소스 = 에이전트 네이티브 트랜스크립트(~/.claude JSONL / ~/.codex rollout) — IR 요약본(turns.jsonl) 아님.
+  // 거긴 전체 대화가 cap 없이 다 있음 → 공식 앱과 동일하게 온전 복원. 복원 전용 파서(IR 리더와 분리: SDK 포맷 대응).
   private async restoreTranscript(modelSessionId: string): Promise<void> {
+    if (this.model === 'agy') return; // 패널은 claude/codex만
     try {
-      const workspaceRoot = getWorkspaceStore().getWorkspacePath(this.workspaceId);
-      const all = await readAllTurns(workspaceRoot);
-      const mine = all
-        .filter((t) => t.sessionId === modelSessionId)
-        .map((t) => ({ user: t.user, assistant: t.assistantBody }));
-      if (mine.length) this.post({ type: 'restore', turns: mine });
+      const transcriptPath = await resolveTranscriptPath(this.model, modelSessionId, this.cwd);
+      if (!transcriptPath) return;
+      const raw = await fs.promises.readFile(transcriptPath, 'utf8').catch(() => '');
+      if (!raw) return;
+      const records: Array<Record<string, unknown>> = [];
+      for (const line of raw.split('\n')) {
+        const t = line.trim();
+        if (!t) continue;
+        try { records.push(JSON.parse(t) as Record<string, unknown>); } catch { /* 깨진 줄 skip */ }
+      }
+      const msgs = this.model === 'codex' ? parseCodexTranscript(records) : parseClaudeTranscript(records);
+      const turns = msgsToTurns(msgs);
+      if (turns.length) this.post({ type: 'restore', turns });
     } catch (err) {
       output.warn(`SdkChatPanel: transcript 복원 실패 — ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -1065,6 +1074,64 @@ export class SdkChatPanel {
 </script>
 </body></html>`;
   }
+}
+
+// ── 트랜스크립트 복원 파서 (display 전용 — IR 리더와 분리). 네이티브 JSONL의 user/assistant 텍스트만 추출. ──
+type DisplayMsg = { role: 'user' | 'assistant'; text: string };
+
+// claude(SDK/CLI 공통): type 'user'(content=string) / type 'assistant'(content=배열, text 블록만). thinking·tool_use는 제외.
+function parseClaudeTranscript(records: Array<Record<string, unknown>>): DisplayMsg[] {
+  const out: DisplayMsg[] = [];
+  for (const r of records) {
+    const msg = r.message as { role?: string; content?: unknown } | undefined;
+    if (r.type === 'user' && typeof msg?.content === 'string') {
+      if (msg.content.trim()) out.push({ role: 'user', text: msg.content });
+    } else if (r.type === 'assistant' && Array.isArray(msg?.content)) {
+      const text = (msg.content as Array<{ type?: string; text?: string }>)
+        .filter((b) => b.type === 'text')
+        .map((b) => b.text ?? '')
+        .join('');
+      if (text.trim()) out.push({ role: 'assistant', text });
+    }
+  }
+  return out;
+}
+
+// codex rollout: event_msg의 user_message/agent_message.message가 실제 대화 텍스트(깔끔).
+//   response_item user엔 codex가 주입하는 AGENTS.md·환경 컨텍스트가 섞여 있어 event_msg를 쓴다.
+function parseCodexTranscript(records: Array<Record<string, unknown>>): DisplayMsg[] {
+  const out: DisplayMsg[] = [];
+  for (const r of records) {
+    if (r.type !== 'event_msg') continue;
+    const p = r.payload as { type?: string; message?: unknown } | undefined;
+    if (p?.type === 'user_message' && typeof p.message === 'string') {
+      if (p.message.trim()) out.push({ role: 'user', text: p.message });
+    } else if (p?.type === 'agent_message' && typeof p.message === 'string') {
+      if (p.message.trim()) out.push({ role: 'assistant', text: p.message });
+    }
+  }
+  return out;
+}
+
+// 평탄한 메시지 목록 → {user, assistant} 턴. 연속 중복(codex가 user를 두 번 기록)은 1회만.
+function msgsToTurns(msgs: DisplayMsg[]): Array<{ user: string; assistant: string }> {
+  const turns: Array<{ user: string; assistant: string }> = [];
+  let cur: { user: string; assistant: string } | null = null;
+  let prev = '';
+  for (const m of msgs) {
+    const key = m.role + ':' + m.text;
+    if (key === prev) continue;
+    prev = key;
+    if (m.role === 'user') {
+      if (cur) turns.push(cur);
+      cur = { user: m.text, assistant: '' };
+    } else {
+      if (!cur) cur = { user: '', assistant: '' };
+      cur.assistant += (cur.assistant ? '\n\n' : '') + m.text;
+    }
+  }
+  if (cur) turns.push(cur);
+  return turns;
 }
 
 function makeNonce(): string {
