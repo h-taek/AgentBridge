@@ -54,7 +54,7 @@ async function buildOpts(
   resumeModelSessionId?: string,
 ): Promise<SpawnOptions> {
   switch (model) {
-    case 'claude': return claudeAdapter.buildSpawnOptions(cwd, workspaceId, resumeSessionId);
+    case 'claude': return claudeAdapter.buildSpawnOptions(cwd, workspaceId, resumeSessionId, resumeModelSessionId);
     case 'codex': return codexAdapter.buildSpawnOptions(cwd, workspaceId, resumeSessionId, resumeModelSessionId);
     case 'agy': return agyAdapter.buildSpawnOptions(cwd, workspaceId, resumeSessionId, resumeModelSessionId);
   }

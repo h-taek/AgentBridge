@@ -29,7 +29,12 @@ export type CliAdapterOptions = {
 export interface CliAdapterSet {
   claude: {
     isAvailable(): ProbeResult;
-    buildSpawnOptions(cwd: string, workspaceId: string, resumeSessionId?: string): Promise<SpawnOptions>;
+    buildSpawnOptions(
+      cwd: string,
+      workspaceId: string,
+      resumeSessionId?: string,
+      resumeModelSessionId?: string,
+    ): Promise<SpawnOptions>;
   };
   codex: {
     isAvailable(): ProbeResult;
@@ -78,7 +83,7 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
     claude: {
       isAvailable: () => envProbe.probe('claude'),
 
-      async buildSpawnOptions(cwd, workspaceId, resumeSessionId) {
+      async buildSpawnOptions(cwd, workspaceId, resumeSessionId, resumeModelSessionId) {
         const sessionId = resumeSessionId ?? randomUUID();
         const env = envProbe.getShellEnv();
         const probe = envProbe.probe('claude');
@@ -99,18 +104,22 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
           }
         }
 
+        // claude 대화 id(jsonl 파일명)는 AgentBridge sessionId와 별개일 수 있다 — SDK 모드로 만든 세션은
+        // SDK가 임의 id를 부여(modelSessionId). 그 세션을 PTY로 이어갈 땐 그 id로 --resume 해야 같은 대화가 이어진다.
+        // (PTY로 만든 세션은 claude id == sessionId라 modelSessionId 없으면 sessionId로 폴백.) opts.sessionId은 AgentBridge id 유지.
+        const claudeId = resumeModelSessionId ?? sessionId;
         let args: string[];
         if (!resumeSessionId) {
-          args = ['--session-id', sessionId, '--settings', settingsFile];
+          args = ['--session-id', claudeId, '--settings', settingsFile];
         } else {
-          const exists = await claudeSessionFileExists(sessionId);
+          const exists = await claudeSessionFileExists(claudeId);
           if (exists) {
-            args = ['--resume', sessionId, '--settings', settingsFile];
+            args = ['--resume', claudeId, '--settings', settingsFile];
           } else {
             log.log(
-              `claudeAdapter: resume 불가 (jsonl 없음) — 새 세션으로 fallback (sessionId=${sessionId.slice(0, 8)})`,
+              `claudeAdapter: resume 불가 (jsonl 없음) — 새 세션으로 fallback (claudeId=${claudeId.slice(0, 8)})`,
             );
-            args = ['--session-id', sessionId, '--settings', settingsFile];
+            args = ['--session-id', claudeId, '--settings', settingsFile];
           }
         }
 

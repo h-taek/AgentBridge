@@ -10,6 +10,7 @@ export async function buildSpawnOptions(
   cwd: string,
   workspaceId: string,
   resumeSessionId?: string,
+  resumeModelSessionId?: string,
 ): Promise<SpawnOptions> {
-  return getCliAdapters().claude.buildSpawnOptions(cwd, workspaceId, resumeSessionId);
+  return getCliAdapters().claude.buildSpawnOptions(cwd, workspaceId, resumeSessionId, resumeModelSessionId);
 }
