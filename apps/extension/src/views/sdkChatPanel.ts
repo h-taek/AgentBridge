@@ -473,6 +473,7 @@ export class SdkChatPanel {
   private html(model: CliKind): string {
     const permLabel = model === 'codex' ? 'Default permissions' : 'Ask before edits';
     const logoSvg = this.readLogoSvg(model);
+    const brand = { claude: 'Claude', codex: 'Codex', agy: 'Antigravity' }[model];
     const nonce = makeNonce();
     const csp = `default-src 'none'; style-src 'unsafe-inline'; img-src data:; script-src 'nonce-${nonce}';`;
     return `<!doctype html><html lang="en"><head>
@@ -680,10 +681,10 @@ export class SdkChatPanel {
       </div>
       <div class="wbox">
         <div class="wlogo" id="wlogo">${logoSvg}</div>
-        <div class="wbrand" id="wbrand">Claude</div>
-        <div class="wcap" id="wcap"><span id="wcapco">Claude</span> running on AgentBridge</div>
+        <div class="wbrand" id="wbrand">${brand}</div>
+        <div class="wcap" id="wcap"><span id="wcapco">${brand}</span> running on AgentBridge</div>
         <div class="wlogin" id="wlogin" style="display:none">
-          <button class="wlbtn" id="wlbtn">Log in to <span id="wlco">Claude</span></button>
+          <button class="wlbtn" id="wlbtn">Log in to <span id="wlco">${brand}</span></button>
           <span class="wsub">Opens your browser · token stored securely</span>
           <span class="wmanual" id="wmanual" style="display:none">Open the login link manually</span>
         </div>
@@ -724,7 +725,7 @@ export class SdkChatPanel {
   const welcome = document.getElementById('welcome');
   const BRAND = { claude:'Claude', codex:'Codex', agy:'Antigravity' };
   // 로고는 서버에서 media/logos/<model>.svg를 인라인 주입(단일 소스). 여기선 브랜드 텍스트만 갱신.
-  var welcomeModel='claude', loginManualUrl='';
+  var welcomeModel='${model}', loginManualUrl='';
   function paintWelcome(m){ welcomeModel=m||welcomeModel; var b=BRAND[welcomeModel]||welcomeModel;
     document.getElementById('wbrand').textContent=b;
     document.getElementById('wcapco').textContent=b; document.getElementById('wlco').textContent=b; }
