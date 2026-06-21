@@ -167,17 +167,30 @@ export const codexAdapter: AgentAdapter = {
       }
     });
 
-    // 핸드셰이크 + 스레드 시작
+    // 핸드셰이크 + 스레드 시작/이어가기
     await request('initialize', { clientInfo: { name: 'agentbridge', title: null, version: '0' }, capabilities: null });
     notify('initialized', {});
-    const startRes = (await request('thread/start', {
-      model: null,
-      cwd: opts.cwd,
-      approvalPolicy,
-      sandbox: 'workspace-write',
-      ...(opts.context ? { developerInstructions: opts.context } : {}),
-    })) as { thread?: { id?: string } };
-    threadId = startRes?.thread?.id ?? threadId;
+    const startThread = async (): Promise<string> => {
+      const r = (await request('thread/start', {
+        model: null,
+        cwd: opts.cwd,
+        approvalPolicy,
+        sandbox: 'workspace-write',
+        ...(opts.context ? { developerInstructions: opts.context } : {}),
+      })) as { thread?: { id?: string } };
+      return r?.thread?.id ?? '';
+    };
+    if (opts.resume) {
+      // 기존 스레드 이어가기 — thread/resume({threadId}). 과거 턴(rollout)이 없으면 실패하므로 새 스레드로 폴백.
+      try {
+        const r = (await request('thread/resume', { threadId: opts.resume })) as { thread?: { id?: string } };
+        threadId = r?.thread?.id ?? opts.resume;
+      } catch {
+        threadId = await startThread();
+      }
+    } else {
+      threadId = await startThread();
+    }
 
     let turnGate: Promise<void> = Promise.resolve();
     const send = (text: string): AsyncIterable<ChatEvent> =>

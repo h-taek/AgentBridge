@@ -55,8 +55,9 @@ export class SdkChatPanel {
 
   private sessionId = '';
   private resumeId: string | undefined; // 이전 세션 이어가기(claude session_id / codex thread id)
-  private onModelSessionCb: ((modelSessionId: string) => void) | undefined; // 시작 후 에이전트 세션 id 보고(영속용)
+  private onModelSessionCb: ((modelSessionId: string) => void) | undefined; // 에이전트 세션 id 보고(영속용)
   private onDisposeCb: (() => void) | undefined; // 패널 닫힘 알림(호스트가 markSessionClosed)
+  private lastModelSession = ''; // 마지막으로 보고한 모델 세션 id(중복 영속 방지)
 
   private constructor(private readonly panel: vscode.WebviewPanel, private readonly extensionUri: vscode.Uri) {}
 
@@ -87,6 +88,14 @@ export class SdkChatPanel {
   reveal(): void { this.panel.reveal(); }
   markDeleted(): void { /* SDK 패널은 별도 삭제 전 처리 불필요(현재) */ }
   dispose(): void { this.panel.dispose(); }
+
+  // 에이전트 세션 id를 modelSessionId로 영속(다음 open 시 resume). 빈 값/중복은 무시.
+  private reportModelSession(id: string): void {
+    if (id && id !== this.lastModelSession) {
+      this.lastModelSession = id;
+      this.onModelSessionCb?.(id);
+    }
+  }
 
   // claude=ESM SDK라 dist 동적 import / codex=SDK-free라 번들 정적. 못 찾으면 웹뷰 에러 + null.
   private async loadAdapter(model: CliKind): Promise<AgentAdapter | null> {
@@ -143,8 +152,8 @@ export class SdkChatPanel {
         // onTurn: 어댑터가 만든 plain TurnRecord를 경계 넘겨 번들 코어 캡처로 영속(turns→압축→IR).
         onTurn: (turn) => capture.accept(turn),
       });
-      // 에이전트가 만든 세션 id(claude session_id / codex thread id)를 modelSessionId로 영속 → 다음 open 시 resume.
-      this.onModelSessionCb?.(this.session.sessionId);
+      // 에이전트 세션 id 영속(다음 open 시 resume). codex=시작 시 thread id 있음 / claude=빈 값 → 첫 턴 session 이벤트에서 잡음.
+      this.reportModelSession(this.session.sessionId);
       // 미로그인 여부를 send 없이 미리 확인 → 미로그인이면 패널이 처음부터 로그인 화면 + 입력 차단.
       const loggedIn = await this.session.checkAuth().catch(() => true);
       this.post({ type: 'ready', sessionId: this.session.sessionId, model: this.model, injected: Boolean(context), loggedIn });
@@ -167,6 +176,7 @@ export class SdkChatPanel {
       try {
         for await (const ev of this.session.send(String(msg.text ?? ''))) {
           if (this.disposed) break;
+          if (ev.t === 'session') this.reportModelSession(ev.sessionId); // claude 실제 session_id가 첫 턴에 도착 → 그때 영속
           this.post({ type: 'event', ev });
         }
       } catch (err) {
