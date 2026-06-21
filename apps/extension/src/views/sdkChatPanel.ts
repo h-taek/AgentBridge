@@ -13,7 +13,7 @@ import { pathToFileURL } from 'url';
 import type { AgentAdapter, ChatEvent, Session, IR, CliKind, PermissionMode, ModelOption, AccountUsage, McpServerInfo, AgentInfo } from '@agentbridge/core';
 // 번들 코어(SDK-free)에서 — 이중로드 규칙: 저장/IR/스케줄러는 번들본 한 사본을 SSOT로.
 // codexAdapter도 SDK-free라 여기 정적 import(번들). claudeAdapter만 ESM SDK라 런타임 동적 import.
-import { readIR, SdkCapture, codexAdapter } from '@agentbridge/core';
+import { readIR, SdkCapture, codexAdapter, readAllTurns } from '@agentbridge/core';
 import { getCompactionScheduler, getWorkspaceStore } from '../core/coreInstances';
 import * as output from '../log/output';
 
@@ -97,6 +97,21 @@ export class SdkChatPanel {
     }
   }
 
+  // 재개 시 이전 대화를 webview로 보내 시작화면 대신 렌더. 턴 기록은 sessionId(=modelSessionId)로 필터.
+  // 어시스턴트 본문은 compact cap(~5K자)이라 매우 긴 답변은 잘릴 수 있음(에이전트 맥락은 resume로 온전).
+  private async restoreTranscript(modelSessionId: string): Promise<void> {
+    try {
+      const workspaceRoot = getWorkspaceStore().getWorkspacePath(this.workspaceId);
+      const all = await readAllTurns(workspaceRoot);
+      const mine = all
+        .filter((t) => t.sessionId === modelSessionId)
+        .map((t) => ({ user: t.user, assistant: t.assistantBody }));
+      if (mine.length) this.post({ type: 'restore', turns: mine });
+    } catch (err) {
+      output.warn(`SdkChatPanel: transcript 복원 실패 — ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
   // claude=ESM SDK라 dist 동적 import / codex=SDK-free라 번들 정적. 못 찾으면 웹뷰 에러 + null.
   private async loadAdapter(model: CliKind): Promise<AgentAdapter | null> {
     if (model === 'codex') return codexAdapter;
@@ -163,6 +178,8 @@ export class SdkChatPanel {
       // 슬래시 명령을 첫 send 전에 미리 채워 / 메뉴에 바로 보이게 (claude=전체 목록 / codex=빈 목록).
       const cmds = await this.session.listCommands().catch(() => [] as string[]);
       if (cmds.length) this.post({ type: 'slash', list: cmds });
+      // 재개 세션이면 이전 대화를 화면에 복원(시작화면 대신). resume=modelSessionId로 이 세션의 턴만 필터.
+      if (resume) await this.restoreTranscript(resume);
     } catch (err) {
       const m = err instanceof Error ? err.message : String(err);
       output.warn(`SdkChatPanel: session start failed — ${m}`);
@@ -326,7 +343,7 @@ export class SdkChatPanel {
     this.post({ type: 'attachAdded', name: safeName, path: insertPath, dataUrl: `data:image/${mime};base64,${base64}` });
   }
 
-  private post(msg: { type: 'ready'; sessionId: string; model?: string; injected?: boolean; loggedIn?: boolean } | { type: 'event'; ev: ChatEvent } | { type: 'models'; list: ModelOption[] } | { type: 'attachAdded'; name: string; path: string; dataUrl: string } | { type: 'loginStarted'; manualUrl: string } | { type: 'loginResult'; ok: boolean } | { type: 'usage'; data: AccountUsage | null } | { type: 'outputStyles'; data: { current: string; available: string[] } | null } | { type: 'mcp'; data: McpServerInfo[] } | { type: 'agents'; data: AgentInfo[] } | { type: 'compacted'; ok: boolean } | { type: 'mentionAdded'; path: string } | { type: 'slash'; list: string[] } | { type: 'files'; list: string[] } | { type: 'cleared' }): void {
+  private post(msg: { type: 'ready'; sessionId: string; model?: string; injected?: boolean; loggedIn?: boolean } | { type: 'event'; ev: ChatEvent } | { type: 'models'; list: ModelOption[] } | { type: 'attachAdded'; name: string; path: string; dataUrl: string } | { type: 'loginStarted'; manualUrl: string } | { type: 'loginResult'; ok: boolean } | { type: 'usage'; data: AccountUsage | null } | { type: 'outputStyles'; data: { current: string; available: string[] } | null } | { type: 'mcp'; data: McpServerInfo[] } | { type: 'agents'; data: AgentInfo[] } | { type: 'compacted'; ok: boolean } | { type: 'mentionAdded'; path: string } | { type: 'slash'; list: string[] } | { type: 'files'; list: string[] } | { type: 'cleared' } | { type: 'restore'; turns: Array<{ user: string; assistant: string }> }): void {
     void this.panel.webview.postMessage(msg);
   }
 
@@ -883,6 +900,18 @@ export class SdkChatPanel {
   }
   function inline(s){ return s.replace(/\`([^\`]+)\`/g,function(_,c){return '<code>'+esc(c)+'</code>';}).replace(/\\*\\*([^*]+)\\*\\*/g,'<strong>$1</strong>'); }
 
+  // 재개 시 이전 대화 복원 — 저장된 턴(user/assistant)을 말풍선으로 그리고 시작화면을 숨긴다.
+  function renderRestore(turns){
+    if(!turns||!turns.length) return;
+    hideWelcome();
+    turns.forEach(function(t){
+      if(t.user&&t.user.trim()){ var ut=el('div','turn user'); ut.appendChild(el('div','msg',t.user)); log.appendChild(ut); }
+      if(t.assistant&&t.assistant.trim()){ var at=el('div','turn assistant'); var it=el('div','item'); it.appendChild(el('span','dot text'));
+        var bd=el('div','body md'); bd.innerHTML=md(t.assistant); it.appendChild(bd); at.appendChild(it); log.appendChild(at); }
+    });
+    bottom();
+  }
+
   var SEND_SVG='<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20V6M6 12l6-6 6 6"/></svg>';
   var STOP_SVG='<svg width="15" height="15" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3" fill="currentColor"/></svg>';
   function setBusy(b){ busy=b; input.disabled=b; sendBtn.disabled=false; sendBtn.classList.toggle('stop',b); sendBtn.innerHTML=b?STOP_SVG:SEND_SVG; }
@@ -973,6 +1002,7 @@ export class SdkChatPanel {
     if(msg.type==='slash'){ SLASH=msg.list||[]; return; }
     if(msg.type==='files'){ if(AC.mode==='file'){ AC.items=(msg.list||[]).map(function(p){return {name:p};}); AC.idx=0; renderAc(); } return; }
     if(msg.type==='cleared'){ stopWork(); cur=null; log.innerHTML=''; closeSettingsMenu(); closeAc(); input.value=''; renderHL(); welcome.classList.remove('hide'); return; }
+    if(msg.type==='restore'){ renderRestore(msg.turns); return; }
     if(msg.type==='compacted'){ closeSettingsMenu(); return; }
     if(msg.type==='mentionAdded'){ var pth=msg.path; input.value=(input.value? input.value.replace(/\\s*$/,'')+' ':'')+'@'+pth+' '; grow(); renderHL(); input.focus(); return; }
     if(msg.type!=='event') return;
