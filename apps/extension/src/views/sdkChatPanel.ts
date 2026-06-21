@@ -17,6 +17,7 @@ import { readIR, SdkCapture, codexAdapter, resolveTranscriptPath, resolveContext
 import { getCompactionScheduler, getWorkspaceStore, getHookInstaller } from '../core/coreInstances';
 import { chatHeaderHtml, CHAT_HEADER_CSS, chatHeaderScript } from './chatHeader';
 import { getSessions, renameSession, deleteSession, type SessionMeta } from '../core/sessionRegistry';
+import { createGroupLocker } from './groupLock';
 import * as output from '../log/output';
 
 type AdapterModule = { claudeAdapter: AgentAdapter };
@@ -62,6 +63,8 @@ export class SdkChatPanel {
   private onTitleCb: ((title: string) => void) | undefined; // 자동 제목 보고(호스트가 renameSession)
   private titlePending = false; // 새 세션의 첫 메시지에서 자동 제목 1회
   private lastModelSession = ''; // 마지막으로 보고한 모델 세션 id(중복 영속 방지)
+  // 에디터 그룹 자동 잠금(PTY와 동일) — 처음 active 시 그룹 잠가 탐색기 파일이 챗을 덮지 않게.
+  private readonly groupLocker = createGroupLocker({ executeCommand: (cmd) => vscode.commands.executeCommand(cmd), warn: (msg) => output.warn(msg) });
 
   private constructor(private readonly panel: vscode.WebviewPanel, private readonly extensionUri: vscode.Uri) {}
 
@@ -183,6 +186,8 @@ export class SdkChatPanel {
     this.model = model;
     this.panel.webview.html = this.html(model);
     this.panel.webview.onDidReceiveMessage((msg) => void this.onMessage(msg));
+    this.panel.onDidChangeViewState((e) => this.groupLocker.onViewState(e.webviewPanel.active));
+    this.groupLocker.onViewState(this.panel.active);
     this.panel.onDidDispose(() => {
       this.disposed = true;
       SdkChatPanel.activePanels.delete(this.sessionId);
@@ -266,7 +271,7 @@ export class SdkChatPanel {
     if (irPresent || mem > 0) this.post({ type: 'inject', ir: irPresent, mem });
   }
 
-  private async onMessage(msg: { type: string; text?: string; id?: string; approve?: boolean; mode?: PermissionMode; level?: string; url?: string; on?: boolean; style?: string; name?: string; enabled?: boolean; query?: string; base64?: string; workspaceId?: string; sessionId?: string; model?: string }): Promise<void> {
+  private async onMessage(msg: { type: string; text?: string; id?: string; approve?: boolean; mode?: PermissionMode; level?: string; url?: string; on?: boolean; style?: string; name?: string; enabled?: boolean; query?: string; base64?: string; workspaceId?: string; sessionId?: string; model?: string; paths?: string[] }): Promise<void> {
     if (msg.type === 'send') {
       if (!this.session) return;
       void this.computeInjectLabel(String(msg.text ?? '')); // 이번 턴 주입 상태 라벨(IR·장기메모리 수)
@@ -304,6 +309,13 @@ export class SdkChatPanel {
         await this.saveAttachment(String(msg.name || `pasted-${Date.now()}.png`), String(msg.base64));
       } catch (err) {
         output.warn(`SdkChatPanel: paste/drop 첨부 실패 — ${err instanceof Error ? err.message : String(err)}`);
+      }
+    } else if (msg.type === 'mentionPaths' && Array.isArray(msg.paths)) {
+      // 드롭된 파일/에디터탭 경로 → @멘션(cwd-상대, 밖이면 절대). 호스트가 상대화해 webview에 mentionAdded로 회신.
+      for (const abs of msg.paths) {
+        const rel = path.relative(this.cwd, abs);
+        const insert = rel && !rel.startsWith('..') && !path.isAbsolute(rel) ? rel : abs;
+        this.post({ type: 'mentionAdded', path: insert });
       }
     } else if (msg.type === 'login') {
       await this.handleLogin();
@@ -1002,9 +1014,29 @@ export class SdkChatPanel {
     for(var i=0;i<items.length;i++){ if(items[i].type&&items[i].type.indexOf('image/')===0){ var f=items[i].getAsFile(); if(f){ sendImageFile(f); had=true; } } }
     if(had) e.preventDefault(); });
   ['dragenter','dragover'].forEach(function(ev){ document.addEventListener(ev, function(e){ e.preventDefault(); }); });
-  document.addEventListener('drop', function(e){ var files=(e.dataTransfer&&e.dataTransfer.files)||[]; var imgs=[];
-    for(var i=0;i<files.length;i++){ if(files[i].type&&files[i].type.indexOf('image/')===0) imgs.push(files[i]); }
-    if(imgs.length){ e.preventDefault(); imgs.forEach(sendImageFile); } });
+  // 드롭 — 이미지=첨부 / 그 외 파일·에디터탭·탐색기 항목=@멘션(경로). PTY 드롭과 동형(File.path + VSCode 내부 uri-list/resource-urls/codeeditors).
+  function decodeFileUri(s){ var t=(s||'').trim(); if(!t||t.charAt(0)==='#') return ''; if(t.indexOf('file://')===0){ try{ return decodeURIComponent(t.slice(7)); }catch(e){ return t.slice(7); } } return t.charAt(0)==='/'?t:''; }
+  document.addEventListener('drop', function(e){
+    var dt=e.dataTransfer; if(!dt) return;
+    var files=dt.files||[]; var imgs=[]; var paths={};
+    for(var i=0;i<files.length;i++){ var f=files[i];
+      if(f.type&&f.type.indexOf('image/')===0) imgs.push(f);
+      else if(f.path) paths[f.path]=1; }
+    var pending=[];
+    if(dt.items){ for(var k=0;k<dt.items.length;k++){ (function(item){
+      if(!item||item.kind!=='string') return; var ty=item.type||'';
+      if(ty!=='text/uri-list'&&ty!=='text/plain'&&ty.indexOf('resource-urls')<0&&ty.indexOf('codeeditors')<0) return;
+      pending.push(new Promise(function(res){ item.getAsString(function(data){
+        if(!data) return res();
+        try{ var j=JSON.parse(data); if(Array.isArray(j)){ j.forEach(function(x){
+          if(typeof x==='string'){ var p=decodeFileUri(x); if(p) paths[p]=1; }
+          else if(x&&typeof x==='object'){ var r=x.resource; var u=(r&&(r.external||r.fsPath||r.path))||x.external||x.fsPath||x.path; if(typeof u==='string'){ var q=decodeFileUri(u); if(q) paths[q]=1; } } }); return res(); } }catch(_){}
+        data.split(/\\r?\\n/).forEach(function(line){ var p2=decodeFileUri(line); if(p2) paths[p2]=1; }); res();
+      }); })); })(dt.items[k]); } }
+    if(imgs.length||pending.length||Object.keys(paths).length) e.preventDefault();
+    imgs.forEach(sendImageFile);
+    Promise.all(pending).then(function(){ var list=Object.keys(paths); if(list.length) vscode.postMessage({type:'mentionPaths',paths:list}); });
+  });
   function thumb(a){ if(!a.dataUrl) return null; var im=document.createElement('img'); im.className='thumb'; im.src=a.dataUrl; return im; }
   function renderChips(){
     chips.innerHTML='';
