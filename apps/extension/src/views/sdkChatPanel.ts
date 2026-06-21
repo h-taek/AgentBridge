@@ -57,6 +57,8 @@ export class SdkChatPanel {
   private resumeId: string | undefined; // 이전 세션 이어가기(claude session_id / codex thread id)
   private onModelSessionCb: ((modelSessionId: string) => void) | undefined; // 에이전트 세션 id 보고(영속용)
   private onDisposeCb: (() => void) | undefined; // 패널 닫힘 알림(호스트가 markSessionClosed)
+  private onTitleCb: ((title: string) => void) | undefined; // 자동 제목 보고(호스트가 renameSession)
+  private titlePending = false; // 새 세션의 첫 메시지에서 자동 제목 1회
   private lastModelSession = ''; // 마지막으로 보고한 모델 세션 id(중복 영속 방지)
 
   private constructor(private readonly panel: vscode.WebviewPanel, private readonly extensionUri: vscode.Uri) {}
@@ -67,7 +69,7 @@ export class SdkChatPanel {
     workspaceId: string,
     model: CliKind,
     sessionId: string,
-    opts?: { resume?: string; onModelSession?: (modelSessionId: string) => void; onDispose?: () => void },
+    opts?: { resume?: string; onModelSession?: (modelSessionId: string) => void; onDispose?: () => void; onTitle?: (title: string) => void },
   ): SdkChatPanel {
     const panel = vscode.window.createWebviewPanel(
       'agentbridge.sdkChat',
@@ -80,6 +82,8 @@ export class SdkChatPanel {
     inst.resumeId = opts?.resume;
     inst.onModelSessionCb = opts?.onModelSession;
     inst.onDisposeCb = opts?.onDispose;
+    inst.onTitleCb = opts?.onTitle;
+    inst.titlePending = !opts?.resume; // 새 세션(재개 아님)만 첫 메시지에서 자동 제목
     SdkChatPanel.activePanels.set(sessionId, inst);
     void inst.init(cwd, workspaceId, model);
     return inst;
@@ -88,6 +92,17 @@ export class SdkChatPanel {
   reveal(): void { this.panel.reveal(); }
   markDeleted(): void { /* SDK 패널은 별도 삭제 전 처리 불필요(현재) */ }
   dispose(): void { this.panel.dispose(); }
+
+  // 새 세션 첫 메시지에서 자동 제목 1회 — claude=generateSessionTitle / codex(null)=첫 메시지 잘라서. 호스트가 renameSession.
+  private async maybeAutoTitle(firstMessage: string): Promise<void> {
+    if (!this.titlePending) return;
+    this.titlePending = false;
+    const first = firstMessage.trim();
+    if (!first) return;
+    const suggested = await this.session?.suggestTitle(first).catch(() => null);
+    const title = (suggested ?? first.slice(0, 60)).trim();
+    if (title) this.onTitleCb?.(title);
+  }
 
   // 에이전트 세션 id를 modelSessionId로 영속(다음 open 시 resume). 빈 값/중복은 무시.
   private reportModelSession(id: string): void {
@@ -204,6 +219,7 @@ export class SdkChatPanel {
           if (ev.t === 'session') this.reportModelSession(ev.sessionId); // claude 실제 session_id가 첫 턴에 도착 → 그때 영속
           this.post({ type: 'event', ev });
         }
+        await this.maybeAutoTitle(String(msg.text ?? ''));
       } catch (err) {
         this.post({ type: 'event', ev: { t: 'error', message: err instanceof Error ? err.message : String(err) } });
       }

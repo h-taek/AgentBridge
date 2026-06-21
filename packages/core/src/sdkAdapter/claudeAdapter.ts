@@ -318,6 +318,15 @@ export const claudeAdapter: AgentAdapter = {
         const cmds = (await q.supportedCommands().catch(() => [])) as unknown as Array<{ name?: string }>;
         return cmds.map((c) => c.name ?? '').filter(Boolean);
       },
+      async suggestTitle(firstMessage) {
+        // SDK 내장 — 첫 메시지 기준 짧은 제목 생성(라이브 확인). 타입 미노출 → 캐스트.
+        try {
+          const t = await (q as unknown as { generateSessionTitle(m: string): Promise<string> }).generateSessionTitle(firstMessage);
+          return typeof t === 'string' && t.trim() ? t.trim() : null;
+        } catch {
+          return null;
+        }
+      },
       respondApproval(id, approve) {
         const resolve = approvals.get(id);
         if (resolve) {

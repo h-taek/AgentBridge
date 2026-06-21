@@ -216,6 +216,17 @@ export function activate(context: vscode.ExtensionContext) {
       resume: modelSessionId,
       onModelSession: (mid) => { void setModelSessionId(workspaceId, sessionId, mid); },
       onDispose: () => { void markSessionClosed(workspaceId, sessionId).then(() => sessionTree.refresh()); },
+      // 첫 메시지 자동 제목 — 아직 기본 이름(CLI 표시명)일 때만 적용(사용자 rename은 보존).
+      onTitle: (title) => {
+        void (async () => {
+          const sessions = await getSessions(workspaceId);
+          const s = sessions.find((x) => x.sessionId === sessionId);
+          if (s && s.name === CLI_DISPLAY_NAME[model]) {
+            await renameSession(workspaceId, sessionId, title);
+            sessionTree.refresh();
+          }
+        })();
+      },
     });
   }
 

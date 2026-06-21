@@ -113,6 +113,8 @@ export interface Session {
   compact(): Promise<boolean>;
   // 슬래시 명령 목록 — 첫 send 전에도 메뉴에 표시. claude=supportedCommands() / codex=없음([]).
   listCommands(): Promise<string[]>;
+  // 세션 자동 이름 — 첫 메시지 기준 짧은 제목. claude=generateSessionTitle / codex=없음(null → 호스트가 첫 메시지로 폴백).
+  suggestTitle(firstMessage: string): Promise<string | null>;
   // 'approval' ChatEvent에 대한 응답 — 진행 중 턴이 이 호출까지 멈춰 있다.
   respondApproval(id: string, approve: boolean): void;
   // 로그인 여부 조회(미로그인=false) — 세션 시작 시 입력 차단/로그인 화면 판단용. claude=accountInfo / codex=account/read.
