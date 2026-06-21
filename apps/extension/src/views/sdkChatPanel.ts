@@ -378,6 +378,8 @@ export class SdkChatPanel {
   .msep{height:1px;background:var(--vscode-panel-border);margin:5px 4px}
   .effort{display:flex;align-items:center;padding:5px 10px 7px}
   .elbl{font-size:11px;color:var(--vscode-descriptionForeground);text-transform:capitalize;flex:none}
+  /* Effort·Thinking 라벨 = 모델 이름 폰트(13px foreground) */
+  .emname{font-size:13px;color:var(--vscode-foreground);text-transform:capitalize;flex:none}
   /* 알약 트랙 + accent 채움(--fill) + 흰색 손잡이, 포커스 노란테 제거 */
   /* 알약 트랙 + 정지점 점 + 흰 손잡이. 트랙(채움+점)은 .ertrack, range는 손잡이/조작만(투명 트랙) */
   .erwrap{position:relative;height:16px;width:120px;flex:none;margin-left:auto}
@@ -553,11 +555,12 @@ export class SdkChatPanel {
     });
     // effort 슬라이더 (#1b) — 모델별 레벨(MODELS.efforts) + 정지점 점 + ultra(보라). claude=applyFlagSettings / codex=turn/start.effort
     var efforts=currentEfforts();
+    var showThinking=(document.body.dataset.model!=='codex');
+    if(efforts.length||showThinking) modelMenu.appendChild(el('div','mhdr','Effort · Thinking'));
     if(efforts.length){
-      modelMenu.appendChild(el('div','msep'));
       buildEffortIdx(efforts);
       var er=el('div','effort');
-      var lbl=el('div','elbl','Effort · '+effortLabel(efforts[effortIdx]));
+      var lbl=el('div','emname','Effort · '+effortLabel(efforts[effortIdx]));
       var wrap=el('div','erwrap'); var track=el('div','ertrack');
       var n=efforts.length;
       function pos(i){ return 'calc(8px + '+(n>1?(i/(n-1)):0)+' * (100% - 16px))'; }
@@ -570,10 +573,9 @@ export class SdkChatPanel {
       wrap.appendChild(track); wrap.appendChild(rng);
       er.appendChild(lbl); er.appendChild(wrap); modelMenu.appendChild(er);
     }
-    // Thinking 토글(#4) — 모델 메뉴 안, effort 슬라이더 바로 아래. claude 계열만(codex는 effort에 통합).
-    if(document.body.dataset.model!=='codex'){
-      modelMenu.appendChild(el('div','msep'));
-      var tkr=el('div','effort'); tkr.appendChild(el('div','elbl','Thinking'));
+    // Thinking 토글(#4) — 모델 메뉴 안, effort 바로 아래(구분선 없음). claude 계열만(codex는 effort에 통합).
+    if(showThinking){
+      var tkr=el('div','effort'); tkr.appendChild(el('div','emname','Thinking'));
       var tkt=mkToggle(thinkingOn); tkt.style.marginLeft='auto';
       tkt.addEventListener('click', function(e){ e.stopPropagation(); thinkingOn=!thinkingOn; tkt.className='tog'+(thinkingOn?' on':''); vscode.postMessage({type:'setThinking',on:thinkingOn}); });
       tkr.appendChild(tkt); modelMenu.appendChild(tkr);
@@ -625,7 +627,7 @@ export class SdkChatPanel {
     f.appendChild(mkItem({icon:'?',label:'View help docs',trailing:el('span','sext','↗'),onClick:function(){ vscode.postMessage({type:'openExternal',url:urls.help}); closeSettingsMenu(); }}));
     f.appendChild(mkItem({icon:'⚑',label:'Report a problem',trailing:el('span','sext','↗'),onClick:function(){ vscode.postMessage({type:'openExternal',url:urls.report}); closeSettingsMenu(); }}));
     if(SLASH.length){ f.appendChild(el('div','msep')); f.appendChild(el('div','ssec','Commands'));
-      SLASH.forEach(function(c){ f.appendChild(mkItem({icon:'/',label:'/'+c,onClick:function(){ input.value='/'+c+' '; grow(); input.focus(); closeSettingsMenu(); }})); }); }
+      SLASH.forEach(function(c){ f.appendChild(mkItem({label:'/'+c,onClick:function(){ input.value='/'+c+' '; grow(); input.focus(); closeSettingsMenu(); }})); }); }
     settingsMenu.appendChild(f); showMenu();
   }
 
