@@ -123,7 +123,7 @@ export class SdkChatPanel {
     }
   }
 
-  private async onMessage(msg: { type: string; text?: string; id?: string; approve?: boolean; mode?: PermissionMode; level?: string; url?: string; on?: boolean; style?: string; name?: string; enabled?: boolean }): Promise<void> {
+  private async onMessage(msg: { type: string; text?: string; id?: string; approve?: boolean; mode?: PermissionMode; level?: string; url?: string; on?: boolean; style?: string; name?: string; enabled?: boolean; query?: string }): Promise<void> {
     if (msg.type === 'send') {
       if (!this.session) return;
       try {
@@ -182,7 +182,22 @@ export class SdkChatPanel {
       term.show();
     } else if (msg.type === 'mentionFile') {
       await this.handleMentionFile();
+    } else if (msg.type === 'searchFiles') {
+      await this.handleSearchFiles(String(msg.query ?? ''));
     }
+  }
+
+  // @ 멘션 자동완성 — cwd 기준 파일명 부분일치 검색(node_modules 등 제외), cwd-상대경로 회신.
+  private async handleSearchFiles(query: string): Promise<void> {
+    const safe = query.replace(/[^\w.\-/]/g, '');
+    const pattern = new vscode.RelativePattern(this.cwd, `**/*${safe}*`);
+    const uris = await vscode.workspace.findFiles(pattern, '**/{node_modules,.git,dist,out,.agentbridge}/**', 30);
+    const files = uris
+      .map((u) => path.relative(this.cwd, u.fsPath))
+      .filter((p) => p && !p.startsWith('..') && !path.isAbsolute(p))
+      .sort((a, b) => a.length - b.length)
+      .slice(0, 20);
+    this.post({ type: 'files', list: files });
   }
 
   // Mention file(설정 2차) — 호스트 파일 피커로 프로젝트 파일 선택 → cwd-상대경로를 입력창에 @멘션으로 삽입.
@@ -245,7 +260,7 @@ export class SdkChatPanel {
     }
   }
 
-  private post(msg: { type: 'ready'; sessionId: string; model?: string; injected?: boolean; loggedIn?: boolean } | { type: 'event'; ev: ChatEvent } | { type: 'models'; list: ModelOption[] } | { type: 'attachAdded'; name: string; path: string; dataUrl: string } | { type: 'loginStarted'; manualUrl: string } | { type: 'loginResult'; ok: boolean } | { type: 'usage'; data: AccountUsage | null } | { type: 'outputStyles'; data: { current: string; available: string[] } | null } | { type: 'mcp'; data: McpServerInfo[] } | { type: 'agents'; data: AgentInfo[] } | { type: 'compacted'; ok: boolean } | { type: 'mentionAdded'; path: string } | { type: 'slash'; list: string[] }): void {
+  private post(msg: { type: 'ready'; sessionId: string; model?: string; injected?: boolean; loggedIn?: boolean } | { type: 'event'; ev: ChatEvent } | { type: 'models'; list: ModelOption[] } | { type: 'attachAdded'; name: string; path: string; dataUrl: string } | { type: 'loginStarted'; manualUrl: string } | { type: 'loginResult'; ok: boolean } | { type: 'usage'; data: AccountUsage | null } | { type: 'outputStyles'; data: { current: string; available: string[] } | null } | { type: 'mcp'; data: McpServerInfo[] } | { type: 'agents'; data: AgentInfo[] } | { type: 'compacted'; ok: boolean } | { type: 'mentionAdded'; path: string } | { type: 'slash'; list: string[] } | { type: 'files'; list: string[] }): void {
     void this.panel.webview.postMessage(msg);
   }
 
@@ -358,8 +373,20 @@ export class SdkChatPanel {
   .pend .x:hover{opacity:1}
   /* 첨부 칩 = 글씨 한 줄 높이에 맞춤 (#2) */
   .thumb{height:18px;width:auto;max-width:34px;border-radius:4px;object-fit:cover;flex:none;display:block}
-  #input{display:block;width:100%;background:none;border:none;color:var(--vscode-input-foreground);font:inherit;resize:none;outline:none;min-height:44px;max-height:200px;line-height:1.5;overflow-y:auto}
+  /* 입력 위 하이라이트 오버레이(#inhl)와 정확히 겹치도록 동일 폰트·줄높이·여백. 텍스트는 투명, 캐럿만 보임. */
+  .inwrap{position:relative}
+  #input{display:block;width:100%;background:none;border:none;color:transparent;caret-color:var(--vscode-input-foreground);font:inherit;resize:none;outline:none;min-height:44px;max-height:200px;line-height:1.5;overflow-y:auto;position:relative;z-index:1}
   #input::placeholder{color:var(--vscode-input-placeholderForeground)}
+  #inhl{position:absolute;inset:0;font:inherit;line-height:1.5;white-space:pre-wrap;word-break:break-word;color:var(--vscode-input-foreground);pointer-events:none;overflow:hidden;z-index:0}
+  #inhl .cmdok{color:var(--accent);font-weight:600}
+  #inhl .mention{color:#5d8af9}
+  /* / · @ 자동완성 드롭다운 */
+  #acMenu{min-width:240px}
+  .acitem{display:flex;align-items:center;gap:8px;padding:5px 10px;border-radius:6px;cursor:pointer}
+  .acitem.sel{background:var(--vscode-menu-selectionBackground,var(--vscode-toolbar-hoverBackground))}
+  .acname{flex:1;font-size:13px;color:var(--vscode-foreground);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .achint{font-size:11px;color:var(--vscode-descriptionForeground);white-space:nowrap}
+  .acbadge{font-size:10px;color:var(--accent);border:1px solid var(--accent);border-radius:4px;padding:0 4px;opacity:.85;flex:none}
   .ctrls{display:flex;align-items:center;gap:9px;margin-top:2px}
   .ic{height:26px;min-width:24px;padding:0 2px;border-radius:7px;border:none;background:none;color:var(--vscode-foreground);cursor:pointer;font-size:17px;font-weight:700;line-height:1}
   .ic:hover{background:var(--vscode-toolbar-hoverBackground)}
@@ -470,7 +497,7 @@ export class SdkChatPanel {
       <div id="approvalSlot"></div>
       <div class="inbox">
         <div class="chips" id="chips"></div>
-        <textarea id="input" rows="1" placeholder="Message…  (Enter to send · Shift+Enter newline)" disabled></textarea>
+        <div class="inwrap"><div id="inhl" aria-hidden="true"></div><textarea id="input" rows="1" placeholder="Message…  (Enter to send · Shift+Enter newline)" disabled></textarea></div>
         <div class="ctrls">
           <button class="ic" id="attachBtn" title="Attach image"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
           <button class="ic" id="slashBtn" title="Slash commands"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M16 5L8 19"/></svg></button>
@@ -484,6 +511,7 @@ export class SdkChatPanel {
   </footer>
   <div id="modelMenu" class="menu"></div>
   <div id="slashMenu" class="menu"></div>
+  <div id="acMenu" class="menu"></div>
 <script nonce="${nonce}">
   const vscode = acquireVsCodeApi();
   const log = document.getElementById('log');
@@ -556,7 +584,7 @@ export class SdkChatPanel {
     // effort 슬라이더 (#1b) — 모델별 레벨(MODELS.efforts) + 정지점 점 + ultra(보라). claude=applyFlagSettings / codex=turn/start.effort
     var efforts=currentEfforts();
     var showThinking=(document.body.dataset.model!=='codex');
-    if(efforts.length||showThinking) modelMenu.appendChild(el('div','mhdr','Effort · Thinking'));
+    if(efforts.length||showThinking){ modelMenu.appendChild(el('div','msep')); modelMenu.appendChild(el('div','mhdr','Effort · Thinking')); }
     if(efforts.length){
       buildEffortIdx(efforts);
       var er=el('div','effort');
@@ -627,7 +655,7 @@ export class SdkChatPanel {
     f.appendChild(mkItem({icon:'?',label:'View help docs',trailing:el('span','sext','↗'),onClick:function(){ vscode.postMessage({type:'openExternal',url:urls.help}); closeSettingsMenu(); }}));
     f.appendChild(mkItem({icon:'⚑',label:'Report a problem',trailing:el('span','sext','↗'),onClick:function(){ vscode.postMessage({type:'openExternal',url:urls.report}); closeSettingsMenu(); }}));
     if(SLASH.length){ f.appendChild(el('div','msep')); f.appendChild(el('div','ssec','Commands'));
-      SLASH.forEach(function(c){ f.appendChild(mkItem({label:'/'+c,onClick:function(){ input.value='/'+c+' '; grow(); input.focus(); closeSettingsMenu(); }})); }); }
+      SLASH.forEach(function(c){ f.appendChild(mkItem({label:'/'+c,onClick:function(){ input.value='/'+c+' '; grow(); renderHL(); input.focus(); closeSettingsMenu(); }})); }); }
     settingsMenu.appendChild(f); showMenu();
   }
 
@@ -678,7 +706,62 @@ export class SdkChatPanel {
     list.forEach(function(a){ var it=el('div','sopt'); it.appendChild(el('span','sck','')); it.appendChild(el('span','snm2',a.name)); if(a.description) it.appendChild(el('span','sod',a.description)); settingsMenu.appendChild(it); }); placeMenu(); }
 
   slashBtn.addEventListener('click', function(ev){ ev.stopPropagation(); if(settingsMenu.style.display==='block') closeSettingsMenu(); else openSettingsMenu(); });
-  document.addEventListener('click', function(){ closeModelMenu(); closeSettingsMenu(); });
+  document.addEventListener('click', function(){ closeModelMenu(); closeSettingsMenu(); closeAc(); });
+
+  // ── 입력 자동완성(/ 명령 + @ 파일) + 명령 색상 하이라이트 ──
+  const inhl=document.getElementById('inhl');
+  const acMenu=document.getElementById('acMenu');
+  var AC={items:[],idx:0,mode:null};
+  acMenu.addEventListener('mousedown', function(e){ e.preventDefault(); }); // 클릭 시 입력 포커스 유지
+  acMenu.addEventListener('click', function(e){ e.stopPropagation(); });
+  function acOpen(){ return acMenu.style.display==='block'; }
+  function closeAc(){ acMenu.style.display='none'; AC.items=[]; AC.mode=null; }
+  // B 그룹(설정 가로채기) — SDK가 안 주는 설정형 명령. 완성 시 send 대신 우리 패널을 연다.
+  function appCmds(){ var model=document.body.dataset.model||'claude'; var u=SUPPORT_URLS[model]||SUPPORT_URLS.claude;
+    var b=[
+      {name:'model',hint:'Switch model',act:function(){ stripSlash(); closeAc(); openModelMenu(); }},
+      {name:'usage',hint:'Account & usage',act:function(){ stripSlash(); closeAc(); openPanel('account'); }},
+      {name:'mcp',hint:'MCP servers',act:function(){ stripSlash(); closeAc(); openPanel('mcp'); }},
+      {name:'agents',hint:'Agents & skills',act:function(){ stripSlash(); closeAc(); openPanel('agents'); }},
+      {name:'help',hint:'Help docs',act:function(){ stripSlash(); closeAc(); vscode.postMessage({type:'openExternal',url:u.help}); }},
+      {name:'bug',hint:'Report a problem',act:function(){ stripSlash(); closeAc(); vscode.postMessage({type:'openExternal',url:u.report}); }},
+      {name:'clear',hint:'New session',act:function(){ stripSlash(); closeAc(); vscode.postMessage({type:'newSession'}); }}
+    ];
+    if(model!=='codex') b.push({name:'output-style',hint:'Output style',act:function(){ stripSlash(); closeAc(); openPanel('output'); }});
+    if(model==='codex') b.push({name:'compact',hint:'Compact',act:function(){ stripSlash(); closeAc(); vscode.postMessage({type:'compact'}); }});
+    return b;
+  }
+  function knownCmd(name){ if(SLASH.indexOf(name)>=0) return true; return appCmds().some(function(a){return a.name===name;}); }
+  function stripSlash(){ input.value=input.value.replace(/^\\/[^\\s]*\\s?/, ''); grow(); renderHL(); }
+  // 명령/멘션 토큰 색칠(오버레이). 입력 텍스트는 투명, 이 div가 같은 위치에 색 입혀 보여줌.
+  function renderHL(){ var v=input.value, out=esc(v);
+    out=out.replace(/(^|\\s)(@[^\\s]+)/g, function(_,p,mn){ return p+'<span class="mention">'+mn+'</span>'; });
+    var cm=v.match(/^\\/([^\\s]+)/); if(cm && knownCmd(cm[1])) out=out.replace(/^(\\/[^\\s]+)/, '<span class="cmdok">$1</span>');
+    inhl.innerHTML=out; inhl.scrollTop=input.scrollTop; }
+
+  function placeAc(){ var r=input.getBoundingClientRect(); acMenu.style.left=r.left+'px'; acMenu.style.bottom=(window.innerHeight-r.top+8)+'px'; }
+  function renderAc(){ acMenu.innerHTML='';
+    if(!AC.items.length){ closeAc(); return; }
+    AC.items.forEach(function(it,i){ var row=el('div','acitem'+(i===AC.idx?' sel':''));
+      row.appendChild(el('span','acname',(AC.mode==='cmd'?'/':'@')+it.name));
+      if(AC.mode==='cmd'){ if(it.app) row.appendChild(el('span','acbadge','설정')); else if(it.hint) row.appendChild(el('span','achint',it.hint)); }
+      row.addEventListener('mousedown', function(e){ e.preventDefault(); AC.idx=i; acAccept(); });
+      acMenu.appendChild(row); });
+    placeAc(); acMenu.style.display='block'; }
+  function acMove(d){ if(!AC.items.length) return; AC.idx=(AC.idx+d+AC.items.length)%AC.items.length;
+    Array.prototype.forEach.call(acMenu.children, function(c,i){ c.className='acitem'+(i===AC.idx?' sel':''); });
+    var s=acMenu.children[AC.idx]; if(s&&s.scrollIntoView) s.scrollIntoView({block:'nearest'}); }
+  function acAccept(){ var it=AC.items[AC.idx]; if(!it) return;
+    if(AC.mode==='cmd'){ if(it.app){ it.act(); return; } input.value='/'+it.name+' '; grow(); renderHL(); closeAc(); input.focus(); }
+    else { input.value=input.value.replace(/(^|\\s)@[^\\s]*$/, function(_,p){ return p+'@'+it.name+' '; }); grow(); renderHL(); closeAc(); input.focus(); } }
+  function updateAc(){ var caret=input.selectionStart||0, pre=input.value.slice(0,caret);
+    var cm=pre.match(/^\\/([^\\s]*)$/), fm=pre.match(/(?:^|\\s)@([^\\s]*)$/);
+    if(cm){ AC.mode='cmd'; var q=cm[1].toLowerCase();
+      var app=appCmds().filter(function(a){return a.name.indexOf(q)===0;}).map(function(a){return {name:a.name,hint:a.hint,app:true,act:a.act};});
+      var sk=SLASH.filter(function(c){return c.toLowerCase().indexOf(q)===0;}).map(function(c){return {name:c,app:false};});
+      AC.items=app.concat(sk).slice(0,50); AC.idx=0; renderAc(); }
+    else if(fm){ AC.mode='file'; vscode.postMessage({type:'searchFiles',query:fm[1]}); }
+    else { closeAc(); } }
 
   // 이미지 첨부(6-5) — + 버튼 → 호스트 파일 다이얼로그 → 프로젝트로 복사 → 경로+썸네일(dataUrl) 회신 → 전송 시 경로 주입.
   const attachBtn = document.getElementById('attachBtn');
@@ -761,13 +844,25 @@ export class SdkChatPanel {
     if(text) t.appendChild(el('div','msg',text));
     log.appendChild(t);
     hideWelcome(); // 첫 메시지 → 시작 화면 숨김
-    input.value=''; input.style.height='auto'; PENDING=[]; renderChips();
+    input.value=''; input.style.height='auto'; renderHL(); closeAc(); PENDING=[]; renderChips();
     setBusy(true); newAssistantTurn(); startWork(); bottom();
     vscode.postMessage({type:'send',text:sent});
   }
   sendBtn.addEventListener('click', function(){ busy? vscode.postMessage({type:'interrupt'}) : sendMsg(); });
-  input.addEventListener('keydown', function(e){ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); sendMsg(); } else if(e.key==='Tab'&&e.shiftKey){ e.preventDefault(); cyclePerm(); } });
-  input.addEventListener('input', grow);
+  input.addEventListener('keydown', function(e){
+    if(acOpen()){
+      if(e.key==='ArrowDown'){ e.preventDefault(); acMove(1); return; }
+      if(e.key==='ArrowUp'){ e.preventDefault(); acMove(-1); return; }
+      if(e.key==='Enter'||e.key==='Tab'){ e.preventDefault(); acAccept(); return; }
+      if(e.key==='Escape'){ e.preventDefault(); closeAc(); return; }
+    }
+    if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); sendMsg(); }
+    else if(e.key==='Tab'&&e.shiftKey){ e.preventDefault(); cyclePerm(); }
+  });
+  input.addEventListener('input', function(){ grow(); renderHL(); updateAc(); });
+  input.addEventListener('scroll', function(){ inhl.scrollTop=input.scrollTop; });
+  input.addEventListener('blur', function(){ setTimeout(closeAc, 120); });
+  input.addEventListener('keyup', function(e){ if(e.key==='ArrowLeft'||e.key==='ArrowRight') updateAc(); });
   document.getElementById('newBtn').addEventListener('click', function(){ vscode.postMessage({type:'newSession'}); });
   document.getElementById('histBtn').addEventListener('click', function(){ vscode.postMessage({type:'history'}); });
 
@@ -793,8 +888,9 @@ export class SdkChatPanel {
     if(msg.type==='mcp'){ renderMcp(msg.data); return; }
     if(msg.type==='agents'){ renderAgents(msg.data); return; }
     if(msg.type==='slash'){ SLASH=msg.list||[]; return; }
+    if(msg.type==='files'){ if(AC.mode==='file'){ AC.items=(msg.list||[]).map(function(p){return {name:p};}); AC.idx=0; renderAc(); } return; }
     if(msg.type==='compacted'){ closeSettingsMenu(); return; }
-    if(msg.type==='mentionAdded'){ var pth=msg.path; input.value=(input.value? input.value.replace(/\\s*$/,'')+' ':'')+'@'+pth+' '; grow(); input.focus(); return; }
+    if(msg.type==='mentionAdded'){ var pth=msg.path; input.value=(input.value? input.value.replace(/\\s*$/,'')+' ':'')+'@'+pth+' '; grow(); renderHL(); input.focus(); return; }
     if(msg.type!=='event') return;
     var ev=msg.ev;
     if(ev.t==='auth'){ if(ev.loggedIn===false){ stopWork(); showLoginMode(true); setLoggedOut(true); if(cur&&cur.turn){ cur.turn.remove(); cur=null; } } }
