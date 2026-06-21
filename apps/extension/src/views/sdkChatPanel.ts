@@ -398,8 +398,6 @@ export class SdkChatPanel {
   .acitem{display:flex;align-items:center;gap:8px;padding:5px 10px;border-radius:6px;cursor:pointer}
   .acitem.sel{background:var(--vscode-menu-selectionBackground,var(--vscode-toolbar-hoverBackground))}
   .acname{flex:1;font-size:13px;color:var(--vscode-foreground);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .achint{font-size:11px;color:var(--vscode-descriptionForeground);white-space:nowrap}
-  .acbadge{font-size:10px;color:var(--accent);border:1px solid var(--accent);border-radius:4px;padding:0 4px;opacity:.85;flex:none}
   .ctrls{display:flex;align-items:center;gap:9px;margin-top:2px}
   .ic{height:26px;min-width:24px;padding:0 2px;border-radius:7px;border:none;background:none;color:var(--vscode-foreground);cursor:pointer;font-size:17px;font-weight:700;line-height:1}
   .ic:hover{background:var(--vscode-toolbar-hoverBackground)}
@@ -583,6 +581,7 @@ export class SdkChatPanel {
   modelMenu.addEventListener('click', function(e){ e.stopPropagation(); }); // 메뉴 내부 클릭은 닫지 않음(슬라이더용)
   function closeModelMenu(){ modelMenu.style.display='none'; }
   function openModelMenu(){
+    closeSettingsMenu(); closeAc(); // 한 번에 하나만
     if(!MODELS.length) return;
     modelMenu.innerHTML='';
     modelMenu.appendChild(el('div','mhdr','Select a model'));
@@ -650,6 +649,7 @@ export class SdkChatPanel {
     it.appendChild(row); if(o.onClick) it.addEventListener('click', o.onClick); return it; }
 
   function openSettingsMenu(){
+    closeModelMenu(); closeAc(); // 한 번에 하나만
     var model=document.body.dataset.model||'claude';
     settingsMenu.className='menu settings'; settingsMenu.innerHTML='';
     var f=document.createDocumentFragment();
@@ -674,6 +674,7 @@ export class SdkChatPanel {
 
   function panelHeader(title){ var h=el('div','sback'); var bk=el('span','sbk','‹ Back'); bk.addEventListener('click', openSettingsMenu); h.appendChild(bk); h.appendChild(el('span',null,' · '+title)); return h; }
   function openPanel(which){
+    closeModelMenu(); closeAc(); // 한 번에 하나만
     settingsMenu.className='menu settings panel'; settingsMenu.innerHTML='';
     var titles={account:'Account & Usage',output:'Output style',mcp:'MCP servers',agents:'Agents & skills'};
     settingsMenu.appendChild(panelHeader(titles[which])); settingsMenu.appendChild(el('div','sload','Loading…'));
@@ -720,6 +721,8 @@ export class SdkChatPanel {
 
   slashBtn.addEventListener('click', function(ev){ ev.stopPropagation(); if(settingsMenu.style.display==='block') closeSettingsMenu(); else openSettingsMenu(); });
   document.addEventListener('click', function(){ closeModelMenu(); closeSettingsMenu(); closeAc(); });
+  // Esc로 모델/설정/자동완성 패널 닫기 (입력 포커스가 아니어도 동작하도록 window 레벨)
+  window.addEventListener('keydown', function(e){ if(e.key==='Escape' && (modelMenu.style.display==='block'||settingsMenu.style.display==='block'||acOpen())){ closeModelMenu(); closeSettingsMenu(); closeAc(); e.preventDefault(); } });
 
   // ── 입력 자동완성(/ 명령 + @ 파일) + 명령 색상 하이라이트 ──
   const inhl=document.getElementById('inhl');
@@ -757,7 +760,6 @@ export class SdkChatPanel {
     if(!AC.items.length){ closeAc(); return; }
     AC.items.forEach(function(it,i){ var row=el('div','acitem'+(i===AC.idx?' sel':''));
       row.appendChild(el('span','acname',(AC.mode==='cmd'?'/':'@')+it.name));
-      if(AC.mode==='cmd'){ if(it.app) row.appendChild(el('span','acbadge','설정')); else if(it.hint) row.appendChild(el('span','achint',it.hint)); }
       row.addEventListener('mousedown', function(e){ e.preventDefault(); AC.idx=i; acAccept(); });
       acMenu.appendChild(row); });
     placeAc(); acMenu.style.display='block'; }
