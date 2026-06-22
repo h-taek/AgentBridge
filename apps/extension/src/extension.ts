@@ -241,7 +241,8 @@ export function activate(context: vscode.ExtensionContext) {
   // chatMode 토글 디스패처 — 설정값에 따라 SDK 패널 또는 PTY 패널을 연다(둘 다 보존, 라우팅만 분기).
   // PTY: buildOpts로 SpawnOptions 구성 → ChatPanel.create(복원 경로와 동일 빌더). 닫힘 시 markSessionClosed.
   async function openChat(cwd: string, workspaceId: string, model: CliKind, sessionId: string, modelSessionId?: string, title?: string): Promise<void> {
-    if (getConfig().chatMode === 'pty') {
+    // agy는 전경 SDK 어댑터가 없어(SDK 구동은 Gemini API 키 필수) chat.mode와 무관하게 항상 PTY로 고정.
+    if (getConfig().chatMode === 'pty' || model === 'agy') {
       const opts = { ...(await buildOpts(model, cwd, workspaceId, sessionId, modelSessionId)), terminalName: title ?? CLI_DISPLAY_NAME[model] };
       const chat = ChatPanel.create(context.extensionUri, opts);
       chat.onDispose(() => { void markSessionClosed(workspaceId, sessionId).then(() => sessionTree.refresh()); });
@@ -455,6 +456,7 @@ export function activate(context: vscode.ExtensionContext) {
     async deserializeWebviewPanel(panel: vscode.WebviewPanel, state: unknown): Promise<void> {
       const s = state as { sessionId?: string; model?: CliKind; workspaceId?: string } | null;
       if (!s || !s.sessionId || !s.model || !s.workspaceId) { panel.dispose(); return; }
+      if (s.model === 'agy') { panel.dispose(); return; } // agy는 SDK 패널 미지원(항상 PTY) — 잔존 sdkChat 탭 폐기.
       const folder = vscode.workspace.workspaceFolders?.[0]?.uri;
       if (!folder) { panel.dispose(); return; }
       const availability = checkAvailability(s.model);
