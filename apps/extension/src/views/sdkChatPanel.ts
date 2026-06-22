@@ -609,7 +609,7 @@ export class SdkChatPanel {
   .ctrls{display:flex;align-items:center;gap:9px;margin-top:2px}
   .ic{height:26px;min-width:24px;padding:0 2px;border-radius:7px;border:none;background:none;color:var(--vscode-foreground);cursor:pointer;font-size:17px;font-weight:700;line-height:1}
   .ic:hover{background:var(--vscode-toolbar-hoverBackground)}
-  .pill{font-size:12px;font-weight:700;color:var(--vscode-foreground);border:none;border-radius:7px;padding:3px 6px;cursor:pointer}
+  .pill{font-size:12px;font-weight:700;color:var(--vscode-foreground);border:none;border-radius:7px;padding:3px 6px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;max-width:160px}
   .pill:hover{background:var(--vscode-toolbar-hoverBackground)}
   .menu{position:fixed;display:none;z-index:10;background:var(--vscode-menu-background,var(--vscode-input-background));border:1px solid var(--vscode-menu-border,var(--vscode-input-border,var(--vscode-panel-border)));border-radius:8px;padding:4px;min-width:200px;max-width:calc(100vw - 24px);max-height:min(460px,calc(100vh - 56px));overflow-y:auto;box-shadow:0 6px 20px rgba(0,0,0,.4)}
   .mhdr{padding:5px 10px 6px;font-size:11px;color:var(--vscode-descriptionForeground);opacity:.7}
@@ -1077,7 +1077,7 @@ export class SdkChatPanel {
 
   var SEND_SVG='<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20V6M6 12l6-6 6 6"/></svg>';
   var STOP_SVG='<svg width="15" height="15" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3" fill="currentColor"/></svg>';
-  function setBusy(b){ busy=b; input.disabled=b; sendBtn.disabled=false; sendBtn.classList.toggle('stop',b); sendBtn.innerHTML=b?STOP_SVG:SEND_SVG; }
+  function setBusy(b){ busy=b; sendBtn.disabled=false; sendBtn.classList.toggle('stop',b); sendBtn.innerHTML=b?STOP_SVG:SEND_SVG; } // 입력은 항상 활성(생성 중 큐잉 위해) — 비활성은 로그아웃 상태만
   var COPY_SVG='<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>';
   var CHECK_SVG='<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>';
   // 답변(턴)당 1개 복사 버튼 — 그 답변의 모든 텍스트(원본 마크다운)를 합쳐 복사. 클릭 시 체크 아이콘 1초 후 원복.
@@ -1087,7 +1087,7 @@ export class SdkChatPanel {
     btn.addEventListener('click', function(e){ e.stopPropagation(); navigator.clipboard.writeText(raw); btn.innerHTML=CHECK_SVG; setTimeout(function(){ btn.innerHTML=COPY_SVG; },1000); });
     turnEl.appendChild(btn);
   }
-  function newAssistantTurn(){ var t=el('div','turn assistant'); log.appendChild(t); cur={turn:t,textItem:null,raw:'',fullRaw:'',deltas:0,think:null}; bottom(); }
+  function newAssistantTurn(afterNode){ var t=el('div','turn assistant'); if(afterNode) log.insertBefore(t, afterNode.nextSibling); else log.appendChild(t); cur={turn:t,textItem:null,raw:'',fullRaw:'',deltas:0,think:null}; bottom(); }
   function itemRow(dotCls){ var r=el('div','item'); r.appendChild(el('span','dot '+dotCls)); var b=el('div','body'); r.appendChild(b);
     // working 줄이 있으면 그 앞에 끼워 항상 맨 아래에 두기.
     var anchor=(work&&work.line&&work.line.parentNode===cur.turn)?work.line:null; cur.turn.insertBefore(r,anchor); return b; }
@@ -1118,19 +1118,31 @@ export class SdkChatPanel {
     if(input.url) return String(input.url);
     var s=JSON.stringify(input); return s.length>240?s.slice(0,240)+'…':s; }
 
-  function sendMsg(){
-    var text=input.value.trim(); if((!text&&!PENDING.length)||busy) return;
-    var atts=PENDING.slice();
-    // 첨부 경로를 메시지에 주입(샌드박스가 프로젝트 내부만 읽으므로 복사된 경로를 전달).
-    var sent = atts.length ? (text? text+'\\n\\n':'') + atts.map(function(a){return a.path;}).join('\\n') : text;
+  // 생성 중 입력 큐(A) — 답변 생성 중 보낸 메시지는 여기 쌓였다 turn_end/error에 순서대로 발사(엔진은 직렬).
+  // 유저 버블은 Enter 즉시 표시(가시화)하고, 발사 시 어시스턴트 턴을 그 버블 *바로 뒤에 끼워* 순서 보존:
+  // 화면이 [유저→응답→유저→응답]으로 나옴(앞에 유저만 쌓이지도, 안 보이지도 않음).
+  var QUEUE=[];
+  function renderUser(text, atts){
     var t=el('div','turn user');
     atts.forEach(function(a){ var ac=el('span','att'); var im=thumb(a); if(im) ac.appendChild(im); else ac.appendChild(el('span',null,'🖼')); ac.appendChild(el('span',null,a.name)); t.appendChild(ac); });
     if(text) t.appendChild(el('div','msg',text));
     log.appendChild(t);
     hideWelcome(); // 첫 메시지 → 시작 화면 숨김
+    return t;
+  }
+  function fireSend(item){ setBusy(true); newAssistantTurn(item.node); startWork(); bottom(); vscode.postMessage({type:'send',text:item.sent}); }
+  function drainQueue(){ if(QUEUE.length) fireSend(QUEUE.shift()); }
+  function sendMsg(){
+    var text=input.value.trim(); if(!text&&!PENDING.length) return;
+    var atts=PENDING.slice();
+    // 첨부 경로를 메시지에 주입(샌드박스가 프로젝트 내부만 읽으므로 복사된 경로를 전달).
+    var sent = atts.length ? (text? text+'\\n\\n':'') + atts.map(function(a){return a.path;}).join('\\n') : text;
+    var node=renderUser(text, atts); // Enter 즉시 유저 버블 표시
     input.value=''; input.style.height='auto'; renderHL(); closeAc(); PENDING=[]; renderChips();
-    setBusy(true); newAssistantTurn(); startWork(); bottom();
-    vscode.postMessage({type:'send',text:sent});
+    var item={ sent: sent, node: node };
+    // 생성 중이면 큐에 쌓고 turn_end에 발사(발사 시 그 유저 버블 뒤에 응답을 끼움) — 아니면 즉시 발사.
+    if(busy){ QUEUE.push(item); bottom(); }
+    else fireSend(item);
   }
   sendBtn.addEventListener('click', function(){ busy? vscode.postMessage({type:'interrupt'}) : sendMsg(); });
   input.addEventListener('keydown', function(e){
@@ -1154,7 +1166,7 @@ export class SdkChatPanel {
     if(msg.type==='ready'){
       if(msg.model){ document.body.dataset.model=msg.model; document.getElementById('badge').textContent=msg.model; initPerm(msg.model); paintWelcome(msg.model); }
       if(msg.loggedIn===false){ showLoginMode(true); setLoggedOut(true); }
-      else { setBusy(false); input.focus(); }
+      else { setBusy(false); input.disabled=false; input.focus(); }
       return;
     }
     if(msg.type==='models'){ MODELS=msg.list||[]; var curM=MODELS.filter(function(m){return m.current;})[0]; if(curM && modelPill.textContent==='Model') modelPill.textContent=curM.label; return; }
@@ -1172,15 +1184,17 @@ export class SdkChatPanel {
     if(msg.type==='agents'){ renderAgents(msg.data); return; }
     if(msg.type==='slash'){ SLASH=msg.list||[]; return; }
     if(msg.type==='files'){ if(AC.mode==='file'){ AC.items=(msg.list||[]).map(function(p){return {name:p};}); AC.idx=0; renderAc(); } return; }
-    if(msg.type==='cleared'){ stopWork(); cur=null; log.innerHTML=''; closeSettingsMenu(); closeAc(); input.value=''; renderHL(); welcome.classList.remove('hide'); return; }
+    if(msg.type==='cleared'){ stopWork(); QUEUE=[]; cur=null; log.innerHTML=''; closeSettingsMenu(); closeAc(); input.value=''; renderHL(); welcome.classList.remove('hide'); return; }
     if(msg.type==='restore'){ renderRestore(msg.turns); return; }
     if(msg.type==='inject'){
       var ip=[]; if(msg.ir) ip.push('IR'); if(msg.mem>0) ip.push(msg.mem+' memory');
-      if(ip.length){
-        var us=log.querySelectorAll('.turn.user'); var lu=us[us.length-1];
-        if(lu && !(lu.nextElementSibling && lu.nextElementSibling.classList.contains('inj'))){
+      if(ip.length && cur && cur.turn){
+        // 현재 어시스턴트 턴(cur) 바로 앞 = 그 턴의 유저 버블과 답변 사이. "마지막 유저 버블"이 아니라 cur 기준이라
+        // 큐로 다음 유저 버블이 미리 떠 있어도 어긋나지 않음.
+        var prev=cur.turn.previousElementSibling;
+        if(!(prev && prev.classList.contains('inj'))){
           var lab=el('div','inj'); lab.textContent='↳ Injected · '+ip.join(', ');
-          lu.insertAdjacentElement('afterend', lab);
+          log.insertBefore(lab, cur.turn);
         }
       }
       return;
@@ -1241,9 +1255,9 @@ export class SdkChatPanel {
       if(work&&cur){ var s=Math.max(1,Math.round((Date.now()-work.t0)/1000)); var tok=work.out;
         var w=el('div','worked'); w.textContent='* Worked for '+s+'s'+(tok?(' · '+fmt(tok)+' tokens'):''); cur.turn.appendChild(w); }
       if(cur&&cur.fullRaw&&cur.fullRaw.trim()) addTurnCopyBtn(cur.turn, cur.fullRaw);
-      stopWork(); setBusy(false); input.focus(); bottom();
+      stopWork(); setBusy(false); input.focus(); bottom(); drainQueue();
     }
-    else if(ev.t==='error'){ if(!cur) newAssistantTurn(); closeText(); var b=itemRow('text'); b.appendChild(el('div','err','⚠ '+ev.message)); stopWork(); setBusy(false); bottom(); }
+    else if(ev.t==='error'){ if(!cur) newAssistantTurn(); closeText(); var b=itemRow('text'); b.appendChild(el('div','err','⚠ '+ev.message)); stopWork(); setBusy(false); bottom(); drainQueue(); }
   });
 </script>
 </body></html>`;
