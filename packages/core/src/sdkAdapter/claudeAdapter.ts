@@ -87,6 +87,10 @@ export const claudeAdapter: AgentAdapter = {
       prompt: input,
       options: {
         cwd: opts.cwd,
+        // 엔진은 SDK 동봉 바이너리(206MB)가 아니라 사용자 시스템 claude CLI를 씀 — codex가 'codex'를 spawn하는 것과
+        // 동일하게 이름을 PATH로 해석(실측 확인). → vsix엔 SDK JS 래퍼만 벤더, 무거운 바이너리 제외.
+        // 미설치 사용자는 호스트의 availability 게이트가 start 전에 선차단한다.
+        pathToClaudeCodeExecutable: 'claude',
         includePartialMessages: true, // 델타 스트리밍(content_block_delta)
         // CLI의 --settings와 동일 — 워크스페이스 격리 settings(.../claude-settings.json)를 로드해
         // 그 안의 UserPromptSubmit 훅(agentbridge-memory.js)을 매 턴 발사 → IR+장기메모리를 additionalContext로 주입.

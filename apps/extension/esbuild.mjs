@@ -78,10 +78,27 @@ function vendorNodePty() {
   }
 }
 
+// claude SDK — out/node_modules/@anthropic-ai/claude-agent-sdk로 동봉. claudeAdapter 자체는 extension.mjs에
+// 번들되지만, 그 안의 import "@anthropic-ai/claude-agent-sdk"(external)가 런타임에 이 위치서 해석된다
+// (node-pty와 동일 메커니즘 — out/extension.mjs 기준 node 해석이 가장 먼저 보는 곳).
+// sdk.mjs는 Node 빌트인만 import하는 self-contained JS 래퍼(3.5MB)라 의존 추적 불필요. 무거운 플랫폼
+// 엔진 바이너리(@anthropic-ai/claude-agent-sdk-*, 206MB)는 별도 패키지라 자연 제외 — 엔진은 사용자 시스템
+// claude(claudeAdapter의 pathToClaudeCodeExecutable='claude')를 쓴다. 내부 node_modules(.bin뿐)는 제외.
+function vendorClaudeSdk() {
+  const root = 'node_modules/@anthropic-ai/claude-agent-sdk';
+  const dest = 'out/node_modules/@anthropic-ai/claude-agent-sdk';
+  cpSync(root, dest, {
+    recursive: true,
+    dereference: true,
+    filter: (s) => !s.includes('claude-agent-sdk/node_modules'),
+  });
+}
+
 // 단일 outfile 빌드는 이전 tsc 산출물(out/core, out/views 등)을 지우지 않으므로 선청소.
 rmSync('out', { recursive: true, force: true });
 vendorXterm();
 vendorNodePty();
+vendorClaudeSdk();
 
 if (watch) {
   const ctx = await esbuild.context(options);
