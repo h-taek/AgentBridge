@@ -970,7 +970,7 @@ export class SdkChatPanel {
     var cm=pre.match(/^\\/([^\\s]*)$/), fm=pre.match(/(?:^|\\s)@([^\\s]*)$/);
     if(cm){ AC.mode='cmd'; var q=cm[1].toLowerCase();
       var app=appCmds().filter(function(a){return a.name.indexOf(q)===0;}).map(function(a){return {name:a.name,hint:a.hint,app:true,act:a.act};});
-      var sk=SLASH.filter(function(c){return c.toLowerCase().indexOf(q)===0;}).map(function(c){return {name:c,app:false};});
+      var sk=SLASH.filter(function(c){return c.toLowerCase().indexOf(q)===0 && !app.some(function(a){return a.name===c.toLowerCase();});}).map(function(c){return {name:c,app:false};});
       AC.items=app.concat(sk).slice(0,50); AC.idx=0; renderAc(); }
     else if(fm){ AC.mode='file'; vscode.postMessage({type:'searchFiles',query:fm[1]}); }
     else { closeAc(); } }
