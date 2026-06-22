@@ -7,9 +7,9 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
-import type { AgentAdapter, ChatEvent, Session, IR, CliKind, PermissionMode, ModelOption, AccountUsage, McpServerInfo, AgentInfo } from '@agentbridge/core';
-// 번들 코어(SDK-free 배럴) — 저장/IR/스케줄러는 번들본 한 사본을 SSOT로. codexAdapter도 SDK-free라 배럴 정적 import.
-import { readIR, SdkCapture, codexAdapter, resolveTranscriptPath, resolveContext, acquireOwnership, readForeignOwner, releaseOwnership } from '@agentbridge/core';
+import type { ChatEvent, Session, IR, CliKind, PermissionMode, ModelOption, AccountUsage, McpServerInfo, AgentInfo } from '@agentbridge/core';
+// 번들 코어(SDK-free 배럴) — 저장/IR/스케줄러/어댑터 팩토리는 번들본 한 사본을 SSOT로. codex·agy는 createSdkAdapters가 들고 온다.
+import { readIR, SdkCapture, createSdkAdapters, resolveTranscriptPath, resolveContext, acquireOwnership, readForeignOwner, releaseOwnership } from '@agentbridge/core';
 // claudeAdapter는 ESM SDK를 만져 배럴 비노출(코어 테스트/데스크탑 보호) — 서브경로 정적 import. SDK는 esbuild external.
 import { claudeAdapter } from '@agentbridge/core/dist/sdkAdapter/claudeAdapter.js';
 import { getCompactionScheduler, getWorkspaceStore, getHookInstaller } from '../core/coreInstances';
@@ -19,6 +19,9 @@ import { chatPanelEvents } from './chatPanel';
 import { getSessions, renameSession, deleteSession, type SessionMeta } from '../core/sessionRegistry';
 import { createGroupLocker } from './groupLock';
 import * as output from '../log/output';
+
+// SDK 어댑터 set(코어 팩토리) — model→어댑터 선택을 코어 한 곳에. claude만 번들 경계라 호스트가 정적 import해 주입.
+const sdkAdapters = createSdkAdapters({ claude: claudeAdapter });
 
 // 이전 세션 IR을 어댑터 context(→systemPrompt append)로 주입할 텍스트로 렌더. compaction의 formatCurrentIR과 동형(JSON 블록).
 function formatIRContext(ir: IR | null): string | undefined {
@@ -171,10 +174,6 @@ export class SdkChatPanel {
   }
 
   // 둘 다 정적 import(번들). claude는 ESM SDK를 external로 두고 런타임 해석.
-  private loadAdapter(model: CliKind): AgentAdapter {
-    return model === 'codex' ? codexAdapter : claudeAdapter;
-  }
-
   private async init(cwd: string, workspaceId: string, model: CliKind): Promise<void> {
     this.cwd = cwd;
     this.workspaceId = workspaceId;
@@ -239,7 +238,7 @@ export class SdkChatPanel {
         scheduler: getCompactionScheduler(), // 기존 PTY 경로와 같은 스케줄러 인스턴스
       });
 
-      const adapter = this.loadAdapter(this.model);
+      const adapter = sdkAdapters[this.model];
       this.session = await adapter.start({
         cwd: this.cwd,
         workspaceId: this.workspaceId,

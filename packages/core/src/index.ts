@@ -90,3 +90,5 @@ export * from './sdkAdapter/types.js';
 export * from './sdkAdapter/sdkCapture.js';
 // codexAdapter는 SDK-free(child_process+JSON)라 배럴 OK — 호스트가 정적 import. (claudeAdapter만 ESM SDK라 비노출)
 export * from './sdkAdapter/codexAdapter.js';
+// 어댑터 팩토리 — codex만 직접 import + claude는 호스트 주입이라 SDK-free, 배럴 OK.
+export * from './sdkAdapter/createSdkAdapters.js';
