@@ -1,4 +1,6 @@
 import * as vscode from 'vscode';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { SpawnOptions } from './pty/types';
 import * as claudeAdapter from './core/cliAdapter/claudeAdapter';
 import * as codexAdapter from './core/cliAdapter/codexAdapter';
@@ -87,6 +89,23 @@ export function activate(context: vscode.ExtensionContext) {
     pendingResetDone = import('./core/sessionRegistry')
       .then(m => m.resetAllSessionsActive(wid))
       .catch(() => { /* noop */ });
+  }
+
+  // agy(SDK)는 사용자 Gemini API 키가 필요 — 워크스페이스 .env를 process.env로 로드(agyAdapter가 GEMINI_API_KEY,
+  // localharness 클라이언트가 ANTIGRAVITY_HARNESS_PATH를 읽음). 형식: NAME=value 줄 파싱(기존 env 우선).
+  // '='가 없는 단일 토큰 파일이면 그 값을 GEMINI_API_KEY로 간주(사용자가 키만 적어둔 경우).
+  if (folderUri) {
+    try {
+      let bareKey = '';
+      for (const raw of readFileSync(join(folderUri.fsPath, '.env'), 'utf8').split('\n')) {
+        const line = raw.trim();
+        if (!line || line.startsWith('#')) continue;
+        const m = line.match(/^([A-Z_][A-Z0-9_]*)\s*=\s*(.*)$/);
+        if (m) { if (!process.env[m[1]]) process.env[m[1]] = m[2].trim().replace(/^["']|["']$/g, ''); }
+        else if (!bareKey) bareKey = line.replace(/^["']|["']$/g, ''); // NAME= 아닌 단일 토큰 = 키 값으로 추정
+      }
+      if (!process.env.GEMINI_API_KEY && bareKey) process.env.GEMINI_API_KEY = bareKey;
+    } catch { /* .env 없음 — agy SDK 키 미설정(checkAuth=false) */ }
   }
 
   // attachment 정리 — 1시간 이상 된 파일 제거 (fire-and-forget).
@@ -241,8 +260,8 @@ export function activate(context: vscode.ExtensionContext) {
   // chatMode 토글 디스패처 — 설정값에 따라 SDK 패널 또는 PTY 패널을 연다(둘 다 보존, 라우팅만 분기).
   // PTY: buildOpts로 SpawnOptions 구성 → ChatPanel.create(복원 경로와 동일 빌더). 닫힘 시 markSessionClosed.
   async function openChat(cwd: string, workspaceId: string, model: CliKind, sessionId: string, modelSessionId?: string, title?: string): Promise<void> {
-    // agy는 전경 SDK 어댑터가 없어(SDK 구동은 Gemini API 키 필수) chat.mode와 무관하게 항상 PTY로 고정.
-    if (getConfig().chatMode === 'pty' || model === 'agy') {
+    // chatMode 토글에 따라 분기 — agy도 claude/codex와 동일(sdk=localharness GUI, pty=agy CLI 터미널).
+    if (getConfig().chatMode === 'pty') {
       const opts = { ...(await buildOpts(model, cwd, workspaceId, sessionId, modelSessionId)), terminalName: title ?? CLI_DISPLAY_NAME[model] };
       const chat = ChatPanel.create(context.extensionUri, opts);
       chat.onDispose(() => { void markSessionClosed(workspaceId, sessionId).then(() => sessionTree.refresh()); });
@@ -456,7 +475,6 @@ export function activate(context: vscode.ExtensionContext) {
     async deserializeWebviewPanel(panel: vscode.WebviewPanel, state: unknown): Promise<void> {
       const s = state as { sessionId?: string; model?: CliKind; workspaceId?: string } | null;
       if (!s || !s.sessionId || !s.model || !s.workspaceId) { panel.dispose(); return; }
-      if (s.model === 'agy') { panel.dispose(); return; } // agy는 SDK 패널 미지원(항상 PTY) — 잔존 sdkChat 탭 폐기.
       const folder = vscode.workspace.workspaceFolders?.[0]?.uri;
       if (!folder) { panel.dispose(); return; }
       const availability = checkAvailability(s.model);
