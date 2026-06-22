@@ -6,10 +6,11 @@
 // 방출 후 턴을 닫는다. 턴은 직렬(turnGate)이라 ref.current 하나로 라우팅.
 // 본문 권위값: TurnRecord의 assistantBody는 최종 assistant 메시지에서만 채운다(델타는 라이브 표시용).
 import { query, type Query, type SDKUserMessage, type PermissionResult, type PermissionMode as SdkPermissionMode } from '@anthropic-ai/claude-agent-sdk';
-import type { OpenTurn, ReaderCtx } from '../transcriptReader/types.js';
+import type { ReaderCtx } from '../transcriptReader/types.js';
 import { finalizeTurn, toolArgString } from '../transcriptReader/util.js';
 import { AsyncQueue } from './asyncQueue.js';
-import type { AccountUsage, AgentAdapter, AgentInfo, ChatEvent, LoginChallenge, McpServerInfo, PermissionMode, Session, StartOptions, UsageContributors, UsageLimit } from './types.js';
+import { createSerialTurnSession, type ActiveTurn } from './createSerialTurnSession.js';
+import type { AccountUsage, AgentAdapter, AgentInfo, LoginChallenge, McpServerInfo, PermissionMode, Session, StartOptions, UsageContributors, UsageLimit } from './types.js';
 
 // SDK Query의 인증 메서드는 .d.ts에 미노출(런타임 객체엔 존재) → 타입만 보강.
 type AuthQuery = {
@@ -65,8 +66,6 @@ const CLAUDE_MODE: Partial<Record<PermissionMode, SdkPermissionMode>> = {
   plan: 'plan',
   auto: 'auto',
 };
-
-type ActiveTurn = { events: AsyncQueue<ChatEvent>; open: OpenTurn };
 
 export const claudeAdapter: AgentAdapter = {
   id: 'claude',
@@ -197,38 +196,13 @@ export const claudeAdapter: AgentAdapter = {
       }
     })();
 
-    // 턴 직렬화 게이트 — 이전 턴이 끝나야 다음 send가 ref.current를 잡는다(라우팅 경쟁 방지).
-    let turnGate: Promise<void> = Promise.resolve();
-
-    const send = (text: string): AsyncIterable<ChatEvent> =>
-      (async function* () {
-        const prev = turnGate;
-        let release!: () => void;
-        turnGate = new Promise<void>((r) => (release = r));
-        await prev;
-        try {
-          const events = new AsyncQueue<ChatEvent>();
-          const open: OpenTurn = {
-            sourceKey: '', // 턴별로 assistant/result uuid에서 채움(세션 id는 턴마다 같아 충돌)
-            user: text,
-            startedAt: new Date().toISOString(),
-            lastAt: '',
-            assistantParts: [],
-            toolCalls: [],
-          };
-          ref.current = { events, open };
-          // sessionId가 이미 있으면(2턴+) 즉시 session 이벤트, 첫 턴은 pump의 init이 방출.
-          if (sessionId) events.push({ t: 'session', sessionId, model });
-          // 입력을 먼저 push — streaming-input mode는 입력이 와야 init/응답을 방출(ready 선대기 시 데드락).
-          input.push({ type: 'user', message: { role: 'user', content: text }, parent_tool_use_id: null });
-          for await (const ev of events) {
-            yield ev;
-          }
-        } finally {
-          ref.current = null;
-          release();
-        }
-      })();
+    // 턴 직렬 골격(게이트·ref·OpenTurn·정리)은 createSerialTurnSession 공유. begin=claude 턴 시작(입력 push).
+    const send = createSerialTurnSession(ref, (active, text) => {
+      // sessionId가 이미 있으면(2턴+) 즉시 session 이벤트, 첫 턴은 pump의 init이 방출.
+      if (sessionId) active.events.push({ t: 'session', sessionId, model });
+      // 입력을 먼저 push — streaming-input mode는 입력이 와야 init/응답을 방출(ready 선대기 시 데드락).
+      input.push({ type: 'user', message: { role: 'user', content: text }, parent_tool_use_id: null });
+    });
 
     return {
       get sessionId() {

@@ -11,13 +11,12 @@
 //   중단: turn/interrupt({threadId,turnId}). 승인: 서버→클라 request(item/.../requestApproval) → {decision}.
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createInterface } from 'node:readline';
-import type { OpenTurn, ReaderCtx } from '../transcriptReader/types.js';
+import type { ReaderCtx } from '../transcriptReader/types.js';
 import { finalizeTurn, toolArgString } from '../transcriptReader/util.js';
-import { AsyncQueue } from './asyncQueue.js';
-import type { AccountUsage, AgentAdapter, AgentInfo, ChatEvent, LoginChallenge, McpServerInfo, PermissionMode, Session, StartOptions, UsageLimit } from './types.js';
+import { createSerialTurnSession, type ActiveTurn } from './createSerialTurnSession.js';
+import type { AccountUsage, AgentAdapter, AgentInfo, LoginChallenge, McpServerInfo, PermissionMode, Session, StartOptions, UsageLimit } from './types.js';
 
 type Pending = { resolve: (v: unknown) => void; reject: (e: unknown) => void };
-type ActiveTurn = { events: AsyncQueue<ChatEvent>; open: OpenTurn; turnId: string };
 type AnyMsg = { id?: number; method?: string; result?: unknown; error?: unknown; params?: Record<string, unknown> };
 
 // 권한 모드 → codex approvalPolicy + sandboxPolicy(turn/start 오버라이드). codex TUI의 3개 모드와 동일.
@@ -192,38 +191,22 @@ export const codexAdapter: AgentAdapter = {
       threadId = await startThread();
     }
 
-    let turnGate: Promise<void> = Promise.resolve();
-    const send = (text: string): AsyncIterable<ChatEvent> =>
-      (async function* () {
-        const prev = turnGate;
-        let release!: () => void;
-        turnGate = new Promise<void>((r) => (release = r));
-        await prev;
-        const events = new AsyncQueue<ChatEvent>();
-        const open: OpenTurn = { sourceKey: '', user: text, startedAt: new Date().toISOString(), lastAt: '', assistantParts: [], toolCalls: [] };
-        const active: ActiveTurn = { events, open, turnId: '' };
-        try {
-          ref.current = active; // 응답 전에 잡아둠 — 델타가 turn/start 응답보다 먼저 와도 라우팅됨
-          events.push({ t: 'session', sessionId: threadId });
-          // approvalPolicy·sandboxPolicy·model 오버라이드 = 이번 턴+이후 적용. 권한 모드·모델 전환을 다음 턴에 반영.
-          const res = (await request('turn/start', {
-            threadId,
-            approvalPolicy,
-            ...(sandboxPolicy ? { sandboxPolicy } : {}),
-            ...(model ? { model } : {}),
-            ...(effort ? { effort } : {}),
-            input: [{ type: 'text', text, text_elements: [] }],
-          })) as { turn?: { id?: string } };
-          active.turnId = res?.turn?.id ?? '';
-          open.sourceKey = active.turnId; // 턴 고유 키 (deterministicTurnId)
-          for await (const ev of events) yield ev;
-        } catch (err) {
-          yield { t: 'error', message: err instanceof Error ? err.message : String(err) };
-        } finally {
-          ref.current = null;
-          release();
-        }
-      })();
+    // 턴 직렬 골격(게이트·ref·OpenTurn·정리)은 createSerialTurnSession 공유. begin=codex 턴 시작(turn/start).
+    const send = createSerialTurnSession(ref, async (active, text) => {
+      // 응답 전에 ref가 잡혀 있어(골격이 begin 전에 세팅) 델타가 turn/start 응답보다 먼저 와도 라우팅됨.
+      active.events.push({ t: 'session', sessionId: threadId });
+      // approvalPolicy·sandboxPolicy·model 오버라이드 = 이번 턴+이후 적용. 권한 모드·모델 전환을 다음 턴에 반영.
+      const res = (await request('turn/start', {
+        threadId,
+        approvalPolicy,
+        ...(sandboxPolicy ? { sandboxPolicy } : {}),
+        ...(model ? { model } : {}),
+        ...(effort ? { effort } : {}),
+        input: [{ type: 'text', text, text_elements: [] }],
+      })) as { turn?: { id?: string } };
+      active.turnId = res?.turn?.id ?? '';
+      active.open.sourceKey = active.turnId; // 턴 고유 키 (deterministicTurnId)
+    });
 
     return {
       get sessionId() {
