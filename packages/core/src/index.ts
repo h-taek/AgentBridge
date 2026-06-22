@@ -92,3 +92,5 @@ export * from './sdkAdapter/sdkCapture.js';
 export * from './sdkAdapter/codexAdapter.js';
 // 어댑터 팩토리 — codex만 직접 import + claude는 호스트 주입이라 SDK-free, 배럴 OK.
 export * from './sdkAdapter/createSdkAdapters.js';
+// 세션 셋업 시퀀스(hook→IR→capture→start) — adapter는 호스트가 주입하므로 SDK-free, 배럴 OK.
+export * from './sdkAdapter/startSdkSession.js';

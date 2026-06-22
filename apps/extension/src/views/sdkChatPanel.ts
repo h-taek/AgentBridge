@@ -7,9 +7,9 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
-import type { ChatEvent, Session, IR, CliKind, PermissionMode, ModelOption, AccountUsage, McpServerInfo, AgentInfo } from '@agentbridge/core';
-// 번들 코어(SDK-free 배럴) — 저장/IR/스케줄러/어댑터 팩토리는 번들본 한 사본을 SSOT로. codex·agy는 createSdkAdapters가 들고 온다.
-import { readIR, SdkCapture, createSdkAdapters, resolveTranscriptPath, resolveContext, acquireOwnership, readForeignOwner, releaseOwnership } from '@agentbridge/core';
+import type { ChatEvent, Session, CliKind, PermissionMode, ModelOption, AccountUsage, McpServerInfo, AgentInfo } from '@agentbridge/core';
+// 번들 코어(SDK-free 배럴) — 저장/IR/스케줄러/어댑터 팩토리·셋업은 번들본 한 사본을 SSOT로. codex·agy는 createSdkAdapters가 들고 온다.
+import { readIR, createSdkAdapters, startSdkSession, resolveTranscriptPath, resolveContext, acquireOwnership, readForeignOwner, releaseOwnership } from '@agentbridge/core';
 // claudeAdapter는 ESM SDK를 만져 배럴 비노출(코어 테스트/데스크탑 보호) — 서브경로 정적 import. SDK는 esbuild external.
 import { claudeAdapter } from '@agentbridge/core/dist/sdkAdapter/claudeAdapter.js';
 import { getCompactionScheduler, getWorkspaceStore, getHookInstaller } from '../core/coreInstances';
@@ -22,23 +22,6 @@ import * as output from '../log/output';
 
 // SDK 어댑터 set(코어 팩토리) — model→어댑터 선택을 코어 한 곳에. claude만 번들 경계라 호스트가 정적 import해 주입.
 const sdkAdapters = createSdkAdapters({ claude: claudeAdapter });
-
-// 이전 세션 IR을 어댑터 context(→systemPrompt append)로 주입할 텍스트로 렌더. compaction의 formatCurrentIR과 동형(JSON 블록).
-function formatIRContext(ir: IR | null): string | undefined {
-  if (!ir) return undefined;
-  const body = {
-    intent: ir.intent,
-    decisions: ir.decisions,
-    files: ir.files,
-    commands: ir.commands,
-    tests: ir.tests,
-    pending: ir.pending,
-  };
-  return (
-    '# 이전 세션 인계 (AgentBridge IR)\n\n다음은 이전 대화에서 압축된 작업 맥락이다. 이어서 돕는다.\n\n' +
-    '```json\n' + JSON.stringify(body, null, 2) + '\n```'
-  );
-}
 
 export class SdkChatPanel {
   private session: Session | null = null;
@@ -214,41 +197,22 @@ export class SdkChatPanel {
   // resume=이전 modelSessionId면 그 세션을 이어간다(최초 open만; /clear는 resume 없이 새로).
   private async startSession(injectContext: boolean, resume?: string): Promise<void> {
     try {
-      // 3단계 — 캡처/IR 배선 (모두 번들 코어 = SSOT).
+      // 셋업 시퀀스(hook→IR→capture→adapter.start)는 코어 startSdkSession 한 곳. 호스트는 결속만 주입.
       const workspaceRoot = getWorkspaceStore().getWorkspacePath(this.workspaceId);
-      // 매 턴 컨텍스트 주입은 설치된 UserPromptSubmit 훅이 담당 — CLI와 동일 installer·동일 헬퍼 재사용(새 메커니즘 0).
-      //   claude: 격리 settings 파일을 SDK `settings` 옵션(=CLI --settings)으로 로드 / codex: cwd/.codex 자동.
-      let settingsFile: string | undefined;
-      try {
-        if (this.model === 'claude') {
-          settingsFile = await getHookInstaller().installClaudeHooks(workspaceRoot, this.workspaceId);
-        } else if (this.model === 'codex') {
-          await getHookInstaller().installCodexHooks(this.cwd, this.workspaceId);
-        }
-      } catch (err) {
-        output.warn(`SdkChatPanel: hook 설치 실패 — ${err instanceof Error ? err.message : String(err)}`);
-      }
-      const ir = injectContext ? await readIR(workspaceRoot) : null;
-      const context = formatIRContext(ir); // 이전 IR → systemPrompt/developerInstructions로 주입
-      const capture = new SdkCapture({
-        workspaceId: this.workspaceId,
-        workspaceRoot,
-        workspacePath: this.cwd,
+      const { session, context } = await startSdkSession({
+        adapter: sdkAdapters[this.model],
         model: this.model,
-        scheduler: getCompactionScheduler(), // 기존 PTY 경로와 같은 스케줄러 인스턴스
-      });
-
-      const adapter = sdkAdapters[this.model];
-      this.session = await adapter.start({
         cwd: this.cwd,
         workspaceId: this.workspaceId,
+        workspaceRoot,
+        scheduler: getCompactionScheduler(), // 기존 PTY 경로와 같은 스케줄러 인스턴스
+        hookInstaller: getHookInstaller(),
         detail: 'compact',
-        // IR/장기메모리 주입은 매 턴 UserPromptSubmit 훅이 담당(아래 settings/.codex) → 시작 시 1회 systemPrompt 주입은 제거(중복).
-        ...(settingsFile ? { settings: settingsFile } : {}),
+        injectContext,
         ...(resume ? { resume } : {}),
-        // onTurn: 어댑터가 만든 plain TurnRecord를 경계 넘겨 번들 코어 캡처로 영속(turns→압축→IR).
-        onTurn: (turn) => capture.accept(turn),
+        logger: { log: (m) => output.log(m), warn: (m) => output.warn(m) },
       });
+      this.session = session;
       // 에이전트 세션 id 영속(다음 open 시 resume). codex=시작 시 thread id 있음 / claude=빈 값 → 첫 턴 session 이벤트에서 잡음.
       this.reportModelSession(this.session.sessionId);
       // 미로그인 여부를 send 없이 미리 확인 → 미로그인이면 패널이 처음부터 로그인 화면 + 입력 차단.
