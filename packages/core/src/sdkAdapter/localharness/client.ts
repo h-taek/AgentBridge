@@ -6,15 +6,17 @@
 //   사용자 Gemini 키는 HarnessConfig.models[].geminiApiEndpoint.apiKey 에 실린다.
 import { spawn, type ChildProcess } from 'node:child_process';
 import WebSocket from 'ws';
+import { resolveHarnessBinary } from './downloadBinary.js';
 import { InputConfig, OutputConfig } from './schema.js';
 
 export interface HarnessStartOptions {
   apiKey: string; // 사용자 Gemini API 키
   model: string; // 에이전트 모델 (예: gemini-3.5-flash)
   cwd: string;
-  binaryPath?: string; // 미지정 시 env ANTIGRAVITY_HARNESS_PATH → 'localharness'(PATH)
+  binaryPath?: string; // 미지정 시 env ANTIGRAVITY_HARNESS_PATH → ~/.agentbridge/bin 캐시 → 자동 다운로드
   storageDir?: string;
   context?: string; // 시스템 지시(IR/handoff) append
+  onDownloadProgress?: (received: number, total: number) => void; // 첫 실행 시 엔진 다운로드 진행률
 }
 
 export interface HarnessClient {
@@ -24,12 +26,10 @@ export interface HarnessClient {
   end(): void;
 }
 
-function resolveBinary(override?: string): string {
-  return override || process.env.ANTIGRAVITY_HARNESS_PATH || 'localharness';
-}
-
 export async function startHarness(opts: HarnessStartOptions): Promise<HarnessClient> {
-  const child: ChildProcess = spawn(resolveBinary(opts.binaryPath), [], { cwd: opts.cwd, stdio: ['pipe', 'pipe', 'pipe'] });
+  // 경로 해소: env override → ~/.agentbridge/bin 캐시 → PyPI 휠에서 자동 추출(첫 실행 1회).
+  const binPath = await resolveHarnessBinary({ binaryPath: opts.binaryPath, onProgress: opts.onDownloadProgress });
+  const child: ChildProcess = spawn(binPath, [], { cwd: opts.cwd, stdio: ['pipe', 'pipe', 'pipe'] });
   let stderr = '';
   child.stderr?.on('data', (d: Buffer) => { stderr += d.toString(); if (stderr.length > 8000) stderr = stderr.slice(-8000); });
 
