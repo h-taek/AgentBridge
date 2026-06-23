@@ -37,6 +37,21 @@ const options = {
   logLevel: 'info',
 };
 
+// 웹뷰 마크다운 렌더러 — markdown-it을 브라우저 IIFE로 번들(라이브러리 인라인)해 out/webview/markdown.js로.
+// sdkChatPanel 웹뷰가 asWebviewUri+nonce <script src>로 로드하고 window.renderMarkdown에 위임한다.
+/** @type {import('esbuild').BuildOptions} */
+const webviewOptions = {
+  entryPoints: ['src/webview/markdown.ts'],
+  bundle: true,
+  outfile: 'out/webview/markdown.js',
+  platform: 'browser',
+  format: 'iife',
+  target: 'es2020',
+  sourcemap: !production,
+  minify: production,
+  logLevel: 'info',
+};
+
 // xterm webview 에셋 — out/vendor/@xterm/<pkg>/{css,lib}. webview가 asWebviewUri로 로드하므로
 // 번들 불가, 파일로 동봉해야 한다. chatPanel의 로드 경로도 여기를 가리킨다.
 function vendorXterm() {
@@ -102,8 +117,11 @@ vendorClaudeSdk();
 
 if (watch) {
   const ctx = await esbuild.context(options);
+  const wctx = await esbuild.context(webviewOptions);
   await ctx.watch();
+  await wctx.watch();
   console.log('esbuild: watching…');
 } else {
   await esbuild.build(options);
+  await esbuild.build(webviewOptions);
 }

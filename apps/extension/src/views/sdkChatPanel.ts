@@ -69,7 +69,11 @@ export class SdkChatPanel {
       'agentbridge.sdkChat',
       opts?.title || `AgentBridge · ${model}`,
       vscode.ViewColumn.Active,
-      { enableScripts: true, retainContextWhenHidden: true },
+      {
+        enableScripts: true,
+        retainContextWhenHidden: true,
+        localResourceRoots: [vscode.Uri.joinPath(extensionUri, 'out'), vscode.Uri.joinPath(extensionUri, 'media')],
+      },
     );
     // 탭 아이콘 = 각 에이전트 정식 로고 SVG(media/logos/<model>.svg).
     const logo = vscode.Uri.joinPath(extensionUri, 'media', 'logos', `${model}.svg`);
@@ -98,6 +102,11 @@ export class SdkChatPanel {
   ): SdkChatPanel {
     const logo = vscode.Uri.joinPath(extensionUri, 'media', 'logos', `${model}.svg`);
     panel.iconPath = { light: logo, dark: logo };
+    // 복원 시 웹뷰 옵션 재설정 — 번들 마크다운 에셋(out/webview) asWebviewUri 로드 허용.
+    panel.webview.options = {
+      enableScripts: true,
+      localResourceRoots: [vscode.Uri.joinPath(extensionUri, 'out'), vscode.Uri.joinPath(extensionUri, 'media')],
+    };
     const inst = new SdkChatPanel(panel, extensionUri);
     inst.sessionId = sessionId;
     inst.resumeId = opts?.resume;
@@ -531,6 +540,7 @@ export class SdkChatPanel {
     const logoSvg = this.readLogoSvg(model);
     const brand = { claude: 'Claude', codex: 'Codex', agy: 'Antigravity' }[model];
     const nonce = makeNonce();
+    const mdUri = this.panel.webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'out', 'webview', 'markdown.js'));
     const csp = `default-src 'none'; style-src 'unsafe-inline'; img-src data:; script-src 'nonce-${nonce}';`;
     return `<!doctype html><html lang="en"><head>
 <meta charset="utf-8" />
@@ -608,6 +618,10 @@ export class SdkChatPanel {
   .md table{border-collapse:collapse;margin:.5em 0;font-size:.95em;display:block;width:max-content;max-width:100%;overflow-x:auto}
   .md th,.md td{border:1px solid var(--vscode-panel-border);padding:4px 9px;text-align:left;vertical-align:top}
   .md th{background:var(--vscode-textBlockQuote-background);font-weight:700}
+  .md a{color:var(--vscode-textLink-foreground);text-decoration:none} .md a:hover{text-decoration:underline}
+  .md hr{border:none;border-top:1px solid var(--vscode-panel-border);margin:.8em 0}
+  .md ol{margin:.3em 0;padding-left:1.5em}
+  .md blockquote{margin:.4em 0;padding-left:.9em;border-left:3px solid var(--vscode-panel-border);color:var(--vscode-descriptionForeground)}
   .caret{display:inline-block;width:6px;height:13px;background:var(--vscode-editor-foreground);margin-left:1px;vertical-align:-2px;animation:blink 1s steps(2) infinite}
   @keyframes blink{50%{opacity:0}}
 
@@ -777,6 +791,7 @@ export class SdkChatPanel {
   <div id="modelMenu" class="menu"></div>
   <div id="slashMenu" class="menu"></div>
   <div id="acMenu" class="menu"></div>
+<script nonce="${nonce}" src="${mdUri}"></script>
 <script nonce="${nonce}">
   const vscode = acquireVsCodeApi();
   vscode.setState({ sessionId: ${JSON.stringify(this.sessionId)}, model: ${JSON.stringify(model)}, workspaceId: ${JSON.stringify(this.workspaceId)} }); // IDE 재시작 복원용 — 직렬화기가 이 값으로 패널 재구성
@@ -981,6 +996,8 @@ export class SdkChatPanel {
 
   slashBtn.addEventListener('click', function(ev){ ev.stopPropagation(); if(settingsMenu.style.display==='block') closeSettingsMenu(); else openSettingsMenu(); });
   document.addEventListener('click', function(){ closeModelMenu(); closeSettingsMenu(); closeAc(); });
+  // 마크다운 링크 클릭 → 외부 브라우저(웹뷰 내 네비게이션 차단)
+  log.addEventListener('click', function(e){ var a=e.target&&e.target.closest&&e.target.closest('a[href]'); if(a){ e.preventDefault(); var href=a.getAttribute('href'); if(href) vscode.postMessage({type:'openExternal',url:href}); } });
   // Esc로 모델/설정/자동완성 패널 닫기 (입력 포커스가 아니어도 동작하도록 window 레벨)
   window.addEventListener('keydown', function(e){ if(e.key!=='Escape') return;
     if(modelMenu.style.display==='block'||settingsMenu.style.display==='block'||acOpen()){ closeModelMenu(); closeSettingsMenu(); closeAc(); e.preventDefault(); return; }
@@ -1096,43 +1113,8 @@ export class SdkChatPanel {
   function el(t,c,x){ var e=document.createElement(t); if(c)e.className=c; if(x!=null)e.textContent=x; return e; }
   function bottom(){ log.scrollTop = log.scrollHeight; }
   function esc(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-  // 최소 마크다운: 펜스코드 → 인라인코드 → 굵게 → 리스트 → 단락
-  function md(src){
-    // 라인 기반 — 펜스 코드블록은 내부 빈 줄·미완(스트리밍)에도 한 블록으로 안전하게 처리.
-    var lines = src.split('\\n'), out = [], i = 0;
-    var cells=function(r){ return r.replace(/^\\s*\\|/,'').replace(/\\|\\s*$/,'').split('|').map(function(c){return c.trim();}); };
-    while (i < lines.length){
-      if (/^\\s*\`\`\`/.test(lines[i])){
-        var code = []; i++;
-        while (i < lines.length && !/^\\s*\`\`\`\\s*$/.test(lines[i])){ code.push(lines[i]); i++; }
-        i++; // 닫는 \`\`\`
-        out.push('<pre><code>'+esc(code.join('\\n'))+'</code></pre>'); continue;
-      }
-      // 제목 (#~######) (#7)
-      var hm = lines[i].match(/^\\s*(#{1,6})\\s+(.*)$/);
-      if (hm){ var lv=hm[1].length; out.push('<h'+lv+'>'+inline(esc(hm[2].replace(/\\s+#+\\s*$/,'')))+'</h'+lv+'>'); i++; continue; }
-      // 표: "| a | b |" 다음 줄이 구분줄("|---|") 일 때만 (#7)
-      if (lines[i].indexOf('|')>=0 && i+1<lines.length && /-/.test(lines[i+1]) && lines[i+1].indexOf('|')>=0 && /^[\\s|:-]+$/.test(lines[i+1])){
-        var head=cells(lines[i]); i+=2; var rows=[];
-        while (i < lines.length && lines[i].trim() && lines[i].indexOf('|')>=0){ rows.push(cells(lines[i])); i++; }
-        var th='<tr>'+head.map(function(c){return '<th>'+inline(esc(c))+'</th>';}).join('')+'</tr>';
-        var tb=rows.map(function(r){return '<tr>'+r.map(function(c){return '<td>'+inline(esc(c))+'</td>';}).join('')+'</tr>';}).join('');
-        out.push('<table>'+th+tb+'</table>'); continue;
-      }
-      if (/^\\s*[-*]\\s+/.test(lines[i])){
-        var li = [];
-        while (i < lines.length && /^\\s*[-*]\\s+/.test(lines[i])){ li.push('<li>'+inline(esc(lines[i].replace(/^\\s*[-*]\\s+/,'')))+'</li>'); i++; }
-        out.push('<ul>'+li.join('')+'</ul>'); continue;
-      }
-      if (!lines[i].trim()){ i++; continue; }
-      // 단락 — 첫 줄은 무조건 소비(진행 보장), 이후 펜스/리스트/제목 만나면 중단
-      var para = [lines[i]]; i++;
-      while (i < lines.length && lines[i].trim() && !/^\\s*\`\`\`/.test(lines[i]) && !/^\\s*[-*]\\s+/.test(lines[i]) && !/^\\s*#{1,6}\\s/.test(lines[i])){ para.push(lines[i]); i++; }
-      out.push('<p>'+inline(esc(para.join('\\n'))).replace(/\\n/g,'<br>')+'</p>');
-    }
-    return out.join('');
-  }
-  function inline(s){ return s.replace(/\`([^\`]+)\`/g,function(_,c){return '<code>'+esc(c)+'</code>';}).replace(/\\*\\*([^*]+)\\*\\*/g,'<strong>$1</strong>'); }
+  // 마크다운 = 번들된 markdown-it(window.renderMarkdown)에 위임. 로드 실패 시 esc 폴백.
+  function md(src){ try{ if(window.renderMarkdown) return window.renderMarkdown(src||''); }catch(e){} return '<p>'+esc(String(src||'')).replace(/\\n/g,'<br>')+'</p>'; }
 
   // 재개 시 이전 대화 복원 — user 말풍선 + assistant의 텍스트/도구를 '나온 순서대로'(흐름 보존) 그리고 시작화면 숨김.
   function renderRestore(turns){
