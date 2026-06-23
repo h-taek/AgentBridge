@@ -32,6 +32,7 @@ export const agyAdapter: AgentAdapter = {
     let cascadeId = ''; // 대화 id (resume·session 이벤트용)
     let turnSeq = 0; // 턴별 고유 sourceKey 생성용 — agy는 trajectoryId가 대화 단위라 턴 키로 못 씀(dedup 충돌 방지)
     const approvalPos = new Map<string, { trajectoryId: string; stepIndex: number }>(); // approval id → 위치(응답용)
+    const toolSteps = new Map<string, 'started' | 'done'>(); // 도구 stepKey 디듀프(하니스가 한 도구에 stepUpdate 다수 전송)
 
     const client: HarnessClient = await startHarness({ apiKey, model, cwd: opts.cwd, context: opts.context });
 
@@ -47,16 +48,28 @@ export const agyAdapter: AgentAdapter = {
         const trajId = typeof su.trajectoryId === 'string' ? su.trajectoryId : '';
         if (typeof su.textDelta === 'string' && su.textDelta) turn.events.push({ t: 'text', text: su.textDelta, final: false });
         if (typeof su.thinkingDelta === 'string' && su.thinkingDelta) turn.events.push({ t: 'thinking', text: su.thinkingDelta });
-        // 완결 assistant 메시지 = TurnRecord 권위본(델타 아님).
+        // 완결 assistant 메시지 = TurnRecord 권위본(델타 아님). agy는 스텝마다 text를 내므로 스텝별로 본문 파트가 된다.
+        // 패널은 final:true마다 텍스트 블록을 닫아 별개 블록으로 렌더 → 도구 행과 자연히 분리(codex 멀티 agentMessage와 동형).
+        // IR은 assistantParts.join('\n')로 합쳐진다. (액션 스텝 text도 모델 서술이라 보존 — 필터하면 본문이 비는 턴 발생.)
         if (su.state === 'STATE_DONE' && su.source === 'SOURCE_MODEL' && typeof su.text === 'string' && su.text) {
           turn.open.assistantParts.push(su.text);
           turn.events.push({ t: 'text', text: su.text, final: true });
         }
-        // 액션(도구) — oneof 서브필드 탐지.
+        // 액션(도구) — oneof 서브필드 탐지. 하니스가 한 도구에 stepUpdate를 여러 번 보내므로 stepKey로 디듀프(started 1회·done 1회).
         for (const k of Object.keys(ACTION_TOOLS)) {
           if (su[k]) {
-            turn.open.toolCalls.push({ tool: ACTION_TOOLS[k], arg: toolArgString(su[k]) });
-            turn.events.push({ t: 'tool', id: `${trajId}:${String(su.stepIndex ?? 0)}`, name: ACTION_TOOLS[k], input: su[k], status: su.state === 'STATE_DONE' ? 'done' : 'started' });
+            const stepKey = `${trajId}:${String(su.stepIndex ?? 0)}`;
+            const isDone = su.state === 'STATE_DONE';
+            const prev = toolSteps.get(stepKey);
+            if (!prev) {
+              toolSteps.set(stepKey, isDone ? 'done' : 'started');
+              turn.open.toolCalls.push({ tool: ACTION_TOOLS[k], arg: toolArgString(su[k]) }); // TurnRecord엔 1회만
+              turn.events.push({ t: 'tool', id: stepKey, name: ACTION_TOOLS[k], input: su[k], status: isDone ? 'done' : 'started' });
+            } else if (isDone && prev !== 'done') {
+              toolSteps.set(stepKey, 'done');
+              turn.events.push({ t: 'tool', id: stepKey, name: ACTION_TOOLS[k], input: su[k], status: 'done' });
+            }
+            break; // oneof — 하나만 매칭
           }
         }
         // 빌트인 도구 승인 요청(STATE_WAITING_FOR_USER).
@@ -89,6 +102,7 @@ export const agyAdapter: AgentAdapter = {
     // 턴 직렬 골격 공유. begin=agy 턴 시작(InputEvent 전송). ref는 begin 전에 세팅돼 델타가 먼저 와도 라우팅됨.
     const send = createSerialTurnSession(ref, (active, text) => {
       active.open.sourceKey = `t${++turnSeq}`; // 턴별 고유 키(begin은 이벤트보다 먼저 실행돼 항상 세팅됨)
+      toolSteps.clear(); // 새 턴 — 도구 디듀프 상태 리셋
       if (cascadeId) active.events.push({ t: 'session', sessionId: cascadeId, model });
       client.sendInput(text);
     });

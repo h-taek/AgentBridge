@@ -59,6 +59,14 @@ export async function startHarness(opts: HarnessStartOptions): Promise<HarnessCl
   const config: Record<string, unknown> = {
     models: [{ name: opts.model, types: ['MODEL_TYPE_TEXT'], geminiApiEndpoint: { apiKey: opts.apiKey } }],
     workspaces: [{ filesystemWorkspace: { directory: opts.cwd } }], // 프로젝트 디렉터리(Python SDK workspaces=[path]와 동형)
+    // 빌트인 코딩 도구 활성화 — 하니스가 직접 실행("harness executes them internally"), 클라는 승인+표시만(codex 동형).
+    // 각 *ToolConfig{enabled} 매핑은 Python SDK _to_harness_side_tools_proto와 동일. 위험 도구(쓰기·셸)는 toolConfirmationRequest로 승인 게이트.
+    harnessSideTools: {
+      find: { enabled: true }, runCommand: { enabled: true }, fileEdit: { enabled: true },
+      viewFile: { enabled: true }, writeToFile: { enabled: true }, grepSearch: { enabled: true },
+      listDir: { enabled: true }, searchWeb: { enabled: true },
+      subagents: { enabled: false }, userQuestions: { enabled: false }, generateImage: { enabled: false },
+    },
   };
   if (opts.context) {
     // IR/handoff = 기본 agy 시스템 프롬프트 뒤에 덧붙임(appended). Python SDK str 단축형(TemplatedSystemInstructions)과 동일.
