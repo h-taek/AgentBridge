@@ -268,12 +268,14 @@ export class SdkChatPanel {
     let irPresent = false;
     try { irPresent = Boolean(await readIR(workspaceRoot)); } catch { /* IR 없음 */ }
     let mem = 0;
+    let memTitles: string[] = [];
     try {
       const userData = path.dirname(path.dirname(workspaceRoot)); // <userData>/workspaces/<id> → <userData>
       const matches = await resolveContext(path.join(userData, 'global'), 'default', text, { topN: 5 });
       mem = matches.length;
+      memTitles = matches.map((m) => m.title); // 실제 주입된 메모리 제목(개수만 남기고 버리던 걸 흘려보냄, #14)
     } catch { /* 글로벌 메모리 미설정 등 */ }
-    if (irPresent || mem > 0) this.post({ type: 'inject', ir: irPresent, mem });
+    if (irPresent || mem > 0) this.post({ type: 'inject', ir: irPresent, mem, memTitles });
   }
 
   private async onMessage(msg: { type: string; text?: string; id?: string; approve?: boolean; mode?: PermissionMode; level?: string; url?: string; on?: boolean; style?: string; name?: string; enabled?: boolean; query?: string; base64?: string; workspaceId?: string; sessionId?: string; model?: string; paths?: string[]; key?: string }): Promise<void> {
@@ -522,7 +524,7 @@ export class SdkChatPanel {
     this.post({ type: 'attachAdded', name: safeName, path: insertPath, dataUrl: `data:image/${mime};base64,${base64}` });
   }
 
-  private post(msg: { type: 'ready'; sessionId: string; model?: string; injected?: boolean; loggedIn?: boolean } | { type: 'event'; ev: ChatEvent } | { type: 'models'; list: ModelOption[] } | { type: 'attachAdded'; name: string; path: string; dataUrl: string } | { type: 'loginStarted'; manualUrl: string } | { type: 'loginResult'; ok: boolean } | { type: 'usage'; data: AccountUsage | null } | { type: 'outputStyles'; data: { current: string; available: string[] } | null } | { type: 'mcp'; data: McpServerInfo[] } | { type: 'agents'; data: AgentInfo[] } | { type: 'compacted'; ok: boolean } | { type: 'mentionAdded'; path: string } | { type: 'slash'; list: string[] } | { type: 'files'; list: string[] } | { type: 'cleared' } | { type: 'inject'; ir: boolean; mem: number } | { type: 'restore'; turns: Array<{ user: string; items: Array<{ type: string; text?: string; name?: string; arg?: string }> }> } | { type: 'sessions'; sessions: SessionMeta[] }): void {
+  private post(msg: { type: 'ready'; sessionId: string; model?: string; injected?: boolean; loggedIn?: boolean } | { type: 'event'; ev: ChatEvent } | { type: 'models'; list: ModelOption[] } | { type: 'attachAdded'; name: string; path: string; dataUrl: string } | { type: 'loginStarted'; manualUrl: string } | { type: 'loginResult'; ok: boolean } | { type: 'usage'; data: AccountUsage | null } | { type: 'outputStyles'; data: { current: string; available: string[] } | null } | { type: 'mcp'; data: McpServerInfo[] } | { type: 'agents'; data: AgentInfo[] } | { type: 'compacted'; ok: boolean } | { type: 'mentionAdded'; path: string } | { type: 'slash'; list: string[] } | { type: 'files'; list: string[] } | { type: 'cleared' } | { type: 'inject'; ir: boolean; mem: number; memTitles: string[] } | { type: 'restore'; turns: Array<{ user: string; items: Array<{ type: string; text?: string; name?: string; arg?: string }> }> } | { type: 'sessions'; sessions: SessionMeta[] }): void {
     void this.panel.webview.postMessage(msg);
   }
 
@@ -583,6 +585,12 @@ export class SdkChatPanel {
   .user .msg{background:var(--vscode-textBlockQuote-background);border-radius:12px;padding:4px 13px;max-width:80%;white-space:pre-wrap}
   /* 주입 상태 라벨 — 유저 버블 바로 아래 작은 회색 한 줄(매 턴 IR·장기메모리 수). */
   .inj{font-size:11px;color:var(--vscode-descriptionForeground);font-family:var(--vscode-editor-font-family),monospace;margin-top:-8px;opacity:.85}
+  /* Injected 펼치기(#14) — 삼각형으로 실제 주입된 장기메모리 제목 표시 */
+  details.inj>summary{cursor:pointer;list-style:none}
+  details.inj>summary::-webkit-details-marker{display:none}
+  details.inj>summary::after{content:' ▸';font-size:9px} details.inj[open]>summary::after{content:' ▾'}
+  .injlist{margin:3px 0 0 13px;display:flex;flex-direction:column;gap:1px}
+  .injitem{font-size:11px;opacity:.9;overflow-wrap:anywhere}
   .att{display:inline-flex;align-items:center;gap:5px;background:var(--vscode-textBlockQuote-background);border:1px solid var(--vscode-panel-border);border-radius:8px;padding:4px 8px;font-size:11px;color:var(--vscode-descriptionForeground);margin-bottom:5px}
 
   .item{display:flex;gap:9px;position:relative}
@@ -1277,7 +1285,13 @@ export class SdkChatPanel {
         // 큐로 다음 유저 버블이 미리 떠 있어도 어긋나지 않음.
         var prev=cur.turn.previousElementSibling;
         if(!(prev && prev.classList.contains('inj'))){
-          var lab=el('div','inj'); lab.textContent='↳ Injected · '+ip.join(', ');
+          var titles=msg.memTitles||[], lab;
+          if(titles.length){
+            lab=el('details','inj'); lab.appendChild(el('summary',null,'↳ Injected · '+ip.join(', ')));
+            var list=el('div','injlist'); titles.forEach(function(t){ list.appendChild(el('div','injitem','• '+t)); }); lab.appendChild(list);
+          } else {
+            lab=el('div','inj'); lab.textContent='↳ Injected · '+ip.join(', ');
+          }
           log.insertBefore(lab, cur.turn);
         }
       }
