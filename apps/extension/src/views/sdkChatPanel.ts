@@ -546,7 +546,7 @@ export class SdkChatPanel {
   ${CHAT_HEADER_CSS}
 
   .logwrap{position:relative;flex:1;display:flex;flex-direction:column;min-height:0}
-  #log{flex:1;overflow-y:auto;padding:18px 16px;display:flex;flex-direction:column;gap:16px}
+  #log{flex:1;overflow-y:auto;overflow-x:hidden;padding:18px 16px;display:flex;flex-direction:column;gap:16px}
   /* 시작 화면 — 대화 전(빈 채팅)에 #log 위에 겹쳐 중앙 표시. 첫 메시지/대화중이면 숨김. */
   #welcome{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
     background:var(--vscode-sideBar-background,var(--vscode-editor-background))}
@@ -587,7 +587,7 @@ export class SdkChatPanel {
   details.think>summary::after{content:" ▸";font-size:9px} details.think[open]>summary::after{content:" ▾"}
   details.think .tx{margin-top:4px;color:var(--vscode-descriptionForeground);white-space:pre-wrap;border-left:1px solid var(--vscode-panel-border);padding-left:9px}
   /* 도구: 볼드 이름 + 설명, 그 아래 IN/OUT 박스 */
-  .tname{font-size:13px;color:var(--vscode-descriptionForeground)}
+  .tname{font-size:13px;color:var(--vscode-descriptionForeground);overflow-wrap:anywhere;word-break:break-word}
   .tname strong{color:var(--vscode-foreground);font-weight:700;margin-right:7px}
   .tbox{margin-top:5px;border:1px solid var(--vscode-panel-border);border-radius:7px;overflow:hidden;font-family:var(--vscode-editor-font-family),monospace;font-size:11.5px;
     background:var(--vscode-textCodeBlock-background);
@@ -596,12 +596,12 @@ export class SdkChatPanel {
   .trow+.trow{border-top:1px solid rgba(127,127,127,.3)}
   .tlabel{flex:none;width:24px;color:var(--vscode-descriptionForeground);opacity:.5;font-size:10.5px;padding-top:2px}
   .tcontent{flex:1;min-width:0;color:var(--vscode-foreground);opacity:.92;white-space:pre-wrap;word-break:break-word;line-height:1.5;max-height:60px;overflow:auto}
-  .md{line-height:1.72} .md p{margin:0 0 .7em} .md p:last-child{margin:0} .md strong{font-weight:700}
+  .md{line-height:1.72;overflow-wrap:anywhere;word-break:break-word} .md p{margin:0 0 .7em} .md p:last-child{margin:0} .md strong{font-weight:700}
   .copybtn{display:inline-flex;align-items:center;align-self:flex-start;margin-top:-10px;margin-left:16px;background:none;border:none;color:var(--vscode-descriptionForeground);opacity:.4;cursor:pointer;padding:4px;border-radius:5px;line-height:1}
   .copybtn svg{width:15px;height:15px}
   .copybtn:hover{opacity:.9;background:var(--vscode-toolbar-hoverBackground)}
   .md code{background:var(--vscode-textCodeBlock-background);padding:1px 5px;border-radius:4px;font-family:var(--vscode-editor-font-family),monospace;font-size:12px}
-  .md pre{background:var(--vscode-textCodeBlock-background);border:1px solid var(--vscode-panel-border);border-radius:8px;padding:10px 12px;overflow-x:auto;margin:.4em 0}
+  .md pre{background:var(--vscode-textCodeBlock-background);border:1px solid var(--vscode-panel-border);border-radius:8px;padding:10px 12px;overflow-x:auto;max-width:100%;margin:.4em 0}
   .md pre code{background:none;padding:0} .md ul{margin:.3em 0;padding-left:1.3em}
   .md h1,.md h2,.md h3,.md h4,.md h5,.md h6{margin:.6em 0 .3em;font-weight:700;line-height:1.3}
   .md h1{font-size:1.45em} .md h2{font-size:1.25em} .md h3{font-size:1.1em} .md h4,.md h5,.md h6{font-size:1em;opacity:.95}
@@ -686,7 +686,7 @@ export class SdkChatPanel {
   .erange::-webkit-slider-runnable-track{background:transparent;height:16px}
   .erange::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:16px;height:16px;border-radius:50%;background:#fff;border:none;box-shadow:0 1px 3px rgba(0,0,0,.5);margin-top:0}
   #send{height:28px;min-width:32px;padding:0 8px;border-radius:8px;border:none;background:var(--accent);color:#1b1b1d;cursor:pointer;display:inline-flex;align-items:center;justify-content:center}
-  #send.stop{background:var(--vscode-button-secondaryBackground,#6b6b6b);color:#fff}
+  #send.stop{background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground)}
   .err{color:var(--vscode-errorForeground);font-size:12px;white-space:pre-wrap}
 
   /* 설정 메뉴(/ 버튼 통합) — 섹션·토글·서브패널 */
