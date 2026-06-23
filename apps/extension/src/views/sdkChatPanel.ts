@@ -686,7 +686,8 @@ export class SdkChatPanel {
   .erange::-webkit-slider-runnable-track{background:transparent;height:16px}
   .erange::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:16px;height:16px;border-radius:50%;background:#fff;border:none;box-shadow:0 1px 3px rgba(0,0,0,.5);margin-top:0}
   #send{height:28px;min-width:32px;padding:0 8px;border-radius:8px;border:none;background:var(--accent);color:#1b1b1d;cursor:pointer;display:inline-flex;align-items:center;justify-content:center}
-  #send.stop{background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground)}
+  /* 정지버튼 = 테마 무관 고정 (모델 accent + 어두운 사각형). VS Code 테마색에 안 기댐 */
+  #send.stop{background:var(--accent);color:#1b1b1d}
   .err{color:var(--vscode-errorForeground);font-size:12px;white-space:pre-wrap}
 
   /* 설정 메뉴(/ 버튼 통합) — 섹션·토글·서브패널 */
