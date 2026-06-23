@@ -30,6 +30,11 @@ let secretStore: vscode.SecretStorage | undefined;
 export function setSdkChatSecrets(s: vscode.SecretStorage): void {
   secretStore = s;
 }
+// 마지막 선택 effort(모델별) 영속 — globalState. activate에서 setSdkChatState로 주입(#15).
+let stateStore: vscode.Memento | undefined;
+export function setSdkChatState(m: vscode.Memento): void {
+  stateStore = m;
+}
 
 export class SdkChatPanel {
   private session: Session | null = null;
@@ -249,7 +254,14 @@ export class SdkChatPanel {
       this.post({ type: 'ready', sessionId: this.session.sessionId, model: this.model, injected: Boolean(context), loggedIn });
       // 6-3: 에이전트 내부 모델 목록을 받아 패널 모델 칩 메뉴를 채운다(실패해도 채팅엔 영향 없음).
       const models = await this.session.listModels().catch(() => [] as ModelOption[]);
-      if (models.length) this.post({ type: 'models', list: models });
+      if (models.length) {
+        // #15: 모델별 마지막 effort 복원 — 현재 모델 efforts에 있으면 세션에 적용 + 슬라이더 시드.
+        const savedEffort = stateStore?.get<string>('agentbridge.lastEffort.' + this.model);
+        const curModel = models.find((m) => m.current) ?? models[0];
+        const effort = savedEffort && curModel?.efforts?.includes(savedEffort) ? savedEffort : undefined;
+        if (effort) await this.session.setEffort(effort).catch(() => { /* best-effort */ });
+        this.post({ type: 'models', list: models, effort });
+      }
       // 슬래시 명령을 첫 send 전에 미리 채워 / 메뉴에 바로 보이게 (claude=전체 목록 / codex=빈 목록).
       const cmds = await this.session.listCommands().catch(() => [] as string[]);
       if (cmds.length) this.post({ type: 'slash', list: cmds });
@@ -305,6 +317,7 @@ export class SdkChatPanel {
         output.warn(`SdkChatPanel: setModel 실패 — ${err instanceof Error ? err.message : String(err)}`);
       });
     } else if (msg.type === 'setEffort' && msg.level) {
+      void stateStore?.update('agentbridge.lastEffort.' + this.model, msg.level); // 모델별 마지막 effort 영속(#15)
       await this.session?.setEffort(msg.level).catch((err) => {
         output.warn(`SdkChatPanel: setEffort 실패 — ${err instanceof Error ? err.message : String(err)}`);
       });
@@ -524,7 +537,7 @@ export class SdkChatPanel {
     this.post({ type: 'attachAdded', name: safeName, path: insertPath, dataUrl: `data:image/${mime};base64,${base64}` });
   }
 
-  private post(msg: { type: 'ready'; sessionId: string; model?: string; injected?: boolean; loggedIn?: boolean } | { type: 'event'; ev: ChatEvent } | { type: 'models'; list: ModelOption[] } | { type: 'attachAdded'; name: string; path: string; dataUrl: string } | { type: 'loginStarted'; manualUrl: string } | { type: 'loginResult'; ok: boolean } | { type: 'usage'; data: AccountUsage | null } | { type: 'outputStyles'; data: { current: string; available: string[] } | null } | { type: 'mcp'; data: McpServerInfo[] } | { type: 'agents'; data: AgentInfo[] } | { type: 'compacted'; ok: boolean } | { type: 'mentionAdded'; path: string } | { type: 'slash'; list: string[] } | { type: 'files'; list: string[] } | { type: 'cleared' } | { type: 'inject'; ir: boolean; mem: number; memTitles: string[] } | { type: 'restore'; turns: Array<{ user: string; items: Array<{ type: string; text?: string; name?: string; arg?: string }> }> } | { type: 'sessions'; sessions: SessionMeta[] }): void {
+  private post(msg: { type: 'ready'; sessionId: string; model?: string; injected?: boolean; loggedIn?: boolean } | { type: 'event'; ev: ChatEvent } | { type: 'models'; list: ModelOption[]; effort?: string } | { type: 'attachAdded'; name: string; path: string; dataUrl: string } | { type: 'loginStarted'; manualUrl: string } | { type: 'loginResult'; ok: boolean } | { type: 'usage'; data: AccountUsage | null } | { type: 'outputStyles'; data: { current: string; available: string[] } | null } | { type: 'mcp'; data: McpServerInfo[] } | { type: 'agents'; data: AgentInfo[] } | { type: 'compacted'; ok: boolean } | { type: 'mentionAdded'; path: string } | { type: 'slash'; list: string[] } | { type: 'files'; list: string[] } | { type: 'cleared' } | { type: 'inject'; ir: boolean; mem: number; memTitles: string[] } | { type: 'restore'; turns: Array<{ user: string; items: Array<{ type: string; text?: string; name?: string; arg?: string }> }> } | { type: 'sessions'; sessions: SessionMeta[] }): void {
     void this.panel.webview.postMessage(msg);
   }
 
@@ -1260,7 +1273,9 @@ export class SdkChatPanel {
       else { showLoginMode(false); setLoggedOut(false); setBusy(false); input.disabled=false; input.focus(); }
       return;
     }
-    if(msg.type==='models'){ MODELS=msg.list||[]; var curM=MODELS.filter(function(m){return m.current;})[0]; if(curM && modelPill.textContent==='Model') modelPill.textContent=curM.label; return; }
+    if(msg.type==='models'){ MODELS=msg.list||[]; var curM=MODELS.filter(function(m){return m.current;})[0]; if(curM && modelPill.textContent==='Model') modelPill.textContent=curM.label;
+      if(msg.effort && curM && curM.efforts){ var ei=curM.efforts.indexOf(msg.effort); if(ei>=0){ effortIdx=ei; userSetEffort=true; } } // #15 마지막 effort 시드
+      return; }
     if(msg.type==='attachAdded'){ PENDING.push({name:msg.name,path:msg.path,dataUrl:msg.dataUrl}); renderChips(); return; }
     if(msg.type==='loginStarted'){ loginManualUrl=msg.manualUrl||''; if(loginManualUrl) document.getElementById('wmanual').style.display='block'; return; }
     if(msg.type==='loginResult'){

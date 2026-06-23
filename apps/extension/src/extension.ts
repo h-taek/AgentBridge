@@ -21,7 +21,7 @@ import { MemoryPanelProvider } from './views/memoryPanel';
 import { ProfilePanelProvider } from './views/profilePanel';
 import { SessionTreeProvider, SessionItem } from './views/sessionTreeView';
 import { ChatPanel, getActivePanel, getAllPanels, chatPanelEvents } from './views/chatPanel';
-import { SdkChatPanel, setSdkChatSecrets } from './views/sdkChatPanel';
+import { SdkChatPanel, setSdkChatSecrets, setSdkChatState } from './views/sdkChatPanel';
 import { compactionEvents } from './core/compactionScheduler';
 import { randomUUID } from 'node:crypto';
 import { registerSession, markSessionClosed, markSessionActive, renameSession, deleteSession, setModelSessionId } from './core/sessionRegistry';
@@ -76,6 +76,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   // agy(API 키) 인증용 SecretStorage 주입 — SdkChatPanel이 키 저장/로드에 사용.
   setSdkChatSecrets(context.secrets);
+  setSdkChatState(context.globalState); // 마지막 선택 effort(모델별) 영속용 (#15)
 
   // hook helper를 ~/.agentbridge/bin/에 설치 (V-12 — 양 앱 공용 canonical 경로).
   // 실패해도 익스텐션 동작에는 지장 없음 (hook만 비활성) — 로그만 남김.
