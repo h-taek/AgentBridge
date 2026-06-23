@@ -40,6 +40,11 @@ const MODEL_CHOICES: ModelChoice[] = [
   { label: 'Antigravity', description: 'Antigravity CLI', model: 'agy' },
 ];
 
+// agy SDK(GUI) 라우팅 스위치. 구현은 완료(어댑터·localharness 자동 다운로드·키 로그인) 됐으나
+// 무료 Gemini API 키의 분당 20요청 레이트리밋(agentic 루프엔 부족)과 세션 재개 미지원으로 GUI 경험이 나빠
+// 현재는 GUI에서 agy를 PTY(구독)로 고정한다. 유료 키 경로/세션 재개가 갖춰지면 true로 바꿔 재활성.
+const AGY_SDK_GUI_ENABLED = false;
+
 function checkAvailability(model: CliKind): { found: boolean; name: string } {
   switch (model) {
     case 'claude': return { ...claudeAdapter.isAvailable(), name: 'claude' };
@@ -263,8 +268,8 @@ export function activate(context: vscode.ExtensionContext) {
   // chatMode 토글 디스패처 — 설정값에 따라 SDK 패널 또는 PTY 패널을 연다(둘 다 보존, 라우팅만 분기).
   // PTY: buildOpts로 SpawnOptions 구성 → ChatPanel.create(복원 경로와 동일 빌더). 닫힘 시 markSessionClosed.
   async function openChat(cwd: string, workspaceId: string, model: CliKind, sessionId: string, modelSessionId?: string, title?: string): Promise<void> {
-    // chatMode 토글에 따라 분기 — agy도 claude/codex와 동일(sdk=localharness GUI, pty=agy CLI 터미널).
-    if (getConfig().chatMode === 'pty') {
+    // chatMode 토글에 따라 분기. 단 agy는 AGY_SDK_GUI_ENABLED=false면 chatMode와 무관하게 PTY 고정(위 주석 참조).
+    if (getConfig().chatMode === 'pty' || (model === 'agy' && !AGY_SDK_GUI_ENABLED)) {
       const opts = { ...(await buildOpts(model, cwd, workspaceId, sessionId, modelSessionId)), terminalName: title ?? CLI_DISPLAY_NAME[model] };
       const chat = ChatPanel.create(context.extensionUri, opts);
       chat.onDispose(() => { void markSessionClosed(workspaceId, sessionId).then(() => sessionTree.refresh()); });
@@ -478,6 +483,7 @@ export function activate(context: vscode.ExtensionContext) {
     async deserializeWebviewPanel(panel: vscode.WebviewPanel, state: unknown): Promise<void> {
       const s = state as { sessionId?: string; model?: CliKind; workspaceId?: string } | null;
       if (!s || !s.sessionId || !s.model || !s.workspaceId) { panel.dispose(); return; }
+      if (s.model === 'agy' && !AGY_SDK_GUI_ENABLED) { panel.dispose(); return; } // agy SDK 비활성 — 잔존 sdkChat 탭 폐기(PTY 고정)
       const folder = vscode.workspace.workspaceFolders?.[0]?.uri;
       if (!folder) { panel.dispose(); return; }
       const availability = checkAvailability(s.model);
