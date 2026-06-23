@@ -1162,9 +1162,14 @@ export class SdkChatPanel {
     work.spin=setInterval(function(){ var F=' .oO@* '; sp.textContent=F[work.frame%F.length]; work.frame++; tick(); },200);
     tick();
   }
-  function tick(){ if(!work) return; var s=Math.floor((Date.now()-work.t0)/1000); work.mt.textContent='('+s+'s'+(work.out?(' · ↑ '+fmt(work.out)+' tokens'):'')+')'; }
+  function tick(){ if(!work) return; var s=Math.floor((Date.now()-work.t0)/1000); work.mt.textContent='('+fmtDur(s)+(work.out?(' · ↑ '+fmt(work.out)+' tokens'):'')+')'; }
   function setStatus(k){ if(work) work.st.textContent=STATUS[k]; }
+  function setStatusText(t){ if(work) work.st.textContent=t; }
+  // 도구 이름 → "무엇을 하는 중"인지 라벨 (#17). 모르는 이름은 그대로 노출.
+  var TOOLVERB={Bash:'Running command',Shell:'Running command',Read:'Reading file',Glob:'Searching files',Grep:'Searching',Edit:'Editing',MultiEdit:'Editing',Write:'Writing file',NotebookEdit:'Editing',WebFetch:'Fetching',WebSearch:'Searching the web',Task:'Sub-agent',TodoWrite:'Planning'};
+  function toolVerb(n){ return (TOOLVERB[n]||n||'Working')+'…'; }
   function fmt(n){ return n>=1000? (n/1000).toFixed(1).replace(/\\.0$/,'')+'k' : ''+n; }
+  function fmtDur(s){ if(s<60) return s+'s'; var h=Math.floor(s/3600), m=Math.floor(s%3600/60), x=s%60; return (h?h+'h ':'')+((h||m)?m+'m ':'')+x+'s'; }
   function stopWork(){ if(work){ clearInterval(work.spin); work.line.remove(); work=null; } }
   function cleanModel(m){ if(!m) return ''; var s=m.replace(/\\[.*?\\]/g,'').replace(/^(claude|codex)-/,''); var p=s.match(/^(opus|sonnet|haiku)-?(\\d+)-?(\\d+)?/i); return p? (p[1].charAt(0).toUpperCase()+p[1].slice(1)+' '+p[2]+(p[3]?'.'+p[3]:'')) : s; }
   function grow(){ input.style.height='auto'; input.style.height=Math.min(input.scrollHeight,160)+'px'; }
@@ -1293,7 +1298,7 @@ export class SdkChatPanel {
         b.appendChild(nm);
         var box=el('div','tbox'); var inTxt=toolIn(ev.input);
         if(inTxt){ var ir=el('div','trow'); ir.appendChild(el('span','tlabel','IN')); ir.appendChild(el('div','tcontent',inTxt)); box.appendChild(ir); }
-        b.appendChild(box); cur.tools[ev.id]={box:box,hasOut:false}; setStatus('working'); bottom();
+        b.appendChild(box); cur.tools[ev.id]={box:box,hasOut:false}; setStatusText(toolVerb(ev.name)); bottom();
       }
       // done → OUT 박스 채움
       if(ev.status==='done'){
@@ -1308,13 +1313,13 @@ export class SdkChatPanel {
       var acts=el('div','aacts'); var no=el('button','an','Deny'); var yes=el('button','ay','Approve');
       no.addEventListener('click', function(){ vscode.postMessage({type:'respondApproval',id:ev.id,approve:false}); box.remove(); });
       yes.addEventListener('click', function(){ vscode.postMessage({type:'respondApproval',id:ev.id,approve:true}); box.remove(); });
-      acts.appendChild(no); acts.appendChild(yes); box.appendChild(info); box.appendChild(acts); approvalSlot.appendChild(box);
+      acts.appendChild(no); acts.appendChild(yes); box.appendChild(info); box.appendChild(acts); approvalSlot.appendChild(box); setStatusText('Waiting for approval…');
     }
     else if(ev.t==='turn_end'){
       closeText(); closeThink();
       // 완료 요약 줄 — Worked for Xs · N tokens (#3) / 인터럽트 시 Interrupted
       if(work&&cur){ var s=Math.max(1,Math.round((Date.now()-work.t0)/1000)); var tok=work.out;
-        var w=el('div','worked'); w.textContent=(interruptRequested?'■ Interrupted after '+s+'s':'* Worked for '+s+'s')+(tok?(' · '+fmt(tok)+' tokens'):''); cur.turn.appendChild(w); }
+        var w=el('div','worked'); w.textContent=(interruptRequested?'■ Interrupted after '+fmtDur(s):'* Worked for '+fmtDur(s))+(tok?(' · '+fmt(tok)+' tokens'):''); cur.turn.appendChild(w); }
       if(cur&&cur.fullRaw&&cur.fullRaw.trim()) addTurnCopyBtn(cur.turn, cur.fullRaw);
       interruptRequested=false; stopWork(); setBusy(false); input.focus(); bottom(); drainQueue();
     }
