@@ -290,7 +290,7 @@ export class SdkChatPanel {
     if (irPresent || mem > 0) this.post({ type: 'inject', ir: irPresent, mem, memTitles });
   }
 
-  private async onMessage(msg: { type: string; text?: string; id?: string; approve?: boolean; mode?: PermissionMode; level?: string; url?: string; on?: boolean; style?: string; name?: string; enabled?: boolean; query?: string; base64?: string; workspaceId?: string; sessionId?: string; model?: string; paths?: string[]; key?: string }): Promise<void> {
+  private async onMessage(msg: { type: string; text?: string; id?: string; approve?: boolean; answers?: { header: string; selected: string[] }[]; mode?: PermissionMode; level?: string; url?: string; on?: boolean; style?: string; name?: string; enabled?: boolean; query?: string; base64?: string; workspaceId?: string; sessionId?: string; model?: string; paths?: string[]; key?: string }): Promise<void> {
     if (msg.type === 'send') {
       if (!this.session) return;
       void this.computeInjectLabel(String(msg.text ?? '')); // 이번 턴 주입 상태 라벨(IR·장기메모리 수)
@@ -308,6 +308,8 @@ export class SdkChatPanel {
       await this.session?.interrupt().catch(() => { /* nothing in flight */ });
     } else if (msg.type === 'respondApproval') {
       this.session?.respondApproval(String(msg.id), Boolean(msg.approve));
+    } else if (msg.type === 'respondQuestion') {
+      this.session?.respondQuestion?.(String(msg.id), Array.isArray(msg.answers) ? msg.answers : []);
     } else if (msg.type === 'setPermissionMode' && msg.mode) {
       await this.session?.setPermissionMode(msg.mode).catch((err) => {
         output.warn(`SdkChatPanel: setPermissionMode 실패 — ${err instanceof Error ? err.message : String(err)}`);
@@ -695,6 +697,26 @@ export class SdkChatPanel {
   .approval .aacts{display:flex;gap:7px;justify-content:flex-end}
   .approval button{font:inherit;padding:6px 16px;border-radius:8px;border:none;cursor:pointer}
   .ay{background:var(--accent);color:#1b1b1d;font-weight:600} .an{background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground)}
+  /* ── 질문 위젯(AskUserQuestion, #13) — approval 카드의 형제. 선택지 행 + 단일 즉시/다중 Confirm ── */
+  .askwrap{position:relative;z-index:1;margin:0 30px -30px;display:flex;flex-direction:column;gap:14px;
+    border:1px solid var(--accent);background:var(--vscode-editorWidget-background,#23211e);border-radius:12px;
+    padding:13px 14px 40px;box-shadow:0 10px 24px rgba(0,0,0,.5);animation:rise .22s ease}
+  .ask{display:flex;flex-direction:column;gap:7px;border-left:2px solid var(--accent);padding-left:11px}
+  .ask .cat{font-size:10.5px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:var(--vscode-descriptionForeground)}
+  .ask .q{font-weight:600;font-size:13px;line-height:1.4}
+  .opts{display:flex;flex-direction:column;gap:1px;margin-top:1px}
+  .opt{display:flex;align-items:flex-start;gap:9px;padding:6px 8px;border-radius:7px;cursor:pointer;background:transparent;transition:background .12s}
+  .opt:hover{background:var(--vscode-toolbar-hoverBackground)}
+  .opt .ol{flex:1;min-width:0} .opt .oname{font-size:13px;font-weight:600;color:var(--vscode-foreground)}
+  .opt.sel .oname{color:var(--accent-bright)}
+  .opt .odesc{font-size:11px;color:var(--vscode-descriptionForeground);line-height:1.4;margin-top:1px}
+  .opt .ck{flex:none;margin-top:1px;color:var(--accent);font-weight:700;opacity:0;transition:opacity .12s} .opt.sel .ck{opacity:1}
+  .askacts{display:flex;align-items:center;gap:10px;justify-content:flex-end;margin-top:1px}
+  .askacts .hint{margin-right:auto;font-size:10.5px;color:var(--vscode-descriptionForeground);opacity:.8}
+  .askacts .confirm{font:inherit;font-weight:600;padding:5px 16px;border-radius:8px;border:none;cursor:pointer;background:var(--accent);color:#1b1b1d}
+  .askacts .confirm:disabled{opacity:.45;cursor:default}
+  .answered{font-family:var(--vscode-editor-font-family),monospace;color:var(--vscode-descriptionForeground);opacity:.78;font-size:12px;display:flex;align-items:center;gap:7px;padding:2px 2px;margin-top:2px}
+  .answered .ck{color:#5ec98a;font-weight:700;flex:none} .answered .cat2{color:var(--accent-bright);opacity:.9} .answered .sep{opacity:.5} .answered .val{color:var(--vscode-foreground);opacity:.9}
 
   /* 입력바 외곽선 = 권한 모드 색(#7). default=포인트색 / edit자동·auto-review=흰색 / plan=파랑 / auto·full=빨강 */
   .inbox{position:relative;z-index:2;background:var(--vscode-input-background);border:1.5px solid var(--accent);border-radius:14px;padding:12px 12px 8px;transition:border-color .15s}
@@ -1448,8 +1470,13 @@ export class SdkChatPanel {
       if(!cur) newAssistantTurn();
       if(!cur.tools) cur.tools={};
       var rec=cur.tools[ev.id];
+      // ── AskUserQuestion → 질문 위젯('question' 이벤트)이 처리 → tool 행 억제(중복 방지, #13) ──
+      if(ev.name==='AskUserQuestion' || (rec&&rec.askq)){
+        if(ev.status==='started') cur.tools[ev.id]={askq:true};
+        if(wasBottom) bottom();
+      }
       // ── TodoWrite → 라이브 영역 todo (트랜스크립트 행 없음, #8) ──
-      if(ev.name==='TodoWrite' || (rec&&rec.todo)){
+      else if(ev.name==='TodoWrite' || (rec&&rec.todo)){
         if(ev.status==='started'){ renderTodos(ev.input); cur.tools[ev.id]={todo:true}; }
         if(wasBottom) bottom();
       }
@@ -1494,6 +1521,47 @@ export class SdkChatPanel {
       no.addEventListener('click', function(){ vscode.postMessage({type:'respondApproval',id:ev.id,approve:false}); box.remove(); });
       yes.addEventListener('click', function(){ vscode.postMessage({type:'respondApproval',id:ev.id,approve:true}); box.remove(); });
       acts.appendChild(no); acts.appendChild(yes); box.appendChild(info); box.appendChild(acts); approvalSlot.appendChild(box); setStatusText('Waiting for approval…');
+    }
+    // 질문 위젯(AskUserQuestion, #13) — 선택지 UI를 입력 위에 띄우고, 답을 respondQuestion으로 회신.
+    // 단일질문·단일선택=클릭 즉시 제출 / 다중질문 or multiSelect=Confirm. 답하면 위젯 제거+트랜스크립트에 한 줄 기록.
+    else if(ev.t==='question'){
+      if(!cur) newAssistantTurn(); closeText(); closeThink();
+      if(!cur.tools) cur.tools={}; cur.tools[ev.id]={askq:true}; // tool 이벤트 중복 억제 마커(#13)
+      var qs=ev.questions||[]; var state=qs.map(function(){ return []; });
+      var needConfirm=qs.length>1||qs.some(function(q){ return q&&q.multiSelect; });
+      var wrap=el('div','askwrap'); var confirmBtn=null, hintEl=null;
+      function refreshQ(){ if(!confirmBtn) return; var ok=state.every(function(s){ return s.length>0; }); confirmBtn.disabled=!ok;
+        if(hintEl){ var tot=0; state.forEach(function(s){ tot+=s.length; }); hintEl.textContent=tot+' selected'; } }
+      function doneQ(){
+        var answers=qs.map(function(q,i){ return {header:(q&&q.header)||'',selected:state[i]}; });
+        vscode.postMessage({type:'respondQuestion',id:ev.id,answers:answers}); wrap.remove();
+        if(cur){ qs.forEach(function(q,i){ var a=el('div','answered'); a.appendChild(el('span','ck','✓'));
+          a.appendChild(el('span','cat2',(q&&q.header)||'')); a.appendChild(el('span','sep','·'));
+          a.appendChild(el('span','val', state[i].join(', ')||'(none)')); cur.turn.appendChild(a); }); }
+        setStatusText(STATUS.working); bottom();
+      }
+      qs.forEach(function(q,qi){ q=q||{}; var ask=el('div','ask');
+        ask.appendChild(el('span','cat',q.header||'')); ask.appendChild(el('div','q',q.question||''));
+        var opts=el('div','opts');
+        (q.options||[]).forEach(function(o){ o=o||{}; var row=el('div','opt'); var ol=el('div','ol');
+          ol.appendChild(el('div','oname',o.label||'')); if(o.description) ol.appendChild(el('div','odesc',o.description));
+          row.appendChild(ol); row.appendChild(el('span','ck','✓'));
+          row.addEventListener('click', function(){
+            if(q.multiSelect){ var ix=state[qi].indexOf(o.label);
+              if(ix>=0){ state[qi].splice(ix,1); row.classList.remove('sel'); } else { state[qi].push(o.label); row.classList.add('sel'); } }
+            else { var rows=opts.querySelectorAll('.opt'); for(var k=0;k<rows.length;k++) rows[k].classList.remove('sel');
+              row.classList.add('sel'); state[qi]=[o.label]; if(!needConfirm){ doneQ(); return; } }
+            refreshQ();
+          });
+          opts.appendChild(row);
+        });
+        ask.appendChild(opts); wrap.appendChild(ask);
+      });
+      if(needConfirm){ var acts2=el('div','askacts'); hintEl=el('span','hint','0 selected');
+        confirmBtn=el('button','confirm','Confirm'); confirmBtn.disabled=true;
+        confirmBtn.addEventListener('click', function(){ if(state.every(function(s){ return s.length>0; })) doneQ(); });
+        acts2.appendChild(hintEl); acts2.appendChild(confirmBtn); wrap.appendChild(acts2); }
+      approvalSlot.appendChild(wrap); setStatusText('Waiting for your answer…'); if(wasBottom) bottom();
     }
     else if(ev.t==='turn_end'){
       closeText(); closeThink();

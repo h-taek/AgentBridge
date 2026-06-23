@@ -14,10 +14,26 @@ export type ChatEvent =
   | { t: 'commands'; commands: string[] }
   // 승인 요청(5단계) — 호스트가 UI로 띄우고 respondApproval(id, approve)로 응답할 때까지 턴이 멈춘다.
   | { t: 'approval'; id: string; title: string; detail: string; tool: string }
+  // 질문 위젯(AskUserQuestion) — claude만. canUseTool로 가로채 선택지 UI를 띄우고 respondQuestion으로 답을 회신.
+  //   (SDK는 답 주입 채널이 없어 deny.message에 선택값을 실어 보냄 — 라이브 확인. codex/agy는 미방출.)
+  | { t: 'question'; id: string; questions: AskQuestion[] }
   // 미로그인 감지(로그인) — 호스트가 로그인 화면을 띄운다. loggedIn:false면 인증 필요.
   | { t: 'auth'; loggedIn: boolean }
   | { t: 'turn_end'; reason: string }
   | { t: 'error'; message: string };
+
+// AskUserQuestion 한 질문 — header(칩)·question(본문)·options(2~4)·multiSelect. options.description은 선택.
+export interface AskQuestion {
+  question: string;
+  header: string;
+  multiSelect?: boolean;
+  options: { label: string; description?: string }[];
+}
+// 질문 응답 — 질문별 선택된 라벨들. 어댑터가 deny.message 텍스트로 포맷해 모델에 회신.
+export interface QuestionAnswer {
+  header: string;
+  selected: string[];
+}
 
 // 로그인 챌린지 — OAuth URL 2종. automatic=SDK 로컬 콜백서버가 자동 완료 / manual=코드 복붙 폴백.
 export interface LoginChallenge {
@@ -118,6 +134,8 @@ export interface Session {
   suggestTitle(firstMessage: string): Promise<string | null>;
   // 'approval' ChatEvent에 대한 응답 — 진행 중 턴이 이 호출까지 멈춰 있다.
   respondApproval(id: string, approve: boolean): void;
+  // 'question' ChatEvent(AskUserQuestion)에 대한 응답 — claude만 구현. 미구현 어댑터(codex/agy)는 'question'을 안 냄.
+  respondQuestion?(id: string, answers: QuestionAnswer[]): void;
   // 로그인 여부 조회(미로그인=false) — 세션 시작 시 입력 차단/로그인 화면 판단용. claude=accountInfo / codex=account/read.
   checkAuth(): Promise<boolean>;
   // 로그인(미로그인 사용자) — claude=q.claudeAuthenticate / codex=account/login/start.

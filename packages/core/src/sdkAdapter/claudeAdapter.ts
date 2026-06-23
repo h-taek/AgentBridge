@@ -10,7 +10,14 @@ import type { ReaderCtx } from '../transcriptReader/types.js';
 import { finalizeTurn, toolArgString } from '../transcriptReader/util.js';
 import { AsyncQueue } from './asyncQueue.js';
 import { createSerialTurnSession, type ActiveTurn } from './createSerialTurnSession.js';
-import type { AccountUsage, AgentAdapter, AgentInfo, LoginChallenge, McpServerInfo, PermissionMode, Session, StartOptions, UsageContributors, UsageLimit } from './types.js';
+import type { AccountUsage, AgentAdapter, AgentInfo, AskQuestion, LoginChallenge, McpServerInfo, PermissionMode, QuestionAnswer, Session, StartOptions, UsageContributors, UsageLimit } from './types.js';
+
+// AskUserQuestion 응답 → deny.message 텍스트. SDK엔 답 주입 채널이 없어 거부 메시지에 선택값을 실어 보내면
+// 모델이 답으로 해석하고 진행한다(라이브 확인). '거부'가 아니라 '사용자 답변'임을 헤더로 명시.
+function formatAnswers(answers: QuestionAnswer[]): string {
+  const lines = answers.map((a) => `- ${a.header}: ${a.selected.join(', ')}`);
+  return `The user answered your question(s):\n${lines.join('\n')}`;
+}
 
 // SDK Query의 인증 메서드는 .d.ts에 미노출(런타임 객체엔 존재) → 타입만 보강.
 type AuthQuery = {
@@ -105,13 +112,19 @@ export const claudeAdapter: AgentAdapter = {
           new Promise<PermissionResult>((resolve) => {
             const id = o.toolUseID;
             approvals.set(id, resolve);
-            ref.current?.events.push({
-              t: 'approval',
-              id,
-              title: o.title ?? `${toolName} 실행 승인`,
-              detail: o.description ?? toolArgString(toolInput),
-              tool: toolName,
-            });
+            // AskUserQuestion → 질문 위젯(respondQuestion이 deny.message로 답 회신) / 그 외 → 승인 카드.
+            const qs = (toolInput as { questions?: unknown } | null)?.questions;
+            if (toolName === 'AskUserQuestion' && Array.isArray(qs)) {
+              ref.current?.events.push({ t: 'question', id, questions: qs as AskQuestion[] });
+            } else {
+              ref.current?.events.push({
+                t: 'approval',
+                id,
+                title: o.title ?? `${toolName} 실행 승인`,
+                detail: o.description ?? toolArgString(toolInput),
+                tool: toolName,
+              });
+            }
           }),
       },
     });
@@ -313,6 +326,14 @@ export const claudeAdapter: AgentAdapter = {
         if (resolve) {
           approvals.delete(id);
           resolve(approve ? { behavior: 'allow' } : { behavior: 'deny', message: '사용자가 거부함' });
+        }
+      },
+      respondQuestion(id, answers) {
+        // 답을 deny.message로 회신 — SDK가 AskUserQuestion을 내부 실행(헤드리스 불가)하지 않게 거부하되 선택값을 전달.
+        const resolve = approvals.get(id);
+        if (resolve) {
+          approvals.delete(id);
+          resolve({ behavior: 'deny', message: formatAnswers(answers) });
         }
       },
       async checkAuth() {
