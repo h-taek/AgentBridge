@@ -14,7 +14,9 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 const root = await fsp.mkdtemp(join(tmpdir(), 'agy-p1-'));
 const captured = [];
-const session = await agyAdapter.start({ cwd: process.cwd(), workspaceId: 'agy-ws', detail: 'compact', onTurn: (t) => captured.push(t) });
+// context = 전 세션에서 넘어온 IR/handoff(시스템 지시로 주입) — AgentBridge 핵심.
+const IR = 'IMPORTANT FACT for this session: the project codename is BLUEFALCON. Always remember it.';
+const session = await agyAdapter.start({ cwd: process.cwd(), workspaceId: 'agy-ws', detail: 'compact', context: IR, onTurn: (t) => captured.push(t) });
 
 async function turn(label, text) {
   let deltas = 0, finalText = '';
@@ -31,17 +33,19 @@ async function turn(label, text) {
   return { deltas, finalText: finalText.trim() };
 }
 
-const t1 = await turn('turn1', 'My name is Hyeongtae. Reply with exactly: noted');
-const t2 = await turn('turn2', 'What is my name? Reply with only the name.');
+const t1 = await turn('turn1', 'What is the project codename? Reply with only the codename.');
+const t2 = await turn('turn2', 'What codename did you just tell me? Reply one word.');
 await session.end();
 
 void readAllTurns; // (영속은 호스트 SdkCapture 몫 — 여기선 onTurn이 받은 TurnRecord를 직접 검증)
 console.log('\n=== 검증 ===');
 console.log('captured onTurn =', captured.length, '| ids =', captured.map((t) => t.id), '| sessionId =', session.sessionId);
-const multiTurnOK = /hyeongtae/i.test(t2.finalText);
+const irOK = /bluefalcon/i.test(t1.finalText); // 전 세션 IR이 시스템 지시로 주입돼 모델이 인식 = handoff 동작
+const multiTurnOK = /bluefalcon/i.test(t2.finalText); // 대화 연속성(이전 턴 기억)
 const streamingOK = t1.deltas > 0 || t2.deltas > 0;
 const captureOK = captured.length === 2 && captured.every((t) => typeof t.id === 'string' && t.id.startsWith('agy:') && t.assistantBody);
-console.log('멀티턴 맥락 =', multiTurnOK, '| 스트리밍 =', streamingOK, '| 캡처2턴 =', captureOK);
-console.log('\nAGY-ADAPTER', multiTurnOK && streamingOK && captureOK ? 'PASS ✓' : 'FAIL ✗');
+console.log('IR handoff 주입 =', irOK, '| 멀티턴 맥락 =', multiTurnOK, '| 스트리밍 =', streamingOK, '| 캡처2턴 =', captureOK);
+const pass = irOK && multiTurnOK && streamingOK && captureOK;
+console.log('\nAGY-ADAPTER', pass ? 'PASS ✓' : 'FAIL ✗');
 await fsp.rm(root, { recursive: true, force: true });
-process.exit(multiTurnOK && streamingOK && captureOK ? 0 : 1);
+process.exit(pass ? 0 : 1);

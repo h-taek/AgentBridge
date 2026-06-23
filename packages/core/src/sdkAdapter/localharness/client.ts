@@ -56,11 +56,15 @@ export async function startHarness(opts: HarnessStartOptions): Promise<HarnessCl
 
   // InitializeConversationEvent — config(HarnessConfig). 사용자 키는 models[].geminiApiEndpoint.apiKey.
   // (응답을 동기 대기하지 않음 — local_connection.py __aenter__와 동일. 이후 OutputEvent 스트림에서 처리.)
-  ws.send(JSON.stringify({
-    config: {
-      models: [{ name: opts.model, types: ['MODEL_TYPE_TEXT'], geminiApiEndpoint: { apiKey: opts.apiKey } }],
-    },
-  }));
+  const config: Record<string, unknown> = {
+    models: [{ name: opts.model, types: ['MODEL_TYPE_TEXT'], geminiApiEndpoint: { apiKey: opts.apiKey } }],
+    workspaces: [{ filesystemWorkspace: { directory: opts.cwd } }], // 프로젝트 디렉터리(Python SDK workspaces=[path]와 동형)
+  };
+  if (opts.context) {
+    // IR/handoff = 기본 agy 시스템 프롬프트 뒤에 덧붙임(appended). Python SDK str 단축형(TemplatedSystemInstructions)과 동일.
+    config.systemInstructions = { appended: { appendedSections: [{ title: 'AgentBridge Handoff', content: opts.context }] } };
+  }
+  ws.send(JSON.stringify({ config }));
 
   const listeners: Array<(ev: Record<string, unknown>) => void> = [];
   ws.on('message', (data: WebSocket.RawData) => {
