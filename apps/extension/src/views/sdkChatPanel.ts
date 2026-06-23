@@ -640,6 +640,7 @@ export class SdkChatPanel {
   .diff .dl.del{background:rgba(224,86,79,.14)} .diff .dl.del .sg{color:#e0564f;opacity:.9} .diff .dl.del .gn{color:#e0564f;opacity:.55}
   .diff .dl.add{background:rgba(94,201,138,.15)} .diff .dl.add .sg{color:#5ec98a;opacity:.95} .diff .dl.add .gn{color:#5ec98a;opacity:.6}
   .diff .dl.gap{height:6px;background:rgba(127,127,127,.06)}
+  .diff .dfile{padding:3px 10px;color:var(--vscode-descriptionForeground);font-size:10.5px;opacity:.85;border-bottom:1px solid rgba(127,127,127,.18);background:rgba(127,127,127,.06)}
   .dtrunc{padding:3px 10px;color:var(--vscode-descriptionForeground);opacity:.6;font-size:10.5px}
   .md{line-height:1.72;overflow-wrap:anywhere;word-break:break-word} .md p{margin:0 0 .7em} .md p:last-child{margin:0} .md strong{font-weight:700}
   .copybtn{display:inline-flex;align-items:center;align-self:flex-start;margin-top:-10px;margin-left:16px;background:none;border:none;color:var(--vscode-descriptionForeground);opacity:.4;cursor:pointer;padding:4px;border-radius:5px;line-height:1}
@@ -1234,8 +1235,24 @@ export class SdkChatPanel {
     while(j<m){ rows.push({k:'add',t:b[j],ln:nn}); nn++;j++; }
     return rows;
   }
+  // codex는 파일별 unified diff를 줌 — 헌크 @@ -o,+n @@에서 실제 라인넘버를 읽어 행으로(LCS 불필요).
+  function parseUnifiedDiff(diff){
+    var text=String(diff==null?'':diff), lines=text.split('\\n'), rows=[], oln=0, nln=0;
+    for(var i=0;i<lines.length;i++){ var L=lines[i];
+      if(L.indexOf('@@')===0){ var mm=/@@ -(\\d+)(?:,\\d+)? \\+(\\d+)(?:,\\d+)? @@/.exec(L); if(mm){ oln=+mm[1]; nln=+mm[2]; } continue; }
+      if(L.indexOf('--- ')===0||L.indexOf('+++ ')===0||L.indexOf('diff ')===0||L.indexOf('index ')===0||L.charAt(0)==='\\\\') continue;
+      var c=L.charAt(0), t=L.slice(1);
+      if(c==='+'){ rows.push({k:'add',t:t,ln:nln}); nln++; }
+      else if(c==='-'){ rows.push({k:'del',t:t,ln:oln}); oln++; }
+      else if(c===' '){ rows.push({k:'ctx',t:t,ln:nln}); oln++; nln++; }
+    }
+    if(!rows.length&&text.trim()) rows=text.split('\\n').map(function(t,i){ return {k:'add',t:t,ln:i+1}; });
+    return rows;
+  }
   function diffRows(name,input){
     if(!input||typeof input!=='object') return null;
+    if(Array.isArray(input.codexFileChanges)){ var rows=[], multi=input.codexFileChanges.length>1;
+      input.codexFileChanges.forEach(function(c,idx){ if(idx) rows.push({k:'gap'}); if(multi&&c&&c.path) rows.push({k:'file',path:c.path}); rows=rows.concat(parseUnifiedDiff(c&&c.diff)); }); return rows; }
     if(name==='Write'){ return String(input.content==null?'':input.content).split('\\n').map(function(t,i){ return {k:'add',t:t,ln:i+1}; }); }
     if(name==='MultiEdit'&&Array.isArray(input.edits)){ var rows=[];
       input.edits.forEach(function(e,idx){ if(idx) rows.push({k:'gap'}); rows=rows.concat(lcsDiff(e&&e.old_string,e&&e.new_string)); }); return rows; }
@@ -1248,6 +1265,7 @@ export class SdkChatPanel {
     var wrap=el('div','diff'), CAP=300, shown=rows.slice(0,CAP);
     shown.forEach(function(r){
       if(r.k==='gap'){ wrap.appendChild(el('div','dl gap')); return; }
+      if(r.k==='file'){ wrap.appendChild(el('div','dfile', r.path||'')); return; }
       var dl=el('div','dl'+(r.k!=='ctx'?(' '+r.k):''));
       dl.appendChild(el('span','gn', r.ln!=null?String(r.ln):''));
       dl.appendChild(el('span','sg', r.k==='add'?'+':(r.k==='del'?'−':' ')));

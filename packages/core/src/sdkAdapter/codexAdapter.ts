@@ -18,6 +18,8 @@ import type { AccountUsage, AgentAdapter, AgentInfo, LoginChallenge, McpServerIn
 
 type Pending = { resolve: (v: unknown) => void; reject: (e: unknown) => void };
 type AnyMsg = { id?: number; method?: string; result?: unknown; error?: unknown; params?: Record<string, unknown> };
+// item/completed fileChange — codex가 파일별 unified diff를 담아 보냄(generate-ts: FileUpdateChange).
+type CodexFileChange = { path?: string; kind?: { type?: string }; diff?: string };
 
 // 권한 모드 → codex approvalPolicy + sandboxPolicy(turn/start 오버라이드). codex TUI의 3개 모드와 동일.
 //   default(Default permissions) · autoReview(Auto-review) · fullAccess(Full access).
@@ -129,7 +131,7 @@ export const codexAdapter: AgentAdapter = {
           if (turn && typeof p.delta === 'string') turn.events.push({ t: 'thinking', text: p.delta });
           break;
         case 'item/completed': {
-          const item = p.item as { type?: string; text?: string; id?: string; command?: string; aggregatedOutput?: string } | undefined;
+          const item = p.item as { type?: string; text?: string; id?: string; command?: string; aggregatedOutput?: string; changes?: CodexFileChange[] } | undefined;
           if (turn && item?.type === 'agentMessage' && typeof item.text === 'string') {
             turn.open.assistantParts.push(item.text); // TurnRecord 권위본
             turn.events.push({ t: 'text', text: item.text, final: true });
@@ -142,6 +144,17 @@ export const codexAdapter: AgentAdapter = {
               input: { command: item.command },
               status: 'done',
               output: typeof item.aggregatedOutput === 'string' ? item.aggregatedOutput.slice(0, 4000) : undefined,
+            });
+          } else if (turn && item?.type === 'fileChange' && Array.isArray(item.changes)) {
+            // 파일 변경 — codex가 파일별 unified diff(changes[].diff)를 완결 item으로 보냄.
+            // diff 툴로 정규화해 claude와 동일 패널 렌더(웹뷰가 codexFileChanges를 unified diff로 파싱).
+            for (const c of item.changes) turn.open.toolCalls.push({ tool: 'Edit', arg: c.path ?? '' });
+            turn.events.push({
+              t: 'tool',
+              id: String(item.id ?? ''),
+              name: 'Edit',
+              input: { file_path: item.changes[0]?.path, codexFileChanges: item.changes },
+              status: 'started',
             });
           }
           break;
