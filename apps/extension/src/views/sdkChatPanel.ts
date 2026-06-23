@@ -603,6 +603,11 @@ export class SdkChatPanel {
   .md code{background:var(--vscode-textCodeBlock-background);padding:1px 5px;border-radius:4px;font-family:var(--vscode-editor-font-family),monospace;font-size:12px}
   .md pre{background:var(--vscode-textCodeBlock-background);border:1px solid var(--vscode-panel-border);border-radius:8px;padding:10px 12px;overflow-x:auto;margin:.4em 0}
   .md pre code{background:none;padding:0} .md ul{margin:.3em 0;padding-left:1.3em}
+  .md h1,.md h2,.md h3,.md h4,.md h5,.md h6{margin:.6em 0 .3em;font-weight:700;line-height:1.3}
+  .md h1{font-size:1.45em} .md h2{font-size:1.25em} .md h3{font-size:1.1em} .md h4,.md h5,.md h6{font-size:1em;opacity:.95}
+  .md table{border-collapse:collapse;margin:.5em 0;font-size:.95em;display:block;width:max-content;max-width:100%;overflow-x:auto}
+  .md th,.md td{border:1px solid var(--vscode-panel-border);padding:4px 9px;text-align:left;vertical-align:top}
+  .md th{background:var(--vscode-textBlockQuote-background);font-weight:700}
   .caret{display:inline-block;width:6px;height:13px;background:var(--vscode-editor-foreground);margin-left:1px;vertical-align:-2px;animation:blink 1s steps(2) infinite}
   @keyframes blink{50%{opacity:0}}
 
@@ -1094,6 +1099,7 @@ export class SdkChatPanel {
   function md(src){
     // 라인 기반 — 펜스 코드블록은 내부 빈 줄·미완(스트리밍)에도 한 블록으로 안전하게 처리.
     var lines = src.split('\\n'), out = [], i = 0;
+    var cells=function(r){ return r.replace(/^\\s*\\|/,'').replace(/\\|\\s*$/,'').split('|').map(function(c){return c.trim();}); };
     while (i < lines.length){
       if (/^\\s*\`\`\`/.test(lines[i])){
         var code = []; i++;
@@ -1101,14 +1107,26 @@ export class SdkChatPanel {
         i++; // 닫는 \`\`\`
         out.push('<pre><code>'+esc(code.join('\\n'))+'</code></pre>'); continue;
       }
+      // 제목 (#~######) (#7)
+      var hm = lines[i].match(/^\\s*(#{1,6})\\s+(.*)$/);
+      if (hm){ var lv=hm[1].length; out.push('<h'+lv+'>'+inline(esc(hm[2].replace(/\\s+#+\\s*$/,'')))+'</h'+lv+'>'); i++; continue; }
+      // 표: "| a | b |" 다음 줄이 구분줄("|---|") 일 때만 (#7)
+      if (lines[i].indexOf('|')>=0 && i+1<lines.length && /-/.test(lines[i+1]) && lines[i+1].indexOf('|')>=0 && /^[\\s|:-]+$/.test(lines[i+1])){
+        var head=cells(lines[i]); i+=2; var rows=[];
+        while (i < lines.length && lines[i].trim() && lines[i].indexOf('|')>=0){ rows.push(cells(lines[i])); i++; }
+        var th='<tr>'+head.map(function(c){return '<th>'+inline(esc(c))+'</th>';}).join('')+'</tr>';
+        var tb=rows.map(function(r){return '<tr>'+r.map(function(c){return '<td>'+inline(esc(c))+'</td>';}).join('')+'</tr>';}).join('');
+        out.push('<table>'+th+tb+'</table>'); continue;
+      }
       if (/^\\s*[-*]\\s+/.test(lines[i])){
         var li = [];
         while (i < lines.length && /^\\s*[-*]\\s+/.test(lines[i])){ li.push('<li>'+inline(esc(lines[i].replace(/^\\s*[-*]\\s+/,'')))+'</li>'); i++; }
         out.push('<ul>'+li.join('')+'</ul>'); continue;
       }
       if (!lines[i].trim()){ i++; continue; }
-      var para = [];
-      while (i < lines.length && lines[i].trim() && !/^\\s*\`\`\`/.test(lines[i]) && !/^\\s*[-*]\\s+/.test(lines[i])){ para.push(lines[i]); i++; }
+      // 단락 — 첫 줄은 무조건 소비(진행 보장), 이후 펜스/리스트/제목 만나면 중단
+      var para = [lines[i]]; i++;
+      while (i < lines.length && lines[i].trim() && !/^\\s*\`\`\`/.test(lines[i]) && !/^\\s*[-*]\\s+/.test(lines[i]) && !/^\\s*#{1,6}\\s/.test(lines[i])){ para.push(lines[i]); i++; }
       out.push('<p>'+inline(esc(para.join('\\n'))).replace(/\\n/g,'<br>')+'</p>');
     }
     return out.join('');
