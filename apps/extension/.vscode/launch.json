@@ -7,7 +7,17 @@
       "request": "launch",
       "args": ["--extensionDevelopmentPath=${workspaceFolder}"],
       "outFiles": ["${workspaceFolder}/out/**/*.js"],
-      "preLaunchTask": "npm: compile"
+      "preLaunchTask": "npm: compile",
+      "env": { "ANTIGRAVITY_HARNESS_PATH": "${userHome}/.local/bin/localharness" }
+    },
+    {
+      "name": "Run Extension (logged-out test)",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": ["--extensionDevelopmentPath=${workspaceFolder}"],
+      "outFiles": ["${workspaceFolder}/out/**/*.js"],
+      "preLaunchTask": "npm: compile",
+      "env": { "HOME": "/tmp/ab-logout-test" }
     }
   ]
 }
