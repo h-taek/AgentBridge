@@ -780,7 +780,7 @@ export class SdkChatPanel {
   const approvalSlot = document.getElementById('approvalSlot');
   const permPill = document.getElementById('permPill');
   const STATUS = { thinking:'Thinking…', working:'Working…', responding:'Responding…' };
-  let cur = null, work = null, busy = false;
+  let cur = null, work = null, busy = false, interruptRequested = false;
 
   // 시작 화면(welcome) — 브랜드 풀네임 + 로고. 대화 전 표시, 첫 메시지/미로그인 분기.
   const welcome = document.getElementById('welcome');
@@ -976,7 +976,9 @@ export class SdkChatPanel {
   slashBtn.addEventListener('click', function(ev){ ev.stopPropagation(); if(settingsMenu.style.display==='block') closeSettingsMenu(); else openSettingsMenu(); });
   document.addEventListener('click', function(){ closeModelMenu(); closeSettingsMenu(); closeAc(); });
   // Esc로 모델/설정/자동완성 패널 닫기 (입력 포커스가 아니어도 동작하도록 window 레벨)
-  window.addEventListener('keydown', function(e){ if(e.key==='Escape' && (modelMenu.style.display==='block'||settingsMenu.style.display==='block'||acOpen())){ closeModelMenu(); closeSettingsMenu(); closeAc(); e.preventDefault(); } });
+  window.addEventListener('keydown', function(e){ if(e.key!=='Escape') return;
+    if(modelMenu.style.display==='block'||settingsMenu.style.display==='block'||acOpen()){ closeModelMenu(); closeSettingsMenu(); closeAc(); e.preventDefault(); return; }
+    if(busy){ interruptRequested=true; vscode.postMessage({type:'interrupt'}); e.preventDefault(); } });
 
   // ── 입력 자동완성(/ 명령 + @ 파일) + 명령 색상 하이라이트 ──
   const inhl=document.getElementById('inhl');
@@ -1187,7 +1189,7 @@ export class SdkChatPanel {
     hideWelcome(); // 첫 메시지 → 시작 화면 숨김
     return t;
   }
-  function fireSend(item){ setBusy(true); newAssistantTurn(item.node); startWork(); bottom(); vscode.postMessage({type:'send',text:item.sent}); }
+  function fireSend(item){ interruptRequested=false; setBusy(true); newAssistantTurn(item.node); startWork(); bottom(); vscode.postMessage({type:'send',text:item.sent}); }
   function drainQueue(){ if(QUEUE.length) fireSend(QUEUE.shift()); }
   function sendMsg(){
     var text=input.value.trim(); if(!text&&!PENDING.length) return;
@@ -1201,8 +1203,9 @@ export class SdkChatPanel {
     if(busy){ QUEUE.push(item); bottom(); }
     else fireSend(item);
   }
-  sendBtn.addEventListener('click', function(){ busy? vscode.postMessage({type:'interrupt'}) : sendMsg(); });
+  sendBtn.addEventListener('click', function(){ if(busy){ interruptRequested=true; vscode.postMessage({type:'interrupt'}); } else sendMsg(); });
   input.addEventListener('keydown', function(e){
+    if(e.isComposing||e.keyCode===229) return; // IME 조합 중(한글 등) Enter/단축키 무시 — 마지막 글자 중복 전송 방지
     if(acOpen()){
       if(e.key==='ArrowDown'){ e.preventDefault(); acMove(1); return; }
       if(e.key==='ArrowUp'){ e.preventDefault(); acMove(-1); return; }
@@ -1309,13 +1312,16 @@ export class SdkChatPanel {
     }
     else if(ev.t==='turn_end'){
       closeText(); closeThink();
-      // 완료 요약 줄 — Worked for Xs · N tokens (#3)
+      // 완료 요약 줄 — Worked for Xs · N tokens (#3) / 인터럽트 시 Interrupted
       if(work&&cur){ var s=Math.max(1,Math.round((Date.now()-work.t0)/1000)); var tok=work.out;
-        var w=el('div','worked'); w.textContent='* Worked for '+s+'s'+(tok?(' · '+fmt(tok)+' tokens'):''); cur.turn.appendChild(w); }
+        var w=el('div','worked'); w.textContent=(interruptRequested?'■ Interrupted after '+s+'s':'* Worked for '+s+'s')+(tok?(' · '+fmt(tok)+' tokens'):''); cur.turn.appendChild(w); }
       if(cur&&cur.fullRaw&&cur.fullRaw.trim()) addTurnCopyBtn(cur.turn, cur.fullRaw);
-      stopWork(); setBusy(false); input.focus(); bottom(); drainQueue();
+      interruptRequested=false; stopWork(); setBusy(false); input.focus(); bottom(); drainQueue();
     }
-    else if(ev.t==='error'){ if(!cur) newAssistantTurn(); closeText(); var b=itemRow('text'); b.appendChild(el('div','err','⚠ '+ev.message)); stopWork(); setBusy(false); bottom(); drainQueue(); }
+    else if(ev.t==='error'){ if(!cur) newAssistantTurn(); closeText();
+      if(interruptRequested){ var w=el('div','worked'); w.textContent='■ Interrupted'; cur.turn.appendChild(w); }
+      else { var b=itemRow('text'); b.appendChild(el('div','err','⚠ '+ev.message)); }
+      interruptRequested=false; stopWork(); setBusy(false); bottom(); drainQueue(); }
   });
 </script>
 </body></html>`;
