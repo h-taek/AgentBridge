@@ -627,6 +627,20 @@ export class SdkChatPanel {
   .trow+.trow{border-top:1px solid rgba(127,127,127,.3)}
   .tlabel{flex:none;width:24px;color:var(--vscode-descriptionForeground);opacity:.5;font-size:10.5px;padding-top:2px}
   .tcontent{flex:1;min-width:0;color:var(--vscode-foreground);opacity:.92;white-space:pre-wrap;word-break:break-word;line-height:1.5;max-height:60px;overflow:auto}
+  /* ── 코드 diff (#11): Edit/Write를 라인 diff로 (단일 라인넘버 열) ── */
+  .chgsum{font-family:var(--vscode-editor-font-family),monospace;font-size:11px;margin-left:6px;white-space:nowrap}
+  .chgsum .add{color:#5ec98a;font-weight:700} .chgsum .del{color:#e0564f;font-weight:700;margin-left:5px}
+  .diff{margin-top:5px;border:1px solid var(--vscode-panel-border);border-radius:7px;overflow:auto;
+    font-family:var(--vscode-editor-font-family),monospace;font-size:11.5px;line-height:1.5;
+    background:color-mix(in srgb,var(--vscode-sideBar-background,var(--vscode-editor-background)) 60%,#000 40%)}
+  .diff .dl{display:flex;white-space:pre;min-width:max-content}
+  .diff .gn{flex:none;width:34px;padding:0 8px 0 6px;text-align:right;color:var(--vscode-descriptionForeground);opacity:.5;font-size:10.5px;border-right:1px solid rgba(127,127,127,.18)}
+  .diff .sg{flex:none;width:16px;text-align:center;color:var(--vscode-descriptionForeground);opacity:.6}
+  .diff .cd{flex:1;padding:0 10px 0 4px;color:var(--vscode-foreground);opacity:.92}
+  .diff .dl.del{background:rgba(224,86,79,.14)} .diff .dl.del .sg{color:#e0564f;opacity:.9} .diff .dl.del .gn{color:#e0564f;opacity:.55}
+  .diff .dl.add{background:rgba(94,201,138,.15)} .diff .dl.add .sg{color:#5ec98a;opacity:.95} .diff .dl.add .gn{color:#5ec98a;opacity:.6}
+  .diff .dl.gap{height:6px;background:rgba(127,127,127,.06)}
+  .dtrunc{padding:3px 10px;color:var(--vscode-descriptionForeground);opacity:.6;font-size:10.5px}
   .md{line-height:1.72;overflow-wrap:anywhere;word-break:break-word} .md p{margin:0 0 .7em} .md p:last-child{margin:0} .md strong{font-weight:700}
   .copybtn{display:inline-flex;align-items:center;align-self:flex-start;margin-top:-10px;margin-left:16px;background:none;border:none;color:var(--vscode-descriptionForeground);opacity:.4;cursor:pointer;padding:4px;border-radius:5px;line-height:1}
   .copybtn svg{width:15px;height:15px}
@@ -1206,6 +1220,44 @@ export class SdkChatPanel {
     if(input.url) return String(input.url);
     var s=JSON.stringify(input); return s.length>240?s.slice(0,240)+'…':s; }
 
+  // ── 코드 diff (#11): Edit/Write/MultiEdit input을 라인 diff DOM으로 (단일 라인넘버 열) ──
+  function isDiffTool(n){ return n==='Edit'||n==='MultiEdit'||n==='Write'||n==='NotebookEdit'; }
+  function lcsDiff(oldS,newS){
+    var a=String(oldS==null?'':oldS).split('\\n'), b=String(newS==null?'':newS).split('\\n'), n=a.length, m=b.length;
+    var dp=[]; for(var i=0;i<=n;i++){ dp.push(new Array(m+1).fill(0)); }
+    for(var i=n-1;i>=0;i--){ for(var j=m-1;j>=0;j--){ dp[i][j]= a[i]===b[j]? dp[i+1][j+1]+1 : Math.max(dp[i+1][j],dp[i][j+1]); } }
+    var rows=[], i=0, j=0, o=1, nn=1;
+    while(i<n&&j<m){ if(a[i]===b[j]){ rows.push({k:'ctx',t:a[i],ln:nn}); o++;nn++;i++;j++; }
+      else if(dp[i+1][j]>=dp[i][j+1]){ rows.push({k:'del',t:a[i],ln:o}); o++;i++; }
+      else { rows.push({k:'add',t:b[j],ln:nn}); nn++;j++; } }
+    while(i<n){ rows.push({k:'del',t:a[i],ln:o}); o++;i++; }
+    while(j<m){ rows.push({k:'add',t:b[j],ln:nn}); nn++;j++; }
+    return rows;
+  }
+  function diffRows(name,input){
+    if(!input||typeof input!=='object') return null;
+    if(name==='Write'){ return String(input.content==null?'':input.content).split('\\n').map(function(t,i){ return {k:'add',t:t,ln:i+1}; }); }
+    if(name==='MultiEdit'&&Array.isArray(input.edits)){ var rows=[];
+      input.edits.forEach(function(e,idx){ if(idx) rows.push({k:'gap'}); rows=rows.concat(lcsDiff(e&&e.old_string,e&&e.new_string)); }); return rows; }
+    if(input.old_string!=null||input.new_string!=null) return lcsDiff(input.old_string,input.new_string);
+    return null;
+  }
+  function renderDiff(name,input){
+    var rows=diffRows(name,input); if(!rows||!rows.length) return null;
+    var add=0,del=0; rows.forEach(function(r){ if(r.k==='add')add++; else if(r.k==='del')del++; });
+    var wrap=el('div','diff'), CAP=300, shown=rows.slice(0,CAP);
+    shown.forEach(function(r){
+      if(r.k==='gap'){ wrap.appendChild(el('div','dl gap')); return; }
+      var dl=el('div','dl'+(r.k!=='ctx'?(' '+r.k):''));
+      dl.appendChild(el('span','gn', r.ln!=null?String(r.ln):''));
+      dl.appendChild(el('span','sg', r.k==='add'?'+':(r.k==='del'?'−':' ')));
+      dl.appendChild(el('span','cd', r.t));
+      wrap.appendChild(dl);
+    });
+    if(rows.length>CAP) wrap.appendChild(el('div','dtrunc','… +'+(rows.length-CAP)+' more lines'));
+    return {node:wrap,add:add,del:del};
+  }
+
   // 생성 중 입력 큐(A) — 답변 생성 중 보낸 메시지는 여기 쌓였다 turn_end/error에 순서대로 발사(엔진은 직렬).
   // 유저 버블은 Enter 즉시 표시(가시화)하고, 발사 시 어시스턴트 턴을 그 버블 *바로 뒤에 끼워* 순서 보존:
   // 화면이 [유저→응답→유저→응답]으로 나옴(앞에 유저만 쌓이지도, 안 보이지도 않음).
@@ -1343,10 +1395,19 @@ export class SdkChatPanel {
         closeText(); closeThink();
         var b=itemRow('tool'); var nm=el('div','tname'); nm.appendChild(el('strong',null,ev.name||'Tool'));
         var dsc=toolDesc(ev.input); if(dsc) nm.appendChild(el('span','tdesc',dsc));
-        b.appendChild(nm);
-        var box=el('div','tbox'); var inTxt=toolIn(ev.input);
-        if(inTxt){ var ir=el('div','trow'); ir.appendChild(el('span','tlabel','IN')); ir.appendChild(el('div','tcontent',inTxt)); box.appendChild(ir); }
-        b.appendChild(box); cur.tools[ev.id]={box:box,hasOut:false}; setStatusText(toolVerb(ev.name)); if(wasBottom) bottom();
+        var dv=isDiffTool(ev.name)?renderDiff(ev.name,ev.input):null;
+        if(dv){
+          // Edit/Write → 파일 경로 + 변경요약(+add/−del) + diff 블록 (IN/OUT 박스 대신)
+          if(ev.input&&typeof ev.input==='object'&&ev.input.file_path) nm.appendChild(el('span','tdesc',String(ev.input.file_path)));
+          var cs=el('span','chgsum'); if(dv.add) cs.appendChild(el('span','add','+'+dv.add)); if(dv.del) cs.appendChild(el('span','del','−'+dv.del)); nm.appendChild(cs);
+          b.appendChild(nm); b.appendChild(dv.node); cur.tools[ev.id]={box:null,hasOut:true};
+        } else {
+          b.appendChild(nm);
+          var box=el('div','tbox'); var inTxt=toolIn(ev.input);
+          if(inTxt){ var ir=el('div','trow'); ir.appendChild(el('span','tlabel','IN')); ir.appendChild(el('div','tcontent',inTxt)); box.appendChild(ir); }
+          b.appendChild(box); cur.tools[ev.id]={box:box,hasOut:false};
+        }
+        setStatusText(toolVerb(ev.name)); if(wasBottom) bottom();
       }
       // done → OUT 박스 채움
       if(ev.status==='done'){
