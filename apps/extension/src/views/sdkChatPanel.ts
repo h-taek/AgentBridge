@@ -1189,6 +1189,9 @@ export class SdkChatPanel {
   // 유저 버블은 Enter 즉시 표시(가시화)하고, 발사 시 어시스턴트 턴을 그 버블 *바로 뒤에 끼워* 순서 보존:
   // 화면이 [유저→응답→유저→응답]으로 나옴(앞에 유저만 쌓이지도, 안 보이지도 않음).
   var QUEUE=[];
+  // 입력 히스토리(↑/↓ 복구, 터미널式) — histIdx -1=라이브 초안. 멀티라인은 커서가 첫/끝 줄일 때만 발동(#16).
+  var HISTORY=[], histIdx=-1, histDraft='';
+  function histSet(v){ input.value=v; try{ input.selectionStart=input.selectionEnd=v.length; }catch(e){} grow(); renderHL(); }
   function renderUser(text, atts){
     var t=el('div','turn user');
     atts.forEach(function(a){ var ac=el('span','att'); var im=thumb(a); if(im) ac.appendChild(im); else ac.appendChild(el('span',null,'🖼')); ac.appendChild(el('span',null,a.name)); t.appendChild(ac); });
@@ -1201,6 +1204,7 @@ export class SdkChatPanel {
   function drainQueue(){ if(QUEUE.length) fireSend(QUEUE.shift()); }
   function sendMsg(){
     var text=input.value.trim(); if(!text&&!PENDING.length) return;
+    if(text && HISTORY[HISTORY.length-1]!==text){ HISTORY.push(text); if(HISTORY.length>100) HISTORY.shift(); } histIdx=-1; histDraft=''; // 히스토리 적재(#16)
     var atts=PENDING.slice();
     // 첨부 경로를 메시지에 주입(샌드박스가 프로젝트 내부만 읽으므로 복사된 경로를 전달).
     var sent = atts.length ? (text? text+'\\n\\n':'') + atts.map(function(a){return a.path;}).join('\\n') : text;
@@ -1220,10 +1224,21 @@ export class SdkChatPanel {
       if(e.key==='Enter'||e.key==='Tab'){ e.preventDefault(); acAccept(); return; }
       if(e.key==='Escape'){ e.preventDefault(); closeAc(); return; }
     }
+    // 입력 히스토리(#16): 커서가 첫 줄이면 ↑로 이전, 끝 줄이면 ↓로 다음/초안복구. Shift+화살표(선택)는 제외.
+    if(e.key==='ArrowUp'&&!e.shiftKey&&input.value.slice(0,input.selectionStart).indexOf('\\n')===-1&&HISTORY.length){
+      e.preventDefault();
+      if(histIdx===-1){ histDraft=input.value; histIdx=HISTORY.length-1; } else if(histIdx>0){ histIdx--; }
+      histSet(HISTORY[histIdx]); return;
+    }
+    if(e.key==='ArrowDown'&&!e.shiftKey&&histIdx!==-1&&input.value.slice(input.selectionEnd).indexOf('\\n')===-1){
+      e.preventDefault();
+      if(histIdx<HISTORY.length-1){ histIdx++; histSet(HISTORY[histIdx]); } else { histIdx=-1; histSet(histDraft); }
+      return;
+    }
     if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); sendMsg(); }
     else if(e.key==='Tab'&&e.shiftKey){ e.preventDefault(); cyclePerm(); }
   });
-  input.addEventListener('input', function(){ grow(); renderHL(); updateAc(); });
+  input.addEventListener('input', function(){ grow(); renderHL(); updateAc(); histIdx=-1; }); // 직접 타이핑 시 히스토리 모드 해제
   input.addEventListener('scroll', function(){ inhl.scrollTop=input.scrollTop; });
   input.addEventListener('blur', function(){ setTimeout(closeAc, 120); });
   input.addEventListener('keyup', function(e){ if(e.key==='ArrowLeft'||e.key==='ArrowRight') updateAc(); });
