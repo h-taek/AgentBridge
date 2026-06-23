@@ -23,6 +23,14 @@ import * as output from '../log/output';
 // SDK 어댑터 set(코어 팩토리) — model→어댑터 선택을 코어 한 곳에. claude만 번들 경계라 호스트가 정적 import해 주입.
 const sdkAdapters = createSdkAdapters({ claude: claudeAdapter });
 
+// agy(API 키) 인증용 — claude/codex는 자체 OAuth 스토어를 쓰지만 agy는 키를 우리가 들고 있어야 한다.
+// 키는 OS 키체인(SecretStorage)에 보관하고 세션 스폰 시 process.env.GEMINI_API_KEY로 주입. activate에서 setSdkChatSecrets로 주입.
+export const GEMINI_SECRET_KEY = 'agentbridge.geminiApiKey';
+let secretStore: vscode.SecretStorage | undefined;
+export function setSdkChatSecrets(s: vscode.SecretStorage): void {
+  secretStore = s;
+}
+
 export class SdkChatPanel {
   private session: Session | null = null;
   private disposed = false;
@@ -197,6 +205,18 @@ export class SdkChatPanel {
   // resume=이전 modelSessionId면 그 세션을 이어간다(최초 open만; /clear는 resume 없이 새로).
   private async startSession(injectContext: boolean, resume?: string): Promise<void> {
     try {
+      // agy는 Gemini API 키가 있어야 엔진을 띄운다. 키 없으면 다운로드/스폰 없이 로그인 화면만(불필요한 30MB 다운로드 방지).
+      // 키 출처: process.env(.env dev 폴백) → SecretStorage(온디맨드 로드, race-free).
+      if (this.model === 'agy') {
+        if (!process.env.GEMINI_API_KEY && secretStore) {
+          const stored = await secretStore.get(GEMINI_SECRET_KEY);
+          if (stored) process.env.GEMINI_API_KEY = stored;
+        }
+        if (!process.env.GEMINI_API_KEY) {
+          this.post({ type: 'ready', sessionId: this.sessionId, model: this.model, injected: false, loggedIn: false });
+          return;
+        }
+      }
       // 셋업 시퀀스(hook→IR→capture→adapter.start)는 코어 startSdkSession 한 곳. 호스트는 결속만 주입.
       const workspaceRoot = getWorkspaceStore().getWorkspacePath(this.workspaceId);
       const { session, context } = await startSdkSession({
@@ -247,7 +267,7 @@ export class SdkChatPanel {
     if (irPresent || mem > 0) this.post({ type: 'inject', ir: irPresent, mem });
   }
 
-  private async onMessage(msg: { type: string; text?: string; id?: string; approve?: boolean; mode?: PermissionMode; level?: string; url?: string; on?: boolean; style?: string; name?: string; enabled?: boolean; query?: string; base64?: string; workspaceId?: string; sessionId?: string; model?: string; paths?: string[] }): Promise<void> {
+  private async onMessage(msg: { type: string; text?: string; id?: string; approve?: boolean; mode?: PermissionMode; level?: string; url?: string; on?: boolean; style?: string; name?: string; enabled?: boolean; query?: string; base64?: string; workspaceId?: string; sessionId?: string; model?: string; paths?: string[]; key?: string }): Promise<void> {
     if (msg.type === 'send') {
       if (!this.session) return;
       void this.computeInjectLabel(String(msg.text ?? '')); // 이번 턴 주입 상태 라벨(IR·장기메모리 수)
@@ -297,6 +317,8 @@ export class SdkChatPanel {
       output.log(`[sdk webview] ${String(msg.text ?? '')}`); // #8 — 웹뷰 디버그 로그 통로(PTY 파리티)
     } else if (msg.type === 'login') {
       await this.handleLogin();
+    } else if (msg.type === 'submitKey') {
+      await this.handleSubmitKey(String(msg.key ?? ''));
     } else if (msg.type === 'openExternal' && msg.url) {
       await vscode.env.openExternal(vscode.Uri.parse(String(msg.url)));
     } else if (msg.type === 'getUsage') {
@@ -436,6 +458,26 @@ export class SdkChatPanel {
     }
   }
 
+  // agy 키 입력(OAuth 대신) — 키를 OS 키체인에 저장하고 process.env에 반영한 뒤 세션을 재기동(엔진을 키와 함께 스폰).
+  // 재기동의 ready(loggedIn=true)가 로그인 화면을 닫는다. 유효성은 첫 턴에 검증됨(여기선 존재만).
+  private async handleSubmitKey(rawKey: string): Promise<void> {
+    const key = rawKey.trim();
+    if (!key) {
+      this.post({ type: 'loginResult', ok: false });
+      return;
+    }
+    try {
+      await secretStore?.store(GEMINI_SECRET_KEY, key);
+      process.env.GEMINI_API_KEY = key;
+      await this.session?.end().catch(() => { /* keyless 세션 정리 */ });
+      this.session = null;
+      await this.startSession(true, this.resumeId); // 키 반영해 재기동 → ready(loggedIn=true)로 로그인 화면 닫힘
+    } catch (err) {
+      output.warn(`SdkChatPanel: 키 저장/재기동 실패 — ${err instanceof Error ? err.message : String(err)}`);
+      this.post({ type: 'loginResult', ok: false });
+    }
+  }
+
   // 첨부 이미지(6-5): 호스트 파일 다이얼로그로 이미지 선택 → saveAttachment로 프로젝트에 복사.
   private async handlePickImage(): Promise<void> {
     const picks = await vscode.window.showOpenDialog({
@@ -522,6 +564,8 @@ export class SdkChatPanel {
   .wlogin{margin-top:20px;display:flex;flex-direction:column;align-items:center;gap:9px}
   .wlbtn{background:var(--accent);color:#1b1b1d;border:none;border-radius:7px;padding:6px 18px;font:inherit;font-weight:600;cursor:pointer}
   .wlbtn:disabled{opacity:.6;cursor:default}
+  .wkey{width:280px;max-width:74vw;padding:7px 11px;font:inherit;font-size:12.5px;color:var(--vscode-input-foreground);background:var(--vscode-input-background);border:1px solid var(--vscode-input-border,transparent);border-radius:7px;outline:none}
+  .wkey:focus{border-color:var(--accent)}
   .wmanual{margin-top:6px;font-size:11px;color:var(--vscode-textLink-foreground);cursor:pointer;text-decoration:underline}
   .turn{display:flex;flex-direction:column;gap:8px}
   .turn.assistant{gap:20px}
@@ -699,7 +743,9 @@ export class SdkChatPanel {
         <div class="wcap" id="wcap"><span id="wcapco">${brand}</span> running on AgentBridge</div>
         <div class="wlogin" id="wlogin" style="display:none">
           <button class="wlbtn" id="wlbtn">Log in to <span id="wlco">${brand}</span></button>
-          <span class="wsub">Opens your browser · token stored securely</span>
+          <input class="wkey" id="wkinput" type="password" placeholder="Paste your Gemini API key" autocomplete="off" autocapitalize="off" spellcheck="false" style="display:none" />
+          <button class="wlbtn" id="wkbtn" style="display:none">Save key</button>
+          <span class="wsub" id="wsub">Opens your browser · token stored securely</span>
           <span class="wmanual" id="wmanual" style="display:none">Open the login link manually</span>
         </div>
       </div>
@@ -745,14 +791,25 @@ export class SdkChatPanel {
     document.getElementById('wbrand').textContent=b;
     document.getElementById('wcapco').textContent=b; document.getElementById('wlco').textContent=b; }
   function hideWelcome(){ welcome.classList.add('hide'); }
+  // agy는 OAuth가 없고 API 키 입력 → 같은 로그인 영역에서 버튼 대신 키 입력창을 보인다(claude/codex는 브라우저 버튼 그대로).
   function showLoginMode(on){ document.getElementById('wcap').style.display=on?'none':'';
-    document.getElementById('wlogin').style.display=on?'flex':'none'; if(on) welcome.classList.remove('hide'); }
+    document.getElementById('wlogin').style.display=on?'flex':'none'; if(on) welcome.classList.remove('hide');
+    var isAgy = welcomeModel==='agy';
+    document.getElementById('wlbtn').style.display = (on && !isAgy)?'':'none';
+    document.getElementById('wkinput').style.display = (on && isAgy)?'':'none';
+    var kb=document.getElementById('wkbtn'); kb.style.display = (on && isAgy)?'':'none'; kb.disabled=false; kb.textContent='Save key';
+    document.getElementById('wsub').textContent = isAgy ? 'Stored securely in your OS keychain' : 'Opens your browser · token stored securely';
+    if(on && isAgy) try{ document.getElementById('wkinput').focus(); }catch(e){} }
   // 미로그인이면 입력 자체를 막아 "보냈는데 안 사라짐"이 안 생기게. 로그인 성공 시 해제.
   function setLoggedOut(on){ input.disabled=on; sendBtn.disabled=on;
     input.placeholder = on ? 'Log in to start chatting…' : 'Message…  (Enter to send · Shift+Enter newline)'; }
   document.getElementById('wlbtn').addEventListener('click', function(){
     var btn=this; btn.disabled=true; btn.textContent='Waiting for browser…'; vscode.postMessage({type:'login'}); });
   document.getElementById('wmanual').addEventListener('click', function(){ if(loginManualUrl) vscode.postMessage({type:'openExternal',url:loginManualUrl}); });
+  document.getElementById('wkbtn').addEventListener('click', function(){
+    var inp=document.getElementById('wkinput'); var v=(inp.value||'').trim(); if(!v) return;
+    var btn=this; btn.disabled=true; btn.textContent='Saving…'; vscode.postMessage({type:'submitKey', key:v}); });
+  document.getElementById('wkinput').addEventListener('keydown', function(e){ if(e.key==='Enter'){ e.preventDefault(); document.getElementById('wkbtn').click(); } });
 
   // 권한 모드(6-2) — 에이전트별 모드 세트(claude 4 / codex 3). Shift+Tab·칩 클릭으로 순환.
   // body[data-perm]으로 입력바 외곽선 색 전환. 호스트가 claude=setPermissionMode / codex=approvalPolicy+sandbox로 매핑.
@@ -1166,7 +1223,7 @@ export class SdkChatPanel {
     if(msg.type==='ready'){
       if(msg.model){ document.body.dataset.model=msg.model; document.getElementById('badge').textContent=msg.model; initPerm(msg.model); paintWelcome(msg.model); }
       if(msg.loggedIn===false){ showLoginMode(true); setLoggedOut(true); }
-      else { setBusy(false); input.disabled=false; input.focus(); }
+      else { showLoginMode(false); setLoggedOut(false); setBusy(false); input.disabled=false; input.focus(); }
       return;
     }
     if(msg.type==='models'){ MODELS=msg.list||[]; var curM=MODELS.filter(function(m){return m.current;})[0]; if(curM && modelPill.textContent==='Model') modelPill.textContent=curM.label; return; }
@@ -1175,7 +1232,8 @@ export class SdkChatPanel {
     if(msg.type==='loginResult'){
       var btn=document.getElementById('wlbtn');
       if(msg.ok){ showLoginMode(false); setLoggedOut(false); setBusy(false); input.focus(); }
-      else { btn.disabled=false; btn.textContent='Log in to '+(BRAND[welcomeModel]||welcomeModel); }
+      else { btn.disabled=false; btn.textContent='Log in to '+(BRAND[welcomeModel]||welcomeModel);
+             var kb=document.getElementById('wkbtn'); kb.disabled=false; kb.textContent='Save key'; }
       return;
     }
     if(msg.type==='usage'){ renderUsage(msg.data); return; }
