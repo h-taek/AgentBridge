@@ -1160,11 +1160,12 @@ export class SdkChatPanel {
     if(work) return;
     var line=el('div','working'); var sp=el('span','tspin'); var st=el('span','shim',STATUS.working); var mt=el('span','wmeta','');
     line.appendChild(sp); line.appendChild(st); line.appendChild(mt); cur.turn.appendChild(line);
-    work={line:line,st:st,mt:mt,t0:Date.now(),out:0,frame:0};
+    work={line:line,st:st,mt:mt,t0:Date.now(),in:0,out:0,frame:0};
     work.spin=setInterval(function(){ var F=' .oO@* '; sp.textContent=F[work.frame%F.length]; work.frame++; tick(); },200);
     tick();
   }
-  function tick(){ if(!work) return; var s=Math.floor((Date.now()-work.t0)/1000); work.mt.textContent='('+fmtDur(s)+(work.out?(' · ↑ '+fmt(work.out)+' tokens'):'')+')'; }
+  // 토큰: ↑=입력(프롬프트) ↓=출력(생성). claude는 턴 끝에만, codex는 중간에 갱신 → 라이브는 codex에서 보임.
+  function tick(){ if(!work) return; var s=Math.floor((Date.now()-work.t0)/1000); work.mt.textContent='('+fmtDur(s)+(work.out?(' · ↑'+fmt(work.in||0)+' ↓'+fmt(work.out)):'')+')'; }
   function setStatus(k){ if(work) work.st.textContent=STATUS[k]; }
   function setStatusText(t){ if(work) work.st.textContent=t; }
   // 도구 이름 → "무엇을 하는 중"인지 라벨 (#17). 모르는 이름은 그대로 노출.
@@ -1309,7 +1310,7 @@ export class SdkChatPanel {
         if(t&&!t.hasOut&&out.trim()){ var orr=el('div','trow'); orr.appendChild(el('span','tlabel','OUT')); orr.appendChild(el('div','tcontent',out)); t.box.appendChild(orr); t.hasOut=true; if(wasBottom) bottom(); }
       }
     }
-    else if(ev.t==='usage'){ if(work){ work.out=ev.outputTokens; tick(); } }
+    else if(ev.t==='usage'){ if(work){ work.in=ev.inputTokens; work.out=ev.outputTokens; tick(); } }
     else if(ev.t==='commands'){ SLASH=ev.commands||[]; }
     else if(ev.t==='approval'){
       var box=el('div','approval'); var info=el('div'); info.appendChild(el('div','t','🔐 '+ev.title)); if(ev.detail) info.appendChild(el('div','d',ev.detail));
@@ -1321,8 +1322,8 @@ export class SdkChatPanel {
     else if(ev.t==='turn_end'){
       closeText(); closeThink();
       // 완료 요약 줄 — Worked for Xs · N tokens (#3) / 인터럽트 시 Interrupted
-      if(work&&cur){ var s=Math.max(1,Math.round((Date.now()-work.t0)/1000)); var tok=work.out;
-        var w=el('div','worked'); w.textContent=(interruptRequested?'■ Interrupted after '+fmtDur(s):'* Worked for '+fmtDur(s))+(tok?(' · '+fmt(tok)+' tokens'):''); cur.turn.appendChild(w); }
+      if(work&&cur){ var s=Math.max(1,Math.round((Date.now()-work.t0)/1000)); var tout=work.out, tin=work.in||0;
+        var w=el('div','worked'); w.textContent=(interruptRequested?'■ Interrupted after '+fmtDur(s):'* Worked for '+fmtDur(s))+(tout?(' · ↑'+fmt(tin)+' ↓'+fmt(tout)+' tokens'):''); cur.turn.appendChild(w); }
       if(cur&&cur.fullRaw&&cur.fullRaw.trim()) addTurnCopyBtn(cur.turn, cur.fullRaw);
       interruptRequested=false; stopWork(); setBusy(false); input.focus(); if(wasBottom) bottom(); drainQueue();
     }
