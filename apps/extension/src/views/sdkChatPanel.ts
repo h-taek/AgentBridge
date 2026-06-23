@@ -1111,6 +1111,8 @@ export class SdkChatPanel {
 
   function el(t,c,x){ var e=document.createElement(t); if(c)e.className=c; if(x!=null)e.textContent=x; return e; }
   function bottom(){ log.scrollTop = log.scrollHeight; }
+  function nearBottom(){ return log.scrollHeight - log.scrollTop - log.clientHeight < 80; } // 바닥 근처(±80px)면 '바닥에 있음'으로 — 스크롤 고정 판정(#5)
+  function bottomSoon(){ requestAnimationFrame(function(){ log.scrollTop = log.scrollHeight; }); } // 유저 액션 — 레이아웃 후(다음 프레임) 무조건 바닥(#6)
   function esc(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
   // 마크다운 = 번들된 markdown-it(window.renderMarkdown)에 위임. 로드 실패 시 esc 폴백.
   function md(src){ try{ if(window.renderMarkdown) return window.renderMarkdown(src||''); }catch(e){} return '<p>'+esc(String(src||'')).replace(/\\n/g,'<br>')+'</p>'; }
@@ -1146,7 +1148,7 @@ export class SdkChatPanel {
     btn.addEventListener('click', function(e){ e.stopPropagation(); navigator.clipboard.writeText(raw); btn.innerHTML=CHECK_SVG; setTimeout(function(){ btn.innerHTML=COPY_SVG; },1000); });
     turnEl.appendChild(btn);
   }
-  function newAssistantTurn(afterNode){ var t=el('div','turn assistant'); if(afterNode) log.insertBefore(t, afterNode.nextSibling); else log.appendChild(t); cur={turn:t,textItem:null,raw:'',fullRaw:'',deltas:0,think:null}; bottom(); }
+  function newAssistantTurn(afterNode){ var t=el('div','turn assistant'); if(afterNode) log.insertBefore(t, afterNode.nextSibling); else log.appendChild(t); cur={turn:t,textItem:null,raw:'',fullRaw:'',deltas:0,think:null}; } // 스크롤은 호출측에서(유저=bottomSoon / 들어오는 이벤트=wasBottom 게이트)
   function itemRow(dotCls){ var r=el('div','item'); r.appendChild(el('span','dot '+dotCls)); var b=el('div','body'); r.appendChild(b);
     // working 줄이 있으면 그 앞에 끼워 항상 맨 아래에 두기.
     var anchor=(work&&work.line&&work.line.parentNode===cur.turn)?work.line:null; cur.turn.insertBefore(r,anchor); return b; }
@@ -1194,7 +1196,7 @@ export class SdkChatPanel {
     hideWelcome(); // 첫 메시지 → 시작 화면 숨김
     return t;
   }
-  function fireSend(item){ interruptRequested=false; setBusy(true); newAssistantTurn(item.node); startWork(); bottom(); vscode.postMessage({type:'send',text:item.sent}); }
+  function fireSend(item){ interruptRequested=false; setBusy(true); newAssistantTurn(item.node); startWork(); bottomSoon(); vscode.postMessage({type:'send',text:item.sent}); }
   function drainQueue(){ if(QUEUE.length) fireSend(QUEUE.shift()); }
   function sendMsg(){
     var text=input.value.trim(); if(!text&&!PENDING.length) return;
@@ -1205,7 +1207,7 @@ export class SdkChatPanel {
     input.value=''; input.style.height='auto'; renderHL(); closeAc(); PENDING=[]; renderChips();
     var item={ sent: sent, node: node };
     // 생성 중이면 큐에 쌓고 turn_end에 발사(발사 시 그 유저 버블 뒤에 응답을 끼움) — 아니면 즉시 발사.
-    if(busy){ QUEUE.push(item); bottom(); }
+    if(busy){ QUEUE.push(item); bottomSoon(); }
     else fireSend(item);
   }
   sendBtn.addEventListener('click', function(){ if(busy){ interruptRequested=true; vscode.postMessage({type:'interrupt'}); } else sendMsg(); });
@@ -1269,23 +1271,24 @@ export class SdkChatPanel {
     if(msg.type==='mentionAdded'){ var pth=msg.path; input.value=(input.value? input.value.replace(/\\s*$/,'')+' ':'')+'@'+pth+' '; grow(); renderHL(); input.focus(); return; }
     if(msg.type!=='event') return;
     var ev=msg.ev;
+    var wasBottom=nearBottom(); // 이 이벤트가 DOM을 바꾸기 전, 유저가 바닥에 있었나 (스크롤 고정 #5)
     if(ev.t==='auth'){ if(ev.loggedIn===false){ stopWork(); showLoginMode(true); setLoggedOut(true); if(cur&&cur.turn){ cur.turn.remove(); cur=null; } } }
     else if(ev.t==='session'){ if(ev.model){ modelPill.textContent=cleanModel(ev.model); } }
     else if(ev.t==='text' && ev.final===false){
       if(!cur) newAssistantTurn(); closeThink();
       if(!cur.textItem){ cur.textItem=itemRow('text'); cur.textItem.className='body md'; cur.raw=''; }
-      cur.raw+=ev.text; cur.deltas++; cur.textItem.innerHTML=md(cur.raw); setStatus('responding'); bottom();
+      cur.raw+=ev.text; cur.deltas++; cur.textItem.innerHTML=md(cur.raw); setStatus('responding'); if(wasBottom) bottom();
     }
     else if(ev.t==='text' && ev.final===true){
       if(!cur) newAssistantTurn(); closeThink();
       if(!cur.textItem){ cur.textItem=itemRow('text'); cur.raw=''; }
       if(cur.deltas===0) cur.raw=ev.text;
-      cur.textItem.innerHTML=md(cur.raw); cur.textItem.className='body md'; if(cur.raw&&cur.raw.trim()) cur.fullRaw=(cur.fullRaw?cur.fullRaw+'\\n\\n':'')+cur.raw; cur.textItem=null; cur.raw=''; cur.deltas=0; bottom();
+      cur.textItem.innerHTML=md(cur.raw); cur.textItem.className='body md'; if(cur.raw&&cur.raw.trim()) cur.fullRaw=(cur.fullRaw?cur.fullRaw+'\\n\\n':'')+cur.raw; cur.textItem=null; cur.raw=''; cur.deltas=0; if(wasBottom) bottom();
     }
     else if(ev.t==='thinking'){
       if(!cur) newAssistantTurn(); closeText();
       if(!cur.think){ var b=itemRow('text'); var d=el('details','think'); var sm=el('summary',null,'Thinking…'); var tx=el('div','tx',''); d.appendChild(sm); d.appendChild(tx); b.appendChild(d); cur.think=tx; cur.thinkSummary=sm; cur.thinkT0=Date.now(); }
-      cur.think.textContent+=ev.text; setStatus('thinking'); bottom();
+      cur.think.textContent+=ev.text; setStatus('thinking'); if(wasBottom) bottom();
     }
     else if(ev.t==='tool'){
       if(!cur) newAssistantTurn();
@@ -1298,12 +1301,12 @@ export class SdkChatPanel {
         b.appendChild(nm);
         var box=el('div','tbox'); var inTxt=toolIn(ev.input);
         if(inTxt){ var ir=el('div','trow'); ir.appendChild(el('span','tlabel','IN')); ir.appendChild(el('div','tcontent',inTxt)); box.appendChild(ir); }
-        b.appendChild(box); cur.tools[ev.id]={box:box,hasOut:false}; setStatusText(toolVerb(ev.name)); bottom();
+        b.appendChild(box); cur.tools[ev.id]={box:box,hasOut:false}; setStatusText(toolVerb(ev.name)); if(wasBottom) bottom();
       }
       // done → OUT 박스 채움
       if(ev.status==='done'){
         var t=cur.tools[ev.id]; var out=ev.output!=null?(typeof ev.output==='string'?ev.output:JSON.stringify(ev.output)):'';
-        if(t&&!t.hasOut&&out.trim()){ var orr=el('div','trow'); orr.appendChild(el('span','tlabel','OUT')); orr.appendChild(el('div','tcontent',out)); t.box.appendChild(orr); t.hasOut=true; bottom(); }
+        if(t&&!t.hasOut&&out.trim()){ var orr=el('div','trow'); orr.appendChild(el('span','tlabel','OUT')); orr.appendChild(el('div','tcontent',out)); t.box.appendChild(orr); t.hasOut=true; if(wasBottom) bottom(); }
       }
     }
     else if(ev.t==='usage'){ if(work){ work.out=ev.outputTokens; tick(); } }
@@ -1321,12 +1324,12 @@ export class SdkChatPanel {
       if(work&&cur){ var s=Math.max(1,Math.round((Date.now()-work.t0)/1000)); var tok=work.out;
         var w=el('div','worked'); w.textContent=(interruptRequested?'■ Interrupted after '+fmtDur(s):'* Worked for '+fmtDur(s))+(tok?(' · '+fmt(tok)+' tokens'):''); cur.turn.appendChild(w); }
       if(cur&&cur.fullRaw&&cur.fullRaw.trim()) addTurnCopyBtn(cur.turn, cur.fullRaw);
-      interruptRequested=false; stopWork(); setBusy(false); input.focus(); bottom(); drainQueue();
+      interruptRequested=false; stopWork(); setBusy(false); input.focus(); if(wasBottom) bottom(); drainQueue();
     }
     else if(ev.t==='error'){ if(!cur) newAssistantTurn(); closeText();
       if(interruptRequested){ var w=el('div','worked'); w.textContent='■ Interrupted'; cur.turn.appendChild(w); }
       else { var b=itemRow('text'); b.appendChild(el('div','err','⚠ '+ev.message)); }
-      interruptRequested=false; stopWork(); setBusy(false); bottom(); drainQueue(); }
+      interruptRequested=false; stopWork(); setBusy(false); if(wasBottom) bottom(); drainQueue(); }
   });
 </script>
 </body></html>`;
