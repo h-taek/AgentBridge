@@ -80,3 +80,4 @@ export * from './pty/types';
 export * from './cliAdapter/index';
 export * from './cliAdapter/codexSessionWatcher';
 export * from './cliAdapter/agyResume';
+export * from './cliAdapter/hookSessionCapture';
