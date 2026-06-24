@@ -59,6 +59,8 @@ export function getCoreCliAdapters(): CliAdapterSet {
       // 코어 installClaudeHooks가 `<workspaceClaudeDir>/settings/claude-settings.json`에 씀.
       // 데스크탑은 settingsDir=`<workspaceRoot>/settings`이므로 워크스페이스 루트를 넘기면 동일 경로.
       workspaceClaudeDir: (workspaceId) => getWorkspacePaths(workspaceId).dir,
+      // 훅 wsDir(<storageRoot>/workspaces/<id>) == getWorkspacePaths(id).dir.
+      hookCaptureDir: (workspaceId) => getWorkspacePaths(workspaceId).dir,
       logger: {
         log: (m) => log.info(m),
         warn: (m) => log.warn(m)
