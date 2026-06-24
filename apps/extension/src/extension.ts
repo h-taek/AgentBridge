@@ -271,6 +271,7 @@ export function activate(context: vscode.ExtensionContext) {
     }
 
     const opts = await buildOpts(session.model, cwd, session.workspaceId, session.sessionId, session.modelSessionId);
+    opts.terminalName = session.name; // 탭 제목 = 세션 이름(트리와 일치; 이름 없으면 모델명)
     await markSessionActive(session.workspaceId, session.sessionId);
     sessionTree.refresh();
     openChatPanel(opts, session.workspaceId);
@@ -398,6 +399,7 @@ export function activate(context: vscode.ExtensionContext) {
       const sessions = await getSessions(s.workspaceId);
       const meta = sessions.find((m) => m.sessionId === s.sessionId);
       const opts = await buildOpts(s.model, folder.fsPath, s.workspaceId, s.sessionId, meta?.modelSessionId ?? s.modelSessionId);
+      if (meta?.name) opts.terminalName = meta.name; // 복원 탭 제목 = 세션 이름
       // activate의 resetAllSessionsActive(모든 세션 비활성)와 경합 회피 — reset 완료 후 active 표시.
       // 안 기다리면 reset이 이 복구된 세션의 active 플래그를 덮어써 비활성으로 남을 수 있음 (V-21).
       if (pendingResetDone) await pendingResetDone;
