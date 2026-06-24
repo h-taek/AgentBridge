@@ -22,7 +22,7 @@
 
 'use strict'
 
-// @agentbridge-helper-version 0.3.0
+// @agentbridge-helper-version 0.4.0
 // (단일 설치 버전 비교용 — 이 파일을 수정하면 반드시 버전을 올릴 것)
 
 const fs = require('fs')
@@ -31,7 +31,7 @@ const path = require('path')
 // §G3 — 검색·주입 로직은 core 단일 소스. esbuild가 빌드 때 이 require를 인라인한다(옵션 나).
 // 런타임 헬퍼 옆엔 node_modules가 없어 require('@agentbridge/core') 불가 → 상대 경로로 엔트리 그래프에 포함.
 const { resolveContext } = require('../src/globalSearch')
-const { resolveQuery, renderGlobalMatches } = require('../src/globalInject')
+const { resolveQuery, renderGlobalMatches, extractSessionIdFromStdin } = require('../src/globalInject')
 
 // claude/codex/agy 모두 stdout JSON의 `hookEventName`이 *호출된 hook event 이름과 정확히 일치*
 // 해야 한다. 일치 안 하면 CLI host가 "expected X but got Y" 에러로 hook을 거부 (claude는 warning,
@@ -368,10 +368,41 @@ async function main() {
   const ir = readJsonSafe(irPath)
   const recentTurns = readRecentTurns(turnsPath, 3)
 
+  const stdinRaw = await readStdin(200)
+
+  // 세션 id 결정적 캡처 — spawn 때 우리가 심은 env 토큰으로 키잉한 파일에 stdin의 native id를
+  // 기록한다. best-effort: 어떤 실패도 컨텍스트 주입(아래)을 막지 않는다. claude는 우리가 id를
+  // 발급하므로 대상 아님.
+  try {
+    const token = process.env.AGENTBRIDGE_WS_SESSION || ''
+    let sid = extractSessionIdFromStdin(stdinRaw, parsed.agent)
+    if (!sid) {
+      if (parsed.agent === 'agy') sid = process.env.ANTIGRAVITY_CONVERSATION_ID || ''
+      else if (parsed.agent === 'codex') sid = process.env.CODEX_THREAD_ID || ''
+    }
+    if (parsed.agent !== 'claude' && token && sid && token === path.basename(token)) {
+      const out = path.join(wsDir, 'captured-' + token + '.json')
+      const tmp = out + '.' + process.pid + '.tmp'
+      fs.writeFileSync(
+        tmp,
+        JSON.stringify({
+          agent: parsed.agent,
+          modelSessionId: sid,
+          ppid: process.ppid,
+          capturedAt: Date.now()
+        })
+      )
+      fs.renameSync(tmp, out)
+    }
+  } catch (e) {
+    process.stderr.write(
+      'agentbridge-memory: capture write skipped — ' + String(e && e.message ? e.message : e) + '\n'
+    )
+  }
+
   // §G3 글로벌 메모리 검색 — additive·best-effort. 어떤 실패도 IR/turns 주입을 막지 않는다.
   let globalBlock = ''
   try {
-    const stdinRaw = await readStdin(200)
     const lastTurn = recentTurns.length ? recentTurns[recentTurns.length - 1] : null
     const lastUserTurn = lastTurn && typeof lastTurn.user === 'string' ? lastTurn.user : ''
     const query = resolveQuery(stdinRaw, lastUserTurn)
