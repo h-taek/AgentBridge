@@ -611,8 +611,8 @@ function buildAdditionalContext(ir, recentTurns, workspaceId, globalBlock) {
     parts.push("");
   }
   if (hasTurns) {
-    parts.push("## Recent conversation (raw, last " + recentTurns.length + " turns)");
-    parts.push(renderRecentTurns(recentTurns));
+    parts.push("## Recent conversation (raw, last " + recentTurns.length + " turns, newest first)");
+    parts.push(renderRecentTurns(recentTurns.slice().reverse()));
   }
   parts.push("</agentbridge-context>");
   return parts.join("\n");
@@ -674,7 +674,13 @@ async function main() {
     );
     globalBlock = "";
   }
-  const additionalContext = buildAdditionalContext(ir, recentTurns, parsed.workspace, globalBlock);
+  const INJECT_BYTE_LIMIT = 9 * 1024;
+  let injTurns = recentTurns;
+  let additionalContext = buildAdditionalContext(ir, injTurns, parsed.workspace, globalBlock);
+  while (Buffer.byteLength(additionalContext, "utf8") > INJECT_BYTE_LIMIT && injTurns.length > 0) {
+    injTurns = injTurns.slice(1);
+    additionalContext = buildAdditionalContext(ir, injTurns, parsed.workspace, globalBlock);
+  }
   process.stdout.write(
     JSON.stringify(buildHookOutput(parsed.agent, parsed.event, additionalContext))
   );

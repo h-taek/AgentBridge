@@ -114,11 +114,8 @@ export class ChatPanel {
 
     if (opts.sessionId) activePanels.set(opts.sessionId, this);
 
-    const modelIcon = `model-${opts.model ?? 'claude'}.png`;
-    this.panel.iconPath = {
-      light: vscode.Uri.joinPath(extensionUri, 'media', modelIcon),
-      dark: vscode.Uri.joinPath(extensionUri, 'media', modelIcon),
-    };
+    const modelLogo = vscode.Uri.joinPath(extensionUri, 'media', 'logos', `${opts.model ?? 'claude'}.svg`);
+    this.panel.iconPath = { light: modelLogo, dark: modelLogo };
 
     this.panel.webview.html = this.buildHtml();
 
@@ -544,7 +541,7 @@ export class ChatPanel {
       vscode.Uri.joinPath(this.extensionUri, 'out', 'vendor', '@xterm', 'addon-unicode11', 'lib', 'addon-unicode11.js'),
     );
     const nonce = getNonce();
-    const modelLabel = this.opts.model ? CLI_DISPLAY_NAME[this.opts.model].toUpperCase() : 'CLI';
+    const modelLabel = this.opts.model ? CLI_DISPLAY_NAME[this.opts.model] : 'CLI';
 
     // VS Code 재시작 시 panel을 복구하기 위한 최소 state. serializer.deserializeWebviewPanel에서
     // 다시 받아 buildOpts로 재구성한다.
@@ -578,6 +575,10 @@ export class ChatPanel {
       flex-direction: column;
       height: 100vh;
     }
+    :root { --accent: #d97757; }
+    body[data-model="codex"] { --accent: #5D8AF9; }
+    body[data-model="agy"] { --accent: #8e6cef; }
+    .title { font-weight: 500; font-size: 12px; color: #fff; }
     .header {
       display: flex;
       align-items: center;
@@ -588,39 +589,32 @@ export class ChatPanel {
       flex-shrink: 0;
       position: relative;
     }
-    .header .model-badge {
+    .header .badge {
       font-size: 11px;
-      font-weight: 600;
-      padding: 2px 8px;
-      border-radius: 10px;
-      background: var(--vscode-badge-background);
-      color: var(--vscode-badge-foreground);
+      font-weight: 800;
+      letter-spacing: .2px;
+      padding: 1px 6px;
+      border-radius: 999px;
+      background: var(--accent);
+      color: #1b1b1d;
     }
-    .header .session-name {
-      font-size: 12px;
-      color: var(--vscode-foreground);
-      flex: 1;
-    }
-    .header-actions { display: flex; gap: 4px; }
-    .header-actions button {
-      background: transparent;
+    .header .sp { flex: 1; }
+    .hbtn {
+      background: none;
       border: none;
-      color: var(--vscode-descriptionForeground);
+      color: var(--vscode-foreground);
       cursor: pointer;
-      width: 28px;
-      height: 28px;
-      border-radius: 4px;
-      display: flex;
+      width: 30px;
+      height: 30px;
+      border-radius: 7px;
+      display: inline-flex;
       align-items: center;
       justify-content: center;
       padding: 0;
     }
-    .header-actions button:hover {
+    .hbtn:hover {
       background: var(--vscode-toolbar-hoverBackground, rgba(255,255,255,0.1));
-      color: var(--vscode-foreground);
     }
-    .header-actions button svg { width: 22px; height: 22px; fill: currentColor; }
-    .header-actions button.btn-new svg { width: 18px; height: 18px; }
 
     /* Session dropdown panel */
     .session-panel {
@@ -789,19 +783,18 @@ export class ChatPanel {
     .xterm-viewport { background-color: inherit !important; }
   </style>
 </head>
-<body>
+<body data-model="${this.opts.model ?? 'claude'}">
   <div class="sp-overlay" id="spOverlay"></div>
   <div class="header">
-    <span class="model-badge">${escapeHtml(modelLabel)}</span>
-    <span class="session-name">${escapeHtml(this.opts.terminalName)}</span>
-    <div class="header-actions">
-      <button id="btnSelectSession" title="Select session">
-        <svg viewBox="0 0 16 16"><path d="M13.5 8a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0ZM8 3.5a4.5 4.5 0 1 0 0 9 4.5 4.5 0 0 0 0-9ZM8.5 5v2.793l1.854 1.853-.708.708L7.5 8.207V5h1Z"/></svg>
-      </button>
-      <button id="btnNewSession" class="btn-new" title="New session">
-        <svg viewBox="0 0 16 16"><path d="M8 1a.5.5 0 0 1 .5.5V7h5.5a.5.5 0 0 1 0 1H8.5v5.5a.5.5 0 0 1-1 0V8H2a.5.5 0 0 1 0-1h5.5V1.5A.5.5 0 0 1 8 1Z"/></svg>
-      </button>
-    </div>
+    <span class="title">AgentBridge</span>
+    <span class="badge">${escapeHtml(modelLabel)}</span>
+    <span class="sp"></span>
+    <button id="btnSelectSession" class="hbtn" title="History">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+    </button>
+    <button id="btnNewSession" class="btn-new hbtn" title="New session">
+      <svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+    </button>
     <div class="session-panel" id="sessionPanel">
       <div class="sp-search">
         <div class="sp-search-wrap">
