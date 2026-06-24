@@ -2,6 +2,12 @@
 
 이 프로젝트는 [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/) 1.1.0 형식을 따르며 [Semantic Versioning](https://semver.org/spec/v2.0.0.html)을 사용한다.
 
+## [Unreleased]
+
+### Fixed
+
+- 긴 대화에서 매 턴 주입되는 맥락의 최근 대화가 잘려나가던 문제 수정 — 주입 블록이 CLI 훅의 크기 한도를 넘으면 아래쪽부터 잘려, 가장 최근(연속성에 중요한) 턴이 비결정적으로 누락될 수 있었다. 이제 블록을 최신순으로 정렬하고 오래된 것부터 줄여, 최근 맥락은 항상 보존된다.
+
 ## [0.4.0] — 2026-06-17
 
 ### Added
