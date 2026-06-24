@@ -3,6 +3,8 @@
 //
 // keep-out 키:
 //   - OPENAI_API_KEY: Codex의 ChatGPT 구독을 silently 무시 → child에 노출 X
+//   - GEMINI_API_KEY / GOOGLE_API_KEY: agy CLI(PTY·refine)가 구독 OAuth 대신 무료티어 API 키로 인증해
+//       레이트리밋에 걸리는 걸 차단
 //   - GEMINI_SYSTEM_MD: Gemini system prompt를 full replacement로 덮어쓰는 차단
 
 import { execSync, execFileSync } from 'child_process';
@@ -23,7 +25,7 @@ export interface ProbeResult {
   versionError?: string;
 }
 
-const ADAPTER_ENV_KEEP_OUT: ReadonlyArray<string> = ['OPENAI_API_KEY', 'GEMINI_SYSTEM_MD'];
+const ADAPTER_ENV_KEEP_OUT: ReadonlyArray<string> = ['OPENAI_API_KEY', 'GEMINI_API_KEY', 'GOOGLE_API_KEY', 'GEMINI_SYSTEM_MD'];
 
 export type EnvProbeOptions = {
   logger?: Logger;
