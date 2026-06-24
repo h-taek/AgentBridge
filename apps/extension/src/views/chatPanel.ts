@@ -114,11 +114,8 @@ export class ChatPanel {
 
     if (opts.sessionId) activePanels.set(opts.sessionId, this);
 
-    const modelIcon = `model-${opts.model ?? 'claude'}.png`;
-    this.panel.iconPath = {
-      light: vscode.Uri.joinPath(extensionUri, 'media', modelIcon),
-      dark: vscode.Uri.joinPath(extensionUri, 'media', modelIcon),
-    };
+    const modelLogo = vscode.Uri.joinPath(extensionUri, 'media', 'logos', `${opts.model ?? 'claude'}.svg`);
+    this.panel.iconPath = { light: modelLogo, dark: modelLogo };
 
     this.panel.webview.html = this.buildHtml();
 
