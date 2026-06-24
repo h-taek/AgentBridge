@@ -23,6 +23,9 @@ export type CliAdapterOptions = {
   // claude 어댑터가 hookInstaller.installClaudeHooks(workspaceClaudeDir, …)에 전달할 디렉토리.
   // 호스트가 workspace 단위 storage 경로를 안다 — workspaceId로 매핑.
   workspaceClaudeDir: (workspaceId: string) => string;
+  // <storageRoot>/workspaces/<workspaceId> — 훅이 captured-<token>.json을 쓰는 디렉토리.
+  // 미제공 시 hookCaptureFilePath 미반환(토큰 캡처 비활성, 파일와치만).
+  hookCaptureDir?: (workspaceId: string) => string;
   logger?: Logger;
 };
 
@@ -38,6 +41,7 @@ export interface CliAdapterSet {
       workspaceId: string,
       resumeSessionId?: string,
       resumeModelSessionId?: string,
+      captureToken?: string,
     ): Promise<SpawnOptions>;
   };
   agy: {
@@ -47,13 +51,14 @@ export interface CliAdapterSet {
       workspaceId: string,
       resumeSessionId?: string,
       resumeModelSessionId?: string,
+      captureToken?: string,
     ): Promise<SpawnOptions>;
   };
 }
 
 export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
   const log = opts.logger ?? noopLogger;
-  const { envProbe, hookInstaller, hookStatusStore } = opts;
+  const { envProbe, hookInstaller, hookStatusStore, hookCaptureDir } = opts;
 
   async function claudeSessionFileExists(uuid: string): Promise<boolean> {
     const root = join(homedir(), '.claude', 'projects');
@@ -130,9 +135,18 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
     codex: {
       isAvailable: () => envProbe.probe('codex'),
 
-      async buildSpawnOptions(cwd, workspaceId, resumeSessionId, resumeModelSessionId) {
+      async buildSpawnOptions(cwd, workspaceId, resumeSessionId, resumeModelSessionId, captureToken) {
         const sessionId = resumeSessionId ?? randomUUID();
-        const env = envProbe.getShellEnv();
+        // 캡처 토큰: 호스트가 명시(captureToken, 데스크탑)하면 그걸, 아니면 내부 sessionId
+        // (extension — opts.sessionId == chatPanel 세션 identity). hookCaptureDir 제공 시에만 활성.
+        const captureFileToken = captureToken ?? sessionId;
+        const env = {
+          ...envProbe.getShellEnv(),
+          ...(hookCaptureDir ? { AGENTBRIDGE_WS_SESSION: captureFileToken } : {}),
+        };
+        const hookCaptureFilePath = hookCaptureDir
+          ? join(hookCaptureDir(workspaceId), 'captured-' + captureFileToken + '.json')
+          : undefined;
         const probe = envProbe.probe('codex');
         const command = probe.resolvedPath ?? 'codex';
 
@@ -178,6 +192,7 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
           sessionId,
           modelSessionId,
           codexSessionSnapshot,
+          hookCaptureFilePath,
         };
       },
     },
@@ -185,9 +200,18 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
     agy: {
       isAvailable: () => envProbe.probe('agy'),
 
-      async buildSpawnOptions(cwd, workspaceId, resumeSessionId, resumeModelSessionId) {
+      async buildSpawnOptions(cwd, workspaceId, resumeSessionId, resumeModelSessionId, captureToken) {
         const sessionId = resumeSessionId ?? randomUUID();
-        const env = envProbe.getShellEnv();
+        // 캡처 토큰: 호스트가 명시(captureToken, 데스크탑)하면 그걸, 아니면 내부 sessionId
+        // (extension — opts.sessionId == chatPanel 세션 identity). hookCaptureDir 제공 시에만 활성.
+        const captureFileToken = captureToken ?? sessionId;
+        const env = {
+          ...envProbe.getShellEnv(),
+          ...(hookCaptureDir ? { AGENTBRIDGE_WS_SESSION: captureFileToken } : {}),
+        };
+        const hookCaptureFilePath = hookCaptureDir
+          ? join(hookCaptureDir(workspaceId), 'captured-' + captureFileToken + '.json')
+          : undefined;
         const probe = envProbe.probe('agy');
         const command = probe.resolvedPath ?? 'agy';
 
@@ -251,6 +275,7 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
           sessionId,
           modelSessionId,
           agyWatchUuid,
+          hookCaptureFilePath,
         };
       },
     },
