@@ -541,7 +541,7 @@ export class ChatPanel {
       vscode.Uri.joinPath(this.extensionUri, 'out', 'vendor', '@xterm', 'addon-unicode11', 'lib', 'addon-unicode11.js'),
     );
     const nonce = getNonce();
-    const modelLabel = this.opts.model ? CLI_DISPLAY_NAME[this.opts.model].toUpperCase() : 'CLI';
+    const modelLabel = this.opts.model ? CLI_DISPLAY_NAME[this.opts.model] : 'CLI';
 
     // VS Code 재시작 시 panel을 복구하기 위한 최소 state. serializer.deserializeWebviewPanel에서
     // 다시 받아 buildOpts로 재구성한다.
@@ -578,7 +578,7 @@ export class ChatPanel {
     :root { --accent: #d97757; }
     body[data-model="codex"] { --accent: #5D8AF9; }
     body[data-model="agy"] { --accent: #8e6cef; }
-    .title { font-weight: 500; font-size: 12px; color: var(--vscode-descriptionForeground); }
+    .title { font-weight: 500; font-size: 12px; color: #fff; }
     .header {
       display: flex;
       align-items: center;
@@ -598,11 +598,7 @@ export class ChatPanel {
       background: var(--accent);
       color: #1b1b1d;
     }
-    .header .session-name {
-      font-size: 12px;
-      color: var(--vscode-foreground);
-      flex: 1;
-    }
+    .header .sp { flex: 1; }
     .hbtn {
       background: none;
       border: none;
@@ -792,12 +788,12 @@ export class ChatPanel {
   <div class="header">
     <span class="title">AgentBridge</span>
     <span class="badge">${escapeHtml(modelLabel)}</span>
-    <span class="session-name">${escapeHtml(this.opts.terminalName)}</span>
+    <span class="sp"></span>
     <button id="btnSelectSession" class="hbtn" title="History">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
     </button>
     <button id="btnNewSession" class="btn-new hbtn" title="New session">
-      <svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+      <svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
     </button>
     <div class="session-panel" id="sessionPanel">
       <div class="sp-search">
