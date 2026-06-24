@@ -670,14 +670,15 @@ export class SdkChatPanel {
   @keyframes shim{from{background-position:140% 0}to{background-position:-140% 0}}
   .wmeta{color:var(--vscode-descriptionForeground);opacity:.7;font-size:12px}
   .worked{font-family:var(--vscode-editor-font-family),monospace;color:var(--vscode-descriptionForeground);opacity:.7;font-size:12px;margin-top:2px}
-  /* ── Working 그룹(#8) — 현재 턴 맨 아래 인라인. todo가 Working 아래 자식으로 매달림 ── */
+  /* ── Working 그룹(#8) — 현재 턴 맨 아래 인라인. todo가 Working 아래 자식으로 매달리고, 완료 후에도 유지 ── */
   .lgroup{display:flex;flex-direction:column}
-  .kids{margin:5px 0 0 16px;padding-left:13px;border-left:1px solid var(--vscode-panel-border);display:flex;flex-direction:column;gap:3px}
+  .kids{margin:5px 0 2px 16px;padding-left:13px;border-left:1px solid var(--vscode-panel-border);display:flex;flex-direction:column;gap:3px}
   .kids .todo{display:flex;align-items:flex-start;gap:8px;font-size:12.5px;line-height:1.5}
   .kids .todo .mk{flex:none;width:13px;text-align:center;margin-top:1px;font-size:12px}
-  .todo.done{color:var(--vscode-descriptionForeground);opacity:.6} .todo.done .txt{text-decoration:line-through} .todo.done .mk{color:#5ec98a}
-  .todo.now{color:var(--vscode-foreground)} .todo.now .mk{color:var(--accent)} .todo.now .txt{font-weight:600}
-  .todo.pend{color:var(--vscode-descriptionForeground);opacity:.55}
+  /* 상태 클래스는 tdone/tnow/tpend — 기존 .pend(이미지 칩) 등과 충돌 회피 */
+  .todo.tdone{color:var(--vscode-descriptionForeground);opacity:.6} .todo.tdone .txt{text-decoration:line-through} .todo.tdone .mk{color:#5ec98a}
+  .todo.tnow{color:var(--vscode-foreground)} .todo.tnow .mk{color:var(--accent)} .todo.tnow .txt{font-weight:600}
+  .todo.tpend{color:var(--vscode-descriptionForeground);opacity:.55}
 
   footer{padding:6px 8px 12px}
   .dock{position:relative}
@@ -1247,8 +1248,8 @@ export class SdkChatPanel {
     if(!TASKS.length){ if(work.kids){ work.kids.remove(); work.kids=null; } return; }
     var box=work.kids; if(!box){ box=el('div','kids'); work.line.appendChild(box); work.kids=box; }
     box.innerHTML='';
-    TASKS.forEach(function(t){ var s=t.status==='completed'?'done':(t.status==='in_progress'?'now':'pend');
-      var row=el('div','todo '+s); row.appendChild(el('span','mk', s==='done'?'✓':(s==='now'?'●':'○')));
+    TASKS.forEach(function(t){ var s=t.status==='completed'?'tdone':(t.status==='in_progress'?'tnow':'tpend');
+      var row=el('div','todo '+s); row.appendChild(el('span','mk', s==='tdone'?'✓':(s==='tnow'?'●':'○')));
       row.appendChild(el('span','txt', t.subject||'')); box.appendChild(row); });
   }
   // 서브에이전트(Agent) — 인라인 한 줄(프롬프트가 커서 IN/OUT 박스 억제). 내부 호출 미방출이라 자식 트리 없음.
@@ -1265,7 +1266,11 @@ export class SdkChatPanel {
   function toolVerb(n){ return (TOOLVERB[n]||n||'Working')+'…'; }
   function fmt(n){ return n>=1000? (n/1000).toFixed(1).replace(/\\.0$/,'')+'k' : ''+n; }
   function fmtDur(s){ if(s<60) return s+'s'; var h=Math.floor(s/3600), m=Math.floor(s%3600/60), x=s%60; return (h?h+'h ':'')+((h||m)?m+'m ':'')+x+'s'; }
-  function stopWork(){ if(work){ clearInterval(work.spin); if(work.line&&work.line.parentNode) work.line.parentNode.removeChild(work.line); work=null; } } // Working+todo 그룹 제거(턴 종료)
+  // 턴 종료 — 스피너(Working 줄)만 제거하고 todo 체크리스트는 남긴다(완료 후에도 살아있게). todo 없으면 빈 그룹 제거.
+  function stopWork(){ if(work){ clearInterval(work.spin);
+    if(work.lead&&work.lead.parentNode) work.lead.parentNode.removeChild(work.lead);
+    if(work.line&&!work.kids&&work.line.parentNode) work.line.parentNode.removeChild(work.line);
+    work=null; } }
   function cleanModel(m){ if(!m) return ''; var s=m.replace(/\\[.*?\\]/g,'').replace(/^(claude|codex)-/,''); var p=s.match(/^(opus|sonnet|haiku)-?(\\d+)-?(\\d+)?/i); return p? (p[1].charAt(0).toUpperCase()+p[1].slice(1)+' '+p[2]+(p[3]?'.'+p[3]:'')) : s; }
   function grow(){ input.style.height='auto'; input.style.height=Math.min(input.scrollHeight,160)+'px'; }
   // 도구 표시용 — 설명(Bash 등의 description) + IN 본문(command/file_path/pattern…)
