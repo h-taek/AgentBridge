@@ -78,6 +78,7 @@ export async function coordinateCapture(opts: {
   graceMs?: number;
   signal: AbortSignal;
 }): Promise<{ id: string; source: 'hook' | 'fallback' } | null> {
+  if (opts.signal.aborted) return null;
   const grace = opts.graceMs ?? 2000;
   return new Promise((resolve) => {
     let settled = false;

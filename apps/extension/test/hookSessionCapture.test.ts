@@ -90,4 +90,16 @@ describe('coordinateCapture', () => {
     ctrl.abort();
     assert.equal(await p, null);
   });
+
+  it('이미 abort된 시그널이면 즉시 null', async () => {
+    const ctrl = new AbortController();
+    ctrl.abort();
+    const r = await coordinateCapture({
+      hookCapture: never(),
+      fallbackCapture: never(),
+      graceMs: 100,
+      signal: ctrl.signal,
+    });
+    assert.equal(r, null);
+  });
 });
