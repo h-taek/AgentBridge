@@ -1231,15 +1231,30 @@ export class SdkChatPanel {
     work.spin=setInterval(function(){ var F=' .oO@* '; sp.textContent=F[work.frame%F.length]; work.frame++; tick(); },200);
     tick();
   }
-  // todo(TodoWrite) — Working 그룹 아래 자식으로(인라인). 매번 전체 리스트가 와서 통째 재렌더.
-  function renderTodos(input){
-    var todos=input&&input.todos; if(!Array.isArray(todos)) return;
-    if(!work) return; var box=work.kids;
-    if(!box){ box=el('div','kids'); work.line.appendChild(box); work.kids=box; }
+  // 할 일 트래커 — 이 환경 claude는 TaskCreate/TaskUpdate(증분)로 관리(TodoWrite 아님, 라이브 확인).
+  // 세션 단위 TASKS 유지 → Working 그룹 아래 체크리스트로 렌더. taskId는 생성순 1-base(라이브 확인).
+  var TASKS=[];
+  function applyTask(name,input){
+    input=input||{};
+    if(name==='TodoWrite'&&Array.isArray(input.todos)){ TASKS=input.todos.map(function(t,i){ return {id:String(i+1),subject:(t&&(t.content||t.activeForm))||'',status:(t&&t.status)||'pending'}; }); }
+    else if(name==='TaskCreate'){ TASKS.push({id:String(TASKS.length+1),subject:String(input.subject||input.activeForm||''),status:'pending'}); }
+    else if(name==='TaskUpdate'){ var hit=null; for(var i=0;i<TASKS.length;i++){ if(TASKS[i].id===String(input.taskId)){ hit=TASKS[i]; break; } }
+      if(hit){ if(input.status==='deleted'){ TASKS=TASKS.filter(function(x){ return x!==hit; }); } else { if(input.status)hit.status=input.status; if(input.subject)hit.subject=String(input.subject); } } }
+    renderTasks();
+  }
+  function renderTasks(){
+    if(!work) return;
+    if(!TASKS.length){ if(work.kids){ work.kids.remove(); work.kids=null; } return; }
+    var box=work.kids; if(!box){ box=el('div','kids'); work.line.appendChild(box); work.kids=box; }
     box.innerHTML='';
-    todos.forEach(function(t){ var s=t&&t.status==='completed'?'done':(t&&t.status==='in_progress'?'now':'pend');
+    TASKS.forEach(function(t){ var s=t.status==='completed'?'done':(t.status==='in_progress'?'now':'pend');
       var row=el('div','todo '+s); row.appendChild(el('span','mk', s==='done'?'✓':(s==='now'?'●':'○')));
-      row.appendChild(el('span','txt', (t&&(t.content||t.activeForm))||'')); box.appendChild(row); });
+      row.appendChild(el('span','txt', t.subject||'')); box.appendChild(row); });
+  }
+  // 서브에이전트(Agent) — 인라인 한 줄(프롬프트가 커서 IN/OUT 박스 억제). 내부 호출 미방출이라 자식 트리 없음.
+  function renderAgent(input){ input=input||{};
+    var desc=(input.subagent_type?String(input.subagent_type):'')+(input.description?((input.subagent_type?' — ':'')+String(input.description)):'');
+    var b=itemRow('tool'); var nm=el('div','tname'); nm.appendChild(el('strong',null,'Agent')); if(desc) nm.appendChild(el('span','tdesc',desc)); b.appendChild(nm);
   }
   // 토큰: ↑=입력(프롬프트) ↓=출력(생성). claude는 턴 끝에만, codex는 중간에 갱신 → 라이브는 codex에서 보임.
   function tick(){ if(!work) return; var s=Math.floor((Date.now()-work.t0)/1000); work.mt.textContent='('+fmtDur(s)+(work.out?(' · ↑'+fmt(work.in||0)+' ↓'+fmt(work.out)):'')+')'; }
@@ -1402,7 +1417,7 @@ export class SdkChatPanel {
     if(msg.type==='agents'){ renderAgents(msg.data); return; }
     if(msg.type==='slash'){ SLASH=msg.list||[]; return; }
     if(msg.type==='files'){ if(AC.mode==='file'){ AC.items=(msg.list||[]).map(function(p){return {name:p};}); AC.idx=0; renderAc(); } return; }
-    if(msg.type==='cleared'){ stopWork(); QUEUE=[]; cur=null; log.innerHTML=''; closeSettingsMenu(); closeAc(); input.value=''; renderHL(); welcome.classList.remove('hide'); return; }
+    if(msg.type==='cleared'){ stopWork(); QUEUE=[]; cur=null; TASKS=[]; log.innerHTML=''; closeSettingsMenu(); closeAc(); input.value=''; renderHL(); welcome.classList.remove('hide'); return; }
     if(msg.type==='restore'){ renderRestore(msg.turns); return; }
     if(msg.type==='inject'){
       var ip=[]; if(msg.ir) ip.push('IR'); if(msg.mem>0) ip.push(msg.mem+' memory');
@@ -1455,9 +1470,18 @@ export class SdkChatPanel {
         if(ev.status==='started') cur.tools[ev.id]={askq:true};
         if(wasBottom) bottom();
       }
-      // ── TodoWrite → Working 그룹 아래 todo (트랜스크립트 행 없음, #8) ──
-      else if(ev.name==='TodoWrite' || (rec&&rec.todo)){
-        if(ev.status==='started'){ renderTodos(ev.input); cur.tools[ev.id]={todo:true}; }
+      // ── 할 일: TaskCreate/TaskUpdate(증분)·TodoWrite(전체) → Working 아래 체크리스트(트랜스크립트 행 없음, #8) ──
+      else if(ev.name==='TaskCreate' || ev.name==='TaskUpdate' || ev.name==='TodoWrite' || (rec&&rec.task)){
+        if(ev.status==='started'){ applyTask(ev.name, ev.input); cur.tools[ev.id]={task:true}; }
+        if(wasBottom) bottom();
+      }
+      // ── TaskList/TaskGet(내부 조회)·ToolSearch(도구 탐색 plumbing) → 표시 안 함 ──
+      else if(ev.name==='TaskList' || ev.name==='TaskGet' || ev.name==='ToolSearch' || (rec&&rec.taskq)){
+        if(ev.status==='started') cur.tools[ev.id]={taskq:true};
+      }
+      // ── 서브에이전트(Agent, 레거시 Task) → 인라인 한 줄, 완료는 무시(IN/OUT 박스 억제, #8) ──
+      else if(ev.name==='Agent' || ev.name==='Task' || (rec&&rec.agent)){
+        if(ev.status==='started'){ if(!rec){ closeText(); closeThink(); renderAgent(ev.input); } cur.tools[ev.id]={agent:true}; setStatusText(toolVerb('Task')); }
         if(wasBottom) bottom();
       }
       else {
