@@ -9,6 +9,7 @@ import { PtyDisplayFilter } from '../core/ptyDisplayFilter';
 import { getSessions, renameSession, deleteSession, setModelSessionId, type SessionMeta } from '../core/sessionRegistry';
 import { captureNewThreadId } from '../core/cliAdapter/codexSessionWatcher';
 import { watchForNewConversationUuid } from '../core/cliAdapter/agyResume';
+import { captureSessionIdFromHook, coordinateCapture } from '@agentbridge/core';
 import * as workspaceStore from '../core/workspaceStore';
 import {
   acquireOwnership,
@@ -335,38 +336,49 @@ export class ChatPanel {
   // agy:   ~/.gemini/antigravity-cli/cache/last_conversations.json polling으로 cwd→UUID 매핑 캡처.
   // 캡처되면 sessionRegistry.setModelSessionId로 영속화 → 다음 reopen에서 resume 인자 생성.
   private startModelSessionIdWatcher(): void {
-    const { workspaceId, sessionId, codexSessionSnapshot, agyWatchUuid, cwd, model } = this.opts;
+    const { workspaceId, sessionId, codexSessionSnapshot, agyWatchUuid, cwd, model, hookCaptureFilePath } =
+      this.opts;
     if (!workspaceId || !sessionId) return;
 
     const persist = (modelSessionId: string): void => {
       void setModelSessionId(workspaceId, sessionId, modelSessionId).catch((err) => {
         output.warn(`ChatPanel: setModelSessionId 실패 — ${String(err)}`);
       });
-      // 매니저에 native id를 알려 transcript 캡처 시작 (codex/agy).
       if (cwd) setCaptureModelSessionId(sessionId, modelSessionId, cwd);
     };
 
+    const ctrl = new AbortController();
+    this.modelSessionWatchAbort = ctrl;
+    const hookCapture = hookCaptureFilePath
+      ? captureSessionIdFromHook({ captureFilePath: hookCaptureFilePath, signal: ctrl.signal })
+      : Promise.resolve<string | null>(null);
+
     if (model === 'codex' && codexSessionSnapshot) {
-      const ctrl = new AbortController();
-      this.modelSessionWatchAbort = ctrl;
-      void captureNewThreadId(codexSessionSnapshot, { signal: ctrl.signal })
-        .then((threadId) => {
-          if (threadId) persist(threadId);
+      void coordinateCapture({
+        hookCapture,
+        fallbackCapture: captureNewThreadId(codexSessionSnapshot, { signal: ctrl.signal }),
+        signal: ctrl.signal,
+      })
+        .then((r) => {
+          if (r) persist(r.id);
         })
-        .catch((err) => {
-          output.warn(`ChatPanel: codex thread_id 캡처 실패 — ${String(err)}`);
-        });
+        .catch((err) => output.warn(`ChatPanel: codex 캡처 실패 — ${String(err)}`));
     } else if (model === 'agy' && agyWatchUuid && cwd) {
-      const ctrl = new AbortController();
-      this.modelSessionWatchAbort = ctrl;
-      void watchForNewConversationUuid({
-        cwd,
-        excludeUuids: agyWatchUuid.excludeUuids,
-        abortSignal: ctrl.signal,
-        onCaptured: (uuid) => persist(uuid),
-      }).catch((err) => {
-        output.warn(`ChatPanel: agy UUID 캡처 실패 — ${String(err)}`);
+      const fallbackCapture = new Promise<string | null>((res) => {
+        void watchForNewConversationUuid({
+          cwd,
+          excludeUuids: agyWatchUuid.excludeUuids,
+          abortSignal: ctrl.signal,
+          onCaptured: (uuid) => res(uuid),
+        })
+          .then(() => res(null))
+          .catch(() => res(null));
       });
+      void coordinateCapture({ hookCapture, fallbackCapture, signal: ctrl.signal })
+        .then((r) => {
+          if (r) persist(r.id);
+        })
+        .catch((err) => output.warn(`ChatPanel: agy 캡처 실패 — ${String(err)}`));
     }
   }
 

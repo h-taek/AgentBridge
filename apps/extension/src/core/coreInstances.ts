@@ -117,6 +117,7 @@ export function initializeCore(
     hookInstaller: _hookInstaller,
     hookStatusStore: _hookStatusStore,
     workspaceClaudeDir: (workspaceId) => _workspaceStore!.getWorkspacePath(workspaceId),
+    hookCaptureDir: (workspaceId) => path.join(storageRoot, 'workspaces', workspaceId),
     logger,
   });
 
