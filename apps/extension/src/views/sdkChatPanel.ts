@@ -611,7 +611,7 @@ export class SdkChatPanel {
   .item{display:flex;gap:9px;position:relative}
   /* 한 턴의 점들을 잇는 옅은 세로선 (다음 점 중심까지) */
   .item:not(:last-child)::before{content:'';position:absolute;left:3px;top:10px;bottom:-30px;width:1px;background:var(--vscode-panel-border)}
-  .item:has(+ .working)::before,.item:has(+ .worked)::before,.item:has(+ .copybtn)::before{display:none}
+  .item:has(+ .lgroup)::before,.item:has(+ .working)::before,.item:has(+ .worked)::before,.item:has(+ .copybtn)::before{display:none}
   .dot{flex:none;width:7px;height:7px;border-radius:50%;margin-top:7px;position:relative;z-index:1}
   .dot.tool{background:var(--accent)} .dot.text{background:var(--vscode-descriptionForeground);opacity:.6}
   .body{flex:1;min-width:0}
@@ -670,23 +670,16 @@ export class SdkChatPanel {
   @keyframes shim{from{background-position:140% 0}to{background-position:-140% 0}}
   .wmeta{color:var(--vscode-descriptionForeground);opacity:.7;font-size:12px}
   .worked{font-family:var(--vscode-editor-font-family),monospace;color:var(--vscode-descriptionForeground);opacity:.7;font-size:12px;margin-top:2px}
-  /* ── 라이브 영역(#live): 스크롤 밖 하단 고정 — Working + todo + 실행중 서브에이전트(#8) ── */
-  #live{flex:none;padding:11px 16px 7px;display:flex;flex-direction:column;gap:12px}
-  #live:empty{display:none}
+  /* ── Working 그룹(#8) — 현재 턴 맨 아래 인라인. todo가 Working 아래 자식으로 매달림 ── */
   .lgroup{display:flex;flex-direction:column}
-  .lead{display:flex;align-items:center;gap:7px;font-size:12.5px}
-  .lead .wmeta{margin-left:auto}
-  .lead .dotline{width:7px;height:7px;border-radius:50%;background:var(--vscode-foreground);flex:none}
-  .lead strong{color:var(--vscode-foreground);font-weight:700;margin-right:6px}
-  .lead .satxt{color:var(--vscode-descriptionForeground);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
-  .kids{margin:5px 0 0 3px;padding-left:13px;border-left:1px solid var(--vscode-panel-border);display:flex;flex-direction:column;gap:3px}
+  .kids{margin:5px 0 0 16px;padding-left:13px;border-left:1px solid var(--vscode-panel-border);display:flex;flex-direction:column;gap:3px}
   .kids .todo{display:flex;align-items:flex-start;gap:8px;font-size:12.5px;line-height:1.5}
   .kids .todo .mk{flex:none;width:13px;text-align:center;margin-top:1px;font-size:12px}
   .todo.done{color:var(--vscode-descriptionForeground);opacity:.6} .todo.done .txt{text-decoration:line-through} .todo.done .mk{color:#5ec98a}
   .todo.now{color:var(--vscode-foreground)} .todo.now .mk{color:var(--accent)} .todo.now .txt{font-weight:600}
   .todo.pend{color:var(--vscode-descriptionForeground);opacity:.55}
 
-  footer{padding:6px 8px 12px;border-top:1px solid var(--vscode-panel-border)}
+  footer{padding:6px 8px 12px}
   .dock{position:relative}
   @keyframes rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
   .approval{position:relative;z-index:1;margin:0 30px -30px;display:flex;flex-direction:column;gap:10px;
@@ -843,7 +836,6 @@ export class SdkChatPanel {
       </div>
     </div>
   </div>
-  <div id="live"></div>
   <footer>
     <div class="dock">
       <div id="approvalSlot"></div>
@@ -869,7 +861,6 @@ export class SdkChatPanel {
   const vscode = acquireVsCodeApi();
   vscode.setState({ sessionId: ${JSON.stringify(this.sessionId)}, model: ${JSON.stringify(model)}, workspaceId: ${JSON.stringify(this.workspaceId)} }); // IDE 재시작 복원용 — 직렬화기가 이 값으로 패널 재구성
   const log = document.getElementById('log');
-  const live = document.getElementById('live');
   const input = document.getElementById('input');
   const sendBtn = document.getElementById('send');
   const approvalSlot = document.getElementById('approvalSlot');
@@ -1231,16 +1222,16 @@ export class SdkChatPanel {
   // 생각 블록 종료 시 "Thought for Ns"로 요약 갱신 (#4)
   function closeThink(){ if(cur&&cur.think&&cur.thinkSummary){ var s=Math.max(1,Math.round((Date.now()-cur.thinkT0)/1000)); cur.thinkSummary.textContent='Thought for '+s+'s'; } if(cur){ cur.think=null; cur.thinkSummary=null; } }
 
-  // Working/todo/서브에이전트는 스크롤 밖 #live에 핀(#8). work.line=lgroup, work.lead=Working 줄, work.kids=todo 컨테이너.
+  // Working 줄은 현재 턴 맨 아래에 인라인(#8 — 핀 해제, 텍스트 아래에 같이 스크롤). work.line=lgroup, work.kids=todo 컨테이너.
   function startWork(){
     if(work) return;
     var grp=el('div','lgroup'); var line=el('div','working'); var sp=el('span','tspin'); var st=el('span','shim',STATUS.working); var mt=el('span','wmeta','');
-    line.appendChild(sp); line.appendChild(st); line.appendChild(mt); grp.appendChild(line); live.appendChild(grp);
+    line.appendChild(sp); line.appendChild(st); line.appendChild(mt); grp.appendChild(line); cur.turn.appendChild(grp);
     work={line:grp,lead:line,st:st,mt:mt,kids:null,t0:Date.now(),in:0,out:0,frame:0};
     work.spin=setInterval(function(){ var F=' .oO@* '; sp.textContent=F[work.frame%F.length]; work.frame++; tick(); },200);
     tick();
   }
-  // todo(TodoWrite) — Working 그룹 아래 자식으로. 매번 전체 리스트가 와서 통째 재렌더.
+  // todo(TodoWrite) — Working 그룹 아래 자식으로(인라인). 매번 전체 리스트가 와서 통째 재렌더.
   function renderTodos(input){
     var todos=input&&input.todos; if(!Array.isArray(todos)) return;
     if(!work) return; var box=work.kids;
@@ -1250,19 +1241,8 @@ export class SdkChatPanel {
       var row=el('div','todo '+s); row.appendChild(el('span','mk', s==='done'?'✓':(s==='now'?'●':'○')));
       row.appendChild(el('span','txt', (t&&(t.content||t.activeForm))||'')); box.appendChild(row); });
   }
-  // 서브에이전트(Task) — 실행 중 #live 한 줄(내부 호출 미방출이라 자식 트리 없음). 완료 시 endSub가 트랜스크립트로.
-  function startSub(id,input){
-    var inp=input||{}; var desc=(inp.subagent_type?String(inp.subagent_type):'')+(inp.description?((inp.subagent_type?' — ':'')+String(inp.description)):'');
-    var grp=el('div','lgroup'); var lead=el('div','lead'); lead.appendChild(el('span','dotline'));
-    lead.appendChild(el('strong',null,'Task')); lead.appendChild(el('span','satxt',desc));
-    var mt=el('span','wmeta',''); lead.appendChild(mt); grp.appendChild(lead); live.appendChild(grp);
-    cur.tools[id]={sub:true,grp:grp,mt:mt,desc:desc,t0:Date.now()};
-  }
-  function endSub(id){ var r=cur.tools[id]; if(!r) return; r.done=true; if(r.grp) r.grp.remove();
-    var b=itemRow('tool'); var nm=el('div','tname'); nm.appendChild(el('strong',null,'Task')); if(r.desc) nm.appendChild(el('span','tdesc',r.desc)); b.appendChild(nm); }
   // 토큰: ↑=입력(프롬프트) ↓=출력(생성). claude는 턴 끝에만, codex는 중간에 갱신 → 라이브는 codex에서 보임.
-  function tick(){ if(!work) return; var s=Math.floor((Date.now()-work.t0)/1000); work.mt.textContent='('+fmtDur(s)+(work.out?(' · ↑'+fmt(work.in||0)+' ↓'+fmt(work.out)):'')+')';
-    if(cur&&cur.tools){ for(var k in cur.tools){ var r=cur.tools[k]; if(r&&r.sub&&!r.done&&r.mt) r.mt.textContent=fmtDur(Math.max(0,Math.floor((Date.now()-r.t0)/1000))); } } }
+  function tick(){ if(!work) return; var s=Math.floor((Date.now()-work.t0)/1000); work.mt.textContent='('+fmtDur(s)+(work.out?(' · ↑'+fmt(work.in||0)+' ↓'+fmt(work.out)):'')+')'; }
   function setStatus(k){ if(work) work.st.textContent=STATUS[k]; }
   function setStatusText(t){ if(work) work.st.textContent=t; }
   // 도구 이름 → "무엇을 하는 중"인지 라벨 (#17). 모르는 이름은 그대로 노출.
@@ -1270,7 +1250,7 @@ export class SdkChatPanel {
   function toolVerb(n){ return (TOOLVERB[n]||n||'Working')+'…'; }
   function fmt(n){ return n>=1000? (n/1000).toFixed(1).replace(/\\.0$/,'')+'k' : ''+n; }
   function fmtDur(s){ if(s<60) return s+'s'; var h=Math.floor(s/3600), m=Math.floor(s%3600/60), x=s%60; return (h?h+'h ':'')+((h||m)?m+'m ':'')+x+'s'; }
-  function stopWork(){ if(work){ clearInterval(work.spin); work=null; } if(live) live.innerHTML=''; } // #live 통째 비움(Working+todo+실행중 서브에이전트)
+  function stopWork(){ if(work){ clearInterval(work.spin); if(work.line&&work.line.parentNode) work.line.parentNode.removeChild(work.line); work=null; } } // Working+todo 그룹 제거(턴 종료)
   function cleanModel(m){ if(!m) return ''; var s=m.replace(/\\[.*?\\]/g,'').replace(/^(claude|codex)-/,''); var p=s.match(/^(opus|sonnet|haiku)-?(\\d+)-?(\\d+)?/i); return p? (p[1].charAt(0).toUpperCase()+p[1].slice(1)+' '+p[2]+(p[3]?'.'+p[3]:'')) : s; }
   function grow(){ input.style.height='auto'; input.style.height=Math.min(input.scrollHeight,160)+'px'; }
   // 도구 표시용 — 설명(Bash 등의 description) + IN 본문(command/file_path/pattern…)
@@ -1475,15 +1455,9 @@ export class SdkChatPanel {
         if(ev.status==='started') cur.tools[ev.id]={askq:true};
         if(wasBottom) bottom();
       }
-      // ── TodoWrite → 라이브 영역 todo (트랜스크립트 행 없음, #8) ──
+      // ── TodoWrite → Working 그룹 아래 todo (트랜스크립트 행 없음, #8) ──
       else if(ev.name==='TodoWrite' || (rec&&rec.todo)){
         if(ev.status==='started'){ renderTodos(ev.input); cur.tools[ev.id]={todo:true}; }
-        if(wasBottom) bottom();
-      }
-      // ── Task 서브에이전트 → 실행 중 라이브 한 줄, 완료 시 트랜스크립트(#8) ──
-      else if(ev.name==='Task' || (rec&&rec.sub)){
-        if(ev.status==='started'){ if(!rec){ closeText(); closeThink(); startSub(ev.id, ev.input); } setStatusText(toolVerb('Task')); }
-        else if(ev.status==='done'){ endSub(ev.id); }
         if(wasBottom) bottom();
       }
       else {
@@ -1528,6 +1502,7 @@ export class SdkChatPanel {
       if(!cur) newAssistantTurn(); closeText(); closeThink();
       if(!cur.tools) cur.tools={}; cur.tools[ev.id]={askq:true}; // tool 이벤트 중복 억제 마커(#13)
       var qs=ev.questions||[]; var state=qs.map(function(){ return []; });
+      vscode.postMessage({type:'log',text:'[sdk] 질문 위젯 수신 — '+qs.length+'개 질문 렌더'}); // #13 진단(모델이 AskUserQuestion 호출했는지 확인용)
       var needConfirm=qs.length>1||qs.some(function(q){ return q&&q.multiSelect; });
       var wrap=el('div','askwrap'); var confirmBtn=null, hintEl=null;
       function refreshQ(){ if(!confirmBtn) return; var ok=state.every(function(s){ return s.length>0; }); confirmBtn.disabled=!ok;
