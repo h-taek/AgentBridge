@@ -691,9 +691,9 @@ export class SdkChatPanel {
   .approval button{font:inherit;padding:6px 16px;border-radius:8px;border:none;cursor:pointer}
   .ay{background:var(--accent);color:#1b1b1d;font-weight:600} .an{background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground)}
   /* ── 질문 위젯(AskUserQuestion, #13) — approval 카드의 형제. 선택지 행 + 단일 즉시/다중 Confirm ── */
-  .askwrap{position:relative;z-index:1;margin:0 30px -30px;display:flex;flex-direction:column;gap:14px;
+  .askwrap{position:relative;z-index:1;margin:0 0 9px;display:flex;flex-direction:column;gap:13px;
     border:1px solid var(--accent);background:var(--vscode-editorWidget-background,#23211e);border-radius:12px;
-    padding:13px 14px 40px;box-shadow:0 10px 24px rgba(0,0,0,.5);animation:rise .22s ease}
+    padding:13px 14px;box-shadow:0 4px 14px rgba(0,0,0,.28);animation:rise .22s ease}
   .ask{display:flex;flex-direction:column;gap:7px;border-left:2px solid var(--accent);padding-left:11px}
   .ask .cat{font-size:10.5px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:var(--vscode-descriptionForeground)}
   .ask .q{font-weight:600;font-size:13px;line-height:1.4}
