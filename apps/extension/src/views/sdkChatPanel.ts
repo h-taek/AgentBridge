@@ -1490,8 +1490,9 @@ export class SdkChatPanel {
         if(wasBottom) bottom();
       }
       else {
-        // started(또는 처음 보는 id) → 헤더 + IN 박스 생성
-        if(!cur.tools[ev.id]){
+        // started(또는 처음 보는 id) → 헤더 + IN 박스 생성. 단 이름 없는 done(이전 턴 백그라운드 tool_result —
+        // <task-notification>)은 새 행을 만들지 않음(코덱스 done-only 툴은 이름이 있어 영향 없음).
+        if(!cur.tools[ev.id] && ev.name){
           closeText(); closeThink();
           var b=itemRow('tool'); var nm=el('div','tname'); nm.appendChild(el('strong',null,ev.name||'Tool'));
           var dsc=toolDesc(ev.input); if(dsc) nm.appendChild(el('span','tdesc',dsc));
