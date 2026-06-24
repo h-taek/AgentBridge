@@ -75,4 +75,34 @@ describe('workspaceStore (V-12 통일 동작)', () => {
     const ids = meta.sessions.map((s) => s.sessionId).sort();
     assert.deepEqual(ids, [sidA, sidB]);
   });
+
+  it('deleteSession가 captured-<sessionId>.json도 함께 정리한다', async () => {
+    const store = createWorkspaceStore({ rootPathForTesting: storagePath });
+    const wid = await store.createWorkspace({
+      workspacePath: '/tmp/agentbridge-test-captured',
+      initialModel: 'claude',
+    }).then((ws) => ws.workspaceId);
+
+    const sessionId = '33333333-3333-4333-8333-333333333333';
+    await store.addSession(wid, 'codex', 'cli', sessionId);
+
+    // 훅이 작성하는 captured-<sessionId>.json 파일을 시뮬레이션
+    const workspaceDirPath = store.getWorkspacePath(wid);
+    const capturedFilePath = join(workspaceDirPath, `captured-${sessionId}.json`);
+    await fs.writeFile(capturedFilePath, JSON.stringify({ turns: [] }), 'utf8');
+
+    // 파일이 존재함을 확인
+    assert.equal(existsSync(capturedFilePath), true);
+
+    // deleteSession 호출
+    await store.deleteSession(wid, sessionId);
+
+    // captured 파일도 삭제되었는지 확인
+    assert.equal(existsSync(capturedFilePath), false);
+
+    // 세션도 삭제되었는지 확인
+    const meta = await store.loadWorkspace(wid);
+    const sessionFound = meta.sessions.find((s) => s.sessionId === sessionId);
+    assert.equal(sessionFound, undefined);
+  });
 });
