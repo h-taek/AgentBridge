@@ -33,6 +33,7 @@ export * from './storageRoot';
 export * from './fileLock';
 export * from './workspaceId';
 export * from './turnsStore';
+export * from './sessionTitle';
 export * from './irStore';
 export * from './workspaceStore';
 export * from './hookStatusStore';
