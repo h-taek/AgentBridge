@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// @agentbridge-helper-version 0.3.0
+// @agentbridge-helper-version 0.4.1
 "use strict";
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -325,6 +325,7 @@ var init_globalSearch = __esm({
 var globalInject_exports = {};
 __export(globalInject_exports, {
   extractPromptFromStdin: () => extractPromptFromStdin,
+  extractSessionIdFromStdin: () => extractSessionIdFromStdin,
   renderGlobalMatches: () => renderGlobalMatches,
   resolveQuery: () => resolveQuery
 });
@@ -362,6 +363,23 @@ function renderGlobalMatches(matches) {
   }
   return lines.join("\n");
 }
+function extractSessionIdFromStdin(stdinRaw, agent) {
+  if (!stdinRaw || !stdinRaw.trim()) return "";
+  let obj;
+  try {
+    obj = JSON.parse(stdinRaw);
+  } catch {
+    return "";
+  }
+  if (!obj || typeof obj !== "object") return "";
+  const rec = obj;
+  const keys = agent === "agy" ? ["conversationId", "conversation_id"] : agent === "codex" ? ["session_id"] : [];
+  for (const k of keys) {
+    const v = rec[k];
+    if (typeof v === "string" && v.trim()) return v;
+  }
+  return "";
+}
 var PROMPT_FIELDS;
 var init_globalInject = __esm({
   "packages/core/src/globalInject.ts"() {
@@ -374,7 +392,7 @@ var init_globalInject = __esm({
 var fs = require("fs");
 var path = require("path");
 var { resolveContext: resolveContext2 } = (init_globalSearch(), __toCommonJS(globalSearch_exports));
-var { resolveQuery: resolveQuery2, renderGlobalMatches: renderGlobalMatches2 } = (init_globalInject(), __toCommonJS(globalInject_exports));
+var { resolveQuery: resolveQuery2, renderGlobalMatches: renderGlobalMatches2, extractSessionIdFromStdin: extractSessionIdFromStdin2 } = (init_globalInject(), __toCommonJS(globalInject_exports));
 var ALLOWED_EVENTS = /* @__PURE__ */ new Set([
   "SessionStart",
   "UserPromptSubmit",
@@ -657,9 +675,35 @@ async function main() {
   const turnsPath = path.join(wsDir, "turns.jsonl");
   const ir = readJsonSafe(irPath);
   const recentTurns = readRecentTurns(turnsPath, 3);
+  const stdinRaw = await readStdin(200);
+  try {
+    const token = process.env.AGENTBRIDGE_WS_SESSION || "";
+    let sid = extractSessionIdFromStdin2(stdinRaw, parsed.agent);
+    if (!sid) {
+      if (parsed.agent === "agy") sid = process.env.ANTIGRAVITY_CONVERSATION_ID || "";
+      else if (parsed.agent === "codex") sid = process.env.CODEX_THREAD_ID || "";
+    }
+    if (parsed.agent !== "claude" && token && sid && token === path.basename(token)) {
+      const out = path.join(wsDir, "sessions", token, "captured.json");
+      const tmp = out + "." + process.pid + ".tmp";
+      fs.writeFileSync(
+        tmp,
+        JSON.stringify({
+          agent: parsed.agent,
+          modelSessionId: sid,
+          ppid: process.ppid,
+          capturedAt: Date.now()
+        })
+      );
+      fs.renameSync(tmp, out);
+    }
+  } catch (e) {
+    process.stderr.write(
+      "agentbridge-memory: capture write skipped \u2014 " + String(e && e.message ? e.message : e) + "\n"
+    );
+  }
   let globalBlock = "";
   try {
-    const stdinRaw = await readStdin(200);
     const lastTurn = recentTurns.length ? recentTurns[recentTurns.length - 1] : null;
     const lastUserTurn = lastTurn && typeof lastTurn.user === "string" ? lastTurn.user : "";
     const query = resolveQuery2(stdinRaw, lastUserTurn);

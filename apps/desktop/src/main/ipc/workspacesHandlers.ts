@@ -536,6 +536,7 @@ async function spawnAndAttachSession(
       workspaceId,
       sessionId: adapterSessionId,
       modelSessionId: session.modelSessionId ?? undefined,
+      captureToken: session.sessionId,
       cwd: ws.workspacePath,
       cols: opts.cols,
       rows: opts.rows

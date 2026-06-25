@@ -45,3 +45,24 @@ export function renderGlobalMatches(matches: SearchMatch[]): string {
   }
   return lines.join('\n');
 }
+
+// hook stdin(JSON)에서 native 세션 id 추출. agy=conversationId(폴백 conversation_id),
+// codex=session_id. claude(우리가 발급)·미지원 agent·JSON 아님·필드 없음 → ''.
+export function extractSessionIdFromStdin(stdinRaw: string, agent: string): string {
+  if (!stdinRaw || !stdinRaw.trim()) return '';
+  let obj: unknown;
+  try {
+    obj = JSON.parse(stdinRaw);
+  } catch {
+    return '';
+  }
+  if (!obj || typeof obj !== 'object') return '';
+  const rec = obj as Record<string, unknown>;
+  const keys =
+    agent === 'agy' ? ['conversationId', 'conversation_id'] : agent === 'codex' ? ['session_id'] : [];
+  for (const k of keys) {
+    const v = rec[k];
+    if (typeof v === 'string' && v.trim()) return v;
+  }
+  return '';
+}
