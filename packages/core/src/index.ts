@@ -58,6 +58,7 @@ export * from './ownerWatcher';
 // 환경 / PTY
 export * from './envProbe';
 export * from './ptyDisplayFilter';
+export * from './contextTag';
 
 // hook
 export * from './hookInstaller';

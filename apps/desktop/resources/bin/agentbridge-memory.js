@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// @agentbridge-helper-version 0.4.1
+// @agentbridge-helper-version 0.4.4
 "use strict";
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -388,11 +388,33 @@ var init_globalInject = __esm({
   }
 });
 
+// packages/core/src/contextTag.ts
+var contextTag_exports = {};
+__export(contextTag_exports, {
+  CONTEXT_CLOSE_TAG: () => CONTEXT_CLOSE_TAG,
+  CONTEXT_OPEN_TAG: () => CONTEXT_OPEN_TAG,
+  CONTEXT_TAG_NAME_PREFIX: () => CONTEXT_TAG_NAME_PREFIX,
+  wrapInjectedContext: () => wrapInjectedContext
+});
+function wrapInjectedContext(body) {
+  return CONTEXT_OPEN_TAG + "\n" + body + "\n" + CONTEXT_CLOSE_TAG;
+}
+var CONTEXT_OPEN_TAG, CONTEXT_CLOSE_TAG, CONTEXT_TAG_NAME_PREFIX;
+var init_contextTag = __esm({
+  "packages/core/src/contextTag.ts"() {
+    "use strict";
+    CONTEXT_OPEN_TAG = '<agentbridge-context k="ab83f1d0">';
+    CONTEXT_CLOSE_TAG = '</agentbridge-context k="ab83f1d0">';
+    CONTEXT_TAG_NAME_PREFIX = "<agentbridge-context";
+  }
+});
+
 // packages/core/bin/agentbridge-memory.js
 var fs = require("fs");
 var path = require("path");
 var { resolveContext: resolveContext2 } = (init_globalSearch(), __toCommonJS(globalSearch_exports));
 var { resolveQuery: resolveQuery2, renderGlobalMatches: renderGlobalMatches2, extractSessionIdFromStdin: extractSessionIdFromStdin2 } = (init_globalInject(), __toCommonJS(globalInject_exports));
+var { wrapInjectedContext: wrapInjectedContext2 } = (init_contextTag(), __toCommonJS(contextTag_exports));
 var ALLOWED_EVENTS = /* @__PURE__ */ new Set([
   "SessionStart",
   "UserPromptSubmit",
@@ -588,17 +610,15 @@ function buildAdditionalContext(ir, recentTurns, workspaceId, globalBlock) {
   const hasTurns = Array.isArray(recentTurns) && recentTurns.length > 0;
   const hasGlobal = !!(globalBlock && globalBlock.trim());
   if (!ir && !hasTurns && !hasGlobal) {
-    return [
-      "<agentbridge-context>",
+    return wrapInjectedContext2([
       HOOK_INSTRUCTIONS,
       "",
       "## AgentBridge context (memory uninitialized)",
       "Workspace " + workspaceId + " has no compacted memory (IR) or turn history yet.",
-      "This hook will accumulate from the next turn onward and compact into an IR.",
-      "</agentbridge-context>"
-    ].join("\n");
+      "This hook will accumulate from the next turn onward and compact into an IR."
+    ].join("\n"));
   }
-  const parts = ["<agentbridge-context>", HOOK_INSTRUCTIONS, ""];
+  const parts = [HOOK_INSTRUCTIONS, ""];
   if (hasGlobal) {
     parts.push(globalBlock);
     parts.push("");
@@ -632,8 +652,7 @@ function buildAdditionalContext(ir, recentTurns, workspaceId, globalBlock) {
     parts.push("## Recent conversation (raw, last " + recentTurns.length + " turns, newest first)");
     parts.push(renderRecentTurns(recentTurns.slice().reverse()));
   }
-  parts.push("</agentbridge-context>");
-  return parts.join("\n");
+  return wrapInjectedContext2(parts.join("\n"));
 }
 async function main() {
   const parsed = parseArgs(process.argv.slice(2));

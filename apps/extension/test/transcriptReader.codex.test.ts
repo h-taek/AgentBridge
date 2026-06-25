@@ -2,7 +2,7 @@
 import { strict as assert } from 'assert';
 import { promises as fs } from 'fs';
 import { join } from 'path';
-import { codexConsume, EMPTY_CARRY, type ReaderCtx } from '@agentbridge/core';
+import { codexConsume, EMPTY_CARRY, CONTEXT_OPEN_TAG, type ReaderCtx } from '@agentbridge/core';
 
 const CTX: ReaderCtx = { workspaceId: 'w1', sessionId: 's1', detail: 'full' };
 
@@ -24,6 +24,27 @@ describe('codexReader', () => {
     assert.equal(t.toolCalls[0].arg, '{"cmd":"ls"}');
     assert.equal(t.toolCalls[0].summary, '파일 목록');
     assert.equal(t.id, 'codex:s1#2026-06-07T00:00:01.000Z'); // codex 턴 키 = user timestamp(고유 id 없음)
+  });
+
+  it('sentinel 주입 블록(새 wire 포맷)을 실사용자 턴으로 오인하지 않는다 (B-005)', () => {
+    const records = [
+      { type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: CONTEXT_OPEN_TAG + '\n주입된 컨텍스트\n</agentbridge-context>' }] } },
+      { type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: '답변' }] } },
+      { type: 'event_msg', payload: { type: 'task_complete' } },
+    ];
+    const { turns } = codexConsume(records, EMPTY_CARRY, CTX);
+    // 안 걸러지면 user=주입텍스트인 가짜 턴이 열려 assistant가 붙고 turns.length===1이 된다.
+    assert.equal(turns.length, 0);
+  });
+
+  it('레거시 plain 주입 블록도 계속 거른다 (옛 트랜스크립트 backward compat)', () => {
+    const records = [
+      { type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: '<agentbridge-context>\n옛 주입\n</agentbridge-context>' }] } },
+      { type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: '답변' }] } },
+      { type: 'event_msg', payload: { type: 'task_complete' } },
+    ];
+    const { turns } = codexConsume(records, EMPTY_CARRY, CTX);
+    assert.equal(turns.length, 0);
   });
 
   it('event_msg/task_complete면 다음 user 없이도 즉시 마감한다 (실시간 flush)', () => {
