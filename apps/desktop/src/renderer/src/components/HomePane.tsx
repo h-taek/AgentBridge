@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import type { CliKind, EnvProbeResult } from '@shared/ipc'
 import { ArrowUpIcon } from './icons'
-import claudeLogo from '../assets/logos/claude.png'
-import codexLogo from '../assets/logos/codex.png'
-import agyLogo from '../assets/logos/agy.png'
+import claudeLogo from '@agentbridge/assets/logos/claude.svg'
+import codexLogo from '@agentbridge/assets/logos/codex.svg'
+import agyLogo from '@agentbridge/assets/logos/agy.svg'
 import { useT } from '../i18n'
 
 // 홈 화면 — 워크스페이스 미선택 상태에서 본문에 표시.

@@ -1,0 +1,7 @@
+# 빌드 생성 브랜드 에셋 — 단일 원본은 @agentbridge/assets, esbuild.mjs가 빌드 때 media/로 vendoring.
+# 커밋되는 건 media/icon.png(마켓플레이스 래스터)뿐. 아래는 전부 생성물.
+media/logos/
+media/dots/
+media/icon.svg
+media/icon-light.svg
+media/icon-dark.svg
