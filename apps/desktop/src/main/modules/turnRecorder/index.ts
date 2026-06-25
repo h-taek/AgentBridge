@@ -1,10 +1,10 @@
 import log from 'electron-log/main'
 import { IpcChannel, type CliKind, type TurnsUpdatedEvent } from '@shared/ipc'
-import { CaptureManager, type TurnsAssistantDetail } from '@agentbridge/core'
+import { CaptureManager, maybeAutoNameSession, type TurnsAssistantDetail } from '@agentbridge/core'
 import { sendToWorkspaceWindow } from '../windowManager'
 import { getCoreCompactionScheduler } from '../compactionScheduler'
 import { getCachedSettings } from '../settings'
-import { getWorkspacePaths, updateSessionMeta } from '../workspaceStore'
+import { getWorkspacePaths, loadSession, updateSessionMeta } from '../workspaceStore'
 
 // 2026-06-07 M2-4: 턴 기록을 PTY 스크래핑 → transcript 읽기로 전환(설계 §E). 호스트는 CaptureManager에
 // 세션을 등록만 하고, 매니저가 각 CLI transcript 파일을 fs.watch/폴링으로 읽어 turns.jsonl을 쌓는다.
@@ -65,6 +65,22 @@ export function registerCapture(args: {
             await updateSessionMeta(workspaceId, sessionId, { lastChattedAt: flushedAt })
           } catch (err) {
             log.warn('CaptureManager lastChattedAt 갱신 실패 (non-fatal)', {
+              workspaceId,
+              sessionId,
+              err: String(err)
+            })
+          }
+          // 자동 세션 이름 — 첫 nameable 턴으로 1회 명명(기존 title 보호). 실패는 무시.
+          try {
+            await maybeAutoNameSession({
+              workspaceRoot,
+              getCurrentTitle: async () => (await loadSession(workspaceId, sessionId)).title,
+              setTitle: async (title) => {
+                await updateSessionMeta(workspaceId, sessionId, { title })
+              }
+            })
+          } catch (err) {
+            log.warn('자동 세션 이름 실패 (non-fatal)', {
               workspaceId,
               sessionId,
               err: String(err)
