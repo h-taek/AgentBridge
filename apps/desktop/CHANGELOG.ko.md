@@ -2,7 +2,7 @@
 
 이 프로젝트는 [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/) 1.1.0 형식을 따르며 [Semantic Versioning](https://semver.org/spec/v2.0.0.html)을 사용한다.
 
-## [Unreleased]
+## [0.5.0] — YYYY-MM-DD
 
 ### Added
 

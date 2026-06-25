@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="apps/extension/media/icon-dark.svg" />
-    <img src="apps/extension/media/icon-light.svg" width="220" alt="AgentBridge logo" />
+    <source media="(prefers-color-scheme: dark)" srcset="packages/assets/brand/agentbridge-dark.svg" />
+    <img src="packages/assets/brand/agentbridge-light.svg" width="220" alt="AgentBridge logo" />
   </picture>
 </p>
 
@@ -11,7 +11,7 @@
 
 <p align="center">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-green.svg"></a>
-  <img alt="Version" src="https://img.shields.io/badge/version-0.4.x-orange.svg">
+  <img alt="Version" src="https://img.shields.io/badge/version-0.5.x-orange.svg">
   <img alt="Desktop" src="https://img.shields.io/badge/desktop-Apple%20Silicon-lightgrey.svg">
   <img alt="Extension" src="https://img.shields.io/badge/extension-Apple%20Silicon-007ACC.svg">
 </p>
