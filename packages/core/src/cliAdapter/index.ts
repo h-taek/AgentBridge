@@ -145,7 +145,7 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
           ...(hookCaptureDir ? { AGENTBRIDGE_WS_SESSION: captureFileToken } : {}),
         };
         const hookCaptureFilePath = hookCaptureDir
-          ? join(hookCaptureDir(workspaceId), 'captured-' + captureFileToken + '.json')
+          ? join(hookCaptureDir(workspaceId), 'sessions', captureFileToken, 'captured.json')
           : undefined;
         const probe = envProbe.probe('codex');
         const command = probe.resolvedPath ?? 'codex';
@@ -210,7 +210,7 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
           ...(hookCaptureDir ? { AGENTBRIDGE_WS_SESSION: captureFileToken } : {}),
         };
         const hookCaptureFilePath = hookCaptureDir
-          ? join(hookCaptureDir(workspaceId), 'captured-' + captureFileToken + '.json')
+          ? join(hookCaptureDir(workspaceId), 'sessions', captureFileToken, 'captured.json')
           : undefined;
         const probe = envProbe.probe('agy');
         const command = probe.resolvedPath ?? 'agy';

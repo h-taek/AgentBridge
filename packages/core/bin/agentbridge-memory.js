@@ -22,7 +22,7 @@
 
 'use strict'
 
-// @agentbridge-helper-version 0.4.0
+// @agentbridge-helper-version 0.4.1
 // (단일 설치 버전 비교용 — 이 파일을 수정하면 반드시 버전을 올릴 것)
 
 const fs = require('fs')
@@ -381,7 +381,7 @@ async function main() {
       else if (parsed.agent === 'codex') sid = process.env.CODEX_THREAD_ID || ''
     }
     if (parsed.agent !== 'claude' && token && sid && token === path.basename(token)) {
-      const out = path.join(wsDir, 'captured-' + token + '.json')
+      const out = path.join(wsDir, 'sessions', token, 'captured.json')
       const tmp = out + '.' + process.pid + '.tmp'
       fs.writeFileSync(
         tmp,

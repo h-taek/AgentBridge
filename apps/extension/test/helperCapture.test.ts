@@ -1,5 +1,6 @@
 import { strict as assert } from 'assert';
 import { promises as fs } from 'fs';
+import { existsSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { spawn } from 'child_process';
@@ -18,7 +19,7 @@ function runHelper(args: string[], stdin: string, extraEnv: Record<string, strin
   });
 }
 
-describe('agentbridge-memory — captured-<token>.json', () => {
+describe('agentbridge-memory — sessions/<token>/captured.json', () => {
   let userData: string;
   const WS = 'ws-1111';
   const TOKEN = 'sess-aaaa';
@@ -28,19 +29,21 @@ describe('agentbridge-memory — captured-<token>.json', () => {
 
   beforeEach(async () => {
     userData = await fs.mkdtemp(join(tmpdir(), 'agentbridge-helpercap-'));
-    await fs.mkdir(join(userData, 'workspaces', WS), { recursive: true });
+    // 세션 디렉토리를 미리 생성 (헬퍼는 mkdir하지 않고 그대로 쓴다).
+    await fs.mkdir(join(userData, 'workspaces', WS, 'sessions', TOKEN), { recursive: true });
   });
   afterEach(async () => {
     await fs.rm(userData, { recursive: true, force: true });
   });
 
-  it('codex: stdin session_id를 captured-<token>.json에 쓴다', async () => {
+  it('codex: stdin session_id를 sessions/<token>/captured.json에 쓴다', async () => {
     await runHelper(
       baseArgs('UserPromptSubmit', 'codex'),
       JSON.stringify({ session_id: '019e-codex', prompt: 'hi' }),
       { AGENTBRIDGE_WS_SESSION: TOKEN },
     );
-    const raw = await fs.readFile(join(userData, 'workspaces', WS, `captured-${TOKEN}.json`), 'utf8');
+    const capturedPath = join(userData, 'workspaces', WS, 'sessions', TOKEN, 'captured.json');
+    const raw = await fs.readFile(capturedPath, 'utf8');
     const obj = JSON.parse(raw);
     assert.equal(obj.modelSessionId, '019e-codex');
     assert.equal(obj.agent, 'codex');
@@ -52,8 +55,8 @@ describe('agentbridge-memory — captured-<token>.json', () => {
       JSON.stringify({ session_id: 'x', prompt: 'hi' }),
       {},
     );
-    const files = await fs.readdir(join(userData, 'workspaces', WS));
-    assert.ok(!files.some((f) => f.startsWith('captured-')), `unexpected: ${files.join(',')}`);
+    const capturedPath = join(userData, 'workspaces', WS, 'sessions', TOKEN, 'captured.json');
+    assert.equal(existsSync(capturedPath), false);
   });
 
   it('claude는 캡처 대상이 아니다', async () => {
@@ -62,7 +65,7 @@ describe('agentbridge-memory — captured-<token>.json', () => {
       JSON.stringify({ session_id: 'x', prompt: 'hi' }),
       { AGENTBRIDGE_WS_SESSION: TOKEN },
     );
-    const files = await fs.readdir(join(userData, 'workspaces', WS));
-    assert.ok(!files.some((f) => f.startsWith('captured-')), `unexpected: ${files.join(',')}`);
+    const capturedPath = join(userData, 'workspaces', WS, 'sessions', TOKEN, 'captured.json');
+    assert.equal(existsSync(capturedPath), false);
   });
 });

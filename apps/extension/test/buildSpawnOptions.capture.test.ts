@@ -19,19 +19,19 @@ describe('buildSpawnOptions — env 토큰 + hookCaptureFilePath', () => {
   it('codex: captureToken이 env와 캡처 경로에 반영된다', async () => {
     const opts = await makeAdapters().codex.buildSpawnOptions('/cwd', 'ws-1', undefined, undefined, 'tok-1');
     assert.equal((opts.env as Record<string, string>).AGENTBRIDGE_WS_SESSION, 'tok-1');
-    assert.equal(opts.hookCaptureFilePath, '/tmp/cap/ws-1/captured-tok-1.json');
+    assert.equal(opts.hookCaptureFilePath, '/tmp/cap/ws-1/sessions/tok-1/captured.json');
   });
 
   it('agy: captureToken이 env와 캡처 경로에 반영된다', async () => {
     const opts = await makeAdapters().agy.buildSpawnOptions('/cwd', 'ws-2', undefined, undefined, 'tok-2');
     assert.equal((opts.env as Record<string, string>).AGENTBRIDGE_WS_SESSION, 'tok-2');
-    assert.equal(opts.hookCaptureFilePath, '/tmp/cap/ws-2/captured-tok-2.json');
+    assert.equal(opts.hookCaptureFilePath, '/tmp/cap/ws-2/sessions/tok-2/captured.json');
   });
 
   it('captureToken 미지정이면 내부 sessionId를 토큰으로 쓴다 (extension 경로)', async () => {
     const opts = await makeAdapters().codex.buildSpawnOptions('/cwd', 'ws-3');
     // sessionId는 내부 생성(randomUUID) → 값은 예측 불가하나 env·경로가 그 값으로 일관돼야 한다.
     assert.equal((opts.env as Record<string, string>).AGENTBRIDGE_WS_SESSION, opts.sessionId);
-    assert.equal(opts.hookCaptureFilePath, `/tmp/cap/ws-3/captured-${opts.sessionId}.json`);
+    assert.equal(opts.hookCaptureFilePath, `/tmp/cap/ws-3/sessions/${opts.sessionId}/captured.json`);
   });
 });

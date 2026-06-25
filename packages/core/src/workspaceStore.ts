@@ -466,8 +466,6 @@ export function createWorkspaceStore(opts: WorkspaceStoreOptions = {}): Workspac
         meta.updatedAt = new Date().toISOString();
         await writeWorkspaceMetaAtomic(meta);
         await fsp.rm(sessionDir(workspaceId, sessionId), { recursive: true, force: true });
-        // 훅 세션 캡처 파일(<workspaceDir>/captured-<sessionId>.json)도 함께 정리 (litter 방지).
-        await fsp.rm(join(workspaceDir(workspaceId), `captured-${sessionId}.json`), { force: true });
       });
       if (deletedSession && onAfterDeleteSession) {
         try {

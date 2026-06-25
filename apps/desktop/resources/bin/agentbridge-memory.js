@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// @agentbridge-helper-version 0.4.0
+// @agentbridge-helper-version 0.4.1
 "use strict";
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -684,7 +684,7 @@ async function main() {
       else if (parsed.agent === "codex") sid = process.env.CODEX_THREAD_ID || "";
     }
     if (parsed.agent !== "claude" && token && sid && token === path.basename(token)) {
-      const out = path.join(wsDir, "captured-" + token + ".json");
+      const out = path.join(wsDir, "sessions", token, "captured.json");
       const tmp = out + "." + process.pid + ".tmp";
       fs.writeFileSync(
         tmp,
