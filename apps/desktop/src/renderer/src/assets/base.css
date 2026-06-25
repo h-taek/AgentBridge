@@ -42,10 +42,7 @@
   --color-danger-bg: rgba(248, 113, 113, 0.14);
   --color-info: #60a5fa;
 
-  /* Model dots */
-  --model-claude: #d97757;
-  --model-codex: #5d8af9;
-  --model-agy: #8e6cef;
+  /* Model dots — 색은 @agentbridge/assets/colors.json 단일 원본. main.tsx가 :root에 --model-* 주입. */
 
   /* Shadows — 부드럽고 깊이감 */
   --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.32);

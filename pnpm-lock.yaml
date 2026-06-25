@@ -20,6 +20,9 @@ importers:
 
   apps/desktop:
     dependencies:
+      '@agentbridge/assets':
+        specifier: workspace:*
+        version: link:../../packages/assets
       '@agentbridge/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -111,6 +114,9 @@ importers:
 
   apps/extension:
     dependencies:
+      '@agentbridge/assets':
+        specifier: workspace:*
+        version: link:../../packages/assets
       '@agentbridge/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -169,6 +175,8 @@ importers:
       typescript:
         specifier: ^5.5.0
         version: 5.9.3
+
+  packages/assets: {}
 
   packages/core:
     devDependencies:

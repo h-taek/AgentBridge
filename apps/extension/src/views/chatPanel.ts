@@ -18,6 +18,7 @@ import {
   readForeignOwner,
 } from '@agentbridge/core';
 import { CLI_DISPLAY_NAME, type CliKind } from '../shared/types';
+import modelColors from '@agentbridge/assets/colors.json';
 import { quoteCommandLine } from '../shared/shellQuote';
 import type { SpawnOptions } from '../pty/types';
 import { createGroupLocker, type GroupLocker } from './groupLock';
@@ -79,13 +80,7 @@ export class ChatPanel {
       {
         enableScripts: true,
         retainContextWhenHidden: true,
-        localResourceRoots: [
-          vscode.Uri.joinPath(extensionUri, 'out', 'vendor', '@xterm', 'xterm', 'css'),
-          vscode.Uri.joinPath(extensionUri, 'out', 'vendor', '@xterm', 'xterm', 'lib'),
-          vscode.Uri.joinPath(extensionUri, 'out', 'vendor', '@xterm', 'addon-fit', 'lib'),
-          vscode.Uri.joinPath(extensionUri, 'out', 'vendor', '@xterm', 'addon-webgl', 'lib'),
-          vscode.Uri.joinPath(extensionUri, 'out', 'vendor', '@xterm', 'addon-unicode11', 'lib'),
-        ],
+        localResourceRoots: ChatPanel.localRoots(extensionUri),
       },
     );
 
@@ -100,6 +95,19 @@ export class ChatPanel {
     return new ChatPanel(panel, extensionUri, opts);
   }
 
+  // 웹뷰가 로드 가능한 로컬 리소스 루트 — xterm 에셋(out/vendor) + 브랜드 에셋(media).
+  // create·revive 양 경로에서 동일하게 적용해야 로딩 화면 로고가 CSP/리소스 정책에 막히지 않는다.
+  private static localRoots(extensionUri: vscode.Uri): vscode.Uri[] {
+    return [
+      vscode.Uri.joinPath(extensionUri, 'out', 'vendor', '@xterm', 'xterm', 'css'),
+      vscode.Uri.joinPath(extensionUri, 'out', 'vendor', '@xterm', 'xterm', 'lib'),
+      vscode.Uri.joinPath(extensionUri, 'out', 'vendor', '@xterm', 'addon-fit', 'lib'),
+      vscode.Uri.joinPath(extensionUri, 'out', 'vendor', '@xterm', 'addon-webgl', 'lib'),
+      vscode.Uri.joinPath(extensionUri, 'out', 'vendor', '@xterm', 'addon-unicode11', 'lib'),
+      vscode.Uri.joinPath(extensionUri, 'media'),
+    ];
+  }
+
   private constructor(
     panel: vscode.WebviewPanel,
     extensionUri: vscode.Uri,
@@ -108,6 +116,11 @@ export class ChatPanel {
     this.panel = panel;
     this.extensionUri = extensionUri;
     this.opts = opts;
+    // revive(reload 복원) 경로도 media 리소스 루트를 갖도록 보장 — 로딩 화면 로고 차단 방지.
+    this.panel.webview.options = {
+      enableScripts: true,
+      localResourceRoots: ChatPanel.localRoots(extensionUri),
+    };
     this.groupLocker = createGroupLocker({
       executeCommand: (cmd) => vscode.commands.executeCommand(cmd),
       warn: (msg) => output.warn(msg),
@@ -554,6 +567,18 @@ export class ChatPanel {
     );
     const nonce = getNonce();
     const modelLabel = this.opts.model ? CLI_DISPLAY_NAME[this.opts.model] : 'CLI';
+    // TUI 부팅 대기 화면용 에셋 — agent 로고 + AgentBridge 마크(데스크톱과 공통 디자인).
+    const loadingModel = this.opts.model ?? 'claude';
+    const loadingLogo = webview.asWebviewUri(
+      vscode.Uri.joinPath(this.extensionUri, 'media', 'logos', `${loadingModel}.svg`),
+    );
+    // 브랜드 마크는 테마에 맞춰 변형 선택 — 컬러(주황/보라/파랑)는 유지, 계단 회색만 명/암 적응.
+    const isLightTheme =
+      vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.Light ||
+      vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.HighContrastLight;
+    const brandMark = webview.asWebviewUri(
+      vscode.Uri.joinPath(this.extensionUri, 'media', isLightTheme ? 'icon-light.svg' : 'icon-dark.svg'),
+    );
 
     // VS Code 재시작 시 panel을 복구하기 위한 최소 state. serializer.deserializeWebviewPanel에서
     // 다시 받아 buildOpts로 재구성한다.
@@ -575,7 +600,7 @@ export class ChatPanel {
 <head>
   <meta charset="UTF-8"/>
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'none'; style-src ${webview.cspSource} 'nonce-${nonce}'; script-src 'nonce-${nonce}'; font-src ${webview.cspSource};">
+    content="default-src 'none'; style-src ${webview.cspSource} 'nonce-${nonce}'; script-src 'nonce-${nonce}'; img-src ${webview.cspSource}; font-src ${webview.cspSource};">
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <link rel="stylesheet" href="${xtermCss}" />
   <style nonce="${nonce}">
@@ -587,9 +612,9 @@ export class ChatPanel {
       flex-direction: column;
       height: 100vh;
     }
-    :root { --accent: #d97757; }
-    body[data-model="codex"] { --accent: #5D8AF9; }
-    body[data-model="agy"] { --accent: #8e6cef; }
+    :root { --accent: ${modelColors.claude}; }
+    body[data-model="codex"] { --accent: ${modelColors.codex}; }
+    body[data-model="agy"] { --accent: ${modelColors.agy}; }
     .title { font-weight: 500; font-size: 12px; color: #fff; }
     .header {
       display: flex;
@@ -793,6 +818,74 @@ export class ChatPanel {
     }
     .xterm { height: 100%; }
     .xterm-viewport { background-color: inherit !important; }
+
+    /* TUI 부팅 대기 — 데스크톱과 공통 디자인. 첫 PTY 출력 도착 시 숨김. */
+    #ab-loading {
+      position: absolute;
+      inset: 0;
+      z-index: 40;
+      background: var(--vscode-panel-background, var(--vscode-editor-background, #1e1e1e));
+      opacity: 1;
+      transition: opacity 240ms ease-out;
+      pointer-events: none;
+    }
+    #ab-loading.hidden { opacity: 0; }
+    .ab-loading-brand {
+      position: absolute;
+      top: 18px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      opacity: 0.72;
+    }
+    .ab-loading-brand img { width: 13px; height: 12px; display: block; }
+    .ab-loading-brand span {
+      font-size: 12.5px;
+      font-weight: 600;
+      letter-spacing: 0.01em;
+      color: var(--vscode-foreground);
+    }
+    .ab-loading-center {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+    .ab-loading-mark {
+      position: relative;
+      width: 72px;
+      height: 72px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 18px;
+    }
+    .ab-loading-pulse {
+      position: absolute;
+      inset: -8px;
+      border-radius: 50%;
+      background: var(--accent);
+      opacity: 0.22;
+      filter: blur(14px);
+      animation: ab-loading-pulse 1.7s ease-in-out infinite;
+    }
+    @keyframes ab-loading-pulse {
+      0%, 100% { transform: scale(0.86); opacity: 0.14; }
+      50% { transform: scale(1.06); opacity: 0.3; }
+    }
+    .ab-loading-logo { position: relative; z-index: 1; width: 56px; height: 56px; display: block; }
+    .ab-loading-label {
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--vscode-foreground);
+      letter-spacing: 0.01em;
+      margin-bottom: 7px;
+    }
+    .ab-loading-sub { font-size: 11.5px; color: var(--vscode-descriptionForeground); letter-spacing: 0.01em; }
   </style>
 </head>
 <body data-model="${this.opts.model ?? 'claude'}">
@@ -818,23 +911,38 @@ export class ChatPanel {
     </div>
     <div class="model-panel" id="modelPanel">
       <div class="mp-item" data-model="claude">
-        <span class="mp-item-dot" style="background:#d97757"></span>
+        <span class="mp-item-dot" style="background:${modelColors.claude}"></span>
         <span class="mp-item-name">Claude</span>
         <span class="mp-item-desc">Anthropic</span>
       </div>
       <div class="mp-item" data-model="codex">
-        <span class="mp-item-dot" style="background:#5D8AF9"></span>
+        <span class="mp-item-dot" style="background:${modelColors.codex}"></span>
         <span class="mp-item-name">Codex</span>
         <span class="mp-item-desc">OpenAI</span>
       </div>
       <div class="mp-item" data-model="agy">
-        <span class="mp-item-dot" style="background:#8e6cef"></span>
+        <span class="mp-item-dot" style="background:${modelColors.agy}"></span>
         <span class="mp-item-name">Antigravity</span>
         <span class="mp-item-desc">Google</span>
       </div>
     </div>
   </div>
-  <div id="terminal-container"></div>
+  <div id="terminal-container">
+    <div id="ab-loading">
+      <div class="ab-loading-brand">
+        <img src="${brandMark}" alt="" />
+        <span>AgentBridge</span>
+      </div>
+      <div class="ab-loading-center">
+        <div class="ab-loading-mark">
+          <div class="ab-loading-pulse"></div>
+          <img class="ab-loading-logo" src="${loadingLogo}" alt="" />
+        </div>
+        <div class="ab-loading-label">${escapeHtml(modelLabel)}</div>
+        <div class="ab-loading-sub">${escapeHtml(modelLabel)} running on AgentBridge</div>
+      </div>
+    </div>
+  </div>
 
   <script nonce="${nonce}" src="${xtermJs}"></script>
   <script nonce="${nonce}" src="${fitJs}"></script>
@@ -1233,6 +1341,8 @@ export class ChatPanel {
     window.addEventListener('message', (e) => {
       const msg = e.data;
       if (msg.type === 'output') {
+        const loadingEl = document.getElementById('ab-loading');
+        if (loadingEl) loadingEl.classList.add('hidden');
         term.write(msg.data);
       }
       if (msg.type === 'sessions') {

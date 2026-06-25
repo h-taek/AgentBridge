@@ -1738,11 +1738,6 @@ details pre {
 .xterm-loading {
   position: absolute;
   inset: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 14px;
   pointer-events: none;
   z-index: 3;
   background: #0c0c10;
@@ -1754,60 +1749,97 @@ details pre {
   opacity: 0;
 }
 
+/* 상단 중앙 — AgentBridge 워드마크 */
+.xterm-loading-brand {
+  position: absolute;
+  top: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  opacity: 0.72;
+}
+
+.xterm-loading-brand-mark {
+  width: 13px;
+  height: 12px;
+  display: block;
+  user-select: none;
+}
+
+.xterm-loading-brand-word {
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--color-text-primary);
+}
+
+/* 정중앙 블록 — agent 로고 + 모델명 + 서브라인 */
+.xterm-loading-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
 .xterm-loading-mark {
   position: relative;
-  width: 80px;
-  height: 80px;
+  width: 72px;
+  height: 72px;
   display: flex;
   align-items: center;
   justify-content: center;
+  margin-bottom: 18px;
 }
 
 /* pulse — 로고 뒤로 모델 색 halo */
 .xterm-loading-pulse {
   position: absolute;
-  inset: 8px;
+  inset: -8px;
   border-radius: 50%;
   background: var(--mark-color, var(--model-claude));
-  opacity: 0.18;
-  filter: blur(8px);
-  animation: xterm-loading-pulse 1.6s ease-in-out infinite;
+  opacity: 0.22;
+  filter: blur(14px);
+  animation: xterm-loading-pulse 1.7s ease-in-out infinite;
 }
 
 @keyframes xterm-loading-pulse {
   0%,
   100% {
-    transform: scale(0.8);
-    opacity: 0.16;
+    transform: scale(0.86);
+    opacity: 0.14;
   }
   50% {
-    transform: scale(1.05);
-    opacity: 0.34;
+    transform: scale(1.06);
+    opacity: 0.3;
   }
 }
 
 .xterm-loading-logo {
   position: relative;
   z-index: 1;
-  width: 64px;
-  height: 64px;
+  width: 56px;
+  height: 56px;
   display: block;
   object-fit: contain;
   user-select: none;
 }
 
 .xterm-loading-label {
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 600;
   color: var(--color-text-primary);
   letter-spacing: 0.01em;
+  margin-bottom: 7px;
 }
 
-.xterm-loading-hint {
-  font-size: 11px;
+.xterm-loading-sub {
+  font-size: 11.5px;
   color: var(--color-text-tertiary);
-  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.01em;
 }
 
 .xterm-loading.model-claude {

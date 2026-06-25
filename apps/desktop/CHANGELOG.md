@@ -10,6 +10,10 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 - New chat sessions are named automatically from your first message — the tab and sidebar now show a short title taken from what you first typed, instead of just the model name. You can still rename a session at any time, and auto-naming never overwrites a name you set.
 
+### Changed
+
+- While an agent's terminal is starting up, AgentBridge now shows a branded loading screen with the agent's logo instead of a blank pane. Agent logos are also now drawn from official vector art, so they stay crisp at every size.
+
 ### Fixed
 
 - Running several sessions of the same agent in one folder (for example two Codex sessions), or reopening a session, now reliably continues the correct conversation — previously a session could occasionally get mixed up with another or start fresh instead of resuming.

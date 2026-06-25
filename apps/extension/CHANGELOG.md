@@ -13,6 +13,7 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 ### Changed
 
 - Chat tabs now use each agent's official brand logo as the tab icon (replacing the old bitmap capture), and reopening a named session shows that name in the tab title instead of just the model name — matching the sidebar. The chat header was refreshed too: a brand-coloured model badge and cleaner line icons.
+- While a chat is starting up, the panel now shows a branded loading screen with the agent's logo, following your VS Code colour theme.
 
 ### Fixed
 
