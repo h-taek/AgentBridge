@@ -2,6 +2,7 @@
 import type { TurnRecord } from '../shared/turns';
 import type { Carry, ConsumeResult, ReaderCtx } from './types';
 import { finalizeTurn, hasTurnContent, toolArgString } from './util';
+import { CONTEXT_TAG_NAME_PREFIX } from '../contextTag';
 
 interface CodexRecord {
   type?: string;
@@ -21,7 +22,9 @@ interface CodexRecord {
 // "<turn_aborted>…" 센티넬. 안 거르면 인터럽트 때 user="<turn_aborted>…"인 가짜 턴이 생긴다
 // (보통 빈-턴 skip이 막지만, 그 뒤에 내용이 붙으면 새므로 명시적으로 차단). 인터럽트 자체는
 // 턴을 닫는 신호로 쓰지 않는다 — 미완 턴은 다음 user/finalize가 처리(설계).
-const NON_USER_PREFIXES = ['<environment_context>', '<agentbridge-context>', '<turn_aborted>'];
+// agentbridge 항목은 닫는 `>` 없이 이름까지만 — 새 sentinel OPEN(`<agentbridge-context k="…">`)과
+// 옛 plain(`<agentbridge-context>`) 양쪽을 같은 startsWith로 잡는다(B-005 wire 변경 backward compat).
+const NON_USER_PREFIXES = ['<environment_context>', CONTEXT_TAG_NAME_PREFIX, '<turn_aborted>'];
 
 function messageText(p: NonNullable<CodexRecord['payload']>): string {
   return (p.content ?? []).map((c) => c.text ?? '').join('');

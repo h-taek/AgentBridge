@@ -22,7 +22,7 @@
 
 'use strict'
 
-// @agentbridge-helper-version 0.4.1
+// @agentbridge-helper-version 0.4.4
 // (단일 설치 버전 비교용 — 이 파일을 수정하면 반드시 버전을 올릴 것)
 
 const fs = require('fs')
@@ -32,6 +32,7 @@ const path = require('path')
 // 런타임 헬퍼 옆엔 node_modules가 없어 require('@agentbridge/core') 불가 → 상대 경로로 엔트리 그래프에 포함.
 const { resolveContext } = require('../src/globalSearch')
 const { resolveQuery, renderGlobalMatches, extractSessionIdFromStdin } = require('../src/globalInject')
+const { wrapInjectedContext } = require('../src/contextTag')
 
 // claude/codex/agy 모두 stdout JSON의 `hookEventName`이 *호출된 hook event 이름과 정확히 일치*
 // 해야 한다. 일치 안 하면 CLI host가 "expected X but got Y" 에러로 hook을 거부 (claude는 warning,
@@ -277,17 +278,15 @@ function buildAdditionalContext(ir, recentTurns, workspaceId, globalBlock) {
   const hasGlobal = !!(globalBlock && globalBlock.trim())
   // 셋 다 비면 명시적으로 "AgentBridge 컨텍스트(미초기화)"임을 모델이 식별하게 sentinel로 감싼다.
   if (!ir && !hasTurns && !hasGlobal) {
-    return [
-      '<agentbridge-context>',
+    return wrapInjectedContext([
       HOOK_INSTRUCTIONS,
       '',
       '## AgentBridge context (memory uninitialized)',
       'Workspace ' + workspaceId + ' has no compacted memory (IR) or turn history yet.',
-      'This hook will accumulate from the next turn onward and compact into an IR.',
-      '</agentbridge-context>'
-    ].join('\n')
+      'This hook will accumulate from the next turn onward and compact into an IR.'
+    ].join('\n'))
   }
-  const parts = ['<agentbridge-context>', HOOK_INSTRUCTIONS, '']
+  const parts = [HOOK_INSTRUCTIONS, '']
   // 장기(글로벌) 메모리를 가장 위에 — 안정적 배경 → 세션 작업기억(IR) → 최근 턴 순.
   if (hasGlobal) {
     parts.push(globalBlock)
@@ -323,8 +322,7 @@ function buildAdditionalContext(ir, recentTurns, workspaceId, globalBlock) {
     parts.push('## Recent conversation (raw, last ' + recentTurns.length + ' turns, newest first)')
     parts.push(renderRecentTurns(recentTurns.slice().reverse()))
   }
-  parts.push('</agentbridge-context>')
-  return parts.join('\n')
+  return wrapInjectedContext(parts.join('\n'))
 }
 
 async function main() {
