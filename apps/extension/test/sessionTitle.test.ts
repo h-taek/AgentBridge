@@ -6,11 +6,11 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { appendTurn, deriveSessionTitle, maybeAutoNameSession, type TurnRecord } from '@agentbridge/core';
 
-function makeTurn(id: string, user: string): TurnRecord {
+function makeTurn(id: string, user: string, sessionId = 's1'): TurnRecord {
   return {
     id,
     workspaceId: 'w1',
-    sessionId: 's1',
+    sessionId,
     model: 'claude',
     startedAt: '2026-06-25T00:00:00.000Z',
     completedAt: '2026-06-25T00:00:01.000Z',
@@ -70,6 +70,7 @@ describe('maybeAutoNameSession', () => {
     let title: string | undefined;
     await maybeAutoNameSession({
       workspaceRoot: root,
+      sessionId: 's1',
       getCurrentTitle: async () => title,
       setTitle: async (t) => {
         title = t;
@@ -84,6 +85,7 @@ describe('maybeAutoNameSession', () => {
     let called = 0;
     await maybeAutoNameSession({
       workspaceRoot: root,
+      sessionId: 's1',
       getCurrentTitle: async () => '사용자가 직접 지은 이름',
       setTitle: async () => {
         called++;
@@ -99,6 +101,7 @@ describe('maybeAutoNameSession', () => {
     let title: string | undefined;
     await maybeAutoNameSession({
       workspaceRoot: root,
+      sessionId: 's1',
       getCurrentTitle: async () => title,
       setTitle: async (t) => {
         title = t;
@@ -112,11 +115,29 @@ describe('maybeAutoNameSession', () => {
     let called = 0;
     await maybeAutoNameSession({
       workspaceRoot: root,
+      sessionId: 's1',
       getCurrentTitle: async () => undefined,
       setTitle: async () => {
         called++;
       },
     });
     assert.equal(called, 0);
+  });
+
+  it('공유 turns 버퍼에서 다른 세션의 턴은 무시하고 자기 세션 첫 턴으로 명명한다', async () => {
+    // turns.jsonl은 워크스페이스 내 여러 세션이 공유 — s2가 먼저 와도 s1은 s1의 첫 턴으로 명명돼야 한다.
+    const root = await tmpRoot();
+    await appendTurn(root, makeTurn('t1', '다른 세션의 첫 발화', 's2'));
+    await appendTurn(root, makeTurn('t2', '내 세션의 진짜 첫 발화', 's1'));
+    let title: string | undefined;
+    await maybeAutoNameSession({
+      workspaceRoot: root,
+      sessionId: 's1',
+      getCurrentTitle: async () => title,
+      setTitle: async (t) => {
+        title = t;
+      },
+    });
+    assert.equal(title, '내 세션의 진짜 첫 발화');
   });
 });

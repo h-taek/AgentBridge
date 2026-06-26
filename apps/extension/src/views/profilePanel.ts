@@ -21,7 +21,10 @@ export class ProfilePanelProvider implements vscode.WebviewViewProvider {
 
   private view: vscode.WebviewView | undefined;
 
-  constructor() {}
+  // 대기 제안 수가 바뀔 때마다 호출(0 포함). 호스트가 액티비티 바 뱃지를 갱신하는 데 쓴다.
+  // webview view는 사용자가 패널을 펼치기 전엔 resolve되지 않으므로, 뱃지는 항상 살아있는
+  // 세션 TreeView에 건다 — 이 콜백이 그 다리 역할(패널 미오픈에도 카운트 통지).
+  constructor(private readonly onCount?: (count: number) => void) {}
 
   resolveWebviewView(
     webviewView: vscode.WebviewView,
@@ -68,6 +71,7 @@ export class ProfilePanelProvider implements vscode.WebviewViewProvider {
   private async sendProposals(): Promise<void> {
     const wid = this.getWorkspaceId();
     if (!wid) {
+      this.onCount?.(0);
       this.postMessage({ type: 'proposal:data', proposals: [], docs: [], profileDir: '' });
       return;
     }
@@ -79,6 +83,7 @@ export class ProfilePanelProvider implements vscode.WebviewViewProvider {
       readProfileDocs(globalDir, profileId),
     ]);
     const docs = docsRaw.map((d) => ({ category: d.category, slug: d.slug, title: d.title, summary: d.summary }));
+    this.onCount?.(proposals.length);
     this.postMessage({ type: 'proposal:data', proposals, docs, profileDir });
   }
 

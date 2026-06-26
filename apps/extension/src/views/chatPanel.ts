@@ -36,6 +36,12 @@ export function getAllPanels(): ChatPanel[] {
   return Array.from(activePanels.values());
 }
 
+// 세션 이름이 바뀐 뒤(자동 명명·수동 rename) 열린 탭 제목을 즉시 갱신. 패널이 없으면 무시.
+// 탭 제목은 패널 생성 시 1회만 박히므로(createWebviewPanel), 이후 변경은 여기로 명시 반영해야 한다.
+export function updateSessionTabTitle(sessionId: string, title: string): void {
+  activePanels.get(sessionId)?.setTabTitle(title);
+}
+
 export class ChatPanel {
   private panel: vscode.WebviewPanel;
   private ptyProcess: pty.IPty | null = null;
@@ -58,6 +64,9 @@ export class ChatPanel {
   private readonly extensionUri: vscode.Uri;
   private onDisposeCallback: (() => void) | null = null;
   private readonly groupLocker: GroupLocker;
+  // 이 패널이 새 AB 컬럼을 만들며 생성됐는지 — 그룹 자동 잠금은 이때만 수행한다.
+  // (기존 AB 그룹에 합류하거나 IDE 재시작 복원되는 패널은 잠금에 손대지 않는다.)
+  private readonly shouldLock: boolean;
 
   markDeleted(): void {
     this.deletedExternally = true;
@@ -67,11 +76,27 @@ export class ChatPanel {
     extensionUri: vscode.Uri,
     opts: SpawnOptions,
   ): ChatPanel {
-    // split이 이미 2개 이상이면 가장 오른쪽 기존 컬럼에 탭으로 추가. 1개면 Beside로 새 split.
-    const groups = vscode.window.tabGroups.all;
-    const targetColumn = groups.length >= 2
-      ? groups[groups.length - 1].viewColumn
-      : vscode.ViewColumn.Beside;
+    // 컬럼 선택은 공식 claude-code 익스텐션과 동일한 방식 — "맨 오른쪽" 기하학이 아니라
+    // "탭이 전부 AgentBridge 챗 웹뷰인 에디터 그룹"을 찾아 그 컬럼에 새 탭으로 합류한다.
+    // 그런 그룹이 없으면 빈 컬럼에 새로 만들고(startedInNewColumn=true), 그때만 그룹을 잠근다.
+    // 배치/포커스에 좌우되지 않으므로 "잠긴 오른쪽 대신 왼쪽에 스폰" 현상이 사라진다.
+    const abGroup = vscode.window.tabGroups.all.find(
+      (g) =>
+        g.tabs.length > 0 &&
+        g.tabs.every(
+          (t) =>
+            t.input instanceof vscode.TabInputWebview &&
+            t.input.viewType.includes('agentbridge.chat'),
+        ),
+    );
+    let startedInNewColumn = false;
+    let targetColumn: vscode.ViewColumn;
+    if (abGroup && abGroup.viewColumn) {
+      targetColumn = abGroup.viewColumn;
+    } else {
+      targetColumn = ChatPanel.findUnusedColumn();
+      startedInNewColumn = true;
+    }
 
     const panel = vscode.window.createWebviewPanel(
       'agentbridge.chat',
@@ -84,7 +109,19 @@ export class ChatPanel {
       },
     );
 
-    return new ChatPanel(panel, extensionUri, opts);
+    return new ChatPanel(panel, extensionUri, opts, startedInNewColumn);
+  }
+
+  // 안 쓰는 에디터 컬럼(One..Nine 중 첫 빈 칸, 없으면 Beside). 공식 claude-code 익스텐션과 동일.
+  private static findUnusedColumn(): vscode.ViewColumn {
+    const used = new Set<number>();
+    vscode.window.tabGroups.all.forEach((g) => {
+      if (g.viewColumn !== undefined) used.add(g.viewColumn);
+    });
+    for (let c = vscode.ViewColumn.One; c <= vscode.ViewColumn.Nine; c++) {
+      if (!used.has(c)) return c;
+    }
+    return vscode.ViewColumn.Beside;
   }
 
   static revive(
@@ -92,7 +129,8 @@ export class ChatPanel {
     extensionUri: vscode.Uri,
     opts: SpawnOptions,
   ): ChatPanel {
-    return new ChatPanel(panel, extensionUri, opts);
+    // 복원은 VS Code가 그룹 잠금 상태까지 워크벤치 레이아웃으로 복구하므로 잠금에 손대지 않는다.
+    return new ChatPanel(panel, extensionUri, opts, false);
   }
 
   // 웹뷰가 로드 가능한 로컬 리소스 루트 — xterm 에셋(out/vendor) + 브랜드 에셋(media).
@@ -112,10 +150,12 @@ export class ChatPanel {
     panel: vscode.WebviewPanel,
     extensionUri: vscode.Uri,
     opts: SpawnOptions,
+    shouldLock: boolean,
   ) {
     this.panel = panel;
     this.extensionUri = extensionUri;
     this.opts = opts;
+    this.shouldLock = shouldLock;
     // revive(reload 복원) 경로도 media 리소스 루트를 갖도록 보장 — 로딩 화면 로고 차단 방지.
     this.panel.webview.options = {
       enableScripts: true,
@@ -184,7 +224,7 @@ export class ChatPanel {
     });
 
     this.panel.onDidChangeViewState((e) => {
-      this.groupLocker.onViewState(e.webviewPanel.active);
+      if (this.shouldLock) this.groupLocker.onViewState(e.webviewPanel.active);
       if (e.webviewPanel.active && this.opts.sessionId) {
         chatPanelEvents.fire({ sessionId: this.opts.sessionId });
       }
@@ -199,8 +239,8 @@ export class ChatPanel {
       }, 50);
     }
     // 생성 직후 이미 active인 패널의 그룹 잠금 — onDidChangeViewState는 변화만 감지하므로
-    // 초기 상태는 직접 1회 전달한다. (sessionId 유무와 무관하므로 위 블록 안에 넣지 않는다)
-    this.groupLocker.onViewState(this.panel.active);
+    // 초기 상태는 직접 1회 전달한다. 단, 새 AB 컬럼을 만든 경우에만(shouldLock).
+    if (this.shouldLock) this.groupLocker.onViewState(this.panel.active);
   }
 
   get sessionId(): string {
@@ -217,6 +257,13 @@ export class ChatPanel {
 
   reveal(): void {
     this.panel.reveal(undefined, false);
+  }
+
+  // 탭 제목 갱신 — 패널 생성 후 세션 이름이 바뀌면 호출(자기 세션 자동명명 또는 updateSessionTabTitle 경유).
+  // 빈 이름으로 탭을 비우지 않도록 가드(빈 rename은 degenerate edge).
+  setTabTitle(title: string): void {
+    if (this.disposed || !title.trim()) return;
+    this.panel.title = title;
   }
 
   private async spawnPty(cols: number, rows: number): Promise<void> {
@@ -280,6 +327,8 @@ export class ChatPanel {
           model: this.opts.model,
           workspacePath: this.opts.cwd,
           modelSessionId: captureModelSessionId,
+          // 자동 명명이 제목을 정하면 이 패널의 탭 제목을 즉시 갱신(닫았다 열 필요 없이).
+          onAutoNamed: (title) => this.setTabTitle(title),
         });
         this.captureRegistered = true;
       }
@@ -477,6 +526,7 @@ export class ChatPanel {
     const newName = await vscode.window.showInputBox({ prompt: vscode.l10n.t('Session name'), value: session.name });
     if (newName === undefined) return;
     await renameSession(workspaceId, sessionId, newName);
+    updateSessionTabTitle(sessionId, newName);
     this.handleGetSessions();
   }
 

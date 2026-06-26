@@ -770,31 +770,16 @@ async function handleHomeSubmit(
   const baseDir = resolveDefaultBasePath(settings)
   await fs.mkdir(baseDir, { recursive: true })
 
-  const now = new Date()
-  const pad = (n: number): string => String(n).padStart(2, '0')
-  // Chat-YYMMDD-HHMM 형식 — 예: Chat-260512-1430. 같은 분 내 충돌은 아래 EEXIST 루프에서 `-N` suffix로 처리.
-  const yy = String(now.getFullYear()).slice(-2)
-  const stem = `Chat-${yy}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}`
-  let folderName = stem
-  let suffix = 1
-  // 동일 초에 두 개 생성되는 충돌만 방어 (보통 2번 안 돈다)
-  while (true) {
-    const candidate = path.join(baseDir, folderName)
-    try {
-      await fs.mkdir(candidate, { recursive: false })
-      break
-    } catch (err) {
-      const code = (err as NodeJS.ErrnoException).code
-      if (code !== 'EEXIST') throw err
-      folderName = `${stem}-${suffix++}`
-    }
-  }
-  const workspacePath = path.join(baseDir, folderName)
+  // 홈 채팅은 항상 *고정* 기본 폴더(baseDir)를 워크스페이스로 쓴다. 매번 새 폴더를 만들면 CLI가
+  // 그 폴더를 "처음 보는 폴더"로 취급해 신뢰/온보딩 화면을 띄우고, 그 화면이 자동 제출되는 첫
+  // 메시지를 먹어버린다(루트 원인). 같은 폴더를 재사용하면 최초 1회 신뢰 후로는 화면 없이 바로 입력된다.
+  // createWorkspace는 V-23로 같은 경로면 새로 만들지 않고 세션만 추가 → 홈 채팅마다 새 세션.
+  const workspacePath = baseDir
 
   const created = await createWorkspace({
     initialModel: req.model,
     workspacePath,
-    title: folderName
+    title: path.basename(workspacePath) || 'AgentBridge'
   })
 
   const activated = await spawnAndAttachSession(

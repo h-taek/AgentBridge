@@ -19,6 +19,9 @@ export function deriveSessionTitle(userText: string): string | null {
 
 export interface AutoNameSessionArgs {
   workspaceRoot: string;
+  // 명명 대상 세션. turns.jsonl은 워크스페이스 내 여러 세션이 공유하므로, 이 id로 걸러야
+  // 다른 세션의 첫 턴으로 잘못 명명되지 않는다(세션 간 제목 오염 방지).
+  sessionId: string;
   // 현재 세션 title(수동 rename 포함). 비어 있지 않으면 명명을 건너뛴다.
   getCurrentTitle: () => Promise<string | undefined>;
   // 명명 확정 시 호출 — workspace.json sessions[].title 갱신.
@@ -32,6 +35,7 @@ export async function maybeAutoNameSession(args: AutoNameSessionArgs): Promise<v
   if (current && current.trim() !== '') return; // 이미 명명됨(수동 포함) — 덮어쓰지 않음
   const turns = await readAllTurns(args.workspaceRoot);
   for (const turn of turns) {
+    if (turn.sessionId !== args.sessionId) continue; // 이 세션의 턴만 — 공유 버퍼 내 타세션 턴 무시
     const title = deriveSessionTitle(turn.user);
     if (title) {
       await args.setTitle(title);
