@@ -104,7 +104,14 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   // --- Profile Panel (장기 메모리 — 자동제안 승인 큐 + 읽기전용 문서) ---
-  const profileProvider = new ProfilePanelProvider();
+  // 대기 제안 수를 액티비티 바 뱃지로 — 항상 살아있는 세션 TreeView(treeView, 아래에서 생성)에 건다.
+  // (webview view는 펼치기 전엔 resolve 안 돼 뱃지가 안 먹음.) 콜백은 런타임에만 호출되므로
+  // 아래에서 선언되는 treeView를 클로저로 참조해도 안전하다.
+  const profileProvider = new ProfilePanelProvider((count) => {
+    treeView.badge = count > 0
+      ? { value: count, tooltip: vscode.l10n.t('{0} pending proposals', count) }
+      : undefined;
+  });
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(
       ProfilePanelProvider.viewType,
@@ -189,6 +196,9 @@ export function activate(context: vscode.ExtensionContext) {
     }
   });
   context.subscriptions.push(treeView);
+
+  // 활성화 시 기존 대기 제안 수로 뱃지 1회 초기화 (이후엔 fireProposalTrigger onUpdated + 승인/버림이 갱신).
+  void profileProvider.notifyProposalsUpdated();
 
   // 공유 저장소 실시간 동기화 — 다른 앱(데스크탑/다른 호스트)이 workspace.json(세션 목록) 또는
   // owner.json(소유)을 바꾸면 세션 트리를 다시 그린다. 데스크탑과 같은 core 워처를 끌어 쓴다.
