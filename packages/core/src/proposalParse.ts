@@ -1,6 +1,6 @@
 // 헤드리스 제안 출력(JSON 배열) 추출·검증. parse.ts의 IR 파서와 같은 방어 전략:
 // fence/산문 제거 → 첫 balanced 배열 추출 → 항목별 강제 변환 + 유효 카테고리·제목 필수.
-import { GLOBAL_CATEGORIES, type GlobalCategory, type ProposalInput } from './shared/global';
+import { GLOBAL_CATEGORIES, DOC_CAPS, type GlobalCategory, type ProposalInput } from './shared/global';
 
 const CATEGORY_SET = new Set<string>(GLOBAL_CATEGORIES);
 
@@ -34,6 +34,21 @@ function asStr(v: unknown): string {
 }
 function asConfidence(v: unknown): number {
   return typeof v === 'number' && Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0.5;
+}
+// 검색 키워드 배열: 문자열만·trim·빈값/중복 제거·순서 보존·캡. 남는 게 없으면 undefined(필드 생략).
+function asIndexEntries(v: unknown): string[] | undefined {
+  if (!Array.isArray(v)) return undefined;
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const e of v) {
+    if (typeof e !== 'string') continue;
+    const t = e.trim();
+    if (!t || seen.has(t)) continue;
+    seen.add(t);
+    out.push(t);
+    if (out.length >= DOC_CAPS.indexEntries) break;
+  }
+  return out.length ? out : undefined;
 }
 
 export type ParseProposalResult =
@@ -70,12 +85,14 @@ export function parseProposalOutput(assistantText: string): ParseProposalResult 
       if (!body) { warnings.push('dropped: empty summary and body'); continue; }
       summary = title;
     }
+    const indexEntries = asIndexEntries(o.indexEntries);
     proposals.push({
       category: category as GlobalCategory,
       title,
       summary,
       body,
       confidence: asConfidence(o.confidence),
+      ...(indexEntries ? { indexEntries } : {}),
     });
   }
   return { ok: true, proposals, warnings };
