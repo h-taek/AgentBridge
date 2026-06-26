@@ -48,6 +48,7 @@ export function registerCapture(args: {
       try {
         await maybeAutoNameSession({
           workspaceRoot: workspaceStore.getWorkspacePath(workspaceId),
+          sessionId,
           getCurrentTitle: async () => (await store.loadSession(workspaceId, sessionId)).title,
           setTitle: (title) => store.updateSessionMeta(workspaceId, sessionId, { title }),
         });
