@@ -44,6 +44,7 @@ Each CLI's default behavior (permission dialogs, tool approval flow, session man
 - **Memory panel** — See the current memory · previous snapshots · turn flow at a glance, and run manual refine and reset.
 - **Long-term memory (global context)** — Durable knowledge (your role · conventions · workflows · …) is auto-proposed from conversations; you approve or dismiss, and approved memory is shared across every workspace. Auto-proposal can be toggled off in settings.
 - **Session persistence + resume** — Even after you quit and relaunch the app, native `--resume` continues your previous conversation as-is.
+- **Automatic session naming** — New chat sessions are named from your first message, so tabs and the sidebar show a short title instead of just the model name; you can rename anytime.
 - **Desktop·extension memory sharing** — If the project folder is the same, both apps use the same working memory (memory · conversation history).
 - **User-asset isolation** — Without modifying global settings, it embeds only the user's own already-authenticated CLIs.
 
