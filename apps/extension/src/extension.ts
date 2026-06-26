@@ -18,7 +18,7 @@ import * as output from './log/output';
 import { MemoryPanelProvider } from './views/memoryPanel';
 import { ProfilePanelProvider } from './views/profilePanel';
 import { SessionTreeProvider, SessionItem } from './views/sessionTreeView';
-import { ChatPanel, getActivePanel, getAllPanels, chatPanelEvents } from './views/chatPanel';
+import { ChatPanel, getActivePanel, getAllPanels, chatPanelEvents, updateSessionTabTitle } from './views/chatPanel';
 import { compactionEvents } from './core/compactionScheduler';
 import { registerSession, markSessionClosed, markSessionActive, renameSession, deleteSession } from './core/sessionRegistry';
 import { registerConfigWatcher, getConfig } from './settings/config';
@@ -330,6 +330,7 @@ export function activate(context: vscode.ExtensionContext) {
     });
     if (newName === undefined) return;
     await renameSession(session.workspaceId, session.sessionId, newName);
+    updateSessionTabTitle(session.sessionId, newName);
     sessionTree.refresh();
   });
 

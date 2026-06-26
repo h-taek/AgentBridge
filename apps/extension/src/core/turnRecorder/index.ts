@@ -23,6 +23,8 @@ export function registerCapture(args: {
   workspacePath: string;
   // claude: jsonl 파일명(=sessionId, 통일 규약). codex/agy: native id(없으면 null → setCaptureModelSessionId 대기).
   modelSessionId: string | null;
+  // 자동 명명이 실제로 제목을 정했을 때 호출 — 호스트가 열린 탭 제목을 갱신(panel.title은 생성 시 1회성).
+  onAutoNamed?: (title: string) => void;
 }): void {
   manager.register({
     workspaceId: args.workspaceId,
@@ -50,7 +52,10 @@ export function registerCapture(args: {
           workspaceRoot: workspaceStore.getWorkspacePath(workspaceId),
           sessionId,
           getCurrentTitle: async () => (await store.loadSession(workspaceId, sessionId)).title,
-          setTitle: (title) => store.updateSessionMeta(workspaceId, sessionId, { title }),
+          setTitle: async (title) => {
+            await store.updateSessionMeta(workspaceId, sessionId, { title });
+            args.onAutoNamed?.(title);
+          },
         });
       } catch {
         /* non-fatal */

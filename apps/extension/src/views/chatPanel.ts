@@ -36,6 +36,12 @@ export function getAllPanels(): ChatPanel[] {
   return Array.from(activePanels.values());
 }
 
+// 세션 이름이 바뀐 뒤(자동 명명·수동 rename) 열린 탭 제목을 즉시 갱신. 패널이 없으면 무시.
+// 탭 제목은 패널 생성 시 1회만 박히므로(createWebviewPanel), 이후 변경은 여기로 명시 반영해야 한다.
+export function updateSessionTabTitle(sessionId: string, title: string): void {
+  activePanels.get(sessionId)?.setTabTitle(title);
+}
+
 export class ChatPanel {
   private panel: vscode.WebviewPanel;
   private ptyProcess: pty.IPty | null = null;
@@ -253,6 +259,13 @@ export class ChatPanel {
     this.panel.reveal(undefined, false);
   }
 
+  // 탭 제목 갱신 — 패널 생성 후 세션 이름이 바뀌면 호출(자기 세션 자동명명 또는 updateSessionTabTitle 경유).
+  // 빈 이름으로 탭을 비우지 않도록 가드(빈 rename은 degenerate edge).
+  setTabTitle(title: string): void {
+    if (this.disposed || !title.trim()) return;
+    this.panel.title = title;
+  }
+
   private async spawnPty(cols: number, rows: number): Promise<void> {
     const { command, args, cwd, env } = this.opts;
 
@@ -314,6 +327,8 @@ export class ChatPanel {
           model: this.opts.model,
           workspacePath: this.opts.cwd,
           modelSessionId: captureModelSessionId,
+          // 자동 명명이 제목을 정하면 이 패널의 탭 제목을 즉시 갱신(닫았다 열 필요 없이).
+          onAutoNamed: (title) => this.setTabTitle(title),
         });
         this.captureRegistered = true;
       }
@@ -511,6 +526,7 @@ export class ChatPanel {
     const newName = await vscode.window.showInputBox({ prompt: vscode.l10n.t('Session name'), value: session.name });
     if (newName === undefined) return;
     await renameSession(workspaceId, sessionId, newName);
+    updateSessionTabTitle(sessionId, newName);
     this.handleGetSessions();
   }
 
