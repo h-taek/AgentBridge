@@ -4,7 +4,7 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 <p align="center"><a href="CHANGELOG.ko.md">한국어</a></p>
 
-## [0.5.0] — YYYY-MM-DD
+## [0.5.0] — 2026-06-26
 
 ### Added
 
