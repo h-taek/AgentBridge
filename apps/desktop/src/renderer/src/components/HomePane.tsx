@@ -7,7 +7,7 @@ import agyLogo from '@agentbridge/assets/logos/agy.svg'
 import { useT } from '../i18n'
 
 // 홈 화면 — 워크스페이스 미선택 상태에서 본문에 표시.
-// 입력 + 모델 선택 → 기본 경로 하위에 워크스페이스 자동 생성 + 세션 spawn + 첫 메시지 submit.
+// 입력 + 모델 선택 → 고정 기본 폴더 워크스페이스 재사용 + 세션 spawn + 첫 메시지 submit.
 //
 // 디자인 톤: 가운데 큰 입력창 + 아래 모델 카드 셀렉터.
 // 제출 시 App.tsx의 handleHomeSubmit이 home:submit IPC를 호출.
