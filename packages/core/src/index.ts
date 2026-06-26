@@ -33,6 +33,7 @@ export * from './storageRoot';
 export * from './fileLock';
 export * from './workspaceId';
 export * from './turnsStore';
+export * from './sessionTitle';
 export * from './irStore';
 export * from './workspaceStore';
 export * from './hookStatusStore';
@@ -57,6 +58,7 @@ export * from './ownerWatcher';
 // 환경 / PTY
 export * from './envProbe';
 export * from './ptyDisplayFilter';
+export * from './contextTag';
 
 // hook
 export * from './hookInstaller';
@@ -80,3 +82,4 @@ export * from './pty/types';
 export * from './cliAdapter/index';
 export * from './cliAdapter/codexSessionWatcher';
 export * from './cliAdapter/agyResume';
+export * from './cliAdapter/hookSessionCapture';

@@ -1,29 +1,17 @@
 import * as vscode from 'vscode';
 import { join } from 'path';
-import { mkdirSync, writeFileSync, existsSync } from 'fs';
 import { getSessions, type SessionMeta } from '../core/sessionRegistry';
 import { CLI_DISPLAY_NAME } from '../shared/types';
 import * as workspaceStore from '../core/workspaceStore';
 
-const MODEL_DOT_COLOR: Record<string, string> = {
-  claude: '#d97757',
-  codex: '#5D8AF9',
-  agy: '#8e6cef',
-};
-
+// dot SVG는 빌드 때 esbuild가 colors.json 색을 박아 media/dots/에 생성한다(단일 출처=colors.json, gitignore).
+// TreeItem.iconPath는 파일 Uri/코디콘만 받으므로 색칠한 dot은 파일이어야 한다. 여기서는 경로만 참조한다.
 let dotIconDir: string | undefined;
 
-function ensureDotIcon(model: string, closed: boolean): vscode.Uri {
+function dotIcon(model: string, closed: boolean): vscode.Uri {
   if (!dotIconDir) return vscode.Uri.file('');
-  const color = MODEL_DOT_COLOR[model] ?? '#888';
-  const opacity = closed ? '0.4' : '1';
-  const key = `dot-${model}${closed ? '-closed' : ''}.svg`;
-  const filePath = join(dotIconDir, key);
-  if (!existsSync(filePath)) {
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><circle cx="8" cy="8" r="3.5" fill="${color}" opacity="${opacity}"/></svg>`;
-    writeFileSync(filePath, svg, 'utf8');
-  }
-  return vscode.Uri.file(filePath);
+  const key = `${model}${closed ? '-closed' : ''}.svg`;
+  return vscode.Uri.file(join(dotIconDir, key));
 }
 
 export class SessionTreeProvider implements vscode.TreeDataProvider<SessionItem> {
@@ -32,7 +20,6 @@ export class SessionTreeProvider implements vscode.TreeDataProvider<SessionItem>
 
   constructor(extUri: vscode.Uri) {
     dotIconDir = join(extUri.fsPath, 'media', 'dots');
-    mkdirSync(dotIconDir, { recursive: true });
   }
 
   refresh(): void {
@@ -74,7 +61,7 @@ export class SessionItem extends vscode.TreeItem {
 
     const closed = !session.active;
     this.description = timeAgo(session.lastActiveAt);
-    const icon = ensureDotIcon(session.model, closed);
+    const icon = dotIcon(session.model, closed);
     this.iconPath = { light: icon, dark: icon };
     this.contextValue = session.active ? 'session-active' : 'session-closed';
 

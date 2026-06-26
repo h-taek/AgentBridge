@@ -2,7 +2,7 @@
   "name": "agentbridge",
   "displayName": "AgentBridge",
   "description": "%extension.description%",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "publisher": "h-taek",
   "l10n": "./l10n",
   "license": "MIT",
@@ -73,10 +73,7 @@
       {
         "command": "agentbridge.newSession",
         "title": "%agentbridge.newSession.title%",
-        "icon": {
-          "light": "media/add-small.svg",
-          "dark": "media/add-small.svg"
-        }
+        "icon": "$(add)"
       },
       {
         "command": "agentbridge.newSessionFromTab",
@@ -263,6 +260,7 @@
     "depcheck": "depcheck"
   },
   "dependencies": {
+    "@agentbridge/assets": "workspace:*",
     "@agentbridge/core": "workspace:*",
     "@xterm/addon-fit": "0.12.0-beta.220",
     "@xterm/addon-unicode11": "0.10.0-beta.220",

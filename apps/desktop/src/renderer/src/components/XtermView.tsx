@@ -5,6 +5,7 @@ import '@xterm/xterm/css/xterm.css'
 import log from 'electron-log/renderer'
 import type { CliKind, SessionKind } from '@shared/ipc'
 import { ClaudeLogo, CodexLogo, AgyLogo } from './modelLogos'
+import brandMark from '@agentbridge/assets/brand/agentbridge-dark.svg'
 import { TerminalIcon } from './icons'
 import { useT } from '../i18n'
 
@@ -401,16 +402,22 @@ export function XtermView({
               className={`xterm-loading model-${classModel}${hasRendered ? ' hidden' : ''}`}
               aria-hidden="true"
             >
-              <div className="xterm-loading-mark">
-                <div className="xterm-loading-pulse" />
-                {isShell ? (
-                  <TerminalIcon className="xterm-loading-logo" />
-                ) : (
-                  <Logo className="xterm-loading-logo" />
-                )}
+              <div className="xterm-loading-brand">
+                <img className="xterm-loading-brand-mark" src={brandMark} alt="" draggable={false} />
+                <span className="xterm-loading-brand-word">AgentBridge</span>
               </div>
-              <div className="xterm-loading-label">{labelText}</div>
-              <div className="xterm-loading-hint">starting…</div>
+              <div className="xterm-loading-center">
+                <div className="xterm-loading-mark">
+                  <div className="xterm-loading-pulse" />
+                  {isShell ? (
+                    <TerminalIcon className="xterm-loading-logo" />
+                  ) : (
+                    <Logo className="xterm-loading-logo" />
+                  )}
+                </div>
+                <div className="xterm-loading-label">{labelText}</div>
+                <div className="xterm-loading-sub">{labelText} running on AgentBridge</div>
+              </div>
             </div>
           )
         })()}

@@ -22,7 +22,7 @@
 
 'use strict'
 
-// @agentbridge-helper-version 0.3.0
+// @agentbridge-helper-version 0.4.4
 // (단일 설치 버전 비교용 — 이 파일을 수정하면 반드시 버전을 올릴 것)
 
 const fs = require('fs')
@@ -31,7 +31,8 @@ const path = require('path')
 // §G3 — 검색·주입 로직은 core 단일 소스. esbuild가 빌드 때 이 require를 인라인한다(옵션 나).
 // 런타임 헬퍼 옆엔 node_modules가 없어 require('@agentbridge/core') 불가 → 상대 경로로 엔트리 그래프에 포함.
 const { resolveContext } = require('../src/globalSearch')
-const { resolveQuery, renderGlobalMatches } = require('../src/globalInject')
+const { resolveQuery, renderGlobalMatches, extractSessionIdFromStdin } = require('../src/globalInject')
+const { wrapInjectedContext } = require('../src/contextTag')
 
 // claude/codex/agy 모두 stdout JSON의 `hookEventName`이 *호출된 hook event 이름과 정확히 일치*
 // 해야 한다. 일치 안 하면 CLI host가 "expected X but got Y" 에러로 hook을 거부 (claude는 warning,
@@ -277,17 +278,15 @@ function buildAdditionalContext(ir, recentTurns, workspaceId, globalBlock) {
   const hasGlobal = !!(globalBlock && globalBlock.trim())
   // 셋 다 비면 명시적으로 "AgentBridge 컨텍스트(미초기화)"임을 모델이 식별하게 sentinel로 감싼다.
   if (!ir && !hasTurns && !hasGlobal) {
-    return [
-      '<agentbridge-context>',
+    return wrapInjectedContext([
       HOOK_INSTRUCTIONS,
       '',
       '## AgentBridge context (memory uninitialized)',
       'Workspace ' + workspaceId + ' has no compacted memory (IR) or turn history yet.',
-      'This hook will accumulate from the next turn onward and compact into an IR.',
-      '</agentbridge-context>'
-    ].join('\n')
+      'This hook will accumulate from the next turn onward and compact into an IR.'
+    ].join('\n'))
   }
-  const parts = ['<agentbridge-context>', HOOK_INSTRUCTIONS, '']
+  const parts = [HOOK_INSTRUCTIONS, '']
   // 장기(글로벌) 메모리를 가장 위에 — 안정적 배경 → 세션 작업기억(IR) → 최근 턴 순.
   if (hasGlobal) {
     parts.push(globalBlock)
@@ -319,11 +318,11 @@ function buildAdditionalContext(ir, recentTurns, workspaceId, globalBlock) {
     parts.push('')
   }
   if (hasTurns) {
-    parts.push('## Recent conversation (raw, last ' + recentTurns.length + ' turns)')
-    parts.push(renderRecentTurns(recentTurns))
+    // 가장 최근 턴을 맨 위로 — 주입 블록이 한도 초과로 잘려도 최신 턴(연속성)이 살아남게.
+    parts.push('## Recent conversation (raw, last ' + recentTurns.length + ' turns, newest first)')
+    parts.push(renderRecentTurns(recentTurns.slice().reverse()))
   }
-  parts.push('</agentbridge-context>')
-  return parts.join('\n')
+  return wrapInjectedContext(parts.join('\n'))
 }
 
 async function main() {
@@ -367,10 +366,41 @@ async function main() {
   const ir = readJsonSafe(irPath)
   const recentTurns = readRecentTurns(turnsPath, 3)
 
+  const stdinRaw = await readStdin(200)
+
+  // 세션 id 결정적 캡처 — spawn 때 우리가 심은 env 토큰으로 키잉한 파일에 stdin의 native id를
+  // 기록한다. best-effort: 어떤 실패도 컨텍스트 주입(아래)을 막지 않는다. claude는 우리가 id를
+  // 발급하므로 대상 아님.
+  try {
+    const token = process.env.AGENTBRIDGE_WS_SESSION || ''
+    let sid = extractSessionIdFromStdin(stdinRaw, parsed.agent)
+    if (!sid) {
+      if (parsed.agent === 'agy') sid = process.env.ANTIGRAVITY_CONVERSATION_ID || ''
+      else if (parsed.agent === 'codex') sid = process.env.CODEX_THREAD_ID || ''
+    }
+    if (parsed.agent !== 'claude' && token && sid && token === path.basename(token)) {
+      const out = path.join(wsDir, 'sessions', token, 'captured.json')
+      const tmp = out + '.' + process.pid + '.tmp'
+      fs.writeFileSync(
+        tmp,
+        JSON.stringify({
+          agent: parsed.agent,
+          modelSessionId: sid,
+          ppid: process.ppid,
+          capturedAt: Date.now()
+        })
+      )
+      fs.renameSync(tmp, out)
+    }
+  } catch (e) {
+    process.stderr.write(
+      'agentbridge-memory: capture write skipped — ' + String(e && e.message ? e.message : e) + '\n'
+    )
+  }
+
   // §G3 글로벌 메모리 검색 — additive·best-effort. 어떤 실패도 IR/turns 주입을 막지 않는다.
   let globalBlock = ''
   try {
-    const stdinRaw = await readStdin(200)
     const lastTurn = recentTurns.length ? recentTurns[recentTurns.length - 1] : null
     const lastUserTurn = lastTurn && typeof lastTurn.user === 'string' ? lastTurn.user : ''
     const query = resolveQuery(stdinRaw, lastUserTurn)
@@ -386,7 +416,15 @@ async function main() {
     globalBlock = ''
   }
 
-  const additionalContext = buildAdditionalContext(ir, recentTurns, parsed.workspace, globalBlock)
+  // 주입 블록을 9KB(UTF-8) 이하로 유지 — 초과하면 가장 오래된 turn부터 빼고 다시 만든다(최신 턴은 보존).
+  // (codex 훅 바인딩 한도 ~10KB·claude ~10,000자 회피. turn만 줄이고 IR/장기메모리는 건드리지 않음.)
+  const INJECT_BYTE_LIMIT = 9 * 1024
+  let injTurns = recentTurns
+  let additionalContext = buildAdditionalContext(ir, injTurns, parsed.workspace, globalBlock)
+  while (Buffer.byteLength(additionalContext, 'utf8') > INJECT_BYTE_LIMIT && injTurns.length > 0) {
+    injTurns = injTurns.slice(1) // 배열 앞 = 가장 오래된 턴 → 제거
+    additionalContext = buildAdditionalContext(ir, injTurns, parsed.workspace, globalBlock)
+  }
   process.stdout.write(
     JSON.stringify(buildHookOutput(parsed.agent, parsed.event, additionalContext))
   )

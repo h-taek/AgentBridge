@@ -9,6 +9,7 @@ import { PtyDisplayFilter } from '../core/ptyDisplayFilter';
 import { getSessions, renameSession, deleteSession, setModelSessionId, type SessionMeta } from '../core/sessionRegistry';
 import { captureNewThreadId } from '../core/cliAdapter/codexSessionWatcher';
 import { watchForNewConversationUuid } from '../core/cliAdapter/agyResume';
+import { captureSessionIdFromHook, coordinateCapture } from '@agentbridge/core';
 import * as workspaceStore from '../core/workspaceStore';
 import {
   acquireOwnership,
@@ -17,6 +18,7 @@ import {
   readForeignOwner,
 } from '@agentbridge/core';
 import { CLI_DISPLAY_NAME, type CliKind } from '../shared/types';
+import modelColors from '@agentbridge/assets/colors.json';
 import { quoteCommandLine } from '../shared/shellQuote';
 import type { SpawnOptions } from '../pty/types';
 import { createGroupLocker, type GroupLocker } from './groupLock';
@@ -32,6 +34,12 @@ export function getActivePanel(sessionId: string): ChatPanel | undefined {
 
 export function getAllPanels(): ChatPanel[] {
   return Array.from(activePanels.values());
+}
+
+// 세션 이름이 바뀐 뒤(자동 명명·수동 rename) 열린 탭 제목을 즉시 갱신. 패널이 없으면 무시.
+// 탭 제목은 패널 생성 시 1회만 박히므로(createWebviewPanel), 이후 변경은 여기로 명시 반영해야 한다.
+export function updateSessionTabTitle(sessionId: string, title: string): void {
+  activePanels.get(sessionId)?.setTabTitle(title);
 }
 
 export class ChatPanel {
@@ -56,6 +64,9 @@ export class ChatPanel {
   private readonly extensionUri: vscode.Uri;
   private onDisposeCallback: (() => void) | null = null;
   private readonly groupLocker: GroupLocker;
+  // 이 패널이 새 AB 컬럼을 만들며 생성됐는지 — 그룹 자동 잠금은 이때만 수행한다.
+  // (기존 AB 그룹에 합류하거나 IDE 재시작 복원되는 패널은 잠금에 손대지 않는다.)
+  private readonly shouldLock: boolean;
 
   markDeleted(): void {
     this.deletedExternally = true;
@@ -65,11 +76,27 @@ export class ChatPanel {
     extensionUri: vscode.Uri,
     opts: SpawnOptions,
   ): ChatPanel {
-    // split이 이미 2개 이상이면 가장 오른쪽 기존 컬럼에 탭으로 추가. 1개면 Beside로 새 split.
-    const groups = vscode.window.tabGroups.all;
-    const targetColumn = groups.length >= 2
-      ? groups[groups.length - 1].viewColumn
-      : vscode.ViewColumn.Beside;
+    // 컬럼 선택은 공식 claude-code 익스텐션과 동일한 방식 — "맨 오른쪽" 기하학이 아니라
+    // "탭이 전부 AgentBridge 챗 웹뷰인 에디터 그룹"을 찾아 그 컬럼에 새 탭으로 합류한다.
+    // 그런 그룹이 없으면 빈 컬럼에 새로 만들고(startedInNewColumn=true), 그때만 그룹을 잠근다.
+    // 배치/포커스에 좌우되지 않으므로 "잠긴 오른쪽 대신 왼쪽에 스폰" 현상이 사라진다.
+    const abGroup = vscode.window.tabGroups.all.find(
+      (g) =>
+        g.tabs.length > 0 &&
+        g.tabs.every(
+          (t) =>
+            t.input instanceof vscode.TabInputWebview &&
+            t.input.viewType.includes('agentbridge.chat'),
+        ),
+    );
+    let startedInNewColumn = false;
+    let targetColumn: vscode.ViewColumn;
+    if (abGroup && abGroup.viewColumn) {
+      targetColumn = abGroup.viewColumn;
+    } else {
+      targetColumn = ChatPanel.findUnusedColumn();
+      startedInNewColumn = true;
+    }
 
     const panel = vscode.window.createWebviewPanel(
       'agentbridge.chat',
@@ -78,17 +105,23 @@ export class ChatPanel {
       {
         enableScripts: true,
         retainContextWhenHidden: true,
-        localResourceRoots: [
-          vscode.Uri.joinPath(extensionUri, 'out', 'vendor', '@xterm', 'xterm', 'css'),
-          vscode.Uri.joinPath(extensionUri, 'out', 'vendor', '@xterm', 'xterm', 'lib'),
-          vscode.Uri.joinPath(extensionUri, 'out', 'vendor', '@xterm', 'addon-fit', 'lib'),
-          vscode.Uri.joinPath(extensionUri, 'out', 'vendor', '@xterm', 'addon-webgl', 'lib'),
-          vscode.Uri.joinPath(extensionUri, 'out', 'vendor', '@xterm', 'addon-unicode11', 'lib'),
-        ],
+        localResourceRoots: ChatPanel.localRoots(extensionUri),
       },
     );
 
-    return new ChatPanel(panel, extensionUri, opts);
+    return new ChatPanel(panel, extensionUri, opts, startedInNewColumn);
+  }
+
+  // 안 쓰는 에디터 컬럼(One..Nine 중 첫 빈 칸, 없으면 Beside). 공식 claude-code 익스텐션과 동일.
+  private static findUnusedColumn(): vscode.ViewColumn {
+    const used = new Set<number>();
+    vscode.window.tabGroups.all.forEach((g) => {
+      if (g.viewColumn !== undefined) used.add(g.viewColumn);
+    });
+    for (let c = vscode.ViewColumn.One; c <= vscode.ViewColumn.Nine; c++) {
+      if (!used.has(c)) return c;
+    }
+    return vscode.ViewColumn.Beside;
   }
 
   static revive(
@@ -96,17 +129,38 @@ export class ChatPanel {
     extensionUri: vscode.Uri,
     opts: SpawnOptions,
   ): ChatPanel {
-    return new ChatPanel(panel, extensionUri, opts);
+    // 복원은 VS Code가 그룹 잠금 상태까지 워크벤치 레이아웃으로 복구하므로 잠금에 손대지 않는다.
+    return new ChatPanel(panel, extensionUri, opts, false);
+  }
+
+  // 웹뷰가 로드 가능한 로컬 리소스 루트 — xterm 에셋(out/vendor) + 브랜드 에셋(media).
+  // create·revive 양 경로에서 동일하게 적용해야 로딩 화면 로고가 CSP/리소스 정책에 막히지 않는다.
+  private static localRoots(extensionUri: vscode.Uri): vscode.Uri[] {
+    return [
+      vscode.Uri.joinPath(extensionUri, 'out', 'vendor', '@xterm', 'xterm', 'css'),
+      vscode.Uri.joinPath(extensionUri, 'out', 'vendor', '@xterm', 'xterm', 'lib'),
+      vscode.Uri.joinPath(extensionUri, 'out', 'vendor', '@xterm', 'addon-fit', 'lib'),
+      vscode.Uri.joinPath(extensionUri, 'out', 'vendor', '@xterm', 'addon-webgl', 'lib'),
+      vscode.Uri.joinPath(extensionUri, 'out', 'vendor', '@xterm', 'addon-unicode11', 'lib'),
+      vscode.Uri.joinPath(extensionUri, 'media'),
+    ];
   }
 
   private constructor(
     panel: vscode.WebviewPanel,
     extensionUri: vscode.Uri,
     opts: SpawnOptions,
+    shouldLock: boolean,
   ) {
     this.panel = panel;
     this.extensionUri = extensionUri;
     this.opts = opts;
+    this.shouldLock = shouldLock;
+    // revive(reload 복원) 경로도 media 리소스 루트를 갖도록 보장 — 로딩 화면 로고 차단 방지.
+    this.panel.webview.options = {
+      enableScripts: true,
+      localResourceRoots: ChatPanel.localRoots(extensionUri),
+    };
     this.groupLocker = createGroupLocker({
       executeCommand: (cmd) => vscode.commands.executeCommand(cmd),
       warn: (msg) => output.warn(msg),
@@ -114,11 +168,8 @@ export class ChatPanel {
 
     if (opts.sessionId) activePanels.set(opts.sessionId, this);
 
-    const modelIcon = `model-${opts.model ?? 'claude'}.png`;
-    this.panel.iconPath = {
-      light: vscode.Uri.joinPath(extensionUri, 'media', modelIcon),
-      dark: vscode.Uri.joinPath(extensionUri, 'media', modelIcon),
-    };
+    const modelLogo = vscode.Uri.joinPath(extensionUri, 'media', 'logos', `${opts.model ?? 'claude'}.svg`);
+    this.panel.iconPath = { light: modelLogo, dark: modelLogo };
 
     this.panel.webview.html = this.buildHtml();
 
@@ -173,7 +224,7 @@ export class ChatPanel {
     });
 
     this.panel.onDidChangeViewState((e) => {
-      this.groupLocker.onViewState(e.webviewPanel.active);
+      if (this.shouldLock) this.groupLocker.onViewState(e.webviewPanel.active);
       if (e.webviewPanel.active && this.opts.sessionId) {
         chatPanelEvents.fire({ sessionId: this.opts.sessionId });
       }
@@ -188,8 +239,8 @@ export class ChatPanel {
       }, 50);
     }
     // 생성 직후 이미 active인 패널의 그룹 잠금 — onDidChangeViewState는 변화만 감지하므로
-    // 초기 상태는 직접 1회 전달한다. (sessionId 유무와 무관하므로 위 블록 안에 넣지 않는다)
-    this.groupLocker.onViewState(this.panel.active);
+    // 초기 상태는 직접 1회 전달한다. 단, 새 AB 컬럼을 만든 경우에만(shouldLock).
+    if (this.shouldLock) this.groupLocker.onViewState(this.panel.active);
   }
 
   get sessionId(): string {
@@ -206,6 +257,13 @@ export class ChatPanel {
 
   reveal(): void {
     this.panel.reveal(undefined, false);
+  }
+
+  // 탭 제목 갱신 — 패널 생성 후 세션 이름이 바뀌면 호출(자기 세션 자동명명 또는 updateSessionTabTitle 경유).
+  // 빈 이름으로 탭을 비우지 않도록 가드(빈 rename은 degenerate edge).
+  setTabTitle(title: string): void {
+    if (this.disposed || !title.trim()) return;
+    this.panel.title = title;
   }
 
   private async spawnPty(cols: number, rows: number): Promise<void> {
@@ -269,6 +327,8 @@ export class ChatPanel {
           model: this.opts.model,
           workspacePath: this.opts.cwd,
           modelSessionId: captureModelSessionId,
+          // 자동 명명이 제목을 정하면 이 패널의 탭 제목을 즉시 갱신(닫았다 열 필요 없이).
+          onAutoNamed: (title) => this.setTabTitle(title),
         });
         this.captureRegistered = true;
       }
@@ -338,38 +398,49 @@ export class ChatPanel {
   // agy:   ~/.gemini/antigravity-cli/cache/last_conversations.json polling으로 cwd→UUID 매핑 캡처.
   // 캡처되면 sessionRegistry.setModelSessionId로 영속화 → 다음 reopen에서 resume 인자 생성.
   private startModelSessionIdWatcher(): void {
-    const { workspaceId, sessionId, codexSessionSnapshot, agyWatchUuid, cwd, model } = this.opts;
+    const { workspaceId, sessionId, codexSessionSnapshot, agyWatchUuid, cwd, model, hookCaptureFilePath } =
+      this.opts;
     if (!workspaceId || !sessionId) return;
 
     const persist = (modelSessionId: string): void => {
       void setModelSessionId(workspaceId, sessionId, modelSessionId).catch((err) => {
         output.warn(`ChatPanel: setModelSessionId 실패 — ${String(err)}`);
       });
-      // 매니저에 native id를 알려 transcript 캡처 시작 (codex/agy).
       if (cwd) setCaptureModelSessionId(sessionId, modelSessionId, cwd);
     };
 
+    const ctrl = new AbortController();
+    this.modelSessionWatchAbort = ctrl;
+    const hookCapture = hookCaptureFilePath
+      ? captureSessionIdFromHook({ captureFilePath: hookCaptureFilePath, signal: ctrl.signal })
+      : Promise.resolve<string | null>(null);
+
     if (model === 'codex' && codexSessionSnapshot) {
-      const ctrl = new AbortController();
-      this.modelSessionWatchAbort = ctrl;
-      void captureNewThreadId(codexSessionSnapshot, { signal: ctrl.signal })
-        .then((threadId) => {
-          if (threadId) persist(threadId);
+      void coordinateCapture({
+        hookCapture,
+        fallbackCapture: captureNewThreadId(codexSessionSnapshot, { signal: ctrl.signal }),
+        signal: ctrl.signal,
+      })
+        .then((r) => {
+          if (r) persist(r.id);
         })
-        .catch((err) => {
-          output.warn(`ChatPanel: codex thread_id 캡처 실패 — ${String(err)}`);
-        });
+        .catch((err) => output.warn(`ChatPanel: codex 캡처 실패 — ${String(err)}`));
     } else if (model === 'agy' && agyWatchUuid && cwd) {
-      const ctrl = new AbortController();
-      this.modelSessionWatchAbort = ctrl;
-      void watchForNewConversationUuid({
-        cwd,
-        excludeUuids: agyWatchUuid.excludeUuids,
-        abortSignal: ctrl.signal,
-        onCaptured: (uuid) => persist(uuid),
-      }).catch((err) => {
-        output.warn(`ChatPanel: agy UUID 캡처 실패 — ${String(err)}`);
+      const fallbackCapture = new Promise<string | null>((res) => {
+        void watchForNewConversationUuid({
+          cwd,
+          excludeUuids: agyWatchUuid.excludeUuids,
+          abortSignal: ctrl.signal,
+          onCaptured: (uuid) => res(uuid),
+        })
+          .then(() => res(null))
+          .catch(() => res(null));
       });
+      void coordinateCapture({ hookCapture, fallbackCapture, signal: ctrl.signal })
+        .then((r) => {
+          if (r) persist(r.id);
+        })
+        .catch((err) => output.warn(`ChatPanel: agy 캡처 실패 — ${String(err)}`));
     }
   }
 
@@ -455,6 +526,7 @@ export class ChatPanel {
     const newName = await vscode.window.showInputBox({ prompt: vscode.l10n.t('Session name'), value: session.name });
     if (newName === undefined) return;
     await renameSession(workspaceId, sessionId, newName);
+    updateSessionTabTitle(sessionId, newName);
     this.handleGetSessions();
   }
 
@@ -544,7 +616,19 @@ export class ChatPanel {
       vscode.Uri.joinPath(this.extensionUri, 'out', 'vendor', '@xterm', 'addon-unicode11', 'lib', 'addon-unicode11.js'),
     );
     const nonce = getNonce();
-    const modelLabel = this.opts.model ? CLI_DISPLAY_NAME[this.opts.model].toUpperCase() : 'CLI';
+    const modelLabel = this.opts.model ? CLI_DISPLAY_NAME[this.opts.model] : 'CLI';
+    // TUI 부팅 대기 화면용 에셋 — agent 로고 + AgentBridge 마크(데스크톱과 공통 디자인).
+    const loadingModel = this.opts.model ?? 'claude';
+    const loadingLogo = webview.asWebviewUri(
+      vscode.Uri.joinPath(this.extensionUri, 'media', 'logos', `${loadingModel}.svg`),
+    );
+    // 브랜드 마크는 테마에 맞춰 변형 선택 — 컬러(주황/보라/파랑)는 유지, 계단 회색만 명/암 적응.
+    const isLightTheme =
+      vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.Light ||
+      vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.HighContrastLight;
+    const brandMark = webview.asWebviewUri(
+      vscode.Uri.joinPath(this.extensionUri, 'media', isLightTheme ? 'icon-light.svg' : 'icon-dark.svg'),
+    );
 
     // VS Code 재시작 시 panel을 복구하기 위한 최소 state. serializer.deserializeWebviewPanel에서
     // 다시 받아 buildOpts로 재구성한다.
@@ -566,7 +650,7 @@ export class ChatPanel {
 <head>
   <meta charset="UTF-8"/>
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'none'; style-src ${webview.cspSource} 'nonce-${nonce}'; script-src 'nonce-${nonce}'; font-src ${webview.cspSource};">
+    content="default-src 'none'; style-src ${webview.cspSource} 'nonce-${nonce}'; script-src 'nonce-${nonce}'; img-src ${webview.cspSource}; font-src ${webview.cspSource};">
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <link rel="stylesheet" href="${xtermCss}" />
   <style nonce="${nonce}">
@@ -578,6 +662,10 @@ export class ChatPanel {
       flex-direction: column;
       height: 100vh;
     }
+    :root { --accent: ${modelColors.claude}; }
+    body[data-model="codex"] { --accent: ${modelColors.codex}; }
+    body[data-model="agy"] { --accent: ${modelColors.agy}; }
+    .title { font-weight: 500; font-size: 12px; color: #fff; }
     .header {
       display: flex;
       align-items: center;
@@ -588,39 +676,32 @@ export class ChatPanel {
       flex-shrink: 0;
       position: relative;
     }
-    .header .model-badge {
+    .header .badge {
       font-size: 11px;
-      font-weight: 600;
-      padding: 2px 8px;
-      border-radius: 10px;
-      background: var(--vscode-badge-background);
-      color: var(--vscode-badge-foreground);
+      font-weight: 800;
+      letter-spacing: .2px;
+      padding: 1px 6px;
+      border-radius: 999px;
+      background: var(--accent);
+      color: #1b1b1d;
     }
-    .header .session-name {
-      font-size: 12px;
-      color: var(--vscode-foreground);
-      flex: 1;
-    }
-    .header-actions { display: flex; gap: 4px; }
-    .header-actions button {
-      background: transparent;
+    .header .sp { flex: 1; }
+    .hbtn {
+      background: none;
       border: none;
-      color: var(--vscode-descriptionForeground);
+      color: var(--vscode-foreground);
       cursor: pointer;
-      width: 28px;
-      height: 28px;
-      border-radius: 4px;
-      display: flex;
+      width: 30px;
+      height: 30px;
+      border-radius: 7px;
+      display: inline-flex;
       align-items: center;
       justify-content: center;
       padding: 0;
     }
-    .header-actions button:hover {
+    .hbtn:hover {
       background: var(--vscode-toolbar-hoverBackground, rgba(255,255,255,0.1));
-      color: var(--vscode-foreground);
     }
-    .header-actions button svg { width: 22px; height: 22px; fill: currentColor; }
-    .header-actions button.btn-new svg { width: 18px; height: 18px; }
 
     /* Session dropdown panel */
     .session-panel {
@@ -787,21 +868,88 @@ export class ChatPanel {
     }
     .xterm { height: 100%; }
     .xterm-viewport { background-color: inherit !important; }
+
+    /* TUI 부팅 대기 — 데스크톱과 공통 디자인. 첫 PTY 출력 도착 시 숨김. */
+    #ab-loading {
+      position: absolute;
+      inset: 0;
+      z-index: 40;
+      background: var(--vscode-panel-background, var(--vscode-editor-background, #1e1e1e));
+      opacity: 1;
+      transition: opacity 240ms ease-out;
+      pointer-events: none;
+    }
+    #ab-loading.hidden { opacity: 0; }
+    .ab-loading-brand {
+      position: absolute;
+      top: 18px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      opacity: 0.72;
+    }
+    .ab-loading-brand img { width: 13px; height: 12px; display: block; }
+    .ab-loading-brand span {
+      font-size: 12.5px;
+      font-weight: 600;
+      letter-spacing: 0.01em;
+      color: var(--vscode-foreground);
+    }
+    .ab-loading-center {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+    .ab-loading-mark {
+      position: relative;
+      width: 72px;
+      height: 72px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 18px;
+    }
+    .ab-loading-pulse {
+      position: absolute;
+      inset: -8px;
+      border-radius: 50%;
+      background: var(--accent);
+      opacity: 0.22;
+      filter: blur(14px);
+      animation: ab-loading-pulse 1.7s ease-in-out infinite;
+    }
+    @keyframes ab-loading-pulse {
+      0%, 100% { transform: scale(0.86); opacity: 0.14; }
+      50% { transform: scale(1.06); opacity: 0.3; }
+    }
+    .ab-loading-logo { position: relative; z-index: 1; width: 56px; height: 56px; display: block; }
+    .ab-loading-label {
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--vscode-foreground);
+      letter-spacing: 0.01em;
+      margin-bottom: 7px;
+    }
+    .ab-loading-sub { font-size: 11.5px; color: var(--vscode-descriptionForeground); letter-spacing: 0.01em; }
   </style>
 </head>
-<body>
+<body data-model="${this.opts.model ?? 'claude'}">
   <div class="sp-overlay" id="spOverlay"></div>
   <div class="header">
-    <span class="model-badge">${escapeHtml(modelLabel)}</span>
-    <span class="session-name">${escapeHtml(this.opts.terminalName)}</span>
-    <div class="header-actions">
-      <button id="btnSelectSession" title="Select session">
-        <svg viewBox="0 0 16 16"><path d="M13.5 8a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0ZM8 3.5a4.5 4.5 0 1 0 0 9 4.5 4.5 0 0 0 0-9ZM8.5 5v2.793l1.854 1.853-.708.708L7.5 8.207V5h1Z"/></svg>
-      </button>
-      <button id="btnNewSession" class="btn-new" title="New session">
-        <svg viewBox="0 0 16 16"><path d="M8 1a.5.5 0 0 1 .5.5V7h5.5a.5.5 0 0 1 0 1H8.5v5.5a.5.5 0 0 1-1 0V8H2a.5.5 0 0 1 0-1h5.5V1.5A.5.5 0 0 1 8 1Z"/></svg>
-      </button>
-    </div>
+    <span class="title">AgentBridge</span>
+    <span class="badge">${escapeHtml(modelLabel)}</span>
+    <span class="sp"></span>
+    <button id="btnSelectSession" class="hbtn" title="History">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+    </button>
+    <button id="btnNewSession" class="btn-new hbtn" title="New session">
+      <svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+    </button>
     <div class="session-panel" id="sessionPanel">
       <div class="sp-search">
         <div class="sp-search-wrap">
@@ -813,23 +961,38 @@ export class ChatPanel {
     </div>
     <div class="model-panel" id="modelPanel">
       <div class="mp-item" data-model="claude">
-        <span class="mp-item-dot" style="background:#d97757"></span>
+        <span class="mp-item-dot" style="background:${modelColors.claude}"></span>
         <span class="mp-item-name">Claude</span>
         <span class="mp-item-desc">Anthropic</span>
       </div>
       <div class="mp-item" data-model="codex">
-        <span class="mp-item-dot" style="background:#5D8AF9"></span>
+        <span class="mp-item-dot" style="background:${modelColors.codex}"></span>
         <span class="mp-item-name">Codex</span>
         <span class="mp-item-desc">OpenAI</span>
       </div>
       <div class="mp-item" data-model="agy">
-        <span class="mp-item-dot" style="background:#8e6cef"></span>
+        <span class="mp-item-dot" style="background:${modelColors.agy}"></span>
         <span class="mp-item-name">Antigravity</span>
         <span class="mp-item-desc">Google</span>
       </div>
     </div>
   </div>
-  <div id="terminal-container"></div>
+  <div id="terminal-container">
+    <div id="ab-loading">
+      <div class="ab-loading-brand">
+        <img src="${brandMark}" alt="" />
+        <span>AgentBridge</span>
+      </div>
+      <div class="ab-loading-center">
+        <div class="ab-loading-mark">
+          <div class="ab-loading-pulse"></div>
+          <img class="ab-loading-logo" src="${loadingLogo}" alt="" />
+        </div>
+        <div class="ab-loading-label">${escapeHtml(modelLabel)}</div>
+        <div class="ab-loading-sub">${escapeHtml(modelLabel)} running on AgentBridge</div>
+      </div>
+    </div>
+  </div>
 
   <script nonce="${nonce}" src="${xtermJs}"></script>
   <script nonce="${nonce}" src="${fitJs}"></script>
@@ -1228,6 +1391,8 @@ export class ChatPanel {
     window.addEventListener('message', (e) => {
       const msg = e.data;
       if (msg.type === 'output') {
+        const loadingEl = document.getElementById('ab-loading');
+        if (loadingEl) loadingEl.classList.add('hidden');
         term.write(msg.data);
       }
       if (msg.type === 'sessions') {

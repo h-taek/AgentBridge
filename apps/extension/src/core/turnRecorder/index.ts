@@ -2,7 +2,7 @@
 // chatPanel은 세션을 매니저에 등록만 하고, 매니저가 각 CLI transcript 파일을 fs.watch/폴링으로 읽어
 // turns.jsonl을 쌓는다. 표시는 PTY 유지(webview output + replay.log는 chatPanel이 그대로 기록).
 
-import { CaptureManager, type TurnsAssistantDetail } from '@agentbridge/core';
+import { CaptureManager, maybeAutoNameSession, type TurnsAssistantDetail } from '@agentbridge/core';
 import type { CliKind } from '../../shared/types';
 import * as workspaceStore from '../workspaceStore';
 import { getCompactionScheduler, getWorkspaceStore, getLogger } from '../coreInstances';
@@ -23,6 +23,8 @@ export function registerCapture(args: {
   workspacePath: string;
   // claude: jsonl 파일명(=sessionId, 통일 규약). codex/agy: native id(없으면 null → setCaptureModelSessionId 대기).
   modelSessionId: string | null;
+  // 자동 명명이 실제로 제목을 정했을 때 호출 — 호스트가 열린 탭 제목을 갱신(panel.title은 생성 시 1회성).
+  onAutoNamed?: (title: string) => void;
 }): void {
   manager.register({
     workspaceId: args.workspaceId,
@@ -35,10 +37,25 @@ export function registerCapture(args: {
     getDetail: () => getConfig().assistantDetail as TurnsAssistantDetail,
     scheduler: getCompactionScheduler(),
     onTurnFlushed: async ({ workspaceId, sessionId, flushedAt }) => {
+      const store = getWorkspaceStore();
       // 옛 sessionRegistry.updateActivity 대체 — workspace.json sessions[]에 lastChattedAt 갱신.
       try {
-        await getWorkspaceStore().updateSessionMeta(workspaceId, sessionId, {
+        await store.updateSessionMeta(workspaceId, sessionId, {
           lastChattedAt: flushedAt,
+        });
+      } catch {
+        /* non-fatal */
+      }
+      // 자동 세션 이름 — 첫 nameable 턴으로 1회 명명(기존 title 보호). 실패는 무시.
+      try {
+        await maybeAutoNameSession({
+          workspaceRoot: workspaceStore.getWorkspacePath(workspaceId),
+          sessionId,
+          getCurrentTitle: async () => (await store.loadSession(workspaceId, sessionId)).title,
+          setTitle: async (title) => {
+            await store.updateSessionMeta(workspaceId, sessionId, { title });
+            args.onAutoNamed?.(title);
+          },
         });
       } catch {
         /* non-fatal */

@@ -200,7 +200,7 @@ export function SessionTabs({
           ) : (
             <span className={`session-tab-dot model-${s.model}`} />
           )}
-          {displayName}
+          <span className="session-tab-name">{displayName}</span>
           {hookReason && (
             <span
               className="session-tab-hook-disabled"

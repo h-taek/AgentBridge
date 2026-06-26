@@ -4,6 +4,27 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 <p align="center"><a href="CHANGELOG.ko.md">한국어</a></p>
 
+## [0.5.0] — 2026-06-26
+
+### Added
+
+- New chat sessions are named automatically from your first message — the tab and sidebar now show a short title taken from what you first typed, instead of just the model name. You can still rename a session at any time, and auto-naming never overwrites a name you set.
+- The Long-term memory view now shows a badge with the number of pending suggestions on its activity-bar icon, so you can tell there's something to review without opening it.
+
+### Changed
+
+- Chat tabs now use each agent's official brand logo as the tab icon (replacing the old bitmap capture), and reopening a named session shows that name in the tab title instead of just the model name — matching the sidebar. The chat header was refreshed too: a brand-coloured model badge and cleaner line icons.
+- While a chat is starting up, the panel now shows a branded loading screen with the agent's logo, following your VS Code colour theme.
+- Long-term memory now matches your prompts more precisely: common Korean function words (such as 어떻게 or 방법) no longer pull in unrelated notes, and newly proposed memories now carry bilingual (Korean/English) search keywords so they're still found when you later ask in different words.
+
+### Fixed
+
+- Running several sessions of the same agent in one folder (for example two Codex sessions), or reopening a session, now reliably continues the correct conversation — previously a session could occasionally get mixed up with another or start fresh instead of resuming.
+- Long conversations no longer drop the most recent turns from the context AgentBridge injects each turn — when that block exceeded the CLI hook's size limit it was truncated from the bottom, so the newest (most relevant) turns could go missing unpredictably. The block is now ordered newest-first and trimmed from the oldest, so recent context always survives.
+- Fixed a glitch in Codex sessions where AgentBridge's internal context could leak onto the screen or cut terminal output short — the injected context is now always collapsed to a single hidden line, and its marker text appearing in the conversation no longer breaks the display.
+- Opening a new chat while the editor is split now joins the existing AgentBridge chat group instead of landing in the wrong editor group.
+- Renaming a session now updates its open tab title immediately, instead of only after you close and reopen the tab.
+
 ## [0.4.0] — 2026-06-17
 
 ### Added

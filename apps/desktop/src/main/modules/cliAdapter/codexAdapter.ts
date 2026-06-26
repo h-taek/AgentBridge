@@ -2,7 +2,7 @@ import type { WebContents } from 'electron'
 import log from 'electron-log/main'
 import { killPty, resizePty, startPty, writePty } from '../ptySession'
 import { captureNewThreadId } from './codexSessionWatcher'
-import { deleteCodexNativeSession } from '@agentbridge/core'
+import { deleteCodexNativeSession, captureSessionIdFromHook, coordinateCapture } from '@agentbridge/core'
 import { getCoreCliAdapters } from './coreCliAdapters'
 import { createCaptureLifetime } from './captureLifetime'
 import type {
@@ -24,7 +24,8 @@ async function spawnInteractive(
     req.cwd ?? '',
     req.workspaceId,
     req.sessionId ?? undefined,
-    req.modelSessionId
+    req.modelSessionId,
+    req.captureToken
   )
   const isNewSession = req.sessionId == null
   log.info('codex spawnInteractive', {
@@ -53,12 +54,20 @@ async function spawnInteractive(
   // 비동기 캡처 — fire-and-forget.
   if (snapshot && lifetime && hooks.onModelSessionIdCaptured) {
     const onCapture = hooks.onModelSessionIdCaptured
-    void captureNewThreadId(snapshot, { signal: lifetime.signal })
-      .then((threadId) => {
-        if (threadId) onCapture(threadId)
+    const hookFile = opts.hookCaptureFilePath
+    const hookCapture = hookFile
+      ? captureSessionIdFromHook({ captureFilePath: hookFile, signal: lifetime.signal })
+      : Promise.resolve(null)
+    void coordinateCapture({
+      hookCapture,
+      fallbackCapture: captureNewThreadId(snapshot, { signal: lifetime.signal }),
+      signal: lifetime.signal
+    })
+      .then((res) => {
+        if (res) onCapture(res.id)
       })
       .catch((err) => {
-        log.warn('codex thread_id capture 실패', { err: String(err) })
+        log.warn('codex modelSessionId 캡처 실패', { err: String(err) })
       })
   }
 

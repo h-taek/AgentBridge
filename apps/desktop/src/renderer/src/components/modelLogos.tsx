@@ -1,10 +1,9 @@
-// 각 모델의 메인 로고 — 실제 이미지 파일을 import.
-// 파일 위치: src/renderer/src/assets/logos/{claude,codex,agy}.png
-// 각 PNG는 배경이 투명해야 한다. Codex의 경우 클라우드 안 `>_` 커서도 transparent.
+// 각 모델의 메인 로고 — @agentbridge/assets 단일 원본의 공식 SVG를 import.
+// (Vite가 .svg를 URL로 해소 → <img src>에 그대로 사용. PNG에서 SVG로 전환.)
 
-import claudeLogo from '../assets/logos/claude.png'
-import codexLogo from '../assets/logos/codex.png'
-import agyLogo from '../assets/logos/agy.png'
+import claudeLogo from '@agentbridge/assets/logos/claude.svg'
+import codexLogo from '@agentbridge/assets/logos/codex.svg'
+import agyLogo from '@agentbridge/assets/logos/agy.svg'
 
 type LogoProps = {
   className?: string

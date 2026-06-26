@@ -4,6 +4,24 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 <p align="center"><a href="CHANGELOG.ko.md">한국어</a></p>
 
+## [0.5.0] — 2026-06-26
+
+### Added
+
+- New chat sessions are named automatically from your first message — the tab and sidebar now show a short title taken from what you first typed, instead of just the model name. You can still rename a session at any time, and auto-naming never overwrites a name you set.
+
+### Changed
+
+- While an agent's terminal is starting up, AgentBridge now shows a branded loading screen with the agent's logo instead of a blank pane. Agent logos are also now drawn from official vector art, so they stay crisp at every size.
+- Long-term memory now matches your prompts more precisely: common Korean function words (such as 어떻게 or 방법) no longer pull in unrelated notes, and newly proposed memories now carry bilingual (Korean/English) search keywords so they're still found when you later ask in different words.
+
+### Fixed
+
+- Running several sessions of the same agent in one folder (for example two Codex sessions), or reopening a session, now reliably continues the correct conversation — previously a session could occasionally get mixed up with another or start fresh instead of resuming.
+- Long conversations no longer drop the most recent turns from the context AgentBridge injects each turn — when that block exceeded the CLI hook's size limit it was truncated from the bottom, so the newest (most relevant) turns could go missing unpredictably. The block is now ordered newest-first and trimmed from the oldest, so recent context always survives.
+- Fixed a glitch in Codex sessions where AgentBridge's internal context could leak onto the screen or cut terminal output short — the injected context is now always collapsed to a single hidden line, and its marker text appearing in the conversation no longer breaks the display.
+- The home chat now reuses a single working folder instead of creating a new one each time, so the first message you send there is no longer occasionally dropped.
+
 ## [0.4.0] — 2026-06-17
 
 ### Added

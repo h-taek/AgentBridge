@@ -67,4 +67,30 @@ describe('parseProposalOutput', () => {
     assert.ok(r.ok);
     if (r.ok) { assert.equal(r.proposals[0].confidence, 1); assert.equal(r.proposals[1].confidence, 0.5); }
   });
+
+  it('indexEntries를 string[]로 파싱하고 trim·중복·비문자·빈값 제거(순서 보존)', () => {
+    const r = parseProposalOutput(JSON.stringify([
+      { category: 'infra', title: 'T', summary: 's', body: 'b', confidence: 0.9,
+        indexEntries: ['  배포 ', 'deploy', '배포', 7, '', 'release'] },
+    ]));
+    assert.ok(r.ok);
+    if (r.ok) assert.deepEqual(r.proposals[0].indexEntries, ['배포', 'deploy', 'release']);
+  });
+
+  it('indexEntries는 50개로 캡', () => {
+    const many = Array.from({ length: 80 }, (_, i) => `kw${i}`);
+    const r = parseProposalOutput(JSON.stringify([
+      { category: 'infra', title: 'T', summary: 's', body: 'b', confidence: 0.9, indexEntries: many },
+    ]));
+    assert.ok(r.ok);
+    if (r.ok) assert.equal(r.proposals[0].indexEntries?.length, 50);
+  });
+
+  it('indexEntries가 없거나 전부 빈값이면 필드 생략(하위호환)', () => {
+    const r1 = parseProposalOutput(JSON.stringify([{ category: 'infra', title: 'T', summary: 's', body: 'b', confidence: 0.9 }]));
+    const r2 = parseProposalOutput(JSON.stringify([{ category: 'infra', title: 'T', summary: 's', body: 'b', confidence: 0.9, indexEntries: ['', '  '] }]));
+    assert.ok(r1.ok && r2.ok);
+    if (r1.ok) assert.equal(r1.proposals[0].indexEntries, undefined);
+    if (r2.ok) assert.equal(r2.proposals[0].indexEntries, undefined);
+  });
 });

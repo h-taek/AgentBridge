@@ -17,6 +17,9 @@ export type SpawnInteractiveRequest = {
   workspaceId: string
   // codex/agy resume 시 native modelSessionId가 있어야 thread_id/conversation 인자 생성 가능.
   modelSessionId?: string
+  // 우리 세션 dir id. spawn env AGENTBRIDGE_WS_SESSION으로 주입돼 훅이 captured-<token>.json
+  // 키잉에 쓴다(같은 워크스페이스 동종 N세션 구분).
+  captureToken?: string
   cwd?: string
   cols?: number
   rows?: number

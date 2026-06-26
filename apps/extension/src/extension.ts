@@ -18,7 +18,7 @@ import * as output from './log/output';
 import { MemoryPanelProvider } from './views/memoryPanel';
 import { ProfilePanelProvider } from './views/profilePanel';
 import { SessionTreeProvider, SessionItem } from './views/sessionTreeView';
-import { ChatPanel, getActivePanel, getAllPanels, chatPanelEvents } from './views/chatPanel';
+import { ChatPanel, getActivePanel, getAllPanels, chatPanelEvents, updateSessionTabTitle } from './views/chatPanel';
 import { compactionEvents } from './core/compactionScheduler';
 import { registerSession, markSessionClosed, markSessionActive, renameSession, deleteSession } from './core/sessionRegistry';
 import { registerConfigWatcher, getConfig } from './settings/config';
@@ -104,7 +104,14 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   // --- Profile Panel (장기 메모리 — 자동제안 승인 큐 + 읽기전용 문서) ---
-  const profileProvider = new ProfilePanelProvider();
+  // 대기 제안 수를 액티비티 바 뱃지로 — 항상 살아있는 세션 TreeView(treeView, 아래에서 생성)에 건다.
+  // (webview view는 펼치기 전엔 resolve 안 돼 뱃지가 안 먹음.) 콜백은 런타임에만 호출되므로
+  // 아래에서 선언되는 treeView를 클로저로 참조해도 안전하다.
+  const profileProvider = new ProfilePanelProvider((count) => {
+    treeView.badge = count > 0
+      ? { value: count, tooltip: vscode.l10n.t('{0} pending proposals', count) }
+      : undefined;
+  });
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(
       ProfilePanelProvider.viewType,
@@ -190,6 +197,9 @@ export function activate(context: vscode.ExtensionContext) {
   });
   context.subscriptions.push(treeView);
 
+  // 활성화 시 기존 대기 제안 수로 뱃지 1회 초기화 (이후엔 fireProposalTrigger onUpdated + 승인/버림이 갱신).
+  void profileProvider.notifyProposalsUpdated();
+
   // 공유 저장소 실시간 동기화 — 다른 앱(데스크탑/다른 호스트)이 workspace.json(세션 목록) 또는
   // owner.json(소유)을 바꾸면 세션 트리를 다시 그린다. 데스크탑과 같은 core 워처를 끌어 쓴다.
   // fs.watch는 즉시성, 폴링(4s)은 패키지/원격 환경에서 watch 누락 시의 안전망.
@@ -271,6 +281,7 @@ export function activate(context: vscode.ExtensionContext) {
     }
 
     const opts = await buildOpts(session.model, cwd, session.workspaceId, session.sessionId, session.modelSessionId);
+    opts.terminalName = session.name; // 탭 제목 = 세션 이름(트리와 일치; 이름 없으면 모델명)
     await markSessionActive(session.workspaceId, session.sessionId);
     sessionTree.refresh();
     openChatPanel(opts, session.workspaceId);
@@ -319,6 +330,7 @@ export function activate(context: vscode.ExtensionContext) {
     });
     if (newName === undefined) return;
     await renameSession(session.workspaceId, session.sessionId, newName);
+    updateSessionTabTitle(session.sessionId, newName);
     sessionTree.refresh();
   });
 
@@ -398,6 +410,7 @@ export function activate(context: vscode.ExtensionContext) {
       const sessions = await getSessions(s.workspaceId);
       const meta = sessions.find((m) => m.sessionId === s.sessionId);
       const opts = await buildOpts(s.model, folder.fsPath, s.workspaceId, s.sessionId, meta?.modelSessionId ?? s.modelSessionId);
+      if (meta?.name) opts.terminalName = meta.name; // 복원 탭 제목 = 세션 이름
       // activate의 resetAllSessionsActive(모든 세션 비활성)와 경합 회피 — reset 완료 후 active 표시.
       // 안 기다리면 reset이 이 복구된 세션의 active 플래그를 덮어써 비활성으로 남을 수 있음 (V-21).
       if (pendingResetDone) await pendingResetDone;

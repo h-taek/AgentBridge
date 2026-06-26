@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// @agentbridge-helper-version 0.3.0
+// @agentbridge-helper-version 0.4.4
 "use strict";
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -195,8 +195,9 @@ function koreanVariant(token) {
 function tokenizeQuery(query) {
   const out = /* @__PURE__ */ new Set();
   for (const tok of tokenizeRaw(query)) {
-    out.add(tok);
     const v = koreanVariant(tok);
+    if (v && STOP_WORDS.has(v)) continue;
+    out.add(tok);
     if (v) out.add(v);
   }
   return [...out];
@@ -264,6 +265,7 @@ var init_globalSearch = __esm({
     "use strict";
     init_globalStore();
     STOP_WORDS = /* @__PURE__ */ new Set([
+      // 영어 기능어
       "the",
       "a",
       "an",
@@ -283,7 +285,29 @@ var init_globalSearch = __esm({
       "as",
       "at",
       "by",
-      "with"
+      "with",
+      // 한국어 의문사·지시어 (1글자는 토크나이저가 이미 제거 → 2음절↑만 등록)
+      "\uC5B4\uB5BB\uAC8C",
+      "\uBB34\uC5C7",
+      "\uBB34\uC2A8",
+      "\uC5B4\uB5A4",
+      "\uC5B4\uB290",
+      "\uC5B4\uB514",
+      "\uC5B8\uC81C",
+      "\uB204\uAD6C",
+      "\uC5BC\uB9C8",
+      // 한국어 기능어·형식명사·흔한 동사(보수적: recall 보호 위해 '작업·사용·처리' 등은 제외)
+      "\uBC29\uBC95",
+      "\uACBD\uC6B0",
+      "\uC815\uB3C4",
+      "\uB54C\uBB38",
+      "\uD1B5\uD574",
+      "\uC704\uD574",
+      "\uB300\uD574",
+      "\uAD00\uD574",
+      "\uC790\uCCB4",
+      "\uC9C4\uD589",
+      "\uD655\uC778"
     ]);
     KOREAN_PARTICLES = [
       "\uC73C\uB85C",
@@ -325,6 +349,7 @@ var init_globalSearch = __esm({
 var globalInject_exports = {};
 __export(globalInject_exports, {
   extractPromptFromStdin: () => extractPromptFromStdin,
+  extractSessionIdFromStdin: () => extractSessionIdFromStdin,
   renderGlobalMatches: () => renderGlobalMatches,
   resolveQuery: () => resolveQuery
 });
@@ -362,6 +387,23 @@ function renderGlobalMatches(matches) {
   }
   return lines.join("\n");
 }
+function extractSessionIdFromStdin(stdinRaw, agent) {
+  if (!stdinRaw || !stdinRaw.trim()) return "";
+  let obj;
+  try {
+    obj = JSON.parse(stdinRaw);
+  } catch {
+    return "";
+  }
+  if (!obj || typeof obj !== "object") return "";
+  const rec = obj;
+  const keys = agent === "agy" ? ["conversationId", "conversation_id"] : agent === "codex" ? ["session_id"] : [];
+  for (const k of keys) {
+    const v = rec[k];
+    if (typeof v === "string" && v.trim()) return v;
+  }
+  return "";
+}
 var PROMPT_FIELDS;
 var init_globalInject = __esm({
   "packages/core/src/globalInject.ts"() {
@@ -370,11 +412,33 @@ var init_globalInject = __esm({
   }
 });
 
+// packages/core/src/contextTag.ts
+var contextTag_exports = {};
+__export(contextTag_exports, {
+  CONTEXT_CLOSE_TAG: () => CONTEXT_CLOSE_TAG,
+  CONTEXT_OPEN_TAG: () => CONTEXT_OPEN_TAG,
+  CONTEXT_TAG_NAME_PREFIX: () => CONTEXT_TAG_NAME_PREFIX,
+  wrapInjectedContext: () => wrapInjectedContext
+});
+function wrapInjectedContext(body) {
+  return CONTEXT_OPEN_TAG + "\n" + body + "\n" + CONTEXT_CLOSE_TAG;
+}
+var CONTEXT_OPEN_TAG, CONTEXT_CLOSE_TAG, CONTEXT_TAG_NAME_PREFIX;
+var init_contextTag = __esm({
+  "packages/core/src/contextTag.ts"() {
+    "use strict";
+    CONTEXT_OPEN_TAG = '<agentbridge-context k="ab83f1d0">';
+    CONTEXT_CLOSE_TAG = '</agentbridge-context k="ab83f1d0">';
+    CONTEXT_TAG_NAME_PREFIX = "<agentbridge-context";
+  }
+});
+
 // packages/core/bin/agentbridge-memory.js
 var fs = require("fs");
 var path = require("path");
 var { resolveContext: resolveContext2 } = (init_globalSearch(), __toCommonJS(globalSearch_exports));
-var { resolveQuery: resolveQuery2, renderGlobalMatches: renderGlobalMatches2 } = (init_globalInject(), __toCommonJS(globalInject_exports));
+var { resolveQuery: resolveQuery2, renderGlobalMatches: renderGlobalMatches2, extractSessionIdFromStdin: extractSessionIdFromStdin2 } = (init_globalInject(), __toCommonJS(globalInject_exports));
+var { wrapInjectedContext: wrapInjectedContext2 } = (init_contextTag(), __toCommonJS(contextTag_exports));
 var ALLOWED_EVENTS = /* @__PURE__ */ new Set([
   "SessionStart",
   "UserPromptSubmit",
@@ -570,17 +634,15 @@ function buildAdditionalContext(ir, recentTurns, workspaceId, globalBlock) {
   const hasTurns = Array.isArray(recentTurns) && recentTurns.length > 0;
   const hasGlobal = !!(globalBlock && globalBlock.trim());
   if (!ir && !hasTurns && !hasGlobal) {
-    return [
-      "<agentbridge-context>",
+    return wrapInjectedContext2([
       HOOK_INSTRUCTIONS,
       "",
       "## AgentBridge context (memory uninitialized)",
       "Workspace " + workspaceId + " has no compacted memory (IR) or turn history yet.",
-      "This hook will accumulate from the next turn onward and compact into an IR.",
-      "</agentbridge-context>"
-    ].join("\n");
+      "This hook will accumulate from the next turn onward and compact into an IR."
+    ].join("\n"));
   }
-  const parts = ["<agentbridge-context>", HOOK_INSTRUCTIONS, ""];
+  const parts = [HOOK_INSTRUCTIONS, ""];
   if (hasGlobal) {
     parts.push(globalBlock);
     parts.push("");
@@ -611,11 +673,10 @@ function buildAdditionalContext(ir, recentTurns, workspaceId, globalBlock) {
     parts.push("");
   }
   if (hasTurns) {
-    parts.push("## Recent conversation (raw, last " + recentTurns.length + " turns)");
-    parts.push(renderRecentTurns(recentTurns));
+    parts.push("## Recent conversation (raw, last " + recentTurns.length + " turns, newest first)");
+    parts.push(renderRecentTurns(recentTurns.slice().reverse()));
   }
-  parts.push("</agentbridge-context>");
-  return parts.join("\n");
+  return wrapInjectedContext2(parts.join("\n"));
 }
 async function main() {
   const parsed = parseArgs(process.argv.slice(2));
@@ -657,9 +718,35 @@ async function main() {
   const turnsPath = path.join(wsDir, "turns.jsonl");
   const ir = readJsonSafe(irPath);
   const recentTurns = readRecentTurns(turnsPath, 3);
+  const stdinRaw = await readStdin(200);
+  try {
+    const token = process.env.AGENTBRIDGE_WS_SESSION || "";
+    let sid = extractSessionIdFromStdin2(stdinRaw, parsed.agent);
+    if (!sid) {
+      if (parsed.agent === "agy") sid = process.env.ANTIGRAVITY_CONVERSATION_ID || "";
+      else if (parsed.agent === "codex") sid = process.env.CODEX_THREAD_ID || "";
+    }
+    if (parsed.agent !== "claude" && token && sid && token === path.basename(token)) {
+      const out = path.join(wsDir, "sessions", token, "captured.json");
+      const tmp = out + "." + process.pid + ".tmp";
+      fs.writeFileSync(
+        tmp,
+        JSON.stringify({
+          agent: parsed.agent,
+          modelSessionId: sid,
+          ppid: process.ppid,
+          capturedAt: Date.now()
+        })
+      );
+      fs.renameSync(tmp, out);
+    }
+  } catch (e) {
+    process.stderr.write(
+      "agentbridge-memory: capture write skipped \u2014 " + String(e && e.message ? e.message : e) + "\n"
+    );
+  }
   let globalBlock = "";
   try {
-    const stdinRaw = await readStdin(200);
     const lastTurn = recentTurns.length ? recentTurns[recentTurns.length - 1] : null;
     const lastUserTurn = lastTurn && typeof lastTurn.user === "string" ? lastTurn.user : "";
     const query = resolveQuery2(stdinRaw, lastUserTurn);
@@ -674,7 +761,13 @@ async function main() {
     );
     globalBlock = "";
   }
-  const additionalContext = buildAdditionalContext(ir, recentTurns, parsed.workspace, globalBlock);
+  const INJECT_BYTE_LIMIT = 9 * 1024;
+  let injTurns = recentTurns;
+  let additionalContext = buildAdditionalContext(ir, injTurns, parsed.workspace, globalBlock);
+  while (Buffer.byteLength(additionalContext, "utf8") > INJECT_BYTE_LIMIT && injTurns.length > 0) {
+    injTurns = injTurns.slice(1);
+    additionalContext = buildAdditionalContext(ir, injTurns, parsed.workspace, globalBlock);
+  }
   process.stdout.write(
     JSON.stringify(buildHookOutput(parsed.agent, parsed.event, additionalContext))
   );

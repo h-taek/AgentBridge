@@ -1,5 +1,10 @@
 import { strict as assert } from 'assert';
-import { extractPromptFromStdin, resolveQuery, renderGlobalMatches } from '@agentbridge/core';
+import {
+  extractPromptFromStdin,
+  resolveQuery,
+  renderGlobalMatches,
+  extractSessionIdFromStdin,
+} from '@agentbridge/core';
 
 describe('globalInject — extractPromptFromStdin', () => {
   it('claude UserPromptSubmit 입력의 prompt 필드를 뽑는다', () => {
@@ -52,5 +57,23 @@ describe('globalInject — renderGlobalMatches', () => {
     const out = renderGlobalMatches([{ category: 'c', slug: 's', title: 't', summary: long, score: 5 }]);
     assert.match(out, /…/);
     assert.ok(!out.includes(long));
+  });
+});
+
+describe('globalInject — extractSessionIdFromStdin', () => {
+  it('agy conversationId를 뽑는다 (폴백 conversation_id)', () => {
+    assert.equal(extractSessionIdFromStdin(JSON.stringify({ conversationId: 'a1' }), 'agy'), 'a1');
+    assert.equal(extractSessionIdFromStdin(JSON.stringify({ conversation_id: 'a2' }), 'agy'), 'a2');
+  });
+  it('codex session_id를 뽑는다', () => {
+    assert.equal(extractSessionIdFromStdin(JSON.stringify({ session_id: 'c1' }), 'codex'), 'c1');
+  });
+  it('claude/알 수 없는 agent는 대상 아님 → 빈 문자열', () => {
+    assert.equal(extractSessionIdFromStdin(JSON.stringify({ session_id: 'x' }), 'claude'), '');
+  });
+  it('JSON이 아니거나 필드가 없으면 빈 문자열', () => {
+    assert.equal(extractSessionIdFromStdin('not json', 'codex'), '');
+    assert.equal(extractSessionIdFromStdin(JSON.stringify({ other: 'q' }), 'agy'), '');
+    assert.equal(extractSessionIdFromStdin('', 'codex'), '');
   });
 });

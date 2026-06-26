@@ -2,7 +2,12 @@ import type { WebContents } from 'electron'
 import log from 'electron-log/main'
 import { killPty, resizePty, startPty, writePty } from '../ptySession'
 import { extractQuotaPercent, recordQuotaPercent } from '../cliQuotaTracker'
-import { deleteAgyNativeSession, watchForNewConversationUuid } from '@agentbridge/core'
+import {
+  deleteAgyNativeSession,
+  watchForNewConversationUuid,
+  captureSessionIdFromHook,
+  coordinateCapture
+} from '@agentbridge/core'
 import { getCoreCliAdapters } from './coreCliAdapters'
 import { createCaptureLifetime } from './captureLifetime'
 import type {
@@ -49,7 +54,8 @@ async function spawnInteractive(
     req.cwd ?? '',
     req.workspaceId,
     req.sessionId ?? undefined,
-    req.modelSessionId
+    req.modelSessionId,
+    req.captureToken
   )
   log.info('agy spawnInteractive', {
     sessionId: req.sessionId,
@@ -92,17 +98,29 @@ async function spawnInteractive(
   if (lifetime && req.cwd && opts.agyWatchUuid) {
     const cwd = req.cwd
     const exclude = opts.agyWatchUuid.excludeUuids
-    void watchForNewConversationUuid({
-      cwd,
-      excludeUuids: exclude,
-      abortSignal: lifetime.signal,
-      onCaptured: (uuid) => {
-        hooks.onModelSessionIdCaptured?.(uuid)
-      },
-      logger: { log: (m) => log.info(m), warn: (m) => log.warn(m) }
-    }).catch((err) => {
-      log.warn('agy modelSessionId 캡처 중 에러', { err: String(err) })
+    const onCapture = hooks.onModelSessionIdCaptured
+    const hookFile = opts.hookCaptureFilePath
+    const hookCapture = hookFile
+      ? captureSessionIdFromHook({ captureFilePath: hookFile, signal: lifetime.signal })
+      : Promise.resolve(null)
+    const fallbackCapture = new Promise<string | null>((res) => {
+      void watchForNewConversationUuid({
+        cwd,
+        excludeUuids: exclude,
+        abortSignal: lifetime.signal,
+        onCaptured: (uuid) => res(uuid),
+        logger: { log: (m) => log.info(m), warn: (m) => log.warn(m) }
+      })
+        .then(() => res(null))
+        .catch(() => res(null))
     })
+    void coordinateCapture({ hookCapture, fallbackCapture, signal: lifetime.signal })
+      .then((r) => {
+        if (r && onCapture) onCapture(r.id)
+      })
+      .catch((err) => {
+        log.warn('agy modelSessionId 캡처 중 에러', { err: String(err) })
+      })
   }
 
   return { ...result, modelSessionId: initialModelSessionId }

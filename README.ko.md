@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="apps/extension/media/icon-dark.svg" />
-    <img src="apps/extension/media/icon-light.svg" width="220" alt="AgentBridge logo" />
+    <source media="(prefers-color-scheme: dark)" srcset="packages/assets/brand/agentbridge-dark.svg" />
+    <img src="packages/assets/brand/agentbridge-light.svg" width="220" alt="AgentBridge logo" />
   </picture>
 </p>
 
@@ -11,7 +11,7 @@
 
 <p align="center">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-green.svg"></a>
-  <img alt="Version" src="https://img.shields.io/badge/version-0.4.x-orange.svg">
+  <img alt="Version" src="https://img.shields.io/badge/version-0.5.x-orange.svg">
   <img alt="Desktop" src="https://img.shields.io/badge/desktop-Apple%20Silicon-lightgrey.svg">
   <img alt="Extension" src="https://img.shields.io/badge/extension-Apple%20Silicon-007ACC.svg">
 </p>
@@ -42,6 +42,7 @@ AgentBridge는 한 워크스페이스 안에 여러 모델 탭을 *동시에* �
 - **메모리 패널** — 현재 메모리 · 이전 스냅샷 · 턴 흐름을 한눈에 보고, 수동 정제·초기화를 할 수 있다.
 - **장기 기억(global context)** — 오래 가는 지식(역할 · 컨벤션 · 워크플로 · …)을 대화에서 자동 제안하고, 승인/버림으로 큐레이션한다. 승인된 기억은 모든 워크스페이스가 공유한다. 자동 제안은 설정에서 끌 수 있다.
 - **세션 영속화 + resume** — 앱을 껐다 켜도 native `--resume`으로 이전 대화를 그대로 이어간다.
+- **자동 세션 이름** — 새 채팅 세션이 첫 메시지로 자동 명명돼, 탭과 사이드바에 모델명 대신 짧은 제목이 표시된다. 이름은 언제든 직접 바꿀 수 있다.
 - **데스크탑·익스텐션 메모리 공유** — 같은 프로젝트 폴더면 두 앱이 같은 작업 기억(메모리·대화 기록)을 사용한다.
 - **사용자 자산 격리** — 글로벌 설정을 수정하지 않고, 사용자가 이미 인증한 본인 CLI만 임베드한다.
 

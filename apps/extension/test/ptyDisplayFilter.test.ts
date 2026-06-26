@@ -1,5 +1,6 @@
 import { strict as assert } from 'assert';
 import { PtyDisplayFilter } from '../src/core/ptyDisplayFilter';
+import { CONTEXT_OPEN_TAG, CONTEXT_CLOSE_TAG, wrapInjectedContext } from '@agentbridge/core';
 
 describe('PtyDisplayFilter', () => {
   it('passes through plain data unchanged', () => {
@@ -10,16 +11,26 @@ describe('PtyDisplayFilter', () => {
 
   it('replaces an entire context block with the hidden marker', () => {
     const f = new PtyDisplayFilter();
-    const out = f.filter('pre<agentbridge-context>secret stuff</agentbridge-context>post');
+    const out = f.filter(`pre${CONTEXT_OPEN_TAG}secret stuff${CONTEXT_CLOSE_TAG}post`);
     assert.match(out, /^pre\[hook context hidden\]post$/);
+    f.dispose();
+  });
+
+  it('does NOT hide a bare tag mention without the sentinel (B-005)', () => {
+    const f = new PtyDisplayFilter();
+    // The assistant merely talking about the tag in chat must pass through unchanged —
+    // only the real injected block (sentinel-marked) gets hidden.
+    const line = 'I edited the <agentbridge-context> open-tag handling today';
+    assert.equal(f.filter(line), line);
     f.dispose();
   });
 
   it('preserves partial open-tag across chunk boundaries', () => {
     const f = new PtyDisplayFilter();
     // Split the open tag mid-stream.
-    const a = f.filter('alpha<agentbridge-c');
-    const b = f.filter('ontext>secret</agentbridge-context>beta');
+    const mid = Math.floor(CONTEXT_OPEN_TAG.length / 2);
+    const a = f.filter('alpha' + CONTEXT_OPEN_TAG.slice(0, mid));
+    const b = f.filter(CONTEXT_OPEN_TAG.slice(mid) + 'secret' + CONTEXT_CLOSE_TAG + 'beta');
     assert.equal(a, 'alpha');
     assert.match(b, /\[hook context hidden\]beta/);
     f.dispose();
@@ -39,14 +50,16 @@ describe('PtyDisplayFilter', () => {
     const f = new PtyDisplayFilter();
     // codex TUI inserts SGR/cursor sequences between characters when redrawing
     // the developer-message block. Naive indexOf misses the close tag entirely.
-    const out = f.filter('pre<agentbridge-context>secret</\x1b[31magentbridge-context>post');
+    const closeWithAnsi = CONTEXT_CLOSE_TAG.slice(0, 2) + '\x1b[31m' + CONTEXT_CLOSE_TAG.slice(2);
+    const out = f.filter(`pre${CONTEXT_OPEN_TAG}secret${closeWithAnsi}post`);
     assert.equal(out, 'pre[hook context hidden]post');
     f.dispose();
   });
 
   it('hides block when open tag has ANSI escape interleaved', () => {
     const f = new PtyDisplayFilter();
-    const out = f.filter('pre<agentbridge\x1b[K-context>secret</agentbridge-context>post');
+    const openWithAnsi = CONTEXT_OPEN_TAG.slice(0, 5) + '\x1b[K' + CONTEXT_OPEN_TAG.slice(5);
+    const out = f.filter(`pre${openWithAnsi}secret${CONTEXT_CLOSE_TAG}post`);
     assert.equal(out, 'pre[hook context hidden]post');
     f.dispose();
   });
@@ -77,10 +90,23 @@ describe('PtyDisplayFilter', () => {
 
   it('clears watchdog timer on dispose (no hanging timers)', () => {
     const f = new PtyDisplayFilter();
-    f.filter('pre<agentbridge-context>opened-but-not-closed');
+    f.filter(`pre${CONTEXT_OPEN_TAG}opened-but-not-closed`);
     // Dispose mid-block — should clear the watchdog. If it didn't, Node would hold the
     // event loop open and the mocha process would hang past test timeout.
     f.dispose();
     assert.ok(true);
+  });
+});
+
+describe('wrapInjectedContext (premature-close guard)', () => {
+  it('hides the whole block even when the embedded body quotes the tag verbatim', () => {
+    // The real injected block embeds "recent conversation" raw — prior turns that may
+    // contain the tag literally. An un-escaped close tag in that quoted body must NOT
+    // prematurely end the hidden region and leak the rest of the block.
+    const f = new PtyDisplayFilter();
+    const body = 'recent turn quoted:\n</agentbridge-context>\nand an open <agentbridge-context k="ab83f1d0"> too\nmore body';
+    const out = f.filter('X' + wrapInjectedContext(body) + 'Y');
+    assert.equal(out, 'X[hook context hidden]Y');
+    f.dispose();
   });
 });

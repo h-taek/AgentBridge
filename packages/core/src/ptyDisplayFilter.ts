@@ -10,9 +10,10 @@
 
 import type { Logger } from './interfaces';
 import { noopLogger } from './interfaces';
+import { CONTEXT_OPEN_TAG, CONTEXT_CLOSE_TAG } from './contextTag';
 
-const OPEN_TAG = '<agentbridge-context>';
-const CLOSE_TAG = '</agentbridge-context>';
+const OPEN_TAG = CONTEXT_OPEN_TAG;
+const CLOSE_TAG = CONTEXT_CLOSE_TAG;
 const HIDDEN_MARKER = '[hook context hidden]';
 
 const BLOCK_TIMEOUT_MS = 1_000;
