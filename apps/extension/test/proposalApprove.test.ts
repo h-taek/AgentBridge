@@ -47,4 +47,24 @@ describe('approveProposal / discardProposal', () => {
     const { globalDir } = await seed();
     assert.equal(await discardProposal(globalDir, DEFAULT_PROFILE_ID, 'conventions__nope'), false);
   });
+
+  it('승인 시 모델이 준 indexEntries를 문서 검색어로 쓴다', async () => {
+    const root = await fsp.mkdtemp(join(tmpdir(), 'ab-appr-idx-'));
+    const globalDir = getGlobalDir(root);
+    const p: ProposalInput = {
+      category: 'conventions', title: 'Use release branch', summary: 's', body: 'b', confidence: 0.9,
+      indexEntries: ['release', '배포', 'git-flow'],
+    };
+    const res0 = await writeProposals(globalDir, DEFAULT_PROFILE_ID, [p], { existingDocTitles: [] });
+    await approveProposal(globalDir, DEFAULT_PROFILE_ID, res0.written[0].id);
+    const docs = await readProfileDocs(globalDir, DEFAULT_PROFILE_ID);
+    assert.deepEqual(docs[0].indexEntries, ['release', '배포', 'git-flow']);
+  });
+
+  it('indexEntries 없는(옛) 제안은 제목을 검색어로 폴백', async () => {
+    const { globalDir, id } = await seed(); // seed 제안엔 indexEntries 없음
+    await approveProposal(globalDir, DEFAULT_PROFILE_ID, id);
+    const docs = await readProfileDocs(globalDir, DEFAULT_PROFILE_ID);
+    assert.deepEqual(docs[0].indexEntries, ['Use release branch']);
+  });
 });

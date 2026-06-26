@@ -35,4 +35,9 @@ describe('buildProposalPrompt', () => {
     const p = buildProposalPrompt({ turns: [], existingIndex: [] });
     assert.match(p, /\(no turns/i);
   });
+
+  it('출력 스키마에 indexEntries(한↔영 검색어) 생성 지시를 담는다', () => {
+    const p = buildProposalPrompt({ turns: [turn()], existingIndex: [] });
+    assert.match(p, /indexEntries/);
+  });
 });

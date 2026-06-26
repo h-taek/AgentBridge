@@ -25,6 +25,29 @@ describe('globalSearch.tokenize', () => {
   });
 });
 
+describe('globalSearch.koreanStopwords', () => {
+  it('한국어 의문사 불용어 제거 — 의미 단어만 남는다', () => {
+    // '어떻게'는 불용어 → '배포'만 남음
+    assert.deepEqual(tokenizeQuery('어떻게 배포'), ['배포']);
+  });
+  it('조사 변이형이 불용어면 원형까지 버린다 (방법을→방법 누수 방지)', () => {
+    // '방법'은 불용어 → 조사 붙은 '방법을'도 통째로 제거
+    assert.deepEqual(tokenizeQuery('방법을'), []);
+    assert.equal(countTokenMatches('방법 설명서', tokenizeQuery('방법을')), 0);
+  });
+  it('불용어를 부분으로 포함한 단어는 보존한다 (방법론 ≠ 방법, recall 보호)', () => {
+    assert.ok(tokenizeQuery('방법론').includes('방법론'));
+  });
+  it('불용어 한 단어로는 무관 문서가 매칭되지 않는다', () => {
+    const noise = {
+      category: 'role', slug: 'solo', title: '1인 개발', summary: '혼자',
+      indexEntries: ['solo'], body: '어떻게 진행하든 확인한다',
+    };
+    // 쿼리의 의미 단어는 '배포'뿐(어떻게는 불용어), noise 문서엔 '배포' 없음 → 0점
+    assert.equal(scoreDoc(noise, tokenizeQuery('배포 어떻게')), 0);
+  });
+});
+
 describe('globalSearch.match', () => {
   it('한글: 문서 텍스트가 쿼리 토큰을 부분문자열로 포함하면 매칭', () => {
     // 쿼리 "배포를"→토큰 {배포를,배포}; 문서에 "배포"만 있어도 매칭(안 깨짐)

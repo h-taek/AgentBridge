@@ -3,8 +3,13 @@
 import { readProfileDocs } from './globalStore';
 
 const STOP_WORDS = new Set([
+  // 영어 기능어
   'the', 'a', 'an', 'of', 'to', 'in', 'on', 'for', 'and', 'or', 'is', 'are', 'be',
   'this', 'that', 'it', 'as', 'at', 'by', 'with',
+  // 한국어 의문사·지시어 (1글자는 토크나이저가 이미 제거 → 2음절↑만 등록)
+  '어떻게', '무엇', '무슨', '어떤', '어느', '어디', '언제', '누구', '얼마',
+  // 한국어 기능어·형식명사·흔한 동사(보수적: recall 보호 위해 '작업·사용·처리' 등은 제외)
+  '방법', '경우', '정도', '때문', '통해', '위해', '대해', '관해', '자체', '진행', '확인',
 ]);
 
 // 흔한 한국어 조사/어미 (꼬리). 화이트리스트 — 이것만 변이형 후보.
@@ -42,8 +47,10 @@ function koreanVariant(token: string): string | null {
 export function tokenizeQuery(query: string): string[] {
   const out = new Set<string>();
   for (const tok of tokenizeRaw(query)) {
-    out.add(tok);
     const v = koreanVariant(tok);
+    // 조사 변이형이 불용어면 이 토큰은 의미 없는 기능어(예: 방법을→방법) → 원형·변이형 모두 버림
+    if (v && STOP_WORDS.has(v)) continue;
+    out.add(tok);
     if (v) out.add(v);
   }
   return [...out];

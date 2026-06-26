@@ -26,13 +26,14 @@ export const DOC_CAPS = {
   indexEntries: 50,
 } as const;
 
-// ─── 자동제안(§D.1) — 스키마 동결(§H): {category,title,summary,body,confidence} ───
+// ─── 자동제안(§D.1) — 동결 스키마(§H)에 indexEntries를 additive 확장(옵셔널 → 옛 제안·기존 파서 하위호환) ───
 export type ProposalInput = {
   category: GlobalCategory;
   title: string;
   summary: string;
   body: string;
   confidence: number; // 0..1
+  indexEntries?: string[]; // 검색 전용 한↔영 키워드(§C). 없으면 승인 시 제목으로 폴백. UI 비노출.
 };
 
 // 디스크 저장 봉투 — 입력 + id/생성시각. (sourceTurnIds 미포함 — 출처 UI 미표시.)

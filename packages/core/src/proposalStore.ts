@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { proposalsDir } from './globalPaths';
 import { slugify } from './globalMarkdown';
 import { writeProfileDocs } from './globalStore';
-import { PROPOSAL_CAPS, type ProposalInput, type StoredProposal } from './shared/global';
+import { DOC_CAPS, PROPOSAL_CAPS, type ProposalInput, type StoredProposal } from './shared/global';
 
 // (카테고리, 제목) 정규화 키 — 중복 판정 단일 규칙.
 function dedupKey(category: string, title: string): string {
@@ -91,6 +91,7 @@ export async function writeProposals(
       summary: clampLen(inp.summary, PROPOSAL_CAPS.summary),
       body: clampLen(inp.body, PROPOSAL_CAPS.body),
       confidence: typeof inp.confidence === 'number' ? Math.max(0, Math.min(1, inp.confidence)) : 0.5,
+      ...(inp.indexEntries?.length ? { indexEntries: inp.indexEntries.slice(0, DOC_CAPS.indexEntries) } : {}),
     };
     await fsp.writeFile(join(dir, `${rec.id}.json`), JSON.stringify(rec, null, 2) + '\n', 'utf8');
     written.push(rec);
@@ -102,7 +103,7 @@ export async function writeProposals(
 // ─── 승인 게이트(§D.5) — GUI가 호출 ───
 
 // 제안 승인 → 검증 통과 시 프로필 문서로 쓰고(writeProfileDocs) 제안 파일 제거. 없으면 null.
-// indexEntries는 v1에서 제목을 키워드로 둔다(사용자가 .md 편집으로 보강 — §D.3).
+// indexEntries는 모델이 만든 한↔영 검색어를 그대로 쓰고, 없는(옛) 제안은 제목으로 폴백(사용자가 .md로 보강 — §D.3).
 export async function approveProposal(
   globalDir: string,
   profileId: string,
@@ -118,7 +119,7 @@ export async function approveProposal(
       title: p.title,
       summary: p.summary,
       body: p.body,
-      indexEntries: [p.title],
+      indexEntries: p.indexEntries?.length ? p.indexEntries : [p.title],
     }],
   });
   await discardProposal(globalDir, profileId, proposalId);
