@@ -195,8 +195,9 @@ function koreanVariant(token) {
 function tokenizeQuery(query) {
   const out = /* @__PURE__ */ new Set();
   for (const tok of tokenizeRaw(query)) {
-    out.add(tok);
     const v = koreanVariant(tok);
+    if (v && STOP_WORDS.has(v)) continue;
+    out.add(tok);
     if (v) out.add(v);
   }
   return [...out];
@@ -264,6 +265,7 @@ var init_globalSearch = __esm({
     "use strict";
     init_globalStore();
     STOP_WORDS = /* @__PURE__ */ new Set([
+      // 영어 기능어
       "the",
       "a",
       "an",
@@ -283,7 +285,29 @@ var init_globalSearch = __esm({
       "as",
       "at",
       "by",
-      "with"
+      "with",
+      // 한국어 의문사·지시어 (1글자는 토크나이저가 이미 제거 → 2음절↑만 등록)
+      "\uC5B4\uB5BB\uAC8C",
+      "\uBB34\uC5C7",
+      "\uBB34\uC2A8",
+      "\uC5B4\uB5A4",
+      "\uC5B4\uB290",
+      "\uC5B4\uB514",
+      "\uC5B8\uC81C",
+      "\uB204\uAD6C",
+      "\uC5BC\uB9C8",
+      // 한국어 기능어·형식명사·흔한 동사(보수적: recall 보호 위해 '작업·사용·처리' 등은 제외)
+      "\uBC29\uBC95",
+      "\uACBD\uC6B0",
+      "\uC815\uB3C4",
+      "\uB54C\uBB38",
+      "\uD1B5\uD574",
+      "\uC704\uD574",
+      "\uB300\uD574",
+      "\uAD00\uD574",
+      "\uC790\uCCB4",
+      "\uC9C4\uD589",
+      "\uD655\uC778"
     ]);
     KOREAN_PARTICLES = [
       "\uC73C\uB85C",
