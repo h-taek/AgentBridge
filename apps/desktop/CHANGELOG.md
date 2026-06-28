@@ -4,6 +4,12 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 <p align="center"><a href="CHANGELOG.ko.md">한국어</a></p>
 
+## [0.5.1] — 2026-06-28
+
+### Changed
+
+- Automatically generated session names are shorter — new sessions named from the first message now use a 20-character title, keeping long first prompts from taking over session labels.
+
 ## [0.5.0] — 2026-06-26
 
 ### Added
