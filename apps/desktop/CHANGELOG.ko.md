@@ -2,6 +2,12 @@
 
 이 프로젝트는 [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/) 1.1.0 형식을 따르며 [Semantic Versioning](https://semver.org/spec/v2.0.0.html)을 사용한다.
 
+## [0.5.1] — 2026-06-28
+
+### Changed
+
+- 첫 메시지로 자동 생성되는 세션 이름이 더 짧아졌다 — 새 세션 이름은 이제 20자까지만 사용해 긴 첫 프롬프트가 세션 라벨을 과하게 차지하지 않는다.
+
 ## [0.5.0] — 2026-06-26
 
 ### Added

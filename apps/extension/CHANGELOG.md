@@ -4,6 +4,13 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 <p align="center"><a href="CHANGELOG.ko.md">한국어</a></p>
 
+## [0.5.1] — 2026-06-28
+
+### Changed
+
+- Chat editor tabs now cap their displayed title at 11 characters and add an ellipsis when needed, so long session names no longer stretch the VS Code tab bar. The stored session name and sidebar label are unchanged.
+- Automatically generated session names are shorter — new sessions named from the first message now use a 20-character title, keeping long first prompts from taking over session labels.
+
 ## [0.5.0] — 2026-06-26
 
 ### Added

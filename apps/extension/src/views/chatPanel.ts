@@ -24,6 +24,11 @@ import type { SpawnOptions } from '../pty/types';
 import { createGroupLocker, type GroupLocker } from './groupLock';
 
 const activePanels = new Map<string, ChatPanel>();
+const MAX_TAB_TITLE_LENGTH = 11;
+
+function tabTitle(title: string): string {
+  return title.length > MAX_TAB_TITLE_LENGTH ? title.substring(0, MAX_TAB_TITLE_LENGTH) + '…' : title;
+}
 
 // 채팅 패널이 활성화될 때 emit. extension.ts가 받아서 사이드 패널 selection 동기화.
 export const chatPanelEvents = new vscode.EventEmitter<{ sessionId: string }>();
@@ -100,7 +105,7 @@ export class ChatPanel {
 
     const panel = vscode.window.createWebviewPanel(
       'agentbridge.chat',
-      opts.terminalName,
+      tabTitle(opts.terminalName),
       { viewColumn: targetColumn, preserveFocus: false },
       {
         enableScripts: true,
@@ -263,7 +268,7 @@ export class ChatPanel {
   // 빈 이름으로 탭을 비우지 않도록 가드(빈 rename은 degenerate edge).
   setTabTitle(title: string): void {
     if (this.disposed || !title.trim()) return;
-    this.panel.title = title;
+    this.panel.title = tabTitle(title);
   }
 
   private async spawnPty(cols: number, rows: number): Promise<void> {

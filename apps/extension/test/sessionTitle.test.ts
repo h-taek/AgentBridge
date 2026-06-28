@@ -36,21 +36,21 @@ describe('deriveSessionTitle', () => {
     assert.equal(deriveSessionTitle('  로그인\n\n401   토큰\t만료  '), '로그인 401 토큰 만료');
   });
 
-  it('40 코드포인트 초과면 40에서 자르고 … 를 붙인다', () => {
-    const long = 'a'.repeat(45);
-    assert.equal(deriveSessionTitle(long), 'a'.repeat(40) + '…');
+  it('20 코드포인트 초과면 20에서 자르고 … 를 붙인다', () => {
+    const long = 'a'.repeat(25);
+    assert.equal(deriveSessionTitle(long), 'a'.repeat(20) + '…');
   });
 
-  it('정확히 40 코드포인트면 … 없이 그대로', () => {
-    const exact = 'b'.repeat(40);
+  it('정확히 20 코드포인트면 … 없이 그대로', () => {
+    const exact = 'b'.repeat(20);
     assert.equal(deriveSessionTitle(exact), exact);
   });
 
   it('이모지 경계를 깨지 않는다 (코드포인트 단위 절단)', () => {
-    // 39 글자 + 이모지 1개(= 40번째 코드포인트) + 뒤 추가 → 이모지가 온전히 포함되고 … 붙음
-    const text = 'x'.repeat(39) + '😀' + 'yyy';
+    // 19 글자 + 이모지 1개(= 20번째 코드포인트) + 뒤 추가 → 이모지가 온전히 포함되고 … 붙음
+    const text = 'x'.repeat(19) + '😀' + 'yyy';
     const out = deriveSessionTitle(text);
-    assert.equal(out, 'x'.repeat(39) + '😀' + '…');
+    assert.equal(out, 'x'.repeat(19) + '😀' + '…');
     assert.ok(!out!.includes('�'), '대체문자(surrogate 분리) 없어야 함');
   });
 
@@ -76,7 +76,7 @@ describe('maybeAutoNameSession', () => {
         title = t;
       },
     });
-    assert.equal(title, '로그인이 자꾸 401 뜨는데 토큰 만료 로직 봐줘');
+    assert.equal(title, '로그인이 자꾸 401 뜨는데 토큰 만…');
   });
 
   it('이미 title이 있으면 절대 덮어쓰지 않는다', async () => {
