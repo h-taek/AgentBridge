@@ -61,7 +61,6 @@ import {
   setCaptureModelSessionId,
   unregisterCapture
 } from '../modules/turnRecorder'
-import { registerDisplayFilter, unregisterDisplayFilter } from '../modules/ptyDisplayFilter'
 import { ensureConversationDirs } from '../modules/conversationStore'
 import {
   clearActiveSession,
@@ -552,7 +551,6 @@ async function spawnAndAttachSession(
         // 같은 (workspace, session)에 이후 새 spawn이 등록됐으면 race 방지로 match일 때만 clear.
         clearActiveSessionIfMatches(workspaceId, session.sessionId, info.ptySessionId)
         unregisterCapture(info.ptySessionId)
-        unregisterDisplayFilter(info.ptySessionId)
       },
       onModelSessionIdCaptured: (modelSessionId): void => {
         void (async (): Promise<void> => {
@@ -601,8 +599,7 @@ async function spawnAndAttachSession(
     modelSessionId: pty.modelSessionId,
     model: session.model
   })
-  // 캡처 + DisplayFilter 등록 — ptySessionId는 spawn 후 결정.
-  registerDisplayFilter(pty.sessionId)
+  // 캡처 등록 — ptySessionId는 spawn 후 결정.
   registerCapture({
     workspaceId,
     sessionId: session.sessionId,
@@ -643,7 +640,7 @@ async function spawnAndAttachSession(
 // AgentBridge hook 주입, IR refine, 턴 캡처, quota probe 모두 *bypass* — 그저 터미널.
 //   - 어댑터 없음 (CLIAdapter 인터페이스는 cli 세션 전용)
 //   - hookInstaller 호출 안 함 (cwd 안 AI 지시 파일 / settings 격리 모두 불필요)
-//   - registerCapture / registerDisplayFilter 호출 안 함 (모델 응답이 없어 의미 없음)
+//   - registerCapture 호출 안 함 (모델 응답이 없어 의미 없음)
 //   - modelSessionId는 항상 null (외부 `claude --resume` 등에 노출되지 않음 — 정책 1 자동 만족)
 //   - sessionActive 등록은 함 (workspace activeSessionCount, before-quit killAllForce 대상에 포함)
 async function spawnAndAttachShellSession(

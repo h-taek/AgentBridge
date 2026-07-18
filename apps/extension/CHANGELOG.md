@@ -4,6 +4,12 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 <p align="center"><a href="CHANGELOG.ko.md">한국어</a></p>
 
+## [0.5.2] — 2026-07-18
+
+### Fixed
+
+- Codex sessions now handle Codex's new collapsible hook-context display. AgentBridge's injected context appears as only a marker line, so its content no longer shows in the chat terminal, and the older display filter that could occasionally cut output short has been removed.
+
 ## [0.5.1] — 2026-06-28
 
 ### Changed

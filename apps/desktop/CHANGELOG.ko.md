@@ -2,6 +2,12 @@
 
 이 프로젝트는 [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/) 1.1.0 형식을 따르며 [Semantic Versioning](https://semver.org/spec/v2.0.0.html)을 사용한다.
 
+## [0.5.2] — 2026-07-18
+
+### Fixed
+
+- 코덱스 세션이 코덱스의 새 접힘형 hook context 표시 방식에 대응한다. 주입되는 컨텍스트가 코덱스의 접힌 미리보기에서 마커 줄 하나로만 보여 본문이 화면에 노출되지 않으며, 터미널 출력을 가끔 잘라먹던 기존 표시 필터를 제거했다.
+
 ## [0.5.1] — 2026-06-28
 
 ### Changed
