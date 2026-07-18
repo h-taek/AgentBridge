@@ -5,7 +5,6 @@ import { chmodSync, createWriteStream, type WriteStream } from 'fs';
 import { join } from 'path';
 import * as output from '../log/output';
 import { registerCapture, setCaptureModelSessionId, unregisterCapture } from '../core/turnRecorder';
-import { PtyDisplayFilter } from '../core/ptyDisplayFilter';
 import { getSessions, renameSession, deleteSession, setModelSessionId, type SessionMeta } from '../core/sessionRegistry';
 import { captureNewThreadId } from '../core/cliAdapter/codexSessionWatcher';
 import { watchForNewConversationUuid } from '../core/cliAdapter/agyResume';
@@ -51,15 +50,6 @@ export class ChatPanel {
   private panel: vscode.WebviewPanel;
   private ptyProcess: pty.IPty | null = null;
   private captureRegistered = false;
-  private displayFilter = (() => {
-    const f = new PtyDisplayFilter();
-    f.setForceUnblockHandler(() => {
-      // watchdog가 force unblock하면 빈 데이터를 다시 흘려서 webview에 신호.
-      // (xterm은 이미 데이터를 받았으면 자체 렌더링하지만, suppress된 chunk를 복구할 수는 없음.)
-      this.panel.webview.postMessage({ type: 'output', data: '\r\n[AgentBridge] hook block watchdog fired — output may have been truncated\r\n' });
-    });
-    return f;
-  })();
   private disposed = false;
   private replayStream: WriteStream | null = null;
   private ownerDir: string | null = null;
@@ -356,10 +346,9 @@ export class ChatPanel {
         if (this.replayStream && !this.replayStream.destroyed) {
           this.replayStream.write(data);
         }
-        const filtered = this.displayFilter.filter(data);
         // 기록은 transcript 파일에서 읽음(M2-5) — 여기선 표시만(webview output). replay.log는 위에서 RAW 기록.
-        if (!this.disposed && filtered) {
-          this.panel.webview.postMessage({ type: 'output', data: filtered });
+        if (!this.disposed && data) {
+          this.panel.webview.postMessage({ type: 'output', data });
         }
       });
 
@@ -557,7 +546,6 @@ export class ChatPanel {
 
     this.modelSessionWatchAbort?.abort();
     void this.flushCapture(); // fire-and-forget finalize (마지막 턴 flush 보장은 disposeAndFlush).
-    this.displayFilter.dispose();
 
     if (this.replayStream && !this.replayStream.destroyed) {
       this.replayStream.end();

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// @agentbridge-helper-version 0.4.4
+// @agentbridge-helper-version 0.4.5
 "use strict";
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -421,14 +421,14 @@ __export(contextTag_exports, {
   wrapInjectedContext: () => wrapInjectedContext
 });
 function wrapInjectedContext(body) {
-  return CONTEXT_OPEN_TAG + "\n" + body + "\n" + CONTEXT_CLOSE_TAG;
+  return CONTEXT_OPEN_TAG + "\n\n" + body + "\n" + CONTEXT_CLOSE_TAG;
 }
 var CONTEXT_OPEN_TAG, CONTEXT_CLOSE_TAG, CONTEXT_TAG_NAME_PREFIX;
 var init_contextTag = __esm({
   "packages/core/src/contextTag.ts"() {
     "use strict";
-    CONTEXT_OPEN_TAG = '<agentbridge-context k="ab83f1d0">';
-    CONTEXT_CLOSE_TAG = '</agentbridge-context k="ab83f1d0">';
+    CONTEXT_OPEN_TAG = "<agentbridge-context>";
+    CONTEXT_CLOSE_TAG = "</agentbridge-context>";
     CONTEXT_TAG_NAME_PREFIX = "<agentbridge-context";
   }
 });

@@ -6,7 +6,6 @@ import type { WebContents } from 'electron'
 import log from 'electron-log/main'
 import type { PtyDataEvent, PtyExitEvent, PtyStartRequest, PtyStartResult } from '@shared/ipc'
 import { IpcChannel } from '@shared/ipc'
-import { filterDisplayData } from './ptyDisplayFilter'
 
 // onExit info에 ptySessionId를 포함 — 같은 contextId에 새 PTY로 교체된 후 직전 PTY의 onExit가
 // 늦게 도착해도 매핑을 헷갈리지 않게(handoff:commit race 방지).
@@ -138,14 +137,9 @@ export function startPty(
     if (replayStream && !replayStream.destroyed) {
       replayStream.write(data)
     }
-    // turnRecorder + xterm renderer: hook context block 제거된 filtered 데이터.
-    // codex 0.130.0 / gemini가 `<agentbridge-context>...</agentbridge-context>`를 visible developer
-    // message로 렌더링하는 이슈(openai/codex#15497, #16933) 워크어라운드.
-    // claude는 hook 출력을 TUI에 안 보여줘 no-op (안전).
-    const filtered = filterDisplayData(id, data)
-    hooks.onData?.(filtered)
+    hooks.onData?.(data)
     if (sender.isDestroyed()) return
-    const evt: PtyDataEvent = { sessionId: id, data: filtered }
+    const evt: PtyDataEvent = { sessionId: id, data }
     sender.send(IpcChannel.PtyData, evt)
   })
 
