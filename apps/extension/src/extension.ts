@@ -12,6 +12,7 @@ import {
   getGlobalDir,
   resolveProfile,
   readIR,
+  migrateLegacyGlobalIfNeeded,
 } from '@agentbridge/core';
 import { initializeCore, getBundledHelperPath, getWorkspaceStore, getLogger, getCoreEnvProbe } from './core/coreInstances';
 import * as output from './log/output';
@@ -65,7 +66,16 @@ export function activate(context: vscode.ExtensionContext) {
   // cliAdapter, compactionScheduler 등 모든 코어 팩토리 인스턴스를 한 번에 초기화.
   initializeCore(context);
 
-  // hook helper를 ~/.agentbridge/bin/에 설치 (V-12 — 양 앱 공용 canonical 경로).
+  // 옛 저장소(~/.agentbridge)의 장기 메모리를 새 저장소로 한 번 복사 (0.5.0 B-1).
+  // 옛 폴더는 지우지 않는다. 실패해도 익스텐션 동작에는 지장 없다.
+  try {
+    const migrated = migrateLegacyGlobalIfNeeded({ logger: getLogger() });
+    if (migrated === 'copied') output.log('옛 저장소의 장기 메모리를 새 저장소로 복사했다');
+  } catch (err) {
+    output.warn(`장기 메모리 이전 실패: ${String(err)}`);
+  }
+
+  // hook helper를 <저장소 루트>/bin/에 설치 (V-12 — canonical 경로).
   // 실패해도 익스텐션 동작에는 지장 없음 (hook만 비활성) — 로그만 남김.
   void installHelperToCanonicalPath(
     getBundledHelperPath(),

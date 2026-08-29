@@ -15,6 +15,7 @@ import { randomUUID } from 'crypto';
 import {
   existsSync,
   mkdirSync,
+  readFileSync,
   renameSync,
   writeFileSync,
   promises as fsp,
@@ -22,11 +23,17 @@ import {
 import { join } from 'path';
 import { CLI_DISPLAY_NAME, type CliKind } from './shared/cli';
 import { type Logger, noopLogger } from './interfaces';
-import { deterministicWorkspaceId } from './workspaceId';
+import { deterministicWorkspaceId, canonicalWorkspacePath } from './workspaceId';
 import { withFileLock } from './fileLock';
 import { getStorageRoot } from './storageRoot';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// 폴더 이름으로 쓰이는 문자열이 경로를 벗어나지 않는지 본다. 0.5.0 전에는 workspaceId의
+// UUID 형식 검사가 이 역할을 겸했는데, 이름이 UUID가 아니게 되면서 명시적 검사로 갈라졌다.
+function isSafeSegment(v: string): boolean {
+  return v.length > 0 && v !== '.' && v !== '..' && !/[\\/\u0000]/.test(v);
+}
 
 // ─── Schema (데스크탑 패턴 차용) ──────────────────────────────────────
 
@@ -155,13 +162,33 @@ export function createWorkspaceStore(opts: WorkspaceStoreOptions = {}): Workspac
 
   // ── workspace.json (메타 + sessions[]) ──
   function workspaceDir(workspaceId: string): string {
-    if (!UUID_RE.test(workspaceId)) {
+    if (!isSafeSegment(workspaceId)) {
       throw new Error(`workspaceStore: invalid workspaceId "${workspaceId}"`);
     }
     return join(globalStoragePath, 'workspaces', workspaceId);
   }
   function workspaceMetaPath(workspaceId: string): string {
     return join(workspaceDir(workspaceId), 'workspace.json');
+  }
+
+  // 폴더 이름의 다이제스트는 네 자라 같은 basename을 가진 두 저장소가 부딪힐 수 있다.
+  // 부딪히면 조용히 같은 폴더를 쓰는 대신 거절한다 — 데이터 혼입이 눈에 보이는 오류가 된다.
+  function assertNoDigestCollision(workspaceId: string, folderFsPath: string): void {
+    let recorded: unknown;
+    try {
+      recorded = (JSON.parse(readFileSync(workspaceMetaPath(workspaceId), 'utf8')) as { workspacePath?: unknown })
+        .workspacePath;
+    } catch {
+      return; // 메타를 못 읽으면 판단 근거가 없다. 기존 폴백 경로가 처리한다.
+    }
+    if (typeof recorded !== 'string' || recorded.length === 0) return;
+    const mine = canonicalWorkspacePath(folderFsPath);
+    const theirs = canonicalWorkspacePath(recorded);
+    if (mine === theirs) return;
+    throw new Error(
+      `workspaceStore: workspace folder "${workspaceId}" already belongs to ${theirs}. ` +
+        `Refusing to share it with ${mine}. Rename either project folder to get a different digest.`,
+    );
   }
   function sessionsDir(workspaceId: string): string {
     return join(workspaceDir(workspaceId), 'sessions');
@@ -267,7 +294,10 @@ export function createWorkspaceStore(opts: WorkspaceStoreOptions = {}): Workspac
       const id = deterministicWorkspaceId(folderFsPath);
       const metaPath = workspaceMetaPath(id);
       // 이미 초기화된 워크스페이스면 그대로 반환.
-      if (existsSync(metaPath)) return id;
+      if (existsSync(metaPath)) {
+        assertNoDigestCollision(id, folderFsPath);
+        return id;
+      }
 
       // workspace.json 초기화 — 호스트가 별도 createWorkspace를 호출하지 않아도(예: 익스텐션)
       // 다음 readWorkspaceMeta가 빈 객체를 보지 않게 함.
@@ -280,7 +310,7 @@ export function createWorkspaceStore(opts: WorkspaceStoreOptions = {}): Workspac
       const now = new Date().toISOString();
       const meta: WorkspaceMeta = {
         workspaceId: id,
-        title: folderFsPath.split('/').pop() ?? `Workspace ${id.slice(0, 8)}`,
+        title: folderFsPath.split('/').pop() || id,
         createdAt: now,
         updatedAt: now,
         workspacePath: folderFsPath,
@@ -311,6 +341,9 @@ export function createWorkspaceStore(opts: WorkspaceStoreOptions = {}): Workspac
     // ── workspace 메타 ──
     async createWorkspace(args) {
       const workspaceId = deterministicWorkspaceId(args.workspacePath);
+      if (existsSync(workspaceMetaPath(workspaceId))) {
+        assertNoDigestCollision(workspaceId, args.workspacePath);
+      }
       return withWorkspaceLock(workspaceId, async () => {
         // 결정적 ID — 같은 폴더로 재호출되면 기존 워크스페이스에 세션만 추가.
         // (데스크탑 V-23 중복 가드가 코어로 흡수됨)
@@ -391,7 +424,7 @@ export function createWorkspaceStore(opts: WorkspaceStoreOptions = {}): Workspac
       }
       const out: WorkspaceListEntry[] = [];
       for (const id of ids) {
-        if (!UUID_RE.test(id)) continue;
+        if (!isSafeSegment(id) || id.startsWith('.')) continue;
         try {
           const m = await readWorkspaceMeta(id);
           out.push({

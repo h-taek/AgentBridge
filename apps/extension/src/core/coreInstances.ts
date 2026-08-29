@@ -102,7 +102,7 @@ export function initializeCore(
   const storageRoot = _workspaceStore.getGlobalStoragePath();
 
   _hookInstaller = createHookInstaller({
-    // hook 명령은 번들 안 경로가 아니라 양 앱 공용 canonical 경로(~/.agentbridge/bin/)를 가리킨다 (V-12).
+    // hook 명령은 번들 안 경로가 아니라 저장소 canonical 경로(<루트>/bin/)를 가리킨다 (V-12).
     helperPath: getCanonicalHelperPath(storageRoot),
     // 저장소 루트와 hook --user-data가 같은 곳을 가리키도록 store에서 가져옴 (테스트 포함 일관성)
     globalStoragePath: storageRoot,
@@ -117,7 +117,7 @@ export function initializeCore(
     hookInstaller: _hookInstaller,
     hookStatusStore: _hookStatusStore,
     workspaceClaudeDir: (workspaceId) => _workspaceStore!.getWorkspacePath(workspaceId),
-    hookCaptureDir: (workspaceId) => path.join(storageRoot, 'workspaces', workspaceId),
+    hookCaptureDir: (workspaceId) => _workspaceStore!.getWorkspacePath(workspaceId),
     logger,
   });
 
