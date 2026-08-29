@@ -19,7 +19,7 @@
   "agentbridge.turns.assistantDetail.enumDescription.full": "어시스턴트 응답 최대 50KB",
   "agentbridge.turns.assistantDetail.enumDescription.compact": "약 5,000자 (앞 4,000 + 뒤 1,000)",
   "agentbridge.turns.assistantDetail.enumDescription.minimal": "약 1,000자 (앞 800 + 뒤 200)",
-  "agentbridge.memory.maxArchiveSnapshots.description": "Memory 패널에 보관할 IR 스냅샷 최대 개수. 초과분은 가장 오래된 것부터 삭제.",
+  "agentbridge.memory.maxArchiveSnapshots.description": "Context 패널에 보관할 IR 스냅샷 최대 개수. 초과분은 가장 오래된 것부터 삭제.",
   "agentbridge.memory.proposalEnabled.description": "대화에서 장기 메모리 후보를 자동 추출. 끄면 자동제안을 비활성화.",
   "agentbridge.refine.useClaude.description": "백그라운드 정제에 Claude 사용. 헤드리스 `claude -p`는 구독이 아닌 별도 API 크레딧을 소모하므로, 끄면 정제에서 Claude를 제외합니다."
 }

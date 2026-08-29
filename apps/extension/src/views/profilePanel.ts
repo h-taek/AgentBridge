@@ -10,16 +10,24 @@ import {
   readProfileDocs,
   getGlobalDir,
   resolveProfile,
+  resolveProjectProfileId,
+  type ProposalScope,
 } from '@agentbridge/core';
 
 // gc-tree §E — 장기 메모리(프로필) 뷰. 데스크탑 ProfilePanel.tsx의 익스텐션 트윈.
 //   ① 승인 큐: 자동제안 카드(카테고리·제목·요약·본문 미리보기 + 승인/버림)
 //   ② 읽기전용 문서 목록(카테고리별 그룹) — 수동 편집은 "폴더 열기"로 .md 직접 편집
-// 제안·문서는 default 프로필 단위로 모든 워크스페이스가 공유 — workspaceId는 resolveProfile 입력일 뿐.
+// 0.5.0 B-1·B-3: 지식이 두 자리로 갈린다. 사용자 지식은 모든 워크스페이스가 공유하는 default
+// 프로필이고, 프로젝트 지식은 git remote로 정해지는 저장소 단위 자리다. 패널은 늘리지 않고
+// 상단 전환으로 한 번에 한쪽만 보여준다 — 훑는 곳이 아니라 승인하고 버리는 곳이라서다.
+const EMPTY_SIDE = { proposals: [], docs: [], profileDir: '' };
+
 export class ProfilePanelProvider implements vscode.WebviewViewProvider {
   static readonly viewType = 'agentbridge.proposalPanel';
 
   private view: vscode.WebviewView | undefined;
+  // git 호출을 매 갱신마다 하지 않도록 폴더별로 기억한다. remote가 없으면 null이 캐시된다.
+  private projectProfileCache = new Map<string, string | null>();
 
   // 대기 제안 수가 바뀔 때마다 호출(0 포함). 호스트가 액티비티 바 뱃지를 갱신하는 데 쓴다.
   // webview view는 사용자가 패널을 펼치기 전엔 resolve되지 않으므로, 뱃지는 항상 살아있는
@@ -41,13 +49,13 @@ export class ProfilePanelProvider implements vscode.WebviewViewProvider {
           await this.sendProposals();
           break;
         case 'proposal:approve':
-          await this.handleApprove(msg.id as string);
+          await this.handleApprove(msg.id as string, msg.scope as ProposalScope);
           break;
         case 'proposal:discard':
-          await this.handleDiscard(msg.id as string);
+          await this.handleDiscard(msg.id as string, msg.scope as ProposalScope);
           break;
         case 'proposal:openFolder':
-          await this.handleOpenFolder();
+          await this.handleOpenFolder(msg.scope as ProposalScope);
           break;
       }
     });
@@ -68,30 +76,65 @@ export class ProfilePanelProvider implements vscode.WebviewViewProvider {
     return workspaceStore.getOrCreateWorkspaceId(folderUri.fsPath);
   }
 
+  // 프로젝트 지식 자리. remote가 없으면 null — 패널이 그쪽 전환을 잠근다.
+  private async getProjectProfileId(): Promise<string | null> {
+    const folderPath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (!folderPath) return null;
+    const cached = this.projectProfileCache.get(folderPath);
+    if (cached !== undefined) return cached;
+    const id = await resolveProjectProfileId(folderPath, { logger: { log: output.log, warn: output.warn } });
+    this.projectProfileCache.set(folderPath, id);
+    return id;
+  }
+
+  private async readSide(
+    globalDir: string,
+    profileId: string,
+    scope: ProposalScope,
+  ): Promise<{ proposals: unknown[]; docs: unknown[]; profileDir: string }> {
+    const [proposals, docsRaw] = await Promise.all([
+      readProposals(globalDir, profileId, scope),
+      readProfileDocs(globalDir, profileId, scope),
+    ]);
+    return {
+      proposals,
+      docs: docsRaw.map((d) => ({ category: d.category, slug: d.slug, title: d.title, summary: d.summary })),
+      profileDir: join(globalDir, scope === 'project' ? 'projects' : 'profiles', profileId),
+    };
+  }
+
   private async sendProposals(): Promise<void> {
     const wid = this.getWorkspaceId();
     if (!wid) {
       this.onCount?.(0);
-      this.postMessage({ type: 'proposal:data', proposals: [], docs: [], profileDir: '' });
+      this.postMessage({ type: 'proposal:data', user: EMPTY_SIDE, project: null });
       return;
     }
     const globalDir = getGlobalDir();
-    const profileId = resolveProfile(wid);
-    const profileDir = join(globalDir, 'profiles', profileId);
-    const [proposals, docsRaw] = await Promise.all([
-      readProposals(globalDir, profileId),
-      readProfileDocs(globalDir, profileId),
+    const projectProfileId = await this.getProjectProfileId();
+    const [user, project] = await Promise.all([
+      this.readSide(globalDir, resolveProfile(wid), 'user'),
+      projectProfileId
+        ? this.readSide(globalDir, projectProfileId, 'project')
+        : Promise.resolve(null),
     ]);
-    const docs = docsRaw.map((d) => ({ category: d.category, slug: d.slug, title: d.title, summary: d.summary }));
-    this.onCount?.(proposals.length);
-    this.postMessage({ type: 'proposal:data', proposals, docs, profileDir });
+    // 뱃지는 양쪽 합계 — 어느 쪽에 올라왔든 볼 것이 있다는 뜻이다.
+    this.onCount?.(user.proposals.length + (project?.proposals.length ?? 0));
+    this.postMessage({ type: 'proposal:data', user, project });
   }
 
-  private async handleApprove(id: string): Promise<void> {
+  // 어느 자리의 제안인지는 웹뷰가 실어 보낸다. 목록이 갈려 있으므로 id만으로는 못 가린다.
+  private async resolveSide(scope: ProposalScope): Promise<string | null> {
+    if (scope === 'project') return this.getProjectProfileId();
     const wid = this.getWorkspaceId();
-    if (!wid || !id) return;
+    return wid ? resolveProfile(wid) : null;
+  }
+
+  private async handleApprove(id: string, scope: ProposalScope): Promise<void> {
+    const profileId = await this.resolveSide(scope);
+    if (!profileId || !id) return;
     try {
-      await approveProposal(getGlobalDir(), resolveProfile(wid), id);
+      await approveProposal(getGlobalDir(), profileId, id, scope);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       output.warn(`profilePanel: approve failed — ${msg}`);
@@ -101,11 +144,11 @@ export class ProfilePanelProvider implements vscode.WebviewViewProvider {
     await this.sendProposals();
   }
 
-  private async handleDiscard(id: string): Promise<void> {
-    const wid = this.getWorkspaceId();
-    if (!wid || !id) return;
+  private async handleDiscard(id: string, scope: ProposalScope): Promise<void> {
+    const profileId = await this.resolveSide(scope);
+    if (!profileId || !id) return;
     try {
-      await discardProposal(getGlobalDir(), resolveProfile(wid), id);
+      await discardProposal(getGlobalDir(), profileId, id, scope);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       output.warn(`profilePanel: discard failed — ${msg}`);
@@ -114,11 +157,11 @@ export class ProfilePanelProvider implements vscode.WebviewViewProvider {
     await this.sendProposals();
   }
 
-  private async handleOpenFolder(): Promise<void> {
-    const wid = this.getWorkspaceId();
-    if (!wid) return;
-    const profileDir = join(getGlobalDir(), 'profiles', resolveProfile(wid));
-    await vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(profileDir));
+  private async handleOpenFolder(scope: ProposalScope): Promise<void> {
+    const profileId = await this.resolveSide(scope);
+    if (!profileId) return;
+    const dir = join(getGlobalDir(), scope === 'project' ? 'projects' : 'profiles', profileId);
+    await vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(dir));
   }
 
   private postMessage(msg: unknown): void {
@@ -129,6 +172,9 @@ export class ProfilePanelProvider implements vscode.WebviewViewProvider {
     const nonce = getNonce();
     // 라벨은 IDE 언어를 따른다(l10n). 데스크탑 ProfilePanel.tsx와 달리 기존엔 한국어 고정이었음.
     const L = {
+      scopeUser: vscode.l10n.t('User'),
+      scopeProject: vscode.l10n.t('Project'),
+      noProjectRepo: vscode.l10n.t('Project knowledge needs a git remote. This folder has none.'),
       openFolder: vscode.l10n.t('Open folder'),
       openFolderTitle: vscode.l10n.t('Open profile folder (edit .md manually)'),
       approvalQueue: vscode.l10n.t('Approval queue'),
@@ -185,6 +231,46 @@ export class ProfilePanelProvider implements vscode.WebviewViewProvider {
     }
     .open-folder:disabled { opacity: 0.4; cursor: default; }
     .open-folder svg { width: 14px; height: 14px; fill: currentColor; }
+    .segmented {
+      display: flex;
+      gap: 2px;
+      padding: 2px;
+      border-radius: 5px;
+      background: var(--vscode-button-secondaryBackground, rgba(255,255,255,0.06));
+      margin-bottom: 10px;
+    }
+    .segmented button {
+      flex: 1;
+      cursor: pointer;
+      font: inherit;
+      font-size: 11.5px;
+      padding: 4px 0;
+      border: none;
+      border-radius: 4px;
+      background: transparent;
+      color: var(--vscode-descriptionForeground);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+    }
+    .segmented button[aria-pressed="true"] {
+      background: var(--vscode-editor-background, rgba(0,0,0,0.35));
+      color: var(--vscode-foreground);
+    }
+    .segmented button:disabled { opacity: 0.4; cursor: default; }
+    .seg-count {
+      font-size: 9.5px;
+      padding: 0 4px;
+      border-radius: 7px;
+      background: var(--vscode-badge-background);
+      color: var(--vscode-badge-foreground);
+    }
+    /* 보고 있지 않은 쪽에 새 제안이 있으면 눈에 띄게 — 전환을 안 눌러도 알아야 한다. */
+    .segmented button[aria-pressed="false"] .seg-count {
+      background: var(--vscode-activityBarBadge-background, #0078d4);
+      color: var(--vscode-activityBarBadge-foreground, #fff);
+    }
     .sechead {
       display: flex;
       align-items: center;
@@ -293,6 +379,10 @@ export class ProfilePanelProvider implements vscode.WebviewViewProvider {
   </style>
 </head>
 <body>
+  <div class="segmented" id="scopeSwitch">
+    <button type="button" data-scope="user" aria-pressed="true">${L.scopeUser}<span class="seg-count" id="userCount" hidden></span></button>
+    <button type="button" data-scope="project" aria-pressed="false">${L.scopeProject}<span class="seg-count" id="projectCount" hidden></span></button>
+  </div>
   <div class="profile-loc">
     <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M14.5 3H7.71l-.85-.85L6.51 2h-5l-.5.5v11l.5.5h13l.5-.5v-10L14.5 3zm-.51 8.49V13h-12V7h4.49l.35-.15.86-.86H14v1.5l-.01 4z"/></svg>
     <span class="profile-loc-name">default</span>
@@ -311,11 +401,25 @@ export class ProfilePanelProvider implements vscode.WebviewViewProvider {
     const openFolderBtn = document.getElementById('openFolderBtn');
 
     let busy = false;
-    let profileDir = '';
+    let scope = 'user';
+    // 양쪽 데이터를 함께 받아두고 전환은 다시 그리기만 한다 — 누를 때마다 왕복하지 않는다.
+    let sides = { user: { proposals: [], docs: [], profileDir: '' }, project: null };
+
+    const switchEl = document.getElementById('scopeSwitch');
+    const countEls = { user: document.getElementById('userCount'), project: document.getElementById('projectCount') };
+    const locNameEl = document.querySelector('.profile-loc-name');
+
+    switchEl.addEventListener('click', (e) => {
+      const btn = e.target.closest('button[data-scope]');
+      if (!btn || btn.disabled || btn.getAttribute('data-scope') === scope) return;
+      scope = btn.getAttribute('data-scope');
+      paint();
+    });
 
     openFolderBtn.addEventListener('click', () => {
-      if (!profileDir) return;
-      vscode.postMessage({ type: 'proposal:openFolder' });
+      const side = sides[scope];
+      if (!side || !side.profileDir) return;
+      vscode.postMessage({ type: 'proposal:openFolder', scope: scope });
     });
 
     const BODY_PREVIEW_MAX = 200;
@@ -334,11 +438,31 @@ export class ProfilePanelProvider implements vscode.WebviewViewProvider {
       const msg = e.data;
       if (msg.type === 'proposal:data') {
         busy = false;
-        profileDir = msg.profileDir || '';
-        openFolderBtn.disabled = !profileDir;
-        render(msg.proposals || [], msg.docs || []);
+        sides = { user: msg.user || { proposals: [], docs: [], profileDir: '' }, project: msg.project || null };
+        // 프로젝트 지식이 없는 저장소면 그쪽으로 못 넘어간다.
+        if (!sides.project && scope === 'project') scope = 'user';
+        paint();
       }
     });
+
+    // 전환 상태와 목록을 한 번에 맞춘다.
+    function paint() {
+      const hasProject = !!sides.project;
+      switchEl.querySelectorAll('button[data-scope]').forEach((b) => {
+        const s = b.getAttribute('data-scope');
+        b.setAttribute('aria-pressed', String(s === scope));
+        b.disabled = s === 'project' && !hasProject;
+        b.title = b.disabled ? L.noProjectRepo : '';
+        const n = s === 'user' ? sides.user.proposals.length : (sides.project ? sides.project.proposals.length : 0);
+        countEls[s].textContent = String(n);
+        countEls[s].hidden = n === 0;
+      });
+      const side = sides[scope] || { proposals: [], docs: [], profileDir: '' };
+      const dirName = side.profileDir ? side.profileDir.split('/').filter(Boolean).pop() : '';
+      locNameEl.textContent = dirName || '—';
+      openFolderBtn.disabled = !side.profileDir;
+      render(side.proposals, side.docs);
+    }
 
     function render(proposals, docs) {
       let html = '';
@@ -398,7 +522,7 @@ export class ProfilePanelProvider implements vscode.WebviewViewProvider {
           busy = true;
           // 진행 중엔 모든 액션 버튼 비활성 — 재조회(proposal:data) 시 busy 해제.
           contentEl.querySelectorAll('button[data-act]').forEach((b) => { b.disabled = true; });
-          vscode.postMessage({ type: act === 'approve' ? 'proposal:approve' : 'proposal:discard', id: id });
+          vscode.postMessage({ type: act === 'approve' ? 'proposal:approve' : 'proposal:discard', id: id, scope: scope });
         });
       });
     }

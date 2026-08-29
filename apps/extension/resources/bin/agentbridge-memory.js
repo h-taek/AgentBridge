@@ -48,11 +48,24 @@ var init_storageRoot = __esm({
 function profilesRoot(globalDir) {
   return (0, import_node_path.join)(globalDir, "profiles");
 }
-function profileDir(globalDir, profileId) {
-  return (0, import_node_path.join)(profilesRoot(globalDir), profileId);
+function projectsRoot(globalDir) {
+  return (0, import_node_path.join)(globalDir, "projects");
 }
-function profileDocsDir(globalDir, profileId) {
-  return (0, import_node_path.join)(profileDir(globalDir, profileId), "docs");
+function scopeRoot(globalDir, scope) {
+  return scope === "project" ? projectsRoot(globalDir) : profilesRoot(globalDir);
+}
+function assertProfileSegment(profileId) {
+  const v = String(profileId ?? "");
+  if (!v || v === "." || v === ".." || /[\\/\u0000]/.test(v)) {
+    throw new Error(`Invalid profileId "${v}": must be a single path segment.`);
+  }
+  return v;
+}
+function profileDir(globalDir, profileId, scope = "user") {
+  return (0, import_node_path.join)(scopeRoot(globalDir, scope), assertProfileSegment(profileId));
+}
+function profileDocsDir(globalDir, profileId, scope = "user") {
+  return (0, import_node_path.join)(profileDir(globalDir, profileId, scope), "docs");
 }
 var import_node_path;
 var init_globalPaths = __esm({
@@ -135,8 +148,8 @@ async function listDocRelPaths(dir, prefix = "") {
   }
   return files.sort();
 }
-async function readProfileDocs(globalDir, profileId) {
-  const docsDir = profileDocsDir(globalDir, profileId);
+async function readProfileDocs(globalDir, profileId, scope = "user") {
+  const docsDir = profileDocsDir(globalDir, profileId, scope);
   const files = (await listDocRelPaths(docsDir)).filter((f) => !/(^|\/)index\.md$/i.test(f));
   const recs = [];
   for (const file of files) {

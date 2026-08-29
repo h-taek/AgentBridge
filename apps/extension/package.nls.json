@@ -19,7 +19,7 @@
   "agentbridge.turns.assistantDetail.enumDescription.full": "Up to 50KB of assistant response",
   "agentbridge.turns.assistantDetail.enumDescription.compact": "~5,000 characters (head 4,000 + tail 1,000)",
   "agentbridge.turns.assistantDetail.enumDescription.minimal": "~1,000 characters (head 800 + tail 200)",
-  "agentbridge.memory.maxArchiveSnapshots.description": "Max IR snapshots to keep in the Memory panel; the oldest beyond this limit are deleted.",
+  "agentbridge.memory.maxArchiveSnapshots.description": "Max IR snapshots to keep in the Context panel; the oldest beyond this limit are deleted.",
   "agentbridge.memory.proposalEnabled.description": "Automatically extract long-term memory candidates from conversations. Turn off to disable automatic proposals.",
   "agentbridge.refine.useClaude.description": "Use Claude for background refinement. Headless `claude -p` consumes separate API credits instead of your subscription, so turn this off to exclude Claude from refine."
 }

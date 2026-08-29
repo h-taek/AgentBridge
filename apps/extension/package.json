@@ -60,7 +60,7 @@
         {
           "type": "webview",
           "id": "agentbridge.memoryPanel",
-          "name": "Memory"
+          "name": "Context"
         },
         {
           "type": "webview",
