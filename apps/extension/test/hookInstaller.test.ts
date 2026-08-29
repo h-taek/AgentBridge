@@ -230,6 +230,53 @@ describe('구버전 잔재 정리', () => {
     assert.ok(globalAgy['orca-status'], '남의 전역 훅은 그대로 둔다');
   });
 
+  it('우리 항목을 뺀 뒤 빈 껍데기와 빈 폴더는 지운다', async () => {
+    await fs.mkdir(join(cwd, '.codex'), { recursive: true });
+    await fs.writeFile(
+      join(cwd, '.codex', 'hooks.json'),
+      JSON.stringify({
+        hooks: { Stop: [{ hooks: [{ type: 'command', command: 'mine' }], _agentbridge_managed: true }] },
+      }),
+      'utf8',
+    );
+    await fs.writeFile(
+      join(cwd, '.codex', 'config.toml'),
+      '# AgentBridge BEGIN\n[features]\nhooks = true\n# AgentBridge END\n',
+      'utf8',
+    );
+    await fs.mkdir(join(cwd, '.agents'), { recursive: true });
+    await fs.writeFile(
+      join(cwd, '.agents', 'hooks.json'),
+      JSON.stringify({ 'agentbridge-memory': { enabled: true } }),
+      'utf8',
+    );
+
+    await cleanupLegacyHooks(cwd);
+    assert.deepEqual(await fs.readdir(cwd), [], '프로젝트 폴더에 우리 파일이 0이어야 한다');
+  });
+
+  it('내용이 남아 있으면 파일을 지우지 않는다', async () => {
+    await fs.mkdir(join(cwd, '.codex'), { recursive: true });
+    await fs.writeFile(
+      join(cwd, '.codex', 'hooks.json'),
+      JSON.stringify({
+        hooks: {
+          Stop: [
+            { hooks: [{ type: 'command', command: 'mine' }], _agentbridge_managed: true },
+            { hooks: [{ type: 'command', command: 'theirs' }] },
+          ],
+        },
+      }),
+      'utf8',
+    );
+    await fs.writeFile(join(cwd, '.codex', 'config.toml'), '[user]\nkeep = 1\n', 'utf8');
+
+    await cleanupLegacyHooks(cwd);
+    const json = await readJson(join(cwd, '.codex', 'hooks.json'));
+    assert.equal(json.hooks.Stop.length, 1);
+    assert.match(await fs.readFile(join(cwd, '.codex', 'config.toml'), 'utf8'), /keep = 1/);
+  });
+
   it('잔재가 없으면 아무것도 하지 않는다', async () => {
     assert.deepEqual(await cleanupLegacyHooks(cwd), []);
     assert.deepEqual(await fs.readdir(cwd), []);

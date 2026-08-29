@@ -425,6 +425,37 @@ export function createHookInstaller(opts: HookInstallerOptions): HookInstaller {
     return true;
   }
 
+  // 의미 있는 내용이 하나도 없는 JSON이면 삭제. `{}`와 `{"hooks":{}}` 둘 다 대상이다.
+  async function removeIfEmptyJson(filePath: string): Promise<void> {
+    const raw = await readFileSafe(filePath);
+    if (raw === null) return;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return; // 못 읽는 파일은 건드리지 않는다
+    }
+    if (!isObject(parsed)) return;
+    const keys = Object.keys(parsed);
+    const empty =
+      keys.length === 0 ||
+      (keys.length === 1 && keys[0] === 'hooks' && isObject(parsed.hooks) && Object.keys(parsed.hooks).length === 0);
+    if (empty) await fsp.rm(filePath, { force: true });
+  }
+
+  async function removeIfBlank(filePath: string): Promise<void> {
+    const raw = await readFileSafe(filePath);
+    if (raw !== null && raw.trim() === '') await fsp.rm(filePath, { force: true });
+  }
+
+  async function removeDirIfEmpty(dir: string): Promise<void> {
+    try {
+      if ((await fsp.readdir(dir)).length === 0) await fsp.rmdir(dir);
+    } catch {
+      /* 없거나 안 비었음 */
+    }
+  }
+
   async function cleanupLegacyHooks(cwd: string): Promise<string[]> {
     // cwd가 실은 하니스의 전역 설정 폴더인 경우를 막는다. 이제 이 가드가 남는 자리는
     // 설치가 아니라 정리다 — 전역 설치 경로는 우리가 직접 조립하므로 가드를 안 지나간다.
@@ -469,6 +500,17 @@ export function createHookInstaller(opts: HookInstallerOptions): HookInstaller {
     // 프로젝트 codex config.toml — 마커 블록 제거
     const codexToml = join(cwd, '.codex', 'config.toml');
     if (await removeTomlMarkerBlock(codexToml)) cleaned.push(codexToml);
+
+    // 우리 항목을 뺀 뒤 아무것도 안 남은 껍데기는 지운다. 남겨 두면 "프로젝트 폴더에 우리 파일 0"이
+    // 아니게 된다 — 라이브 검증에서 `{}`·`{"hooks":{}}`·빈 config.toml이 그대로 남는 것을 확인했다.
+    // 내용이 있으면 손대지 않는다(남의 것일 수 있다).
+    for (const f of [codexProject, join(cwd, '.agents', 'hooks.json')]) {
+      await removeIfEmptyJson(f);
+    }
+    await removeIfBlank(codexToml);
+    for (const d of [join(cwd, '.codex'), join(cwd, '.agents')]) {
+      await removeDirIfEmpty(d);
+    }
 
     if (cleaned.length > 0) log.log(`hookInstaller: cleaned legacy hooks — ${cleaned.join(', ')}`);
     return cleaned;
