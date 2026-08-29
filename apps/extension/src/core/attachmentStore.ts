@@ -1,103 +1,63 @@
-// 워크스페이스 cwd 아래 .agentbridge/attachments/ 디렉토리에 첨부파일을 저장한다.
+// 첨부파일을 워크스페이스 데이터 폴더의 attachments/ 아래에 저장한다 (0.5.0 B-1).
 //
-// 이전: packages/core/src/attachmentStore.ts. 데스크탑은 첨부 기능 자체를 안 써서
-// (외부 경로 직접 입력 방식) 익스텐션 전용. 2026-06-01 코어에서 extension/src/core/로 이전.
+// 0.5.0 전에는 사용자 프로젝트 안 `<cwd>/.agentbridge/attachments/`에 썼다. 남의 저장소에
+// 우리 폴더를 만드는 일이라 `.gitignore`까지 고쳐야 했다. 이제 우리 저장소 안에 두므로
+// 프로젝트 폴더에 아무것도 남기지 않고, gitignore도 건드릴 이유가 없다.
+//
+// 대신 저장 위치가 작업 폴더 밖이 된다. claude는 밖의 경로를 읽을 때 승인을 요구하므로
+// 기동 인자 `--add-dir <워크스페이스 폴더>`가 함께 있어야 첨부가 읽힌다 (research 06 §1).
 
 import { promises as fs } from 'fs';
 import { basename, dirname, join } from 'path';
-import * as vscode from 'vscode';
 import { type Logger, noopLogger } from '@agentbridge/core';
+import { getWorkspacePath } from './workspaceStore';
 
 // 단방향 의존: coreInstances가 init 시점에 setAttachmentLogger로 logger 주입.
-// 이 모듈은 더 이상 coreInstances를 import하지 않음 (circular dep 제거).
 let _logger: Logger = noopLogger;
 export function setAttachmentLogger(logger: Logger): void {
   _logger = logger;
 }
 
 const TTL_MS = 60 * 60 * 1000; // 1 hour
-const ATTACH_DIR_NAME = '.agentbridge';
+// 구버전이 사용자 프로젝트 안에 만들던 폴더 이름. 이제 만들지 않고 정리만 한다.
+const LEGACY_DIR_NAME = '.agentbridge';
 
-function attachmentsRoot(cwd: string): string {
-  return join(cwd, ATTACH_DIR_NAME, 'attachments');
+function attachmentsRoot(workspaceId: string): string {
+  return join(getWorkspacePath(workspaceId), 'attachments');
 }
-
-function workspaceCwd(): string | null {
-  const folderUri = vscode.workspace.workspaceFolders?.[0]?.uri;
-  return folderUri ? folderUri.fsPath : null;
-}
-
-export type AttachmentStoreOptions = {
-  logger?: Logger;
-};
 
 // sessionId는 디렉토리 분리용. 반환은 절대 경로.
 // path.basename으로 filename에 포함된 경로 분리자(../, /)를 제거해 traversal 방어층을 둔다.
-function attachmentPathForCwd(cwd: string, sessionId: string, filename: string): string {
-  const safeName = basename(filename);
-  const safeSession = basename(sessionId);
-  return join(attachmentsRoot(cwd), safeSession, safeName);
+export function attachmentPathFor(
+  workspaceId: string,
+  sessionId: string,
+  filename: string,
+): string {
+  return join(attachmentsRoot(workspaceId), basename(sessionId), basename(filename));
 }
 
-async function writeAttachmentInternal(
-  cwd: string,
-  absPath: string,
-  base64: string,
-  opts: AttachmentStoreOptions = {},
-): Promise<void> {
+export async function writeAttachment(absPath: string, base64: string): Promise<void> {
   await fs.mkdir(dirname(absPath), { recursive: true });
   await fs.writeFile(absPath, Buffer.from(base64, 'base64'));
-  await ensureGitignoreEntry(cwd, opts);
 }
 
-async function ensureGitignoreEntry(
-  cwd: string,
-  opts: AttachmentStoreOptions,
-): Promise<void> {
-  const log = opts.logger ?? noopLogger;
-  const gitignore = join(cwd, '.gitignore');
-  try {
-    const raw = await fs.readFile(gitignore, 'utf8');
-    const lines = raw.split(/\r?\n/);
-    if (lines.some((l) => l.trim() === ATTACH_DIR_NAME || l.trim() === ATTACH_DIR_NAME + '/'))
-      return;
-    const appended = (raw.endsWith('\n') ? raw : raw + '\n') + ATTACH_DIR_NAME + '/\n';
-    await fs.writeFile(gitignore, appended, 'utf8');
-    log.log(`appended ${ATTACH_DIR_NAME}/ to .gitignore`);
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-      // git 리포가 아닐 수도 있음 — .gitignore 새로 만들지는 않음.
-      return;
-    }
-    log.warn(`gitignore update failed: ${err instanceof Error ? err.message : String(err)}`);
-  }
-}
-
-async function cleanupSessionAttachmentsInternal(
-  cwd: string,
+export async function cleanupSessionAttachments(
+  workspaceId: string,
   sessionId: string,
-  opts: AttachmentStoreOptions = {},
 ): Promise<void> {
-  const log = opts.logger ?? noopLogger;
-  const dir = join(attachmentsRoot(cwd), sessionId);
+  const dir = join(attachmentsRoot(workspaceId), basename(sessionId));
   try {
     await fs.rm(dir, { recursive: true, force: true });
-    log.log(`attachments cleaned for session ${sessionId.slice(0, 8)}`);
+    _logger.log(`attachments cleaned for session ${sessionId.slice(0, 8)}`);
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
-      log.warn(
-        `attachment cleanup failed: ${err instanceof Error ? err.message : String(err)}`,
-      );
+      _logger.warn(`attachment cleanup failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 }
 
-async function cleanupStaleAttachmentsInternal(
-  cwd: string,
-  opts: AttachmentStoreOptions = {},
-): Promise<void> {
-  const log = opts.logger ?? noopLogger;
-  const attRoot = attachmentsRoot(cwd);
+export async function cleanupStaleAttachments(workspaceId: string): Promise<void> {
+  const attRoot = attachmentsRoot(workspaceId);
   let sessionDirs: string[];
   try {
     sessionDirs = await fs.readdir(attRoot);
@@ -128,45 +88,33 @@ async function cleanupStaleAttachmentsInternal(
       }
     }
     try {
-      const remaining = await fs.readdir(sDir);
-      if (remaining.length === 0) await fs.rmdir(sDir);
+      if ((await fs.readdir(sDir)).length === 0) await fs.rmdir(sDir);
     } catch {
       /* skip */
     }
   }
-  if (deleted > 0)
-    log.log(`attachment cleanup: removed ${deleted} stale files (>${TTL_MS / 60000}min)`);
+  if (deleted > 0) {
+    _logger.log(`attachment cleanup: removed ${deleted} stale files (>${TTL_MS / 60000}min)`);
+  }
 }
 
-// ─── Facade: VS Code workspace folder를 cwd로 자동 resolve ───────────
-
-export function attachmentPathFor(
-  _workspaceId: string,
-  sessionId: string,
-  filename: string,
-): string {
-  const cwd = workspaceCwd();
-  if (!cwd) throw new Error('No workspace folder');
-  return attachmentPathForCwd(cwd, sessionId, filename);
-}
-
-export async function writeAttachment(absPath: string, base64: string): Promise<void> {
-  const cwd = workspaceCwd();
-  if (!cwd) throw new Error('No workspace folder');
-  await writeAttachmentInternal(cwd, absPath, base64, { logger: _logger });
-}
-
-export async function cleanupSessionAttachments(
-  _workspaceId: string,
-  sessionId: string,
-): Promise<void> {
-  const cwd = workspaceCwd();
-  if (!cwd) return;
-  await cleanupSessionAttachmentsInternal(cwd, sessionId, { logger: _logger });
-}
-
-export async function cleanupStaleAttachments(): Promise<void> {
-  const cwd = workspaceCwd();
-  if (!cwd) return;
-  await cleanupStaleAttachmentsInternal(cwd, { logger: _logger });
+// 구버전이 사용자 프로젝트에 만든 `.agentbridge/` 폴더를 걷어낸다.
+//
+// 안에 있던 첨부는 옮기지 않고 지운다. 수명이 1시간짜리라 옮겨 봐야 곧 지워지고,
+// 경로가 이미 지난 대화에 박혀 있어 옮기면 오히려 그 경로가 어긋난다.
+//
+// 우리가 아는 것(attachments/)만 지우고, 그 결과 폴더가 비면 폴더도 지운다. 모르는 내용이
+// 들어 있으면 손대지 않는다. `.gitignore`에 덧붙였던 줄은 남긴다 — 지우면 사용자 저장소에
+// 우리가 만든 diff가 하나 더 생기고, 남아 있어도 해가 없다.
+export async function cleanupLegacyProjectFolder(cwd: string): Promise<boolean> {
+  const legacyDir = join(cwd, LEGACY_DIR_NAME);
+  try {
+    await fs.rm(join(legacyDir, 'attachments'), { recursive: true, force: true });
+    if ((await fs.readdir(legacyDir)).length > 0) return false;
+    await fs.rmdir(legacyDir);
+    _logger.log(`removed legacy project folder ${legacyDir}`);
+    return true;
+  } catch {
+    return false; // 없거나 안 비었음
+  }
 }

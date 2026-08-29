@@ -97,8 +97,15 @@ export function activate(context: vscode.ExtensionContext) {
       .catch(() => { /* noop */ });
   }
 
-  // attachment 정리 — 1시간 이상 된 파일 제거 (fire-and-forget).
-  void import('./core/attachmentStore').then(m => m.cleanupStaleAttachments()).catch(() => { /* noop */ });
+  // attachment 정리 — 1시간 이상 된 파일 제거 + 구버전이 프로젝트에 만든 폴더 제거 (fire-and-forget).
+  void import('./core/attachmentStore')
+    .then(async (m) => {
+      const folder = vscode.workspace.workspaceFolders?.[0]?.uri;
+      if (!folder) return;
+      await m.cleanupStaleAttachments(workspaceStore.getOrCreateWorkspaceId(folder.fsPath));
+      await m.cleanupLegacyProjectFolder(folder.fsPath);
+    })
+    .catch(() => { /* noop */ });
   registerConfigWatcher(context);
   notifications.init(context.globalState);
   notifications.notifyFirstRun();
