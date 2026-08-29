@@ -1,0 +1,16 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      // 저장소 루트를 연 채로 F5를 눌러도 익스텐션이 뜨게 한다.
+      // 루트 package.json은 pnpm 워크스페이스 매니페스트라 engines.vscode가 없어,
+      // 개발 경로를 apps/extension으로 명시하지 않으면 VS Code가 로드를 거부한다.
+      "name": "Run Extension (apps/extension)",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": ["--extensionDevelopmentPath=${workspaceFolder}/apps/extension"],
+      "outFiles": ["${workspaceFolder}/apps/extension/out/**/*.js"],
+      "preLaunchTask": "compile extension"
+    }
+  ]
+}
