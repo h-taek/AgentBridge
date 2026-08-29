@@ -45,6 +45,5 @@
   "Profile documents": "프로필 문서",
   "No documents yet. They fill in automatically as you work.": "아직 문서가 없습니다. 쓸수록 자동으로 채워집니다.",
   "User": "사용자",
-  "Project": "프로젝트",
-  "Project knowledge needs a git remote. This folder has none.": "프로젝트 지식은 git remote가 있어야 쌓인다. 이 폴더에는 없다."
+  "Project": "프로젝트"
 }

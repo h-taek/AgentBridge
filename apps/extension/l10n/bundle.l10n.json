@@ -45,6 +45,5 @@
   "Profile documents": "Profile documents",
   "No documents yet. They fill in automatically as you work.": "No documents yet. They fill in automatically as you work.",
   "User": "User",
-  "Project": "Project",
-  "Project knowledge needs a git remote. This folder has none.": "Project knowledge needs a git remote. This folder has none."
+  "Project": "Project"
 }

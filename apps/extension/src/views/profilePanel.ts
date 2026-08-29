@@ -11,6 +11,7 @@ import {
   getGlobalDir,
   resolveProfile,
   resolveProjectProfileId,
+  adoptPathKeyedProject,
   type ProposalScope,
 } from '@agentbridge/core';
 
@@ -76,13 +77,17 @@ export class ProfilePanelProvider implements vscode.WebviewViewProvider {
     return workspaceStore.getOrCreateWorkspaceId(folderUri.fsPath);
   }
 
-  // 프로젝트 지식 자리. remote가 없으면 null — 패널이 그쪽 전환을 잠근다.
+  // 프로젝트 지식 자리. remote가 있으면 그것으로, 없으면 폴더 경로로 정해진다.
+  // 폴더가 안 열려 있을 때만 null이다.
   private async getProjectProfileId(): Promise<string | null> {
     const folderPath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     if (!folderPath) return null;
     const cached = this.projectProfileCache.get(folderPath);
     if (cached !== undefined) return cached;
-    const id = await resolveProjectProfileId(folderPath, { logger: { log: output.log, warn: output.warn } });
+    const logger = { log: output.log, warn: output.warn };
+    const id = await resolveProjectProfileId(folderPath, { logger });
+    // 로컬로 쌓다가 remote가 생긴 경우 자리를 한 번 옮긴다.
+    adoptPathKeyedProject(join(getGlobalDir(), 'projects'), folderPath, id, logger);
     this.projectProfileCache.set(folderPath, id);
     return id;
   }
@@ -174,7 +179,6 @@ export class ProfilePanelProvider implements vscode.WebviewViewProvider {
     const L = {
       scopeUser: vscode.l10n.t('User'),
       scopeProject: vscode.l10n.t('Project'),
-      noProjectRepo: vscode.l10n.t('Project knowledge needs a git remote. This folder has none.'),
       openFolder: vscode.l10n.t('Open folder'),
       openFolderTitle: vscode.l10n.t('Open profile folder (edit .md manually)'),
       approvalQueue: vscode.l10n.t('Approval queue'),
@@ -258,7 +262,6 @@ export class ProfilePanelProvider implements vscode.WebviewViewProvider {
       background: var(--vscode-editor-background, rgba(0,0,0,0.35));
       color: var(--vscode-foreground);
     }
-    .segmented button:disabled { opacity: 0.4; cursor: default; }
     .seg-count {
       font-size: 9.5px;
       padding: 0 4px;
@@ -411,7 +414,7 @@ export class ProfilePanelProvider implements vscode.WebviewViewProvider {
 
     switchEl.addEventListener('click', (e) => {
       const btn = e.target.closest('button[data-scope]');
-      if (!btn || btn.disabled || btn.getAttribute('data-scope') === scope) return;
+      if (!btn || btn.getAttribute('data-scope') === scope) return;
       scope = btn.getAttribute('data-scope');
       paint();
     });
@@ -447,12 +450,9 @@ export class ProfilePanelProvider implements vscode.WebviewViewProvider {
 
     // 전환 상태와 목록을 한 번에 맞춘다.
     function paint() {
-      const hasProject = !!sides.project;
       switchEl.querySelectorAll('button[data-scope]').forEach((b) => {
         const s = b.getAttribute('data-scope');
         b.setAttribute('aria-pressed', String(s === scope));
-        b.disabled = s === 'project' && !hasProject;
-        b.title = b.disabled ? L.noProjectRepo : '';
         const n = s === 'user' ? sides.user.proposals.length : (sides.project ? sides.project.proposals.length : 0);
         countEls[s].textContent = String(n);
         countEls[s].hidden = n === 0;

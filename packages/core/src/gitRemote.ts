@@ -4,11 +4,17 @@
 // 따라오고, 다른 기계에 클론해도 같은 프로필을 쓰고, worktree는 remote가 같으니 본 저장소의 지식을
 // 그대로 공유한다.
 //
-// remote가 없는 저장소(로컬 전용, git 아님)는 프로젝트 프로필 없이 돌아간다 — 프로젝트 지식을
-// 안 쌓을 뿐 나머지는 그대로다.
+// remote가 없으면 폴더 경로를 키로 쓴다. remote가 있을 때 더 좋은 키인 것이지, 없다고 프로젝트
+// 지식을 안 쌓을 이유는 아니다 — 이동·클론·worktree 연속성은 remote 없는 저장소가 애초에 가질 수
+// 없는 성질이고, 그걸 못 가진다는 이유로 지식 자체를 버리면 로컬 전용 프로젝트가 통째로 빠진다.
+//
+// 나중에 remote가 생기면 키가 바뀌므로 경로 키로 쌓아둔 것을 한 번 옮긴다(adoptPathKeyedProject).
 
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { existsSync, renameSync } from 'node:fs';
+import { join } from 'node:path';
+import { canonicalWorkspacePath } from './workspaceId';
 import type { Logger } from './interfaces';
 import { noopLogger } from './interfaces';
 
@@ -52,6 +58,19 @@ export function profileIdForRemote(normalized: string): string {
   return `${name || 'repo'}-${digest}`;
 }
 
+// 경로를 키로 쓸 때의 id. remote 키와 같은 모양(<이름>-<다이제스트 8자>)이지만 입력이 달라
+// 값이 겹치지 않는다. 워크스페이스 폴더 이름과도 다이제스트 길이로 갈린다.
+export function profileIdForPath(folderFsPath: string): string {
+  const canonical = canonicalWorkspacePath(folderFsPath);
+  const digest = createHash('sha256').update(canonical, 'utf8').digest('hex').slice(0, PROFILE_DIGEST_LEN);
+  const name = (canonical.split('/').filter(Boolean).pop() ?? '')
+    .replace(/[^a-z0-9._-]+/gi, '-')
+    .replace(/^[.\-]+/, '')
+    .replace(/[.\-]+$/, '')
+    .slice(0, MAX_NAME_LEN);
+  return `${name || 'project'}-${digest}`;
+}
+
 export type GitRemoteReader = (cwd: string) => Promise<string | null>;
 
 // origin의 URL. git이 없거나 저장소가 아니거나 remote가 없으면 null.
@@ -70,22 +89,41 @@ export const readOriginUrl: GitRemoteReader = (cwd) =>
     );
   });
 
-// 프로젝트 프로필 id. remote가 없으면 null — 호출처는 프로젝트 지식을 안 쌓는다.
+// 프로젝트 지식 폴더 이름. remote가 있으면 그것으로, 없으면 폴더 경로로 정한다.
 export async function resolveProjectProfileId(
   cwd: string,
   opts: { readRemote?: GitRemoteReader; logger?: Logger } = {},
-): Promise<string | null> {
+): Promise<string> {
   const log = opts.logger ?? noopLogger;
   const read = opts.readRemote ?? readOriginUrl;
-  let url: string | null;
+  let url: string | null = null;
   try {
     url = await read(cwd);
   } catch (err) {
     log.warn(`gitRemote: origin 조회 실패 — ${err instanceof Error ? err.message : String(err)}`);
-    return null;
   }
-  if (!url) return null;
-  const normalized = normalizeRemoteUrl(url);
-  if (!normalized) return null;
-  return profileIdForRemote(normalized);
+  const normalized = url ? normalizeRemoteUrl(url) : '';
+  return normalized ? profileIdForRemote(normalized) : profileIdForPath(cwd);
+}
+
+// 로컬로 쌓다가 remote가 생기면 키가 바뀌어 지식이 사라진 것처럼 보인다. remote 키 자리가 아직
+// 없고 경로 키 자리에 쌓인 것이 있으면 한 번 옮긴다. 저장소 루트 이전과 같은 모양이다.
+export function adoptPathKeyedProject(
+  projectsRootDir: string,
+  cwd: string,
+  resolvedId: string,
+  logger?: Logger,
+): void {
+  const log = logger ?? noopLogger;
+  const pathId = profileIdForPath(cwd);
+  if (resolvedId === pathId) return; // 경로 키를 쓰는 중 — 옮길 것이 없다
+  const from = join(projectsRootDir, pathId);
+  const to = join(projectsRootDir, resolvedId);
+  if (!existsSync(from) || existsSync(to)) return;
+  try {
+    renameSync(from, to);
+    log.log(`gitRemote: 경로 키 프로젝트 지식을 remote 키로 옮겼다 — ${pathId} -> ${resolvedId}`);
+  } catch (err) {
+    log.warn(`gitRemote: 프로젝트 지식 이전 실패 — ${err instanceof Error ? err.message : String(err)}`);
+  }
 }
