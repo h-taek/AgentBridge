@@ -112,6 +112,9 @@ describe('runProposalPass — scope 분배', () => {
     const project = await readProposals(globalDir, PROJECT);
     assert.deepEqual(user.map((p) => p.title), ['사용자 규칙']);
     assert.deepEqual(project.map((p) => p.title), ['이 저장소 규칙']);
+    // 판단 근거를 저장에도 남긴다 — 패널 표시와 재분류의 근거.
+    assert.equal(user[0].scope, 'user');
+    assert.equal(project[0].scope, 'project');
   });
 
   it('scope가 없으면 사용자 것으로 본다 — 0.5.0 이전 출력 호환', async () => {

@@ -87,6 +87,9 @@ export async function writeProposals(
       id: proposalId(inp.category, inp.title),
       createdAt: new Date().toISOString(),
       category: inp.category,
+      // 어느 프로필로 갈지는 이미 정해졌지만, 무엇으로 판단해 여기 왔는지를 함께 남긴다 —
+      // 패널이 표시하고, 나중에 재분류가 필요할 때 근거가 된다.
+      ...(inp.scope ? { scope: inp.scope } : {}),
       title: clampLen(inp.title, PROPOSAL_CAPS.title),
       summary: clampLen(inp.summary, PROPOSAL_CAPS.summary),
       body: clampLen(inp.body, PROPOSAL_CAPS.body),
