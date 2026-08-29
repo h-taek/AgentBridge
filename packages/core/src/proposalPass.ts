@@ -15,12 +15,16 @@ import { buildProposalPrompt } from './proposalPrompt';
 import { parseProposalOutput } from './proposalParse';
 import { collectProposalTurns, writeProposalCursor, bumpCompactionCount, shouldRunProposalPass } from './proposalCursor';
 import { writeProposals } from './proposalStore';
-import { readProfileDocs } from './globalStore';
+import { readProfileDocs, ensureProfile } from './globalStore';
 
 export type RunProposalPassArgs = {
   workspaceRoot: string;
   globalDir: string;
+  // 사용자 프로필(default). scope=user인 제안이 여기로 간다.
   profileId: string;
+  // 프로젝트 프로필(git remote로 정해짐). 없으면 scope=project인 제안은 버린다 —
+  // remote 없는 저장소는 프로젝트 지식 없이 0.5.0 이전과 같이 돌아간다.
+  projectProfileId?: string | null;
   decision: RefineDecision;
   envProbe: EnvProbe;
   logger?: Logger;
@@ -46,9 +50,16 @@ export async function runProposalPass(args: RunProposalPassArgs): Promise<Propos
     return { written: 0, skipped: 0, skippedReason: 'no-new-turns' };
   }
 
-  // 중복방지용 기존 프로필 인덱스(카테고리·제목).
-  const docs = await readProfileDocs(args.globalDir, args.profileId).catch(() => []);
-  const existingIndex = docs.map((d) => ({ category: d.category, title: d.title }));
+  // 중복방지용 기존 인덱스 — 두 프로필을 합쳐 넣는다. 갈라 넣으면 이미 프로젝트 쪽에 있는 사실을
+  // 사용자 쪽에 다시 제안하는(그 반대도) 중복이 생긴다.
+  const userDocs = await readProfileDocs(args.globalDir, args.profileId).catch(() => []);
+  const projectDocs = args.projectProfileId
+    ? await readProfileDocs(args.globalDir, args.projectProfileId).catch(() => [])
+    : [];
+  const existingIndex = [...userDocs, ...projectDocs].map((d) => ({
+    category: d.category,
+    title: d.title,
+  }));
 
   const prompt = buildProposalPrompt({ turns: collected.turns, existingIndex });
 
@@ -69,14 +80,37 @@ export async function runProposalPass(args: RunProposalPassArgs): Promise<Propos
     return { written: 0, skipped: 0, skippedReason: 'parse-failed' };
   }
 
-  const { written, skipped } = await writeProposals(args.globalDir, args.profileId, parsed.proposals, {
-    existingDocTitles: existingIndex,
-  });
+  // scope로 갈라 각 프로필에 쓴다. 중복 판정은 합본 인덱스로 하되 저장은 제 자리로 간다.
+  const forUser = parsed.proposals.filter((p) => p.scope !== 'project');
+  const forProject = args.projectProfileId
+    ? parsed.proposals.filter((p) => p.scope === 'project')
+    : [];
+  const droppedProject = parsed.proposals.length - forUser.length - forProject.length;
+
+  let written = 0;
+  let skipped = 0;
+  if (forUser.length) {
+    const r = await writeProposals(args.globalDir, args.profileId, forUser, {
+      existingDocTitles: existingIndex,
+    });
+    written += r.written.length;
+    skipped += r.skipped.length;
+  }
+  if (forProject.length && args.projectProfileId) {
+    // 프로젝트 프로필은 첫 제안이 나올 때 만들어진다 — remote 없는 저장소에 빈 프로필을 남기지 않는다.
+    await ensureProfile(args.globalDir, args.projectProfileId);
+    const r = await writeProposals(args.globalDir, args.projectProfileId, forProject, {
+      existingDocTitles: existingIndex,
+    });
+    written += r.written.length;
+    skipped += r.skipped.length;
+  }
 
   // 성공(분석+파싱 완료) 시에만 커서 전진 — 실패 시 재처리되도록.
   if (collected.newCursor) await writeProposalCursor(args.workspaceRoot, collected.newCursor);
-  log.log(`proposalPass: wrote ${written.length}, skipped ${skipped.length}, cursor → ${collected.newCursor}`);
-  return { written: written.length, skipped: skipped.length };
+  const droppedNote = droppedProject > 0 ? `, dropped ${droppedProject} project-scoped (no git remote)` : '';
+  log.log(`proposalPass: wrote ${written}, skipped ${skipped}${droppedNote}, cursor → ${collected.newCursor}`);
+  return { written, skipped };
 }
 
 // 워크스페이스당 분석 패스 1개만 동시 실행(중복 헤드리스 spawn 방지). 프로세스별 상태 —
@@ -88,6 +122,7 @@ export type RunProposalTriggerArgs = {
   workspaceRoot: string;
   globalDir: string;
   profileId: string;
+  projectProfileId?: string | null;
   activeModel: CliKind;
   refineConfig: RefinePolicyConfig;
   envProbe: EnvProbe;
@@ -117,6 +152,7 @@ export async function runProposalTrigger(args: RunProposalTriggerArgs): Promise<
         workspaceRoot: args.workspaceRoot,
         globalDir: args.globalDir,
         profileId: args.profileId,
+        projectProfileId: args.projectProfileId,
         decision,
         envProbe: args.envProbe,
         logger: args.logger,

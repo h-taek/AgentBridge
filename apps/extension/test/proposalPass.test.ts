@@ -65,3 +65,90 @@ describe('runProposalPass', () => {
     assert.equal((await readProposalState(workspaceRoot)).lastProcessedId, null); // 전진 안 됨
   });
 });
+
+// 0.5.0 B-1 — scope로 두 프로필에 갈라 쓴다. 중복 판정은 합본 인덱스로 한다.
+describe('runProposalPass — scope 분배', () => {
+  const PROJECT = 'h-taek-agentbridge-deadbeef';
+  const analysisWith = (items: unknown[]) => async () =>
+    ({ result: { assistantText: JSON.stringify(items) } }) as any;
+
+  const run = (
+    globalDir: string,
+    workspaceRoot: string,
+    items: unknown[],
+    projectProfileId?: string | null,
+  ) =>
+    runProposalPass({
+      workspaceRoot,
+      globalDir,
+      profileId: DEFAULT_PROFILE_ID,
+      projectProfileId,
+      decision: { policy: 'priority', order: ['agy'] } as any,
+      envProbe: {} as any,
+      runAnalysis: analysisWith(items),
+    });
+
+  const item = (scope: string | undefined, title: string) => ({
+    category: 'conventions',
+    ...(scope ? { scope } : {}),
+    title,
+    summary: 's',
+    body: 'b',
+    confidence: 0.9,
+  });
+
+  it('user는 사용자 프로필, project는 프로젝트 프로필로 간다', async () => {
+    const { globalDir, workspaceRoot } = await setup();
+    await appendTurn(workspaceRoot, turn('a', '2026-06-13T00:00:01Z', 'q'));
+    const res = await run(
+      globalDir,
+      workspaceRoot,
+      [item('user', '사용자 규칙'), item('project', '이 저장소 규칙')],
+      PROJECT,
+    );
+    assert.equal(res.written, 2);
+
+    const user = await readProposals(globalDir, DEFAULT_PROFILE_ID);
+    const project = await readProposals(globalDir, PROJECT);
+    assert.deepEqual(user.map((p) => p.title), ['사용자 규칙']);
+    assert.deepEqual(project.map((p) => p.title), ['이 저장소 규칙']);
+  });
+
+  it('scope가 없으면 사용자 것으로 본다 — 0.5.0 이전 출력 호환', async () => {
+    const { globalDir, workspaceRoot } = await setup();
+    await appendTurn(workspaceRoot, turn('a', '2026-06-13T00:00:01Z', 'q'));
+    await run(globalDir, workspaceRoot, [item(undefined, '스코프 없음')], PROJECT);
+    assert.equal((await readProposals(globalDir, DEFAULT_PROFILE_ID)).length, 1);
+    assert.equal((await readProposals(globalDir, PROJECT)).length, 0);
+  });
+
+  it('remote가 없으면 project 제안은 버리고 user만 쌓는다', async () => {
+    const { globalDir, workspaceRoot } = await setup();
+    await appendTurn(workspaceRoot, turn('a', '2026-06-13T00:00:01Z', 'q'));
+    const res = await run(globalDir, workspaceRoot, [
+      item('user', '사용자 규칙'),
+      item('project', '버려질 프로젝트 규칙'),
+    ]);
+    assert.equal(res.written, 1);
+    assert.deepEqual(
+      (await readProposals(globalDir, DEFAULT_PROFILE_ID)).map((p) => p.title),
+      ['사용자 규칙'],
+    );
+  });
+
+  it('프로젝트 제안이 없으면 프로젝트 프로필을 만들지 않는다', async () => {
+    const { globalDir, workspaceRoot } = await setup();
+    await appendTurn(workspaceRoot, turn('a', '2026-06-13T00:00:01Z', 'q'));
+    await run(globalDir, workspaceRoot, [item('user', '사용자 규칙')], PROJECT);
+    await assert.rejects(() => fsp.stat(join(globalDir, 'profiles', PROJECT)));
+  });
+
+  it('경로 탈출 profileId는 거절한다', async () => {
+    const { globalDir, workspaceRoot } = await setup();
+    await appendTurn(workspaceRoot, turn('a', '2026-06-13T00:00:01Z', 'q'));
+    await assert.rejects(
+      () => run(globalDir, workspaceRoot, [item('project', 'x')], '../escape'),
+      /single path segment/,
+    );
+  });
+});

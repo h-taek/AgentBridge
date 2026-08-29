@@ -1,8 +1,16 @@
 // 헤드리스 제안 출력(JSON 배열) 추출·검증. parse.ts의 IR 파서와 같은 방어 전략:
 // fence/산문 제거 → 첫 balanced 배열 추출 → 항목별 강제 변환 + 유효 카테고리·제목 필수.
-import { GLOBAL_CATEGORIES, DOC_CAPS, type GlobalCategory, type ProposalInput } from './shared/global';
+import {
+  GLOBAL_CATEGORIES,
+  PROPOSAL_SCOPES,
+  DOC_CAPS,
+  type GlobalCategory,
+  type ProposalInput,
+  type ProposalScope,
+} from './shared/global';
 
 const CATEGORY_SET = new Set<string>(GLOBAL_CATEGORIES);
+const SCOPE_SET = new Set<string>(PROPOSAL_SCOPES);
 
 function stripCodeFence(s: string): string {
   const m = s.match(/```(?:json|javascript|js)?\s*\n?([\s\S]*?)\n?```/i);
@@ -85,9 +93,17 @@ export function parseProposalOutput(assistantText: string): ParseProposalResult 
       if (!body) { warnings.push('dropped: empty summary and body'); continue; }
       summary = title;
     }
+    // scope는 category와 달리 틀려도 버리지 않는다. 빠뜨린 출력까지 통째로 날리면 0.5.0 이전과
+    // 같은 상태(사용자 지식만 쌓임)가 아니라 아무것도 안 쌓이는 상태가 된다.
+    const rawScope = asStr(o.scope).trim().toLowerCase();
+    let scope: ProposalScope = 'user';
+    if (SCOPE_SET.has(rawScope)) scope = rawScope as ProposalScope;
+    else if (rawScope) warnings.push(`scope "${rawScope}" not recognized — treated as user`);
+
     const indexEntries = asIndexEntries(o.indexEntries);
     proposals.push({
       category: category as GlobalCategory,
+      scope,
       title,
       summary,
       body,

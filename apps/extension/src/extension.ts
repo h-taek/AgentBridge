@@ -11,6 +11,7 @@ import {
   runProposalTrigger,
   getGlobalDir,
   resolveProfile,
+  resolveProjectProfileId,
   readIR,
   migrateLegacyGlobalIfNeeded,
 } from '@agentbridge/core';
@@ -147,11 +148,18 @@ export function activate(context: vscode.ExtensionContext) {
       const ir = await readIR(workspaceRoot);
       const activeModel: CliKind = (ir?.meta.lastModel as CliKind) ?? 'claude';
       const cfg = getConfig();
+      // 프로젝트 프로필 키는 git remote에서 나온다. 워크스페이스 폴더 경로가 있어야 읽을 수 있고,
+      // remote가 없으면 null — 프로젝트 지식 없이 예전과 같이 돈다.
+      const folder = vscode.workspace.workspaceFolders?.[0]?.uri;
+      const projectProfileId = folder
+        ? await resolveProjectProfileId(folder.fsPath, { logger: getLogger() })
+        : null;
       await runProposalTrigger({
         workspaceId,
         workspaceRoot,
         globalDir: getGlobalDir(),
         profileId: resolveProfile(workspaceId),
+        projectProfileId,
         activeModel,
         refineConfig: {
           policy: cfg.refinePolicy,

@@ -11,16 +11,17 @@ import { validateGlobalUpdateInput } from './globalValidate';
 import type { GlobalUpdateInput } from './shared/global';
 import type { SearchDocRecord } from './globalSearch';
 
-// v1: 항상 default (vNext에서 workspace→profile 매핑 도입 — §F).
+// 사용자 프로필은 계속 하나다(default). 그 옆에 서는 프로젝트 프로필은 git remote로 정해지므로
+// 워크스페이스 id가 아니라 폴더 경로가 필요하다 — resolveProjectProfileId(gitRemote.ts)가 맡는다.
 export function resolveProfile(_workspaceId: string): string {
   return DEFAULT_PROFILE_ID;
 }
 
-// profiles/default 골격을 만든다. 이미 있으면 무손상 반환(멱등).
+// 프로필 골격을 만든다. 이미 있으면 무손상 반환(멱등).
 // tmp 디렉토리에 완성 후 atomic rename publish(§A.3) — hook이 반쯤 만들어진 프로필을 읽는 일 방지.
-export async function ensureDefaultProfile(globalDir: string): Promise<void> {
+export async function ensureProfile(globalDir: string, profileId: string): Promise<void> {
   await withFileLock(globalDir, async () => {
-    const dir = profileDir(globalDir, DEFAULT_PROFILE_ID);
+    const dir = profileDir(globalDir, profileId); // 단일 세그먼트 검증 포함
     try {
       await fsp.stat(dir);
       return; // 이미 존재
@@ -28,17 +29,17 @@ export async function ensureDefaultProfile(globalDir: string): Promise<void> {
       /* 없음 → 생성 */
     }
     await fsp.mkdir(profilesRoot(globalDir), { recursive: true });
-    const tmp = join(profilesRoot(globalDir), `.tmp-default-${process.pid}-${Date.now()}`);
+    const tmp = join(profilesRoot(globalDir), `.tmp-${profileId}-${process.pid}-${Date.now()}`);
     await fsp.rm(tmp, { recursive: true, force: true });
     await fsp.mkdir(join(tmp, 'docs'), { recursive: true });
     await fsp.mkdir(join(tmp, 'proposals'), { recursive: true });
     const now = new Date().toISOString();
     await fsp.writeFile(
       join(tmp, 'profile.json'),
-      JSON.stringify({ version: 1, name: DEFAULT_PROFILE_ID, summary: '', createdAt: now, updatedAt: now }, null, 2) + '\n',
+      JSON.stringify({ version: 1, name: profileId, summary: '', createdAt: now, updatedAt: now }, null, 2) + '\n',
       'utf8',
     );
-    await fsp.writeFile(join(tmp, 'index.md'), renderIndexMarkdown({ profileId: DEFAULT_PROFILE_ID, docs: [] }), 'utf8');
+    await fsp.writeFile(join(tmp, 'index.md'), renderIndexMarkdown({ profileId, docs: [] }), 'utf8');
     try {
       await fsp.rename(tmp, dir);
     } catch {
@@ -46,6 +47,10 @@ export async function ensureDefaultProfile(globalDir: string): Promise<void> {
       await fsp.rm(tmp, { recursive: true, force: true });
     }
   });
+}
+
+export function ensureDefaultProfile(globalDir: string): Promise<void> {
+  return ensureProfile(globalDir, DEFAULT_PROFILE_ID);
 }
 
 // docs/ 하위 .md를 재귀 나열 (상대 경로). gc-tree store.ts listDocRelativePaths 이식.

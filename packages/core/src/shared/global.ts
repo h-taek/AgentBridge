@@ -27,8 +27,14 @@ export const DOC_CAPS = {
 } as const;
 
 // ─── 자동제안(§D.1) — 동결 스키마(§H)에 indexEntries를 additive 확장(옵셔널 → 옛 제안·기존 파서 하위호환) ───
+// 이 사실이 사용자의 것인가 이 저장소의 것인가 (0.5.0 B-1). 프로필을 가르는 유일한 기준이다.
+export const PROPOSAL_SCOPES = ['user', 'project'] as const;
+export type ProposalScope = (typeof PROPOSAL_SCOPES)[number];
+
 export type ProposalInput = {
   category: GlobalCategory;
+  // 없으면 사용자 것으로 본다 — 0.5.0 이전에 저장된 제안과 scope를 빠뜨린 모델 출력을 위한 기본값.
+  scope?: ProposalScope;
   title: string;
   summary: string;
   body: string;
