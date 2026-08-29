@@ -1,5 +1,8 @@
 // agy transcript.jsonl 레코드 → TurnRecord[]. 순수 함수. claude/codex와 동일한 jsonl reader 인터페이스.
-// 소스: ~/.gemini/antigravity-cli/brain/<convUUID>/.system_generated/logs/transcript.jsonl
+// 소스: 종료 훅 `Stop`이 알려주는 `transcriptPath`. 실측상
+//   ~/.gemini/antigravity-cli/brain/<convUUID>/.system_generated/logs/transcript_full.jsonl 을 가리킨다.
+//   같은 폴더의 transcript.jsonl은 긴 필드를 잘라낸 판이다(truncated_fields 키로 표시) — 훅이
+//   알려주는 쪽이 잘리지 않은 원본이다 (research 07 §3-1). 레코드 타입·키는 둘이 같다.
 //   - 각 스텝 "완료" 시 한 줄씩 append (status는 항상 DONE — 라이브 검증).
 //   - user 턴:  type=USER_INPUT + source=USER_EXPLICIT (content는 <USER_REQUEST>…</USER_REQUEST>로 감싸짐).
 //   - 주입:     source=SYSTEM(CONVERSATION_HISTORY 등) → 무시.
