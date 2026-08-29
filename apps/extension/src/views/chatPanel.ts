@@ -832,7 +832,8 @@ export class ChatPanel {
       background: var(--vscode-panel-background, var(--vscode-editor-background, #1e1e1e));
       position: relative;
     }
-    #terminal-container.drop-active::after {
+    #terminal-container.drop-active::after,
+    #terminal-container.drop-report::after {
       content: 'Drop with Shift to insert paths';
       position: absolute;
       inset: 8px;
@@ -845,6 +846,11 @@ export class ChatPanel {
       pointer-events: none;
       z-index: 50;
       font-size: 13px;
+    }
+    /* 드롭 결과를 잠깐 띄운다 — 실패가 조용히 지나가지 않게. */
+    #terminal-container.drop-report::after {
+      content: attr(data-drop-msg);
+      border-style: solid;
     }
     .xterm { height: 100%; }
     .xterm-viewport { background-color: inherit !important; }
@@ -1140,43 +1146,79 @@ export class ChatPanel {
       if (!types) return false;
       for (let i = 0; i < types.length; i++) {
         const t = types[i];
-        if (t === 'Files' || t === 'text/uri-list' || t.includes('resource-urls') || t.includes('codeeditors')) return true;
+        if (t === 'Files' || t === 'text/uri-list' || t === 'text/plain') return true;
+        // VS Code 내부 드래그 — 탐색기·편집기 탭이 저마다 다른 이름을 싣는다.
+        if (t.includes('resource-urls') || t.includes('codeeditors') || t.indexOf('application/vnd.code') === 0) return true;
       }
       return false;
     }
-    function isShiftActive(e) {
-      return !!(e && e.shiftKey);
+
+    // Shift 래치 — 커서가 이 화면 안에 있는 동안 Shift가 한 번이라도 눌리면 그 드래그를 우리 것으로
+    // 잡고, 화면을 벗어나거나 드래그가 끝날 때까지 유지한다.
+    //
+    // 매 이벤트마다 shiftKey를 다시 보면 마우스를 놓기 직전에 Shift가 떨어진 드롭이 씹힌다.
+    // 리스너가 웹뷰 document에 있어 커서가 이 화면 위일 때만 이벤트가 오므로, 래치의 유효 범위는
+    // 자연히 이 패널로 한정된다 — 편집기나 탐색기 위의 드래그는 애초에 우리에게 오지 않는다.
+    let dragLatched = false;
+    let dragDepth = 0;
+    let dropReportTimer = null;
+
+    function releaseDrag() {
+      dragLatched = false;
+      dragDepth = 0;
+      container.classList.remove('drop-active');
+    }
+    // 이미 잡은 드래그면 Shift와 타입을 다시 묻지 않는다.
+    function latchDrag(e) {
+      if (!dragLatched && e.shiftKey && hasFileLikeType(e.dataTransfer && e.dataTransfer.types)) {
+        dragLatched = true;
+      }
+      return dragLatched;
+    }
+    // 드롭 결과를 잠깐 띄운다. 실패가 로그에만 남고 화면은 조용한 상태를 없앤다.
+    function reportDrop(msg) {
+      container.dataset.dropMsg = msg;
+      container.classList.add('drop-report');
+      if (dropReportTimer) clearTimeout(dropReportTimer);
+      dropReportTimer = setTimeout(() => container.classList.remove('drop-report'), 2600);
     }
 
     document.addEventListener('dragenter', (e) => {
-      if (!isShiftActive(e) || !hasFileLikeType(e.dataTransfer && e.dataTransfer.types)) return;
+      dragDepth++;
+      if (!latchDrag(e)) return;
       e.preventDefault();
       e.stopPropagation();
       container.classList.add('drop-active');
     }, true);
     document.addEventListener('dragover', (e) => {
-      if (!isShiftActive(e) || !hasFileLikeType(e.dataTransfer && e.dataTransfer.types)) return;
+      if (!latchDrag(e)) return;
       e.preventDefault();
       e.stopPropagation();
       if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
       container.classList.add('drop-active');
     }, true);
-    document.addEventListener('dragleave', (e) => {
-      // 드래그가 윈도우 밖으로 나가면 (relatedTarget=null) 오버레이 제거.
-      if (!e.relatedTarget) container.classList.remove('drop-active');
+    document.addEventListener('dragleave', () => {
+      // 진입·이탈 깊이로 판단한다. relatedTarget은 웹뷰 안에서 요소를 넘나들 때도 null로 와서,
+      // 그것만 보면 드래그 중에 표시가 깜빡이고 래치가 엉뚱하게 풀린다.
+      dragDepth = Math.max(0, dragDepth - 1);
+      if (dragDepth === 0) releaseDrag();
     }, true);
+    document.addEventListener('dragend', releaseDrag, true);
+    window.addEventListener('blur', releaseDrag);
+
     document.addEventListener('drop', (e) => {
-      container.classList.remove('drop-active');
-      if (!isShiftActive(e)) return;
+      const latched = dragLatched;
+      releaseDrag();
+      if (!latched) return;
       const dt = e.dataTransfer;
       if (!dt) return;
       const types = Array.from(dt.types || []);
-      if (!hasFileLikeType(types)) return;
       e.preventDefault();
       e.stopPropagation();
 
       const paths = new Set();
       const pending = [];
+      let failed = 0;
 
       // 1a. File.path가 있으면 직접 사용 (Electron 일부 환경에서만 노출)
       if (dt.files) {
@@ -1193,24 +1235,31 @@ export class ChatPanel {
             const reader = new FileReader();
             reader.onload = () => {
               const result = reader.result;
-              if (typeof result !== 'string') { resolve(); return; }
+              if (typeof result !== 'string') { failed++; resolve(); return; }
               const comma = result.indexOf(',');
               const base64 = comma >= 0 ? result.slice(comma + 1) : '';
-              if (!base64) { resolve(); return; }
+              if (!base64) { failed++; resolve(); return; }
               const reqId = 'attach-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+              let settled = false;
+              const finish = (ok) => {
+                if (settled) return;
+                settled = true;
+                window.removeEventListener('message', handler);
+                if (!ok) failed++;
+                resolve();
+              };
               const handler = (ev) => {
                 const m = ev.data;
                 if (m && m.type === 'attachSaved' && m.reqId === reqId) {
-                  window.removeEventListener('message', handler);
                   if (m.path) paths.add(m.path);
-                  resolve();
+                  finish(!!m.path);
                 }
               };
               window.addEventListener('message', handler);
               vscode.postMessage({ type: 'attachSave', reqId, name: f.name, base64 });
-              setTimeout(() => { window.removeEventListener('message', handler); resolve(); }, 10_000);
+              setTimeout(() => finish(false), 10_000);
             };
-            reader.onerror = () => resolve();
+            reader.onerror = () => { failed++; resolve(); };
             reader.readAsDataURL(f);
           }));
         }
@@ -1259,8 +1308,13 @@ export class ChatPanel {
 
       Promise.all(pending).then(() => {
         if (paths.size === 0) {
-          vscode.postMessage({ type: 'log', data: 'DnD: no paths extracted — types=' + JSON.stringify(types) });
+          reportDrop(failed > 0 ? 'Could not read the dropped file' : 'No file path found in this drop');
+          vscode.postMessage({ type: 'log', data: 'DnD: no paths extracted — failed=' + failed + ' types=' + JSON.stringify(types) });
           return;
+        }
+        if (failed > 0) {
+          reportDrop('Skipped ' + failed + ' file' + (failed > 1 ? 's' : '') + ' that could not be read');
+          vscode.postMessage({ type: 'log', data: 'DnD: ' + failed + ' file(s) failed, ' + paths.size + ' inserted' });
         }
         // @<path> mention 형식 — claude/codex/agy 모두 지원.
         const insertion = Array.from(paths).map(p => '@' + quoteMentionPath(p)).join(' ') + ' ';
