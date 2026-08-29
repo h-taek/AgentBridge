@@ -1,5 +1,6 @@
 import type { EventEmitter } from 'events';
 import type { CliKind } from '../shared/types';
+import type { HookIssue, HookIssueKind } from '@agentbridge/core';
 import { getHookStatusStore } from './coreInstances';
 
 // hookStatusEvents 호환 — 코어 인스턴스의 events EventEmitter를 그대로 노출.
@@ -12,16 +13,23 @@ export const hookStatusEvents: EventEmitter = new Proxy({} as EventEmitter, {
   },
 });
 
-export function setHookDisabled(workspaceId: string, model: CliKind, reason: string): void {
-  getHookStatusStore().setDisabled(workspaceId, model, reason);
-}
-
-export function clearHookDisabled(workspaceId: string, model: CliKind): void {
-  getHookStatusStore().clearDisabled(workspaceId, model);
-}
-
-export function getHookDisabledReasons(
+export function setHookDisabled(
   workspaceId: string,
-): Array<{ model: CliKind; reason: string }> {
+  model: CliKind,
+  reason: string,
+  kind: HookIssueKind = 'install',
+): void {
+  getHookStatusStore().setDisabled(workspaceId, model, reason, kind);
+}
+
+export function clearHookDisabled(
+  workspaceId: string,
+  model: CliKind,
+  kind: HookIssueKind = 'install',
+): void {
+  getHookStatusStore().clearDisabled(workspaceId, model, kind);
+}
+
+export function getHookDisabledReasons(workspaceId: string): HookIssue[] {
   return getHookStatusStore().getDisabledReasons(workspaceId);
 }

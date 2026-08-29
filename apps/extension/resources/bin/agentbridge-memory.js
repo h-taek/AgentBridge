@@ -440,6 +440,19 @@ var { resolveContext: resolveContext2 } = (init_globalSearch(), __toCommonJS(glo
 var { resolveQuery: resolveQuery2, renderGlobalMatches: renderGlobalMatches2, extractSessionIdFromStdin: extractSessionIdFromStdin2 } = (init_globalInject(), __toCommonJS(globalInject_exports));
 var { wrapInjectedContext: wrapInjectedContext2 } = (init_contextTag(), __toCommonJS(contextTag_exports));
 var TERMINATION_EVENTS = /* @__PURE__ */ new Set(["Stop", "StopFailure"]);
+function writeHookError(wsDir, agent, event, message) {
+  try {
+    const token = process.env.AGENTBRIDGE_WS_SESSION || "";
+    if (!wsDir || !token || token !== path.basename(token)) return;
+    const dir = path.join(wsDir, "sessions", token);
+    fs.mkdirSync(dir, { recursive: true });
+    const out = path.join(dir, "hook-error.json");
+    const tmp = out + "." + process.pid + ".tmp";
+    fs.writeFileSync(tmp, JSON.stringify({ agent, event, message: String(message), at: Date.now() }));
+    fs.renameSync(tmp, out);
+  } catch {
+  }
+}
 function buildTurnSignal(agent, event, payload) {
   const p = payload && typeof payload === "object" ? payload : {};
   const str = (v) => typeof v === "string" && v.trim() ? v : "";
@@ -735,6 +748,7 @@ async function main() {
   const rel = path.relative(storageRoot, wsDir);
   if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) {
     process.stderr.write("agentbridge-memory: AGENTBRIDGE_WS_DIR must live under the storage root\n");
+    writeHookError(wsDir, parsed.agent, parsed.event, "AGENTBRIDGE_WS_DIR\uAC00 \uC800\uC7A5\uC18C \uB8E8\uD2B8 \uBC16\uC744 \uAC00\uB9AC\uD0A8\uB2E4");
     process.stdout.write(JSON.stringify(buildHookOutput(parsed.agent, parsed.event, "")));
     process.exit(0);
   }
@@ -767,9 +781,9 @@ async function main() {
       fs.renameSync(tmp, out);
     }
   } catch (e) {
-    process.stderr.write(
-      "agentbridge-memory: capture write skipped \u2014 " + String(e && e.message ? e.message : e) + "\n"
-    );
+    const msg = String(e && e.message ? e.message : e);
+    process.stderr.write("agentbridge-memory: capture write skipped \u2014 " + msg + "\n");
+    writeHookError(wsDir, parsed.agent, parsed.event, "\uC138\uC158 id \uCEA1\uCC98 \uC2E4\uD328 \u2014 " + msg);
   }
   if (TERMINATION_EVENTS.has(parsed.event)) {
     try {
@@ -789,9 +803,9 @@ async function main() {
         fs.renameSync(tmp, out);
       }
     } catch (e) {
-      process.stderr.write(
-        "agentbridge-memory: turn signal write skipped \u2014 " + String(e && e.message ? e.message : e) + "\n"
-      );
+      const msg = String(e && e.message ? e.message : e);
+      process.stderr.write("agentbridge-memory: turn signal write skipped \u2014 " + msg + "\n");
+      writeHookError(wsDir, parsed.agent, parsed.event, "\uD134 \uC885\uB8CC \uC2E0\uD638 \uC4F0\uAE30 \uC2E4\uD328 \u2014 " + msg);
     }
     process.stdout.write(JSON.stringify(buildTerminationOutput(parsed.agent)));
     process.exit(0);

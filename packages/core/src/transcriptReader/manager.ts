@@ -94,13 +94,18 @@ export class CaptureSession {
     }
   }
 
-  private ctx(): ReaderCtx {
-    return { workspaceId: this.opts.workspaceId, sessionId: this.opts.sessionId, detail: this.opts.getDetail() };
+  private ctx(turnClosed: boolean): ReaderCtx {
+    return {
+      workspaceId: this.opts.workspaceId,
+      sessionId: this.opts.sessionId,
+      detail: this.opts.getDetail(),
+      turnClosed,
+    };
   }
 
   // 매 tick EMPTY_CARRY로 호출(atomic-read는 cursor부터 통째로 다시 읽으므로 메모리 carry 불필요).
-  private runReader(input: unknown[]): ConsumeResult {
-    const ctx = this.ctx();
+  private runReader(input: unknown[], turnClosed: boolean): ConsumeResult {
+    const ctx = this.ctx(turnClosed);
     switch (this.opts.model) {
       case 'codex':
         return codexConsume(input, EMPTY_CARRY, ctx);
@@ -113,7 +118,9 @@ export class CaptureSession {
 
   // 증분 1회 처리(atomic-read): cursor(미완 꼬리 시작)부터 EOF까지 읽어, 완료로 확정된 턴만 append하고
   // cursor를 그 끝까지만 전진한다. 완료 태그 없는 꼬리는 cursor 유지 → 다음 tick에 다시 읽는다.
-  async tick(): Promise<void> {
+  // turnClosed: 종료 훅이 "이 턴은 끝났다"고 알려온 tick인가. agy는 transcript에 완료 표시가 없어
+  // 이 값으로만 턴을 닫는다 (0.5.0 A-2).
+  async tick(turnClosed = false): Promise<void> {
     await this.ensureLoaded();
     const cursor = this.cursor as number;
 
@@ -126,10 +133,12 @@ export class CaptureSession {
     }
 
     if (inc.records.length === 0) return; // 완전한 새 라인 없음 — cursor 유지
-    if (inc.offset === this.lastEof) return; // 파일이 안 자람 — 같은 미완 꼬리 재처리 방지
+    // 파일이 안 자람 — 같은 미완 꼬리 재처리 방지. 단 종료 신호가 온 tick은 통과시킨다.
+    // 그때는 내용이 아니라 "닫아도 된다"는 사실이 새로 온 것이라 다시 읽어야 한다.
+    if (inc.offset === this.lastEof && !turnClosed) return;
     this.lastEof = inc.offset;
 
-    const { turns, consumed } = this.runReader(inc.records);
+    const { turns, consumed } = this.runReader(inc.records, turnClosed);
     await this.emit(turns);
 
     // 완료된 턴 끝까지만 cursor 전진. 미완 꼬리(consumed..)는 다음 tick에 그 시작부터 다시 읽는다.
@@ -153,8 +162,8 @@ export class CaptureSession {
       this.log.warn(`CaptureSession finalize read 실패 (${this.opts.model}): ${String(err)}`);
       return;
     }
-    const { turns, carry } = this.runReader(inc.records);
-    const tail = finalizeCarry(carry, this.opts.model, this.ctx()); // 내용 없으면 null(빈-턴 skip)
+    const { turns, carry } = this.runReader(inc.records, false);
+    const tail = finalizeCarry(carry, this.opts.model, this.ctx(false)); // 내용 없으면 null(빈-턴 skip)
     const all = tail ? [...turns, tail] : turns;
     if (all.length) await this.emit(all);
   }

@@ -55,6 +55,23 @@ const TERMINATION_EVENTS = new Set(['Stop', 'StopFailure'])
 // 종료 페이로드를 하니스 차이 없는 한 모양으로 정규화한다.
 // claude/codex: session_id·transcript_path·agent_id (research 04 §1·§2)
 // agy: conversationId·transcriptPath·fullyIdle·terminationReason (§3)
+// 우리 훅이 제 일을 못 했다는 사실을 호스트가 볼 수 있는 자리에 남긴다.
+// stderr는 CLI가 삼키므로 파일이 유일한 통로다 (0.5.0 A-2).
+function writeHookError(wsDir, agent, event, message) {
+  try {
+    const token = process.env.AGENTBRIDGE_WS_SESSION || ''
+    if (!wsDir || !token || token !== path.basename(token)) return
+    const dir = path.join(wsDir, 'sessions', token)
+    fs.mkdirSync(dir, { recursive: true })
+    const out = path.join(dir, 'hook-error.json')
+    const tmp = out + '.' + process.pid + '.tmp'
+    fs.writeFileSync(tmp, JSON.stringify({ agent, event, message: String(message), at: Date.now() }))
+    fs.renameSync(tmp, out)
+  } catch {
+    /* 여기서 더 할 수 있는 게 없다 */
+  }
+}
+
 function buildTurnSignal(agent, event, payload) {
   const p = payload && typeof payload === 'object' ? payload : {}
   const str = (v) => (typeof v === 'string' && v.trim() ? v : '')
@@ -395,6 +412,7 @@ async function main() {
   const rel = path.relative(storageRoot, wsDir)
   if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) {
     process.stderr.write('agentbridge-memory: AGENTBRIDGE_WS_DIR must live under the storage root\n')
+    writeHookError(wsDir, parsed.agent, parsed.event, 'AGENTBRIDGE_WS_DIR가 저장소 루트 밖을 가리킨다')
     process.stdout.write(JSON.stringify(buildHookOutput(parsed.agent, parsed.event, '')))
     process.exit(0)
   }
@@ -433,9 +451,9 @@ async function main() {
       fs.renameSync(tmp, out)
     }
   } catch (e) {
-    process.stderr.write(
-      'agentbridge-memory: capture write skipped — ' + String(e && e.message ? e.message : e) + '\n'
-    )
+    const msg = String(e && e.message ? e.message : e)
+    process.stderr.write('agentbridge-memory: capture write skipped — ' + msg + '\n')
+    writeHookError(wsDir, parsed.agent, parsed.event, '세션 id 캡처 실패 — ' + msg)
   }
 
   // 턴 종료 신호 — 호스트가 이걸 받아 transcript를 읽는다 (0.5.0 A-2).
@@ -459,11 +477,9 @@ async function main() {
         fs.renameSync(tmp, out)
       }
     } catch (e) {
-      process.stderr.write(
-        'agentbridge-memory: turn signal write skipped — ' +
-          String(e && e.message ? e.message : e) +
-          '\n'
-      )
+      const msg = String(e && e.message ? e.message : e)
+      process.stderr.write('agentbridge-memory: turn signal write skipped — ' + msg + '\n')
+      writeHookError(wsDir, parsed.agent, parsed.event, '턴 종료 신호 쓰기 실패 — ' + msg)
     }
     process.stdout.write(JSON.stringify(buildTerminationOutput(parsed.agent)))
     process.exit(0)

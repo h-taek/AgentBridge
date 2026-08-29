@@ -46,6 +46,8 @@ interface Entry {
   opts: RegisterSessionOptions;
   session: CaptureSession | null;
   transcriptPath: string | null;
+  // 마지막 신호가 "턴이 온전히 끝났다"였는가. agy의 턴 닫기 근거로 리더까지 내려간다.
+  turnClosed: boolean;
   watcher: TurnSignalWatcher | null;
   abort: AbortController;
   timers: Set<ReturnType<typeof setTimeout>>;
@@ -73,6 +75,7 @@ export class CaptureManager {
       opts,
       session: null,
       transcriptPath: null,
+      turnClosed: false,
       watcher: null,
       abort: new AbortController(),
       timers: new Set(),
@@ -144,6 +147,7 @@ export class CaptureManager {
         `CaptureManager: transcript 경로가 바뀌었다 (${entry.opts.sessionId}) — 첫 경로를 유지한다`,
       );
     }
+    entry.turnClosed = sig.complete;
     // 훅이 뜬 시점엔 그 턴을 닫는 레코드가 아직 없을 수 있다 → 짧게 재시도.
     const delays = entry.opts.retryDelaysMs ?? SIGNAL_RETRY_DELAYS_MS;
     for (const ms of delays) {
@@ -182,6 +186,6 @@ export class CaptureManager {
         logger: this.log,
       });
     }
-    await entry.session.tick();
+    await entry.session.tick(entry.turnClosed);
   }
 }

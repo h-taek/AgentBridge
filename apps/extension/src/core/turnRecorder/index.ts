@@ -7,6 +7,7 @@ import type { CliKind } from '../../shared/types';
 import * as workspaceStore from '../workspaceStore';
 import { getCompactionScheduler, getWorkspaceStore, getLogger } from '../coreInstances';
 import { getConfig } from '../../settings/config';
+import { setHookDisabled } from '../hookStatusStore';
 
 // logger는 호출 시점에 lazily 조회 (모듈 로드 시 coreInstances 미초기화 가능).
 const manager = new CaptureManager({
@@ -14,7 +15,15 @@ const manager = new CaptureManager({
     log: (m) => getLogger().log(m),
     warn: (m) => getLogger().warn(m),
   },
+  // 신호가 왔는데 쓸 수 없으면 유추하지 않고 드러낸다 (0.5.0 A-2).
+  onSignalUnusable: ({ sessionId, model, reason }) => {
+    const workspaceId = signalWorkspaceIds.get(sessionId);
+    if (workspaceId) setHookDisabled(workspaceId, model, reason, 'runtime');
+  },
 });
+
+// onSignalUnusable이 워크스페이스를 알려면 등록 시점 매핑이 필요하다.
+const signalWorkspaceIds = new Map<string, string>();
 
 export function registerCapture(args: {
   workspaceId: string;
@@ -26,6 +35,7 @@ export function registerCapture(args: {
   // 자동 명명이 실제로 제목을 정했을 때 호출 — 호스트가 열린 탭 제목을 갱신(panel.title은 생성 시 1회성).
   onAutoNamed?: (title: string) => void;
 }): void {
+  signalWorkspaceIds.set(args.sessionId, args.workspaceId);
   manager.register({
     workspaceId: args.workspaceId,
     workspaceRoot: workspaceStore.getWorkspacePath(args.workspaceId),
@@ -65,5 +75,6 @@ export function registerCapture(args: {
 
 // 세션 종료 — finalize로 carry의 마지막 열린 턴 flush. deactivate는 panel별 disposeAndFlush가 호출.
 export function unregisterCapture(sessionId: string): Promise<void> {
+  signalWorkspaceIds.delete(sessionId);
   return manager.unregister(sessionId);
 }

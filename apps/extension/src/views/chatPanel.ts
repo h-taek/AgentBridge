@@ -5,8 +5,9 @@ import { chmodSync, createWriteStream, type WriteStream } from 'fs';
 import { join } from 'path';
 import * as output from '../log/output';
 import { registerCapture, unregisterCapture } from '../core/turnRecorder';
+import { setHookDisabled } from '../core/hookStatusStore';
 import { getSessions, renameSession, deleteSession, setModelSessionId, type SessionMeta } from '../core/sessionRegistry';
-import { captureSessionIdFromHook } from '@agentbridge/core';
+import { captureSessionIdFromHook, watchHookErrors, resolveHookErrorFile } from '@agentbridge/core';
 import * as workspaceStore from '../core/workspaceStore';
 import {
   acquireOwnership,
@@ -53,6 +54,7 @@ export class ChatPanel {
   private ownerDir: string | null = null;
   private deletedExternally = false;
   private modelSessionWatchAbort: AbortController | null = null;
+  private hookErrorWatchAbort: AbortController | null = null;
   private readonly opts: SpawnOptions;
   private readonly extensionUri: vscode.Uri;
   private onDisposeCallback: (() => void) | null = null;
@@ -347,10 +349,12 @@ export class ChatPanel {
       });
 
       this.startModelSessionIdWatcher();
+      this.startHookErrorWatcher();
 
       this.ptyProcess.onExit(({ exitCode, signal }) => {
         output.log(`ChatPanel PTY exited: code=${exitCode} signal=${signal ?? 'none'}`);
         this.modelSessionWatchAbort?.abort();
+        this.hookErrorWatchAbort?.abort();
         if (this.replayStream && !this.replayStream.destroyed) {
           this.replayStream.end();
           this.replayStream = null;
@@ -385,6 +389,26 @@ export class ChatPanel {
   // 훅이 <워크스페이스>/sessions/<세션 id>/captured.json에 native id를 쓰면 그것만 읽는다.
   // 폴더를 뒤져 알아맞히는 경로는 두지 않는다 — 틀린 id는 없는 id보다 나쁘다 (spec A-1).
   // 캡처되면 sessionRegistry.setModelSessionId로 영속화 → 다음 reopen에서 resume 인자 생성.
+  // 훅이 제 일을 못 했다는 사실을 드러낸다 (0.5.0 A-2). 폴백을 걷어낸 뒤로 이 상태를 덮어 줄
+  // 것이 없으므로, 조용히 절름발이로 도는 대신 UI에 띄운다.
+  private startHookErrorWatcher(): void {
+    const { workspaceId, sessionId, model } = this.opts;
+    if (!workspaceId || !sessionId || !model) return;
+    const ctrl = new AbortController();
+    this.hookErrorWatchAbort = ctrl;
+    const errorFilePath = resolveHookErrorFile(
+      workspaceStore.getWorkspacePath(workspaceId),
+      sessionId,
+    );
+    const watcher = watchHookErrors({
+      errorFilePath,
+      signal: ctrl.signal,
+      logger: { log: (m) => output.log(m), warn: (m) => output.warn(m) },
+      onError: (err) => setHookDisabled(workspaceId, model, err.message, 'runtime'),
+    });
+    ctrl.signal.addEventListener('abort', () => watcher.stop(), { once: true });
+  }
+
   private startModelSessionIdWatcher(): void {
     const { workspaceId, sessionId, model, hookCaptureFilePath } = this.opts;
     if (!workspaceId || !sessionId || !hookCaptureFilePath) return;
@@ -510,6 +534,7 @@ export class ChatPanel {
     if (this.opts.sessionId) activePanels.delete(this.opts.sessionId);
 
     this.modelSessionWatchAbort?.abort();
+    this.hookErrorWatchAbort?.abort();
     void this.flushCapture(); // fire-and-forget finalize (마지막 턴 flush 보장은 disposeAndFlush).
 
     if (this.replayStream && !this.replayStream.destroyed) {

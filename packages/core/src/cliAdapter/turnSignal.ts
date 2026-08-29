@@ -133,3 +133,95 @@ export function watchTurnSignals(opts: {
 
   return { stop };
 }
+
+// ─── 훅 실행 실패 통로 (0.5.0 A-2) ────────────────────────────────────────
+//
+// 훅은 CLI가 띄운 별도 프로세스라 우리 쪽으로 값을 되돌릴 통로가 없다. stderr는 CLI가 삼킨다.
+// 그래서 신호와 같은 방식으로 파일에 남기고 호스트가 읽는다. 폴백을 걷어낸 뒤로 훅이 값을
+// 안 주는 상태를 덮어 줄 것이 없으므로, 침묵 대신 표시로 드러내는 것이 이 파일의 존재 이유다.
+
+export const HOOK_ERROR_FILENAME = 'hook-error.json';
+
+export interface HookError {
+  agent: CliKind;
+  event: string;
+  message: string;
+  at: number;
+}
+
+export function resolveHookErrorFile(workspaceDir: string, sessionId: string): string {
+  return join(workspaceDir, 'sessions', sessionId, HOOK_ERROR_FILENAME);
+}
+
+export function parseHookError(raw: string): HookError | null {
+  let obj: unknown;
+  try {
+    obj = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!obj || typeof obj !== 'object') return null;
+  const o = obj as Record<string, unknown>;
+  const agent = str(o.agent);
+  if (agent !== 'claude' && agent !== 'codex' && agent !== 'agy') return null;
+  const message = str(o.message);
+  if (!message) return null;
+  return {
+    agent,
+    event: str(o.event),
+    message,
+    at: typeof o.at === 'number' && Number.isFinite(o.at) ? o.at : 0,
+  };
+}
+
+export function watchHookErrors(opts: {
+  errorFilePath: string;
+  onError: (err: HookError) => void;
+  intervalMs?: number;
+  signal: AbortSignal;
+  logger?: Logger;
+}): TurnSignalWatcher {
+  const log = opts.logger ?? noopLogger;
+  const pollMs = opts.intervalMs ?? 10000;
+  const file = opts.errorFilePath;
+  let lastAt = -1;
+  let stopped = false;
+  let watcher: SessionFileWatcher | null = null;
+  let timer: ReturnType<typeof setInterval> | null = null;
+
+  const stop = (): void => {
+    if (stopped) return;
+    stopped = true;
+    if (timer) clearInterval(timer);
+    watcher?.stop();
+    opts.signal.removeEventListener('abort', stop);
+  };
+
+  const check = async (): Promise<void> => {
+    if (stopped) return;
+    let raw: string;
+    try {
+      raw = await fs.readFile(file, 'utf8');
+    } catch {
+      return;
+    }
+    const err = parseHookError(raw);
+    if (!err || err.at <= lastAt) return;
+    lastAt = err.at;
+    log.warn(`hook 실행 실패 (${err.agent} ${err.event}): ${err.message}`);
+    opts.onError(err);
+  };
+
+  if (opts.signal.aborted) return { stop: () => {} };
+  opts.signal.addEventListener('abort', stop, { once: true });
+  watcher = createSessionFileWatcher({
+    root: dirname(file),
+    filenames: [basename(file)],
+    onChange: () => void check(),
+    logger: { warn: (m) => log.warn(m) },
+  });
+  timer = setInterval(() => void check(), pollMs);
+  void check();
+
+  return { stop };
+}

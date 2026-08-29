@@ -5,7 +5,7 @@ import { promises as fs } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { spawn } from 'child_process';
-import { parseTurnSignal } from '@agentbridge/core';
+import { parseTurnSignal, parseHookError } from '@agentbridge/core';
 
 const BUNDLED_HELPER = join(__dirname, '..', 'resources', 'bin', 'agentbridge-memory.js');
 
@@ -178,5 +178,50 @@ describe('종료 훅 신호 — 호스트 파싱', () => {
     assert.equal(parseTurnSignal(JSON.stringify({ ...base, agent: 'gemini' })), null);
     assert.equal(parseTurnSignal('{"agent":"claude","ev'), null);
     assert.equal(parseTurnSignal(JSON.stringify({ ...base, event: '' })), null);
+  });
+});
+
+describe('훅 실행 실패 통로', () => {
+  const WS = 'ws-err';
+  const TOKEN = 'sess-err';
+  let userData: string;
+  let helper: string;
+
+  beforeEach(async () => {
+    userData = await fs.mkdtemp(join(tmpdir(), 'ab-hookerr-'));
+    await fs.mkdir(join(userData, 'workspaces', WS), { recursive: true });
+    await fs.mkdir(join(userData, 'bin'), { recursive: true });
+    helper = join(userData, 'bin', 'agentbridge-memory.js');
+    await fs.copyFile(BUNDLED_HELPER, helper);
+  });
+  afterEach(async () => {
+    await fs.rm(userData, { recursive: true, force: true });
+  });
+
+  it('저장소 루트 밖을 가리키면 파일로 남긴다 — stderr는 CLI가 삼킨다', async () => {
+    const outside = await fs.mkdtemp(join(tmpdir(), 'ab-outside-'));
+    await fs.mkdir(join(outside, 'sessions', TOKEN), { recursive: true });
+    await new Promise<void>((resolve) => {
+      const p = spawn('node', [helper, 'inject', '--agent', 'codex', '--event', 'UserPromptSubmit'], {
+        env: { ...process.env, AGENTBRIDGE_WS_SESSION: TOKEN, AGENTBRIDGE_WS_DIR: outside },
+      });
+      p.stdout.on('data', () => {});
+      p.stderr.on('data', () => {});
+      p.stdin.write('{}');
+      p.stdin.end();
+      p.on('close', () => resolve());
+    });
+    const raw = await fs.readFile(join(outside, 'sessions', TOKEN, 'hook-error.json'), 'utf8');
+    const err = parseHookError(raw);
+    assert.ok(err, '파싱 가능한 오류 기록이어야 한다');
+    assert.equal(err!.agent, 'codex');
+    assert.match(err!.message, /저장소 루트/);
+    await fs.rm(outside, { recursive: true, force: true });
+  });
+
+  it('형식이 어긋난 기록은 무시한다', () => {
+    assert.equal(parseHookError('{"agent":"claude"}'), null, '메시지 없는 기록은 무시');
+    assert.equal(parseHookError('not json'), null);
+    assert.equal(parseHookError('{"agent":"gemini","message":"x"}'), null);
   });
 });

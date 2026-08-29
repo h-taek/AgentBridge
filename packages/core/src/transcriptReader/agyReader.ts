@@ -5,8 +5,9 @@
 //   - 주입:     source=SYSTEM(CONVERSATION_HISTORY 등) → 무시.
 //   - 도구 호출: type=PLANNER_RESPONSE + tool_calls 있음 (content 없음).
 //   - 도구 결과: 도구별 type(LIST_DIRECTORY/VIEW_FILE 등) + content → 직전 도구 호출 summary.
-//   - 턴 끝(즉시 flush): type=PLANNER_RESPONSE + content 있음 + tool_calls 없음 = 사용자에게 보내는 최종 답변.
-//     (라이브 검증: 중간 스텝은 content 없거나 tool_calls 있음 → 오탐 0. thinking은 별도 필드라 content에 안 섞임.)
+//   - 턴 끝: transcript에는 표시가 없다. 종료 훅 Stop이 알려준다(ctx.turnClosed, 0.5.0 A-2).
+//     예전엔 "content 있고 tool_calls 없는 PLANNER_RESPONSE = 최종 답변"으로 추론해 닫았는데,
+//     한 턴에 답변 텍스트가 여러 번 나오면 첫 번째에서 잘렸다. 이제 전부 모아 두고 신호에 닫는다.
 import type { Carry, ConsumeResult, ReaderCtx, TurnRecord } from './types';
 import { finalizeTurn, hasTurnContent, toolArgString } from './util';
 
@@ -71,11 +72,8 @@ export function agyConsume(records: unknown[], carry: Carry, ctx: ReaderCtx): Co
           open.toolCalls.push({ tool: String(tc.name ?? 'tool'), arg: toolArgString(tc.args) });
         }
       } else if (hasText(raw.content)) {
-        // 최종 답변(도구 없음 + content 있음) = 턴 끝 → 즉시 flush. thinking은 제외.
+        // 사용자에게 보내는 답변 텍스트. 턴을 닫는 것은 종료 훅 신호다.
         open.assistantParts.push(raw.content);
-        turns.push(finalizeTurn(open, 'agy', ctx));
-        turnIndex++;
-        open = null;
       }
       // content/tool_calls 둘 다 없으면(생각만) skip
       continue;
@@ -86,6 +84,14 @@ export function agyConsume(records: unknown[], carry: Carry, ctx: ReaderCtx): Co
       const last = open.toolCalls[open.toolCalls.length - 1];
       if (last && last.summary === undefined) last.summary = raw.content.slice(0, 200);
     }
+  }
+
+  // 종료 훅이 이 턴의 끝을 알려온 tick이면 열린 턴을 닫는다. 내용이 아직 없으면 닫지 않는다 —
+  // 훅이 뜬 시점에 마지막 레코드가 파일에 안 닿았을 수 있어 재시도에 맡긴다.
+  if (ctx.turnClosed && open && hasTurnContent(open)) {
+    turns.push(finalizeTurn(open, 'agy', ctx));
+    turnIndex++;
+    open = null;
   }
 
   return { turns, carry: { open, turnIndex }, consumed: open ? openStart : list.length };
