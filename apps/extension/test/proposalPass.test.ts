@@ -109,7 +109,7 @@ describe('runProposalPass — scope 분배', () => {
     assert.equal(res.written, 2);
 
     const user = await readProposals(globalDir, DEFAULT_PROFILE_ID);
-    const project = await readProposals(globalDir, PROJECT);
+    const project = await readProposals(globalDir, PROJECT, 'project');
     assert.deepEqual(user.map((p) => p.title), ['사용자 규칙']);
     assert.deepEqual(project.map((p) => p.title), ['이 저장소 규칙']);
     // 판단 근거를 저장에도 남긴다 — 패널 표시와 재분류의 근거.
@@ -122,7 +122,7 @@ describe('runProposalPass — scope 분배', () => {
     await appendTurn(workspaceRoot, turn('a', '2026-06-13T00:00:01Z', 'q'));
     await run(globalDir, workspaceRoot, [item(undefined, '스코프 없음')], PROJECT);
     assert.equal((await readProposals(globalDir, DEFAULT_PROFILE_ID)).length, 1);
-    assert.equal((await readProposals(globalDir, PROJECT)).length, 0);
+    assert.equal((await readProposals(globalDir, PROJECT, 'project')).length, 0);
   });
 
   it('remote가 없으면 project 제안은 버리고 user만 쌓는다', async () => {
@@ -139,11 +139,26 @@ describe('runProposalPass — scope 분배', () => {
     );
   });
 
-  it('프로젝트 제안이 없으면 프로젝트 프로필을 만들지 않는다', async () => {
+  it('프로젝트 지식은 profiles가 아니라 projects 아래에 쌓인다', async () => {
+    const { globalDir, workspaceRoot } = await setup();
+    await appendTurn(workspaceRoot, turn('a', '2026-06-13T00:00:01Z', 'q'));
+    await run(
+      globalDir,
+      workspaceRoot,
+      [item('user', '사용자 규칙'), item('project', '이 저장소 규칙')],
+      PROJECT,
+    );
+    // 사용자 프로필 목록은 default 하나로 그대로여야 한다 — 다중 사용자 프로필 확장 자리이지
+    // 프로젝트 지식을 끼워 넣을 곳이 아니다.
+    assert.deepEqual(await fsp.readdir(join(globalDir, 'profiles')), [DEFAULT_PROFILE_ID]);
+    assert.deepEqual(await fsp.readdir(join(globalDir, 'projects')), [PROJECT]);
+  });
+
+  it('프로젝트 제안이 없으면 projects 폴더를 만들지 않는다', async () => {
     const { globalDir, workspaceRoot } = await setup();
     await appendTurn(workspaceRoot, turn('a', '2026-06-13T00:00:01Z', 'q'));
     await run(globalDir, workspaceRoot, [item('user', '사용자 규칙')], PROJECT);
-    await assert.rejects(() => fsp.stat(join(globalDir, 'profiles', PROJECT)));
+    await assert.rejects(() => fsp.stat(join(globalDir, 'projects')));
   });
 
   it('경로 탈출 profileId는 거절한다', async () => {

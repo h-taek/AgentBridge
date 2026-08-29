@@ -20,10 +20,10 @@ import { readProfileDocs, ensureProfile } from './globalStore';
 export type RunProposalPassArgs = {
   workspaceRoot: string;
   globalDir: string;
-  // 사용자 프로필(default). scope=user인 제안이 여기로 간다.
+  // 사용자 프로필(global/profiles/default). scope=user인 제안이 여기로 간다.
   profileId: string;
-  // 프로젝트 프로필(git remote로 정해짐). 없으면 scope=project인 제안은 버린다 —
-  // remote 없는 저장소는 프로젝트 지식 없이 0.5.0 이전과 같이 돌아간다.
+  // 프로젝트 지식 폴더 이름(global/projects/ 아래, git remote로 정해짐). 없으면 scope=project인
+  // 제안은 버린다 — remote 없는 저장소는 프로젝트 지식 없이 0.5.0 이전과 같이 돌아간다.
   projectProfileId?: string | null;
   decision: RefineDecision;
   envProbe: EnvProbe;
@@ -54,7 +54,7 @@ export async function runProposalPass(args: RunProposalPassArgs): Promise<Propos
   // 사용자 쪽에 다시 제안하는(그 반대도) 중복이 생긴다.
   const userDocs = await readProfileDocs(args.globalDir, args.profileId).catch(() => []);
   const projectDocs = args.projectProfileId
-    ? await readProfileDocs(args.globalDir, args.projectProfileId).catch(() => [])
+    ? await readProfileDocs(args.globalDir, args.projectProfileId, 'project').catch(() => [])
     : [];
   const existingIndex = [...userDocs, ...projectDocs].map((d) => ({
     category: d.category,
@@ -97,11 +97,15 @@ export async function runProposalPass(args: RunProposalPassArgs): Promise<Propos
     skipped += r.skipped.length;
   }
   if (forProject.length && args.projectProfileId) {
-    // 프로젝트 프로필은 첫 제안이 나올 때 만들어진다 — remote 없는 저장소에 빈 프로필을 남기지 않는다.
-    await ensureProfile(args.globalDir, args.projectProfileId);
-    const r = await writeProposals(args.globalDir, args.projectProfileId, forProject, {
-      existingDocTitles: existingIndex,
-    });
+    // 프로젝트 지식 폴더는 첫 제안이 나올 때 만들어진다 — remote 없는 저장소에 빈 폴더를 남기지 않는다.
+    await ensureProfile(args.globalDir, args.projectProfileId, 'project');
+    const r = await writeProposals(
+      args.globalDir,
+      args.projectProfileId,
+      forProject,
+      { existingDocTitles: existingIndex },
+      'project',
+    );
     written += r.written.length;
     skipped += r.skipped.length;
   }

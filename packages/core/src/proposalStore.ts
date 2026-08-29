@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { proposalsDir } from './globalPaths';
 import { slugify } from './globalMarkdown';
 import { writeProfileDocs } from './globalStore';
-import { DOC_CAPS, PROPOSAL_CAPS, type ProposalInput, type StoredProposal } from './shared/global';
+import { DOC_CAPS, PROPOSAL_CAPS, type ProposalInput, type ProposalScope, type StoredProposal } from './shared/global';
 
 // (카테고리, 제목) 정규화 키 — 중복 판정 단일 규칙.
 function dedupKey(category: string, title: string): string {
@@ -38,8 +38,12 @@ function clampLen(s: string, cap: number): string {
   return typeof s === 'string' && s.length > cap ? s.slice(0, cap) : (s || '');
 }
 
-export async function readProposals(globalDir: string, profileId: string): Promise<StoredProposal[]> {
-  const dir = proposalsDir(globalDir, profileId);
+export async function readProposals(
+  globalDir: string,
+  profileId: string,
+  scope: ProposalScope = 'user',
+): Promise<StoredProposal[]> {
+  const dir = proposalsDir(globalDir, profileId, scope);
   let files: string[];
   try {
     files = await fsp.readdir(dir);
@@ -67,8 +71,9 @@ export async function writeProposals(
   profileId: string,
   inputs: ProposalInput[],
   opts: { existingDocTitles: { category: string; title: string }[] },
+  scope: ProposalScope = 'user',
 ): Promise<WriteProposalsResult> {
-  const dir = proposalsDir(globalDir, profileId);
+  const dir = proposalsDir(globalDir, profileId, scope);
   await fsp.mkdir(dir, { recursive: true });
 
   const seen = new Set<string>();
@@ -111,8 +116,9 @@ export async function approveProposal(
   globalDir: string,
   profileId: string,
   proposalId: string,
+  scope: ProposalScope = 'user',
 ): Promise<{ written: string[] } | null> {
-  const all = await readProposals(globalDir, profileId);
+  const all = await readProposals(globalDir, profileId, scope);
   const p = all.find((x) => x.id === proposalId);
   if (!p) return null;
   const res = await writeProfileDocs(globalDir, profileId, {
@@ -124,8 +130,8 @@ export async function approveProposal(
       body: p.body,
       indexEntries: p.indexEntries?.length ? p.indexEntries : [p.title],
     }],
-  });
-  await discardProposal(globalDir, profileId, proposalId);
+  }, scope);
+  await discardProposal(globalDir, profileId, proposalId, scope);
   return { written: res.written };
 }
 
@@ -134,8 +140,9 @@ export async function discardProposal(
   globalDir: string,
   profileId: string,
   proposalId: string,
+  scope: ProposalScope = 'user',
 ): Promise<boolean> {
-  const file = join(proposalsDir(globalDir, profileId), `${proposalId}.json`);
+  const file = join(proposalsDir(globalDir, profileId, scope), `${proposalId}.json`);
   try {
     await fsp.unlink(file);
     return true;
