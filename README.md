@@ -7,12 +7,11 @@
 
 # AgentBridge
 
-> A tool that automatically carries your working context across multiple AI coding agents (Claude · Codex · Antigravity). Available on macOS (Apple Silicon) as a Desktop app and an IDE extension.
+> A tool that automatically carries your working context across multiple AI coding agents (Claude · Codex · Antigravity). Available on macOS (Apple Silicon) as an IDE extension.
 
 <p align="center">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-green.svg"></a>
   <img alt="Version" src="https://img.shields.io/badge/version-0.5.x-orange.svg">
-  <img alt="Desktop" src="https://img.shields.io/badge/desktop-Apple%20Silicon-lightgrey.svg">
   <img alt="Extension" src="https://img.shields.io/badge/extension-Apple%20Silicon-007ACC.svg">
 </p>
 
@@ -45,7 +44,6 @@ Each CLI's default behavior (permission dialogs, tool approval flow, session man
 - **Long-term memory (global context)** — Durable knowledge (your role · conventions · workflows · …) is auto-proposed from conversations; you approve or dismiss, and approved memory is shared across every workspace. Auto-proposal can be toggled off in settings.
 - **Session persistence + resume** — Even after you quit and relaunch the app, native `--resume` continues your previous conversation as-is.
 - **Automatic session naming** — New chat sessions are named from your first message, so tabs and the sidebar show a short title instead of just the model name; you can rename anytime.
-- **Desktop·extension memory sharing** — If the project folder is the same, both apps use the same working memory (memory · conversation history).
 - **User-asset isolation** — Without modifying global settings, it embeds only the user's own already-authenticated CLIs.
 
 ## How it works — three principles
@@ -68,7 +66,6 @@ All three CLIs must be on your PATH. It works even if only some are installed, b
 
 ## Available as
 
-- macOS (Apple Silicon) Desktop app — [install & usage](apps/desktop/README.md)
 - macOS (Apple Silicon) IDE extension — Works in VS Code · Cursor · Antigravity IDE and other VS Code-family IDEs. [install & usage](apps/extension/README.md)
 
 ## Privacy
@@ -82,10 +79,10 @@ Nothing is sent to any external service (a backend of our own, analytics/telemet
 
 ## Data location
 
-The Desktop and extension share the same location under `~/.agentbridge/` — if the project folder is the same, memory refined in one app is seen as-is in the other (V-12 unified store).
+Everything lives under `~/.agentbridge/`, keyed by the project folder (V-12 unified store).
 
 ```
-~/.agentbridge/                              ← AgentBridge metadata (shared by Desktop·extension)
+~/.agentbridge/                              ← AgentBridge metadata
 ├── workspaces/<workspaceId>/
 │   ├── workspace.json
 │   ├── ir.json                             ← compressed shared memory (short-term)

@@ -7,12 +7,11 @@
 
 # AgentBridge
 
-> 여러 AI 코딩 에이전트(Claude · Codex · Antigravity) 사이에서 작업 맥락이 자동으로 따라가는 도구. macOS(Apple Silicon)에서 데스크탑 앱과 IDE 익스텐션 두 형태로 제공.
+> 여러 AI 코딩 에이전트(Claude · Codex · Antigravity) 사이에서 작업 맥락이 자동으로 따라가는 도구. macOS(Apple Silicon)에서 IDE 익스텐션으로 제공.
 
 <p align="center">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-green.svg"></a>
   <img alt="Version" src="https://img.shields.io/badge/version-0.5.x-orange.svg">
-  <img alt="Desktop" src="https://img.shields.io/badge/desktop-Apple%20Silicon-lightgrey.svg">
   <img alt="Extension" src="https://img.shields.io/badge/extension-Apple%20Silicon-007ACC.svg">
 </p>
 
@@ -43,7 +42,6 @@ AgentBridge는 한 워크스페이스 안에 여러 모델 탭을 *동시에* �
 - **장기 기억(global context)** — 오래 가는 지식(역할 · 컨벤션 · 워크플로 · …)을 대화에서 자동 제안하고, 승인/버림으로 큐레이션한다. 승인된 기억은 모든 워크스페이스가 공유한다. 자동 제안은 설정에서 끌 수 있다.
 - **세션 영속화 + resume** — 앱을 껐다 켜도 native `--resume`으로 이전 대화를 그대로 이어간다.
 - **자동 세션 이름** — 새 채팅 세션이 첫 메시지로 자동 명명돼, 탭과 사이드바에 모델명 대신 짧은 제목이 표시된다. 이름은 언제든 직접 바꿀 수 있다.
-- **데스크탑·익스텐션 메모리 공유** — 같은 프로젝트 폴더면 두 앱이 같은 작업 기억(메모리·대화 기록)을 사용한다.
 - **사용자 자산 격리** — 글로벌 설정을 수정하지 않고, 사용자가 이미 인증한 본인 CLI만 임베드한다.
 
 ## 동작 원리 — 세 가지 원칙
@@ -66,7 +64,6 @@ AgentBridge는 사용자 환경의 CLI를 임베드하므로, 사용하려는 �
 
 ## 사용 가능 형태
 
-- macOS(Apple Silicon) 데스크탑 앱 — [설치·사용법](apps/desktop/README.ko.md)
 - macOS(Apple Silicon) IDE 익스텐션 — VS Code · Cursor · Antigravity IDE 등 VS Code 계열 IDE에서 동작. [설치·사용법](apps/extension/README.ko.md)
 
 ## 프라이버시
@@ -80,10 +77,10 @@ AgentBridge는 자체 서버나 백엔드 없이 사용자 본인 환경의 CLI�
 
 ## 데이터 위치
 
-데스크탑·익스텐션은 `~/.agentbridge/`의 같은 위치를 공유한다 — 같은 프로젝트 폴더면 한 앱에서 정제한 메모리를 다른 앱에서 그대로 본다(V-12 통일 저장소).
+모든 데이터는 프로젝트 폴더를 키로 `~/.agentbridge/` 아래에 둔다(V-12 통일 저장소).
 
 ```
-~/.agentbridge/                              ← AgentBridge 메타데이터 (데스크탑·익스텐션 공유)
+~/.agentbridge/                              ← AgentBridge 메타데이터
 ├── workspaces/<workspaceId>/
 │   ├── workspace.json
 │   ├── ir.json                             ← 압축된 공유 메모리 (단기)

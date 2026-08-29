@@ -8,11 +8,10 @@
 - `brand/icon-light.png` — 미사용 래스터(파킹). 연결된 소비처 없음.
 - `colors.json` — 모델 색 단일 정의 `{ claude, codex, agy }`.
 
-## 소비 방식 (호스트마다 다름)
+## 소비 방식
 
-- **desktop (electron-vite)**: 빌드 타임 import. `import logo from '@agentbridge/assets/logos/claude.svg'`(URL), `import colors from '@agentbridge/assets/colors.json'`. 복사 없음.
 - **extension (vsce)**: 런타임에 자기 폴더의 파일 경로를 찾으므로 `esbuild.mjs`가 빌드 때 `media/`로 복사·생성한다(xterm vendoring과 동일). `media/logos`·`media/icon*.svg`·`media/dots`는 생성물이라 gitignore.
 
 ## 빼는 것 (포맷이 강제되는 래스터)
 
-OS 앱 아이콘(`apps/desktop/build/icon.{icns,ico,png}`, `resources/icon.png`)·마켓 아이콘(`apps/extension/media/icon.png`)은 도구가 래스터를 고정 경로에서 요구해 SVG로 대체 불가 → 각 호스트 유지(마스터에서 파생).
+마켓 아이콘(`apps/extension/media/icon.png`)은 도구가 래스터를 고정 경로에서 요구해 SVG로 대체 불가 → 그 자리에 유지(마스터에서 파생).

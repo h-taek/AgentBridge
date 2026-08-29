@@ -11,16 +11,7 @@
 
 ---
 
-## Differences vs. the desktop app
-
-It shares core logic with the desktop app, but the following items are missing or simplified due to IDE environment constraints.
-
-1. **Proactive usage measurement + automatic fallback** — The desktop app measures quota with a background probe right after refining, switching to the next model *before* reaching the limit. The extension only falls back in priority order *after* a refine call fails (one failure always occurs).
-2. **Per-card IR deletion** — The desktop app can delete each IR section (decisions/files/commands/tests/pending) at the card level. The extension only supports a full reset.
-3. **Native file drag and drop** — On the desktop app, an OS-level drop auto-pastes the absolute path. The extension creates a copy inside the project folder and passes the path of that copy (the copy is auto-deleted after some time).
-4. **Multi-window / built-in zsh terminal tab** — Desktop-only. The extension runs within a single IDE instance and uses the IDE's own terminal.
-
-For features common to both apps (Memory panel, refine policy, automatic hook injection, etc.), see the [monorepo README](https://github.com/h-taek/AgentBridge/blob/main/README.md).
+For an overview of the features (Memory panel, refine policy, automatic hook injection, etc.), see the [monorepo README](https://github.com/h-taek/AgentBridge/blob/main/README.md).
 
 ## Installation
 

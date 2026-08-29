@@ -2,7 +2,7 @@
   "name": "agentbridge-monorepo",
   "private": true,
   "version": "0.0.0",
-  "description": "AgentBridge monorepo — desktop app + VS Code extension + shared core",
+  "description": "AgentBridge monorepo — VS Code extension + shared core",
   "packageManager": "pnpm@9.0.0",
   "engines": {
     "node": ">=20"

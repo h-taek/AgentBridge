@@ -9,16 +9,7 @@
 
 ---
 
-## 데스크탑 대비 차이
-
-데스크탑 앱과 코어 로직을 공유하지만, IDE 환경 제약상 다음 항목이 빠지거나 간소화돼 있다.
-
-1. **사용량 사전 측정 + 자동 폴백 (proactive)** — 데스크탑은 정제 직후 백그라운드 probe로 quota를 측정해 한도 근접 *전*에 다음 모델로 전환. 익스텐션은 refine 호출이 실패한 *후*에야 priority 순서대로 폴백한다 (한 번의 실패가 항상 발생)
-2. **IR 카드 개별 삭제** — 데스크탑은 각 IR 섹션(decisions/files/commands/tests/pending) 카드 단위 삭제 가능. 익스텐션은 전체 reset만 지원
-3. **네이티브 파일 드래그 앤 드롭** — 데스크탑은 OS 레벨 드롭으로 절대 경로가 자동 paste. 익스텐션은 프로젝트 폴더 내에 사본을 생성하고 해당 사본의 경로를 전달 (사본은 일정 시간 후 자동 삭제)
-4. **멀티 윈도우 / 내장 zsh 터미널 탭** — 데스크탑 전용. 익스텐션은 IDE 한 인스턴스 안에서 동작하고 터미널은 IDE 자체 기능 사용
-
-양쪽 앱 공통 기능(메모리 패널·refine 정책·hook 자동 주입 등)은 [모노레포 README](https://github.com/h-taek/AgentBridge/blob/main/README.ko.md) 참고.
+기능 전반(메모리 패널·refine 정책·hook 자동 주입 등)은 [모노레포 README](https://github.com/h-taek/AgentBridge/blob/main/README.ko.md) 참고.
 
 ## 설치
 
