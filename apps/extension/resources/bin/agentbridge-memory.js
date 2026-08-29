@@ -449,6 +449,7 @@ var ALLOWED_EVENTS = /* @__PURE__ */ new Set([
   "PreInvocation",
   "PostInvocation"
 ]);
+var CAPTURE_ONLY_EVENTS = /* @__PURE__ */ new Set(["SessionStart"]);
 function parseArgs(argv) {
   const out = {
     cmd: argv[0] || null,
@@ -674,7 +675,7 @@ async function main() {
   const parsed = parseArgs(process.argv.slice(2));
   if (parsed.cmd !== "inject") {
     process.stderr.write(
-      "agentbridge-memory: usage: inject --agent <kind> --workspace <id> --user-data <path> --event <name>\n"
+      "agentbridge-memory: usage: inject --agent <claude|codex|agy> --event <name>\n"
     );
     process.exit(2);
   }
@@ -737,6 +738,10 @@ async function main() {
     process.stderr.write(
       "agentbridge-memory: capture write skipped \u2014 " + String(e && e.message ? e.message : e) + "\n"
     );
+  }
+  if (CAPTURE_ONLY_EVENTS.has(parsed.event)) {
+    process.stdout.write(JSON.stringify(buildHookOutput(parsed.agent, parsed.event, "")));
+    process.exit(0);
   }
   let globalBlock = "";
   try {

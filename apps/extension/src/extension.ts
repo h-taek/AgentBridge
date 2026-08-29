@@ -21,7 +21,7 @@ import { ProfilePanelProvider } from './views/profilePanel';
 import { SessionTreeProvider, SessionItem } from './views/sessionTreeView';
 import { ChatPanel, getActivePanel, getAllPanels, chatPanelEvents, updateSessionTabTitle } from './views/chatPanel';
 import { compactionEvents } from './core/compactionScheduler';
-import { registerSession, markSessionClosed, markSessionActive, renameSession, deleteSession } from './core/sessionRegistry';
+import { registerSession, markSessionClosed, markSessionActive, renameSession, deleteSession, reclaimPendingModelSessionId } from './core/sessionRegistry';
 import { registerConfigWatcher, getConfig } from './settings/config';
 import * as notifications from './core/notifications';
 import { CLI_DISPLAY_NAME, type CliKind } from './shared/types';
@@ -290,7 +290,8 @@ export function activate(context: vscode.ExtensionContext) {
       return;
     }
 
-    const opts = await buildOpts(session.model, cwd, session.workspaceId, session.sessionId, session.modelSessionId);
+    const modelSessionId = await reclaimPendingModelSessionId(session);
+    const opts = await buildOpts(session.model, cwd, session.workspaceId, session.sessionId, modelSessionId);
     opts.terminalName = session.name; // 탭 제목 = 세션 이름(트리와 일치; 이름 없으면 모델명)
     await markSessionActive(session.workspaceId, session.sessionId);
     sessionTree.refresh();
@@ -419,7 +420,10 @@ export function activate(context: vscode.ExtensionContext) {
       // (openSession이 정상인 이유는 레지스트리를 읽기 때문). 복원도 레지스트리를 SSOT로 삼아 최신 값을 읽는다.
       const sessions = await getSessions(s.workspaceId);
       const meta = sessions.find((m) => m.sessionId === s.sessionId);
-      const opts = await buildOpts(s.model, folder.fsPath, s.workspaceId, s.sessionId, meta?.modelSessionId ?? s.modelSessionId);
+      const restored = meta
+        ? await reclaimPendingModelSessionId(meta)
+        : undefined;
+      const opts = await buildOpts(s.model, folder.fsPath, s.workspaceId, s.sessionId, restored ?? s.modelSessionId);
       if (meta?.name) opts.terminalName = meta.name; // 복원 탭 제목 = 세션 이름
       // activate의 resetAllSessionsActive(모든 세션 비활성)와 경합 회피 — reset 완료 후 active 표시.
       // 안 기다리면 reset이 이 복구된 세션의 active 플래그를 덮어써 비활성으로 남을 수 있음 (V-21).

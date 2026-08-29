@@ -59,6 +59,11 @@ const ALLOWED_EVENTS = new Set([
   'PostInvocation'
 ])
 
+// 세션 id 확정만 하고 컨텍스트는 싣지 않는 이벤트 (0.5.0 A-1).
+// codex의 SessionStart는 spawn 직후에 fire한다. 여기서 IR을 실으면 곧이어 오는 첫 턴의
+// UserPromptSubmit이 같은 IR을 또 실어 이중 주입이 된다.
+const CAPTURE_ONLY_EVENTS = new Set(['SessionStart'])
+
 function parseArgs(argv) {
   // 형식: inject --agent <kind> --event <name>
   const out = {
@@ -323,7 +328,7 @@ async function main() {
   const parsed = parseArgs(process.argv.slice(2))
   if (parsed.cmd !== 'inject') {
     process.stderr.write(
-      'agentbridge-memory: usage: inject --agent <kind> --workspace <id> --user-data <path> --event <name>\n'
+      'agentbridge-memory: usage: inject --agent <claude|codex|agy> --event <name>\n'
     )
     process.exit(2)
   }
@@ -395,6 +400,11 @@ async function main() {
     process.stderr.write(
       'agentbridge-memory: capture write skipped — ' + String(e && e.message ? e.message : e) + '\n'
     )
+  }
+
+  if (CAPTURE_ONLY_EVENTS.has(parsed.event)) {
+    process.stdout.write(JSON.stringify(buildHookOutput(parsed.agent, parsed.event, '')))
+    process.exit(0)
   }
 
   // §G3 글로벌 메모리 검색 — additive·best-effort. 어떤 실패도 IR/turns 주입을 막지 않는다.

@@ -58,7 +58,8 @@ describe('adapter integration (M16 await chain regression guard)', () => {
 
     const hooks = JSON.parse(await fs.readFile(hooksPath, 'utf8'));
     assert.ok(hooks.hooks?.UserPromptSubmit);
-    assert.equal(hooks.hooks?.SessionStart, undefined);
+    // SessionStart는 spawn 직후 세션 id 확정용 (0.5.0 A-1) — 컨텍스트는 헬퍼가 비워 보낸다.
+    assert.ok(hooks.hooks?.SessionStart);
 
     const toml = await fs.readFile(tomlPath, 'utf8');
     assert.match(toml, /# AgentBridge BEGIN[\s\S]*\[features\][\s\S]*hooks = true[\s\S]*# AgentBridge END/);

@@ -13,6 +13,7 @@ import type { Logger } from '../interfaces';
 import { noopLogger } from '../interfaces';
 import { snapshotCodexSessions } from './codexSessionWatcher';
 import { snapshotAgyConversations, resolveResumeArgs } from './agyResume';
+import { resolveHookCaptureFile } from './hookSessionCapture';
 
 export type CliAdapterOptions = {
   envProbe: EnvProbe;
@@ -142,7 +143,7 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
           AGENTBRIDGE_WS_SESSION: captureFileToken,
           AGENTBRIDGE_WS_DIR: wsDir,
         };
-        const hookCaptureFilePath = join(wsDir, 'sessions', captureFileToken, 'captured.json');
+        const hookCaptureFilePath = resolveHookCaptureFile(wsDir, captureFileToken);
         const probe = envProbe.probe('codex');
         const command = probe.resolvedPath ?? 'codex';
 
@@ -207,7 +208,7 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
           AGENTBRIDGE_WS_SESSION: captureFileToken,
           AGENTBRIDGE_WS_DIR: wsDir,
         };
-        const hookCaptureFilePath = join(wsDir, 'sessions', captureFileToken, 'captured.json');
+        const hookCaptureFilePath = resolveHookCaptureFile(wsDir, captureFileToken);
         const probe = envProbe.probe('agy');
         const command = probe.resolvedPath ?? 'agy';
 

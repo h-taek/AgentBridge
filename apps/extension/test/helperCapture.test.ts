@@ -10,14 +10,17 @@ import { spawn } from 'child_process';
 const BUNDLED_HELPER = join(__dirname, '..', 'resources', 'bin', 'agentbridge-memory.js');
 let HELPER = BUNDLED_HELPER;
 
-function runHelper(args: string[], stdin: string, extraEnv: Record<string, string>): Promise<void> {
+function runHelper(args: string[], stdin: string, extraEnv: Record<string, string>): Promise<string> {
   return new Promise((resolve) => {
     const p = spawn('node', [HELPER, ...args], { env: { ...process.env, ...extraEnv } });
-    p.stdout.on('data', () => {});
+    let out = '';
+    p.stdout.on('data', (c) => {
+      out += String(c);
+    });
     p.stderr.on('data', () => {});
     p.stdin.write(stdin);
     p.stdin.end();
-    p.on('close', () => resolve());
+    p.on('close', () => resolve(out));
   });
 }
 
@@ -55,6 +58,25 @@ describe('agentbridge-memory — sessions/<token>/captured.json', () => {
     const obj = JSON.parse(raw);
     assert.equal(obj.modelSessionId, '019e-codex');
     assert.equal(obj.agent, 'codex');
+  });
+
+  it('codex SessionStart는 캡처만 하고 컨텍스트는 비워 보낸다 (첫 턴 이중 주입 방지)', async () => {
+    await fs.writeFile(
+      join(userData, 'workspaces', WS, 'ir.json'),
+      JSON.stringify({ intent: { goal: '이중 주입 감지용' } }),
+      'utf8',
+    );
+    const out = await runHelper(
+      baseArgs('SessionStart', 'codex'),
+      JSON.stringify({ session_id: '019e-start', hook_event_name: 'SessionStart' }),
+      { AGENTBRIDGE_WS_SESSION: TOKEN, ...wsEnv() },
+    );
+    const capturedPath = join(userData, 'workspaces', WS, 'sessions', TOKEN, 'captured.json');
+    assert.equal(JSON.parse(await fs.readFile(capturedPath, 'utf8')).modelSessionId, '019e-start');
+
+    const emitted = JSON.parse(out);
+    assert.equal(emitted.hookSpecificOutput.hookEventName, 'SessionStart');
+    assert.equal(emitted.hookSpecificOutput.additionalContext, '');
   });
 
   it('토큰 env가 없으면 캡처 파일을 만들지 않는다', async () => {

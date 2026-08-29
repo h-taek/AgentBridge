@@ -8,7 +8,12 @@
 //   turnCount         → (drop, UI 미사용)
 
 import type { CliKind } from '../shared/types';
-import { CLI_DISPLAY_NAME, type SessionMeta as CoreSessionMeta } from '@agentbridge/core';
+import {
+  CLI_DISPLAY_NAME,
+  readCapturedSessionId,
+  resolveHookCaptureFile,
+  type SessionMeta as CoreSessionMeta,
+} from '@agentbridge/core';
 import { getWorkspaceStore } from './coreInstances';
 
 // 옛 호출처가 sessionId를 외부 발급해 넘기던 패턴을 유지하기 위해 sessionId override 지원 wrapper.
@@ -116,4 +121,19 @@ export async function getSessions(workspaceId: string): Promise<SessionMeta[]> {
       return bTs.localeCompare(aTs);
     })
     .map((s) => toLegacy(workspaceId, s));
+}
+
+// 미확정으로 남은 세션 id를 회수한다 (0.5.0 A-1).
+//
+// codex·agy는 세션 id를 훅이 알려준다. 훅이 캡처 파일을 쓰기 전에 탭이 닫히면 감시자는 죽지만
+// 파일은 세션 폴더에 남는다. 다음에 그 세션을 열 때 그 값을 읽어 소급 귀속시켜, 기동 인자를
+// 만들기 전에 resume 대상이 잡히게 한다. claude는 우리가 id를 발급하므로 대상이 아니다.
+export async function reclaimPendingModelSessionId(session: SessionMeta): Promise<string | undefined> {
+  if (session.modelSessionId) return session.modelSessionId;
+  if (session.model === 'claude') return undefined;
+  const wsDir = getWorkspaceStore().getWorkspacePath(session.workspaceId);
+  const captured = await readCapturedSessionId(resolveHookCaptureFile(wsDir, session.sessionId));
+  if (!captured) return undefined;
+  await setModelSessionId(session.workspaceId, session.sessionId, captured);
+  return captured;
 }
