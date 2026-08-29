@@ -99,10 +99,6 @@ describe('hookInstaller (전역 설치)', () => {
     const json = await readJson(hooksJsonPath);
     assert.ok(Array.isArray(json.hooks.UserPromptSubmit));
 
-    // SessionStart는 spawn 직후 세션 id 확정용으로 등록한다 (0.5.0 A-1).
-    const startCmd: string = json.hooks.SessionStart[0].hooks[0].command;
-    assert.match(startCmd, /--event SessionStart\b/);
-
     const toml = await fs.readFile(configTomlPath, 'utf8');
     assert.match(toml, /# AgentBridge BEGIN/);
     assert.match(toml, /hooks = true/);
@@ -116,12 +112,11 @@ describe('hookInstaller (전역 설치)', () => {
       join(dir, 'hooks.json'),
       JSON.stringify({
         hooks: {
-          // 우리가 관리하는 이벤트 — 사용자 것은 남고 우리 것은 새 커맨드로 교체된다.
+          // 우리가 더 이상 관리하지 않는 이벤트 — 사용자 것은 남고 우리 것만 걷어낸다.
           SessionStart: [
             { hooks: [{ type: 'command', command: 'user-own-hook' }] },
             { hooks: [{ type: 'command', command: 'old-agentbridge' }], _agentbridge_managed: true },
           ],
-          // 더 이상 관리하지 않는 이벤트에 남은 우리 항목 — 통째로 걷어낸다.
           PostToolUse: [
             { hooks: [{ type: 'command', command: 'stale-agentbridge' }], _agentbridge_managed: true },
           ],
@@ -132,9 +127,8 @@ describe('hookInstaller (전역 설치)', () => {
 
     const { hooksJsonPath } = await installCodexHooks();
     const json = await readJson(hooksJsonPath);
-    assert.equal(json.hooks.SessionStart.length, 2);
+    assert.equal(json.hooks.SessionStart.length, 1);
     assert.equal(json.hooks.SessionStart[0].hooks[0].command, 'user-own-hook');
-    assert.match(json.hooks.SessionStart[1].hooks[0].command, /agentbridge-memory\.js/);
     assert.equal(json.hooks.PostToolUse, undefined);
   });
 

@@ -449,7 +449,6 @@ var ALLOWED_EVENTS = /* @__PURE__ */ new Set([
   "PreInvocation",
   "PostInvocation"
 ]);
-var CAPTURE_ONLY_EVENTS = /* @__PURE__ */ new Set(["SessionStart"]);
 function parseArgs(argv) {
   const out = {
     cmd: argv[0] || null,
@@ -738,10 +737,6 @@ async function main() {
     process.stderr.write(
       "agentbridge-memory: capture write skipped \u2014 " + String(e && e.message ? e.message : e) + "\n"
     );
-  }
-  if (CAPTURE_ONLY_EVENTS.has(parsed.event)) {
-    process.stdout.write(JSON.stringify(buildHookOutput(parsed.agent, parsed.event, "")));
-    process.exit(0);
   }
   let globalBlock = "";
   try {

@@ -317,14 +317,11 @@ export function createHookInstaller(opts: HookInstallerOptions): HookInstaller {
       }
     }
 
-    // SessionStart는 세션 id를 spawn 직후에 확정하려고 등록한다 (0.5.0 A-1). 헬퍼가 이 이벤트에서는
-    // 캡처만 하고 컨텍스트는 비워 보내므로 첫 턴 IR 이중 주입은 생기지 않는다.
-    // 주의: 훅 신뢰 확인이 세션이 뜬 뒤에 나오므로 승인 직후 첫 세션에는 이 이벤트가 오지 않는다.
-    // 그 세션은 첫 턴의 UserPromptSubmit이 확정한다.
+    // SessionStart는 등록하지 않는다. 첫 턴 전에는 보존할 대화가 없어 그 구간의 세션 id가 하는 일이
+    // 없고(research 06 §6-1), 폴더 스냅샷 폴백을 걷어낸 뒤로는 훅과 경주할 상대도 없다.
+    // 세 하니스가 같은 모양이 된다 — codex·agy는 첫 턴 훅이 id를 확정한다.
+    // mergeCodexHooks가 과거 버전이 심은 managed SessionStart 항목을 청소한다.
     const merged = mergeCodexHooks(existing, {
-      SessionStart: {
-        hooks: [{ type: 'command', command: buildHookCommand('codex', 'SessionStart') }],
-      },
       UserPromptSubmit: {
         hooks: [{ type: 'command', command: buildHookCommand('codex', 'UserPromptSubmit') }],
       },
