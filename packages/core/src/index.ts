@@ -80,6 +80,5 @@ export * from './pty/types';
 
 // CLI 어댑터
 export * from './cliAdapter/index';
-export * from './cliAdapter/codexSessionWatcher';
 export * from './cliAdapter/agyResume';
 export * from './cliAdapter/hookSessionCapture';

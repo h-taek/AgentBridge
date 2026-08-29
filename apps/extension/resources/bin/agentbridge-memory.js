@@ -720,7 +720,9 @@ async function main() {
       else if (parsed.agent === "codex") sid = process.env.CODEX_THREAD_ID || "";
     }
     if (parsed.agent !== "claude" && token && sid && token === path.basename(token)) {
-      const out = path.join(wsDir, "sessions", token, "captured.json");
+      const dir = path.join(wsDir, "sessions", token);
+      fs.mkdirSync(dir, { recursive: true });
+      const out = path.join(dir, "captured.json");
       const tmp = out + "." + process.pid + ".tmp";
       fs.writeFileSync(
         tmp,

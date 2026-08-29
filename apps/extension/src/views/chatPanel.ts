@@ -6,9 +6,7 @@ import { join } from 'path';
 import * as output from '../log/output';
 import { registerCapture, setCaptureModelSessionId, unregisterCapture } from '../core/turnRecorder';
 import { getSessions, renameSession, deleteSession, setModelSessionId, type SessionMeta } from '../core/sessionRegistry';
-import { captureNewThreadId } from '../core/cliAdapter/codexSessionWatcher';
-import { watchForNewConversationUuid } from '../core/cliAdapter/agyResume';
-import { captureSessionIdFromHook, coordinateCapture } from '@agentbridge/core';
+import { captureSessionIdFromHook } from '@agentbridge/core';
 import * as workspaceStore from '../core/workspaceStore';
 import {
   acquireOwnership,
@@ -387,55 +385,27 @@ export class ChatPanel {
     }
   }
 
-  // codex/agy modelSessionId 후처리 캡처 — spawn 직후 fire-and-forget.
-  // codex: ~/.codex/sessions 스냅샷 diff로 thread_id 파일명 추출.
-  // agy:   ~/.gemini/antigravity-cli/cache/last_conversations.json polling으로 cwd→UUID 매핑 캡처.
+  // codex/agy 세션 id 캡처 — spawn 직후 fire-and-forget.
+  // 훅이 <워크스페이스>/sessions/<세션 id>/captured.json에 native id를 쓰면 그것만 읽는다.
+  // 폴더를 뒤져 알아맞히는 경로는 두지 않는다 — 틀린 id는 없는 id보다 나쁘다 (spec A-1).
   // 캡처되면 sessionRegistry.setModelSessionId로 영속화 → 다음 reopen에서 resume 인자 생성.
   private startModelSessionIdWatcher(): void {
-    const { workspaceId, sessionId, codexSessionSnapshot, agyWatchUuid, cwd, model, hookCaptureFilePath } =
-      this.opts;
-    if (!workspaceId || !sessionId) return;
-
-    const persist = (modelSessionId: string): void => {
-      void setModelSessionId(workspaceId, sessionId, modelSessionId).catch((err) => {
-        output.warn(`ChatPanel: setModelSessionId 실패 — ${String(err)}`);
-      });
-      if (cwd) setCaptureModelSessionId(sessionId, modelSessionId, cwd);
-    };
+    const { workspaceId, sessionId, cwd, model, hookCaptureFilePath } = this.opts;
+    if (!workspaceId || !sessionId || !hookCaptureFilePath) return;
+    if (model !== 'codex' && model !== 'agy') return;
 
     const ctrl = new AbortController();
     this.modelSessionWatchAbort = ctrl;
-    const hookCapture = hookCaptureFilePath
-      ? captureSessionIdFromHook({ captureFilePath: hookCaptureFilePath, signal: ctrl.signal })
-      : Promise.resolve<string | null>(null);
 
-    if (model === 'codex' && codexSessionSnapshot) {
-      void coordinateCapture({
-        hookCapture,
-        fallbackCapture: captureNewThreadId(codexSessionSnapshot, { signal: ctrl.signal }),
-        signal: ctrl.signal,
+    void captureSessionIdFromHook({ captureFilePath: hookCaptureFilePath, signal: ctrl.signal })
+      .then((modelSessionId) => {
+        if (!modelSessionId) return;
+        void setModelSessionId(workspaceId, sessionId, modelSessionId).catch((err) => {
+          output.warn(`ChatPanel: setModelSessionId 실패 — ${String(err)}`);
+        });
+        if (cwd) setCaptureModelSessionId(sessionId, modelSessionId, cwd);
       })
-        .then((r) => {
-          if (r) persist(r.id);
-        })
-        .catch((err) => output.warn(`ChatPanel: codex 캡처 실패 — ${String(err)}`));
-    } else if (model === 'agy' && agyWatchUuid && cwd) {
-      const fallbackCapture = new Promise<string | null>((res) => {
-        void watchForNewConversationUuid({
-          cwd,
-          excludeUuids: agyWatchUuid.excludeUuids,
-          abortSignal: ctrl.signal,
-          onCaptured: (uuid) => res(uuid),
-        })
-          .then(() => res(null))
-          .catch(() => res(null));
-      });
-      void coordinateCapture({ hookCapture, fallbackCapture, signal: ctrl.signal })
-        .then((r) => {
-          if (r) persist(r.id);
-        })
-        .catch((err) => output.warn(`ChatPanel: agy 캡처 실패 — ${String(err)}`));
-    }
+      .catch((err) => output.warn(`ChatPanel: ${model} 캡처 실패 — ${String(err)}`));
   }
 
   private ensureSpawnHelperExecutable(): void {

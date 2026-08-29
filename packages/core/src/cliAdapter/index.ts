@@ -11,8 +11,7 @@ import type { HookInstaller } from '../hookInstaller';
 import type { HookStatusStore } from '../hookStatusStore';
 import type { Logger } from '../interfaces';
 import { noopLogger } from '../interfaces';
-import { snapshotCodexSessions } from './codexSessionWatcher';
-import { snapshotAgyConversations, resolveResumeArgs } from './agyResume';
+import { resolveResumeArgs } from './agyResume';
 import { resolveHookCaptureFile } from './hookSessionCapture';
 
 export type CliAdapterOptions = {
@@ -39,7 +38,6 @@ export interface CliAdapterSet {
       workspaceId: string,
       resumeSessionId?: string,
       resumeModelSessionId?: string,
-      captureToken?: string,
     ): Promise<SpawnOptions>;
   };
   agy: {
@@ -49,7 +47,6 @@ export interface CliAdapterSet {
       workspaceId: string,
       resumeSessionId?: string,
       resumeModelSessionId?: string,
-      captureToken?: string,
     ): Promise<SpawnOptions>;
   };
 }
@@ -133,17 +130,15 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
     codex: {
       isAvailable: () => envProbe.probe('codex'),
 
-      async buildSpawnOptions(cwd, workspaceId, resumeSessionId, resumeModelSessionId, captureToken) {
+      async buildSpawnOptions(cwd, workspaceId, resumeSessionId, resumeModelSessionId) {
         const sessionId = resumeSessionId ?? randomUUID();
-        // 캡처 토큰: 호스트가 명시하면 그걸, 아니면 내부 sessionId.
-        const captureFileToken = captureToken ?? sessionId;
         const wsDir = workspaceDir(workspaceId);
         const env = {
           ...envProbe.getShellEnv(),
-          AGENTBRIDGE_WS_SESSION: captureFileToken,
+          AGENTBRIDGE_WS_SESSION: sessionId,
           AGENTBRIDGE_WS_DIR: wsDir,
         };
-        const hookCaptureFilePath = resolveHookCaptureFile(wsDir, captureFileToken);
+        const hookCaptureFilePath = resolveHookCaptureFile(wsDir, sessionId);
         const probe = envProbe.probe('codex');
         const command = probe.resolvedPath ?? 'codex';
 
@@ -159,15 +154,11 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
           }
         }
 
-        const isNewSession = !resumeSessionId;
-
         let args: string[];
         let modelSessionId: string | undefined = resumeModelSessionId;
-        let codexSessionSnapshot: SpawnOptions['codexSessionSnapshot'] | undefined;
 
-        if (isNewSession) {
+        if (!resumeSessionId) {
           args = [];
-          codexSessionSnapshot = await snapshotCodexSessions();
         } else if (resumeModelSessionId) {
           args = ['resume', resumeModelSessionId];
         } else {
@@ -175,7 +166,6 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
             `codexAdapter: resume 요청이지만 thread_id 없음 — 새 세션으로 fallback (sessionId=${sessionId.slice(0, 8)})`,
           );
           args = [];
-          codexSessionSnapshot = await snapshotCodexSessions();
           modelSessionId = undefined;
         }
 
@@ -189,7 +179,6 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
           workspaceId,
           sessionId,
           modelSessionId,
-          codexSessionSnapshot,
           hookCaptureFilePath,
         };
       },
@@ -198,17 +187,15 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
     agy: {
       isAvailable: () => envProbe.probe('agy'),
 
-      async buildSpawnOptions(cwd, workspaceId, resumeSessionId, resumeModelSessionId, captureToken) {
+      async buildSpawnOptions(cwd, workspaceId, resumeSessionId, resumeModelSessionId) {
         const sessionId = resumeSessionId ?? randomUUID();
-        // 캡처 토큰: 호스트가 명시하면 그걸, 아니면 내부 sessionId.
-        const captureFileToken = captureToken ?? sessionId;
         const wsDir = workspaceDir(workspaceId);
         const env = {
           ...envProbe.getShellEnv(),
-          AGENTBRIDGE_WS_SESSION: captureFileToken,
+          AGENTBRIDGE_WS_SESSION: sessionId,
           AGENTBRIDGE_WS_DIR: wsDir,
         };
-        const hookCaptureFilePath = resolveHookCaptureFile(wsDir, captureFileToken);
+        const hookCaptureFilePath = resolveHookCaptureFile(wsDir, sessionId);
         const probe = envProbe.probe('agy');
         const command = probe.resolvedPath ?? 'agy';
 
@@ -226,15 +213,11 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
 
         const cwdArgs = cwd ? ['--add-dir', cwd] : [];
 
-        const isNewSession = !resumeSessionId;
-
         let args: string[];
         let modelSessionId: string | undefined = resumeModelSessionId;
-        let needsWatch = false;
 
-        if (isNewSession) {
+        if (!resumeSessionId) {
           args = [...cwdArgs, '--dangerously-skip-permissions'];
-          needsWatch = true;
         } else if (resumeModelSessionId) {
           try {
             const resumeArgs = await resolveResumeArgs({
@@ -246,20 +229,12 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
             log.warn(`agyAdapter: resume 불가 — 새 세션으로 fallback (${String(err)})`);
             args = [...cwdArgs, '--dangerously-skip-permissions'];
             modelSessionId = undefined;
-            needsWatch = true;
           }
         } else {
           log.warn(
             `agyAdapter: resume 요청이지만 conversation UUID 없음 — 새 세션으로 fallback (sessionId=${sessionId.slice(0, 8)})`,
           );
           args = [...cwdArgs, '--dangerously-skip-permissions'];
-          needsWatch = true;
-        }
-
-        let agyWatchUuid: SpawnOptions['agyWatchUuid'] | undefined;
-        if (needsWatch) {
-          const existing = await snapshotAgyConversations();
-          agyWatchUuid = { excludeUuids: existing };
         }
 
         return {
@@ -272,7 +247,6 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
           workspaceId,
           sessionId,
           modelSessionId,
-          agyWatchUuid,
           hookCaptureFilePath,
         };
       },
