@@ -38,7 +38,8 @@ type HookEventName =
   | 'UserPromptSubmit'
   | 'PreInvocation'
   | 'PostInvocation'
-  | 'Stop';
+  | 'Stop'
+  | 'StopFailure';
 
 const TOML_MARKER_START = '# AgentBridge BEGIN';
 const TOML_MARKER_END = '# AgentBridge END';
@@ -178,9 +179,18 @@ export function createHookInstaller(opts: HookInstallerOptions): HookInstaller {
     }
 
     // SessionStart는 등록하지 않는다 — 세션 첫 턴에서 UserPromptSubmit와 같은 IR을 이중 주입하기 때문.
+    // Stop·StopFailure는 턴 기록의 트리거다 (0.5.0 A-2). StopFailure를 빠뜨리면 API·모델 오류로
+    // 끊긴 턴에 Stop이 오지 않아 그 턴이 통째로 유실된다 (research 04 §1).
+    // SubagentStop은 등록하지 않는다 — 자식 종료는 부모 턴이 아니고, claude는 자식에 Stop을 쏘지 않는다.
     const merged = mergeClaudeHooks(existing, {
       UserPromptSubmit: {
         hooks: [{ type: 'command', command: buildHookCommand('claude', 'UserPromptSubmit') }],
+      },
+      Stop: {
+        hooks: [{ type: 'command', command: buildHookCommand('claude', 'Stop') }],
+      },
+      StopFailure: {
+        hooks: [{ type: 'command', command: buildHookCommand('claude', 'StopFailure') }],
       },
     });
 
@@ -325,6 +335,11 @@ export function createHookInstaller(opts: HookInstallerOptions): HookInstaller {
       UserPromptSubmit: {
         hooks: [{ type: 'command', command: buildHookCommand('codex', 'UserPromptSubmit') }],
       },
+      // 턴 기록 트리거 (0.5.0 A-2). SubagentStop은 등록하지 않는다 — Stop 스키마에 agent_id가
+      // 아예 없어 부모 턴만 온다 (research 04 §2).
+      Stop: {
+        hooks: [{ type: 'command', command: buildHookCommand('codex', 'Stop') }],
+      },
     });
 
     if (await writeIfChanged(hooksJsonPath, JSON.stringify(merged, null, 2))) {
@@ -343,6 +358,7 @@ export function createHookInstaller(opts: HookInstallerOptions): HookInstaller {
   interface AgyHookGroup {
     enabled?: boolean;
     PreInvocation?: AgyHookAction[];
+    Stop?: AgyHookAction[];
     _agentbridge_managed?: true;
   }
   type AgyHooksRoot = Record<string, AgyHookGroup>;
@@ -374,6 +390,8 @@ export function createHookInstaller(opts: HookInstallerOptions): HookInstaller {
     merged[AGY_GROUP] = {
       enabled: true,
       PreInvocation: [{ type: 'command', command: buildHookCommand('agy', 'PreInvocation') }],
+      // 턴 기록 트리거 (0.5.0 A-2). agy에는 자식 전용 종료 이벤트가 없어 conversationId로 가른다.
+      Stop: [{ type: 'command', command: buildHookCommand('agy', 'Stop') }],
       _agentbridge_managed: true,
     };
 

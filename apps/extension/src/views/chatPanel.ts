@@ -4,7 +4,7 @@ import { randomBytes } from 'crypto';
 import { chmodSync, createWriteStream, type WriteStream } from 'fs';
 import { join } from 'path';
 import * as output from '../log/output';
-import { registerCapture, setCaptureModelSessionId, unregisterCapture } from '../core/turnRecorder';
+import { registerCapture, unregisterCapture } from '../core/turnRecorder';
 import { getSessions, renameSession, deleteSession, setModelSessionId, type SessionMeta } from '../core/sessionRegistry';
 import { captureSessionIdFromHook } from '@agentbridge/core';
 import * as workspaceStore from '../core/workspaceStore';
@@ -307,19 +307,15 @@ export class ChatPanel {
 
       output.log(`ChatPanel PTY pid=${this.ptyProcess.pid}`);
 
-      if (this.opts.model && this.opts.workspaceId && this.opts.sessionId) {
-        // claude는 sessionId가 곧 jsonl 파일명(통일 규약). codex/agy는 native id를 비동기 캡처
-        // (startModelSessionIdWatcher → setCaptureModelSessionId) — 여기선 modelSessionId가 있으면(resume) 전달.
-        const captureModelSessionId =
-          this.opts.model === 'claude'
-            ? (this.opts.modelSessionId ?? this.opts.sessionId)
-            : (this.opts.modelSessionId ?? null);
+      if (this.opts.model && this.opts.workspaceId && this.opts.sessionId && this.opts.turnSignalFilePath) {
+        // 턴 기록은 종료 훅 신호가 트리거다. 신호가 transcript 경로까지 실어 오므로 여기서
+        // modelSessionId를 넘길 필요가 없다 (0.5.0 A-2).
         registerCapture({
           workspaceId: this.opts.workspaceId,
           sessionId: this.opts.sessionId,
           model: this.opts.model,
           workspacePath: this.opts.cwd,
-          modelSessionId: captureModelSessionId,
+          signalFilePath: this.opts.turnSignalFilePath,
           // 자동 명명이 제목을 정하면 이 패널의 탭 제목을 즉시 갱신(닫았다 열 필요 없이).
           onAutoNamed: (title) => this.setTabTitle(title),
         });
@@ -390,7 +386,7 @@ export class ChatPanel {
   // 폴더를 뒤져 알아맞히는 경로는 두지 않는다 — 틀린 id는 없는 id보다 나쁘다 (spec A-1).
   // 캡처되면 sessionRegistry.setModelSessionId로 영속화 → 다음 reopen에서 resume 인자 생성.
   private startModelSessionIdWatcher(): void {
-    const { workspaceId, sessionId, cwd, model, hookCaptureFilePath } = this.opts;
+    const { workspaceId, sessionId, model, hookCaptureFilePath } = this.opts;
     if (!workspaceId || !sessionId || !hookCaptureFilePath) return;
     if (model !== 'codex' && model !== 'agy') return;
 
@@ -403,7 +399,6 @@ export class ChatPanel {
         void setModelSessionId(workspaceId, sessionId, modelSessionId).catch((err) => {
           output.warn(`ChatPanel: setModelSessionId 실패 — ${String(err)}`);
         });
-        if (cwd) setCaptureModelSessionId(sessionId, modelSessionId, cwd);
       })
       .catch((err) => output.warn(`ChatPanel: ${model} 캡처 실패 — ${String(err)}`));
   }

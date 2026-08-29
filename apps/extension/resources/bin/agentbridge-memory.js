@@ -439,6 +439,36 @@ var path = require("path");
 var { resolveContext: resolveContext2 } = (init_globalSearch(), __toCommonJS(globalSearch_exports));
 var { resolveQuery: resolveQuery2, renderGlobalMatches: renderGlobalMatches2, extractSessionIdFromStdin: extractSessionIdFromStdin2 } = (init_globalInject(), __toCommonJS(globalInject_exports));
 var { wrapInjectedContext: wrapInjectedContext2 } = (init_contextTag(), __toCommonJS(contextTag_exports));
+var TERMINATION_EVENTS = /* @__PURE__ */ new Set(["Stop", "StopFailure"]);
+function buildTurnSignal(agent, event, payload) {
+  const p = payload && typeof payload === "object" ? payload : {};
+  const str = (v) => typeof v === "string" && v.trim() ? v : "";
+  if (agent === "agy") {
+    return {
+      agent,
+      event,
+      sessionId: str(p.conversationId) || str(p.conversation_id),
+      transcriptPath: str(p.transcriptPath) || str(p.transcript_path),
+      // 배경 작업이 남아 있으면 턴이 아직 안 끝났다.
+      complete: p.fullyIdle === true,
+      terminationReason: str(p.terminationReason),
+      error: str(p.error),
+      at: Date.now()
+    };
+  }
+  return {
+    agent,
+    event,
+    sessionId: str(p.session_id),
+    transcriptPath: str(p.transcript_path),
+    // 자식(서브에이전트) 신호는 부모 턴이 아니다. Stop 스키마엔 원래 없지만 방어로 싣는다.
+    agentId: str(p.agent_id),
+    // claude는 API·모델 오류로 끊기면 Stop 대신 StopFailure가 온다 (research 04 §1).
+    complete: event !== "StopFailure",
+    error: str(p.error),
+    at: Date.now()
+  };
+}
 var ALLOWED_EVENTS = /* @__PURE__ */ new Set([
   "SessionStart",
   "UserPromptSubmit",
@@ -446,6 +476,7 @@ var ALLOWED_EVENTS = /* @__PURE__ */ new Set([
   "PreToolUse",
   "PostToolUse",
   "Stop",
+  "StopFailure",
   "PreInvocation",
   "PostInvocation"
 ]);
@@ -740,6 +771,31 @@ async function main() {
       "agentbridge-memory: capture write skipped \u2014 " + String(e && e.message ? e.message : e) + "\n"
     );
   }
+  if (TERMINATION_EVENTS.has(parsed.event)) {
+    try {
+      const token = process.env.AGENTBRIDGE_WS_SESSION || "";
+      if (token && token === path.basename(token)) {
+        let payload = null;
+        try {
+          payload = JSON.parse(stdinRaw);
+        } catch {
+          payload = null;
+        }
+        const dir = path.join(wsDir, "sessions", token);
+        fs.mkdirSync(dir, { recursive: true });
+        const out = path.join(dir, "turn-signal.json");
+        const tmp = out + "." + process.pid + ".tmp";
+        fs.writeFileSync(tmp, JSON.stringify(buildTurnSignal(parsed.agent, parsed.event, payload)));
+        fs.renameSync(tmp, out);
+      }
+    } catch (e) {
+      process.stderr.write(
+        "agentbridge-memory: turn signal write skipped \u2014 " + String(e && e.message ? e.message : e) + "\n"
+      );
+    }
+    process.stdout.write(JSON.stringify(buildTerminationOutput(parsed.agent)));
+    process.exit(0);
+  }
   let globalBlock = "";
   try {
     const lastTurn = recentTurns.length ? recentTurns[recentTurns.length - 1] : null;
@@ -767,6 +823,10 @@ async function main() {
     JSON.stringify(buildHookOutput(parsed.agent, parsed.event, additionalContext))
   );
   process.exit(0);
+}
+function buildTerminationOutput(agent) {
+  if (agent === "agy") return { decision: "stop" };
+  return { suppressOutput: true };
 }
 function buildHookOutput(agent, event, additionalContext) {
   if (agent === "agy") {

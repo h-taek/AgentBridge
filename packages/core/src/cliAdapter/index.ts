@@ -13,6 +13,7 @@ import type { Logger } from '../interfaces';
 import { noopLogger } from '../interfaces';
 import { resolveResumeArgs } from './agyResume';
 import { resolveHookCaptureFile } from './hookSessionCapture';
+import { resolveTurnSignalFile } from './turnSignal';
 
 export type CliAdapterOptions = {
   envProbe: EnvProbe;
@@ -83,6 +84,7 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
         const wsDir = workspaceDir(workspaceId);
         const env = {
           ...envProbe.getShellEnv(),
+          AGENTBRIDGE_WS_SESSION: sessionId,
           AGENTBRIDGE_WS_DIR: wsDir,
         };
         const probe = envProbe.probe('claude');
@@ -123,6 +125,7 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
           model: 'claude',
           workspaceId,
           sessionId,
+          turnSignalFilePath: resolveTurnSignalFile(wsDir, sessionId),
         };
       },
     },
@@ -139,6 +142,7 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
           AGENTBRIDGE_WS_DIR: wsDir,
         };
         const hookCaptureFilePath = resolveHookCaptureFile(wsDir, sessionId);
+        const turnSignalFilePath = resolveTurnSignalFile(wsDir, sessionId);
         const probe = envProbe.probe('codex');
         const command = probe.resolvedPath ?? 'codex';
 
@@ -180,6 +184,7 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
           sessionId,
           modelSessionId,
           hookCaptureFilePath,
+          turnSignalFilePath,
         };
       },
     },
@@ -196,6 +201,7 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
           AGENTBRIDGE_WS_DIR: wsDir,
         };
         const hookCaptureFilePath = resolveHookCaptureFile(wsDir, sessionId);
+        const turnSignalFilePath = resolveTurnSignalFile(wsDir, sessionId);
         const probe = envProbe.probe('agy');
         const command = probe.resolvedPath ?? 'agy';
 
@@ -248,6 +254,7 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
           sessionId,
           modelSessionId,
           hookCaptureFilePath,
+          turnSignalFilePath,
         };
       },
     },

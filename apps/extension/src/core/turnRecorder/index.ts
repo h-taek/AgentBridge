@@ -1,6 +1,6 @@
 // CaptureManager facade — 2026-06-07 M2-5: 턴 기록을 PTY 스크래핑 → transcript 읽기로 전환(설계 §E).
-// chatPanel은 세션을 매니저에 등록만 하고, 매니저가 각 CLI transcript 파일을 fs.watch/폴링으로 읽어
-// turns.jsonl을 쌓는다. 표시는 PTY 유지(webview output + replay.log는 chatPanel이 그대로 기록).
+// chatPanel은 세션을 매니저에 등록만 하고, 매니저가 종료 훅 신호를 받아 그 신호가 실어 온
+// transcript를 읽어 turns.jsonl을 쌓는다(0.5.0 A-2). 표시는 PTY 유지.
 
 import { CaptureManager, maybeAutoNameSession, type TurnsAssistantDetail } from '@agentbridge/core';
 import type { CliKind } from '../../shared/types';
@@ -21,8 +21,8 @@ export function registerCapture(args: {
   sessionId: string;
   model: CliKind;
   workspacePath: string;
-  // claude: jsonl 파일명(=sessionId, 통일 규약). codex/agy: native id(없으면 null → setCaptureModelSessionId 대기).
-  modelSessionId: string | null;
+  // 훅이 이 세션의 종료 신호를 쓰는 파일. 어댑터가 SpawnOptions로 넘긴다.
+  signalFilePath: string;
   // 자동 명명이 실제로 제목을 정했을 때 호출 — 호스트가 열린 탭 제목을 갱신(panel.title은 생성 시 1회성).
   onAutoNamed?: (title: string) => void;
 }): void {
@@ -32,8 +32,7 @@ export function registerCapture(args: {
     workspacePath: args.workspacePath,
     sessionId: args.sessionId,
     model: args.model,
-    modelSessionId: args.modelSessionId,
-    cwd: args.workspacePath,
+    signalFilePath: args.signalFilePath,
     getDetail: () => getConfig().assistantDetail as TurnsAssistantDetail,
     scheduler: getCompactionScheduler(),
     onTurnFlushed: async ({ workspaceId, sessionId, flushedAt }) => {
@@ -62,11 +61,6 @@ export function registerCapture(args: {
       }
     },
   });
-}
-
-// codex/agy 비동기 modelSessionId 캡처 시 호출 — 매니저가 그때 경로를 해석해 캡처 시작.
-export function setCaptureModelSessionId(sessionId: string, modelSessionId: string, cwd: string): void {
-  manager.setModelSessionId(sessionId, modelSessionId, cwd);
 }
 
 // 세션 종료 — finalize로 carry의 마지막 열린 턴 flush. deactivate는 panel별 disposeAndFlush가 호출.

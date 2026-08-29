@@ -48,6 +48,43 @@ const { wrapInjectedContext } = require('../src/contextTag')
 // agy 추가 이벤트(PreInvocation/PostInvocation)는 매 모델 호출 직전·직후에 fire. SessionStart/
 // BeforeAgent 대신 agy는 PreInvocation으로 컨텍스트 inject. PostInvocation/Stop은 향후 활용.
 
+// 턴 종료 이벤트 (0.5.0 A-2). 이 이벤트에서는 컨텍스트를 싣지 않고 종료 신호 파일만 쓴다.
+// 호스트가 그 신호를 받아 transcript를 읽는다 — 폴링으로 파일이 자랐는지 훔쳐보지 않는다.
+const TERMINATION_EVENTS = new Set(['Stop', 'StopFailure'])
+
+// 종료 페이로드를 하니스 차이 없는 한 모양으로 정규화한다.
+// claude/codex: session_id·transcript_path·agent_id (research 04 §1·§2)
+// agy: conversationId·transcriptPath·fullyIdle·terminationReason (§3)
+function buildTurnSignal(agent, event, payload) {
+  const p = payload && typeof payload === 'object' ? payload : {}
+  const str = (v) => (typeof v === 'string' && v.trim() ? v : '')
+  if (agent === 'agy') {
+    return {
+      agent,
+      event,
+      sessionId: str(p.conversationId) || str(p.conversation_id),
+      transcriptPath: str(p.transcriptPath) || str(p.transcript_path),
+      // 배경 작업이 남아 있으면 턴이 아직 안 끝났다.
+      complete: p.fullyIdle === true,
+      terminationReason: str(p.terminationReason),
+      error: str(p.error),
+      at: Date.now()
+    }
+  }
+  return {
+    agent,
+    event,
+    sessionId: str(p.session_id),
+    transcriptPath: str(p.transcript_path),
+    // 자식(서브에이전트) 신호는 부모 턴이 아니다. Stop 스키마엔 원래 없지만 방어로 싣는다.
+    agentId: str(p.agent_id),
+    // claude는 API·모델 오류로 끊기면 Stop 대신 StopFailure가 온다 (research 04 §1).
+    complete: event !== 'StopFailure',
+    error: str(p.error),
+    at: Date.now()
+  }
+}
+
 const ALLOWED_EVENTS = new Set([
   'SessionStart',
   'UserPromptSubmit',
@@ -55,6 +92,7 @@ const ALLOWED_EVENTS = new Set([
   'PreToolUse',
   'PostToolUse',
   'Stop',
+  'StopFailure',
   'PreInvocation',
   'PostInvocation'
 ])
@@ -400,6 +438,37 @@ async function main() {
     )
   }
 
+  // 턴 종료 신호 — 호스트가 이걸 받아 transcript를 읽는다 (0.5.0 A-2).
+  // 캡처와 같은 폴더에 쓰고, 매번 덮어쓴다. 신호를 하나 놓쳐도 다음 신호에 증분으로 따라잡으므로
+  // 누적할 필요가 없다.
+  if (TERMINATION_EVENTS.has(parsed.event)) {
+    try {
+      const token = process.env.AGENTBRIDGE_WS_SESSION || ''
+      if (token && token === path.basename(token)) {
+        let payload = null
+        try {
+          payload = JSON.parse(stdinRaw)
+        } catch {
+          payload = null
+        }
+        const dir = path.join(wsDir, 'sessions', token)
+        fs.mkdirSync(dir, { recursive: true })
+        const out = path.join(dir, 'turn-signal.json')
+        const tmp = out + '.' + process.pid + '.tmp'
+        fs.writeFileSync(tmp, JSON.stringify(buildTurnSignal(parsed.agent, parsed.event, payload)))
+        fs.renameSync(tmp, out)
+      }
+    } catch (e) {
+      process.stderr.write(
+        'agentbridge-memory: turn signal write skipped — ' +
+          String(e && e.message ? e.message : e) +
+          '\n'
+      )
+    }
+    process.stdout.write(JSON.stringify(buildTerminationOutput(parsed.agent)))
+    process.exit(0)
+  }
+
   // §G3 글로벌 메모리 검색 — additive·best-effort. 어떤 실패도 IR/turns 주입을 막지 않는다.
   let globalBlock = ''
   try {
@@ -431,6 +500,14 @@ async function main() {
     JSON.stringify(buildHookOutput(parsed.agent, parsed.event, additionalContext))
   )
   process.exit(0)
+}
+
+// 종료 훅 출력. 종료를 막지 않는 최소 응답을 낸다.
+// agy는 `decision`이 required이고 "continue"만 종료를 막는다 → 다른 값을 준다 (research 04 §3).
+// claude/codex는 `decision`의 유일한 허용값이 "block"이라 아예 싣지 않는다 (§2).
+function buildTerminationOutput(agent) {
+  if (agent === 'agy') return { decision: 'stop' }
+  return { suppressOutput: true }
 }
 
 function buildHookOutput(agent, event, additionalContext) {
