@@ -20,12 +20,9 @@ export type CliAdapterOptions = {
   // 가진 호스트는 hookInstaller 안 주입하고 spawn 후 별도로 hooks 설치 가능.
   hookInstaller?: HookInstaller;
   hookStatusStore?: HookStatusStore;
-  // claude 어댑터가 hookInstaller.installClaudeHooks(workspaceClaudeDir, …)에 전달할 디렉토리.
-  // 호스트가 workspace 단위 storage 경로를 안다 — workspaceId로 매핑.
-  workspaceClaudeDir: (workspaceId: string) => string;
-  // <storageRoot>/workspaces/<workspaceId> — 훅이 captured-<token>.json을 쓰는 디렉토리.
-  // 미제공 시 hookCaptureFilePath 미반환(토큰 캡처 비활성, 파일와치만).
-  hookCaptureDir?: (workspaceId: string) => string;
+  // <storageRoot>/workspaces/<workspaceId> — 그 워크스페이스의 데이터 폴더.
+  // 훅이 신원으로 쓰는 AGENTBRIDGE_WS_DIR이자 캡처 파일이 떨어지는 자리다.
+  workspaceDir: (workspaceId: string) => string;
   logger?: Logger;
 };
 
@@ -58,7 +55,7 @@ export interface CliAdapterSet {
 
 export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
   const log = opts.logger ?? noopLogger;
-  const { envProbe, hookInstaller, hookStatusStore, hookCaptureDir } = opts;
+  const { envProbe, hookInstaller, hookStatusStore, workspaceDir } = opts;
 
   async function claudeSessionFileExists(uuid: string): Promise<boolean> {
     const root = join(homedir(), '.claude', 'projects');
@@ -85,17 +82,18 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
 
       async buildSpawnOptions(cwd, workspaceId, resumeSessionId) {
         const sessionId = resumeSessionId ?? randomUUID();
-        const env = envProbe.getShellEnv();
+        const wsDir = workspaceDir(workspaceId);
+        const env = {
+          ...envProbe.getShellEnv(),
+          AGENTBRIDGE_WS_DIR: wsDir,
+        };
         const probe = envProbe.probe('claude');
         const command = probe.resolvedPath ?? 'claude';
 
-        let settingsFile = '';
         if (hookInstaller) {
           try {
-            settingsFile = await hookInstaller.installClaudeHooks(
-              opts.workspaceClaudeDir(workspaceId),
-              workspaceId,
-            );
+            await hookInstaller.installClaudeHooks();
+            await hookInstaller.cleanupLegacyHooks(cwd);
             hookStatusStore?.clearDisabled(workspaceId, 'claude');
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
@@ -104,20 +102,19 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
           }
         }
 
-        let args: string[];
-        if (!resumeSessionId) {
-          args = ['--session-id', sessionId, '--settings', settingsFile];
-        } else {
-          const exists = await claudeSessionFileExists(sessionId);
-          if (exists) {
-            args = ['--resume', sessionId, '--settings', settingsFile];
-          } else {
-            log.log(
-              `claudeAdapter: resume 불가 (jsonl 없음) — 새 세션으로 fallback (sessionId=${sessionId.slice(0, 8)})`,
-            );
-            args = ['--session-id', sessionId, '--settings', settingsFile];
-          }
-        }
+        // 우리 폴더는 작업 폴더 밖이라 claude가 읽기 전에 승인을 요구한다(첨부가 여기 있다).
+        // 세션 인자라 우리가 띄운 세션에만 걸린다. 에이전트용 CLI 명령 허용(--allowedTools)은
+        // 그 CLI가 생기는 3단계(B-5)에서 같은 자리에 붙는다.
+        const accessArgs = ['--add-dir', wsDir];
+        const sessionArgs = !resumeSessionId
+          ? ['--session-id', sessionId]
+          : (await claudeSessionFileExists(sessionId))
+            ? ['--resume', sessionId]
+            : (log.log(
+                `claudeAdapter: resume 불가 (jsonl 없음) — 새 세션으로 fallback (sessionId=${sessionId.slice(0, 8)})`,
+              ),
+              ['--session-id', sessionId]);
+        const args = [...sessionArgs, ...accessArgs];
 
         return {
           command,
@@ -137,22 +134,22 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
 
       async buildSpawnOptions(cwd, workspaceId, resumeSessionId, resumeModelSessionId, captureToken) {
         const sessionId = resumeSessionId ?? randomUUID();
-        // 캡처 토큰: 호스트가 명시(captureToken, 데스크탑)하면 그걸, 아니면 내부 sessionId
-        // (extension — opts.sessionId == chatPanel 세션 identity). hookCaptureDir 제공 시에만 활성.
+        // 캡처 토큰: 호스트가 명시하면 그걸, 아니면 내부 sessionId.
         const captureFileToken = captureToken ?? sessionId;
+        const wsDir = workspaceDir(workspaceId);
         const env = {
           ...envProbe.getShellEnv(),
-          ...(hookCaptureDir ? { AGENTBRIDGE_WS_SESSION: captureFileToken } : {}),
+          AGENTBRIDGE_WS_SESSION: captureFileToken,
+          AGENTBRIDGE_WS_DIR: wsDir,
         };
-        const hookCaptureFilePath = hookCaptureDir
-          ? join(hookCaptureDir(workspaceId), 'sessions', captureFileToken, 'captured.json')
-          : undefined;
+        const hookCaptureFilePath = join(wsDir, 'sessions', captureFileToken, 'captured.json');
         const probe = envProbe.probe('codex');
         const command = probe.resolvedPath ?? 'codex';
 
         if (hookInstaller) {
           try {
-            await hookInstaller.installCodexHooks(cwd, workspaceId);
+            await hookInstaller.installCodexHooks();
+            await hookInstaller.cleanupLegacyHooks(cwd);
             hookStatusStore?.clearDisabled(workspaceId, 'codex');
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
@@ -202,22 +199,22 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
 
       async buildSpawnOptions(cwd, workspaceId, resumeSessionId, resumeModelSessionId, captureToken) {
         const sessionId = resumeSessionId ?? randomUUID();
-        // 캡처 토큰: 호스트가 명시(captureToken, 데스크탑)하면 그걸, 아니면 내부 sessionId
-        // (extension — opts.sessionId == chatPanel 세션 identity). hookCaptureDir 제공 시에만 활성.
+        // 캡처 토큰: 호스트가 명시하면 그걸, 아니면 내부 sessionId.
         const captureFileToken = captureToken ?? sessionId;
+        const wsDir = workspaceDir(workspaceId);
         const env = {
           ...envProbe.getShellEnv(),
-          ...(hookCaptureDir ? { AGENTBRIDGE_WS_SESSION: captureFileToken } : {}),
+          AGENTBRIDGE_WS_SESSION: captureFileToken,
+          AGENTBRIDGE_WS_DIR: wsDir,
         };
-        const hookCaptureFilePath = hookCaptureDir
-          ? join(hookCaptureDir(workspaceId), 'sessions', captureFileToken, 'captured.json')
-          : undefined;
+        const hookCaptureFilePath = join(wsDir, 'sessions', captureFileToken, 'captured.json');
         const probe = envProbe.probe('agy');
         const command = probe.resolvedPath ?? 'agy';
 
         if (hookInstaller) {
           try {
-            await hookInstaller.installAgyHooks(cwd, workspaceId);
+            await hookInstaller.installAgyHooks();
+            await hookInstaller.cleanupLegacyHooks(cwd);
             hookStatusStore?.clearDisabled(workspaceId, 'agy');
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);

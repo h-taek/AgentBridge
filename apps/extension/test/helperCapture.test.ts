@@ -5,8 +5,10 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { spawn } from 'child_process';
 
-// 번들된 헬퍼(에스빌드 self-contained CJS). Task 2의 rebundle 이후 최신.
-const HELPER = join(__dirname, '..', 'resources', 'bin', 'agentbridge-memory.js');
+// 번들된 헬퍼(에스빌드 self-contained CJS). 실제 배치(<루트>/bin/)를 흉내내 복사해서 돌린다 —
+// 헬퍼가 자기 위치에서 저장소 루트를 계산하기 때문이다(0.5.0 A-3).
+const BUNDLED_HELPER = join(__dirname, '..', 'resources', 'bin', 'agentbridge-memory.js');
+let HELPER = BUNDLED_HELPER;
 
 function runHelper(args: string[], stdin: string, extraEnv: Record<string, string>): Promise<void> {
   return new Promise((resolve) => {
@@ -24,13 +26,19 @@ describe('agentbridge-memory — sessions/<token>/captured.json', () => {
   const WS = 'ws-1111';
   const TOKEN = 'sess-aaaa';
   const baseArgs = (event: string, agent: string): string[] => [
-    'inject', '--agent', agent, '--workspace', WS, '--user-data', userData, '--event', event,
+    'inject', '--agent', agent, '--event', event,
   ];
+  const wsEnv = (): Record<string, string> => ({
+    AGENTBRIDGE_WS_DIR: join(userData, 'workspaces', WS),
+  });
 
   beforeEach(async () => {
     userData = await fs.mkdtemp(join(tmpdir(), 'agentbridge-helpercap-'));
     // 세션 디렉토리를 미리 생성 (헬퍼는 mkdir하지 않고 그대로 쓴다).
     await fs.mkdir(join(userData, 'workspaces', WS, 'sessions', TOKEN), { recursive: true });
+    await fs.mkdir(join(userData, 'bin'), { recursive: true });
+    HELPER = join(userData, 'bin', 'agentbridge-memory.js');
+    await fs.copyFile(BUNDLED_HELPER, HELPER);
   });
   afterEach(async () => {
     await fs.rm(userData, { recursive: true, force: true });
@@ -40,7 +48,7 @@ describe('agentbridge-memory — sessions/<token>/captured.json', () => {
     await runHelper(
       baseArgs('UserPromptSubmit', 'codex'),
       JSON.stringify({ session_id: '019e-codex', prompt: 'hi' }),
-      { AGENTBRIDGE_WS_SESSION: TOKEN },
+      { AGENTBRIDGE_WS_SESSION: TOKEN, ...wsEnv() },
     );
     const capturedPath = join(userData, 'workspaces', WS, 'sessions', TOKEN, 'captured.json');
     const raw = await fs.readFile(capturedPath, 'utf8');
@@ -63,7 +71,7 @@ describe('agentbridge-memory — sessions/<token>/captured.json', () => {
     await runHelper(
       baseArgs('UserPromptSubmit', 'claude'),
       JSON.stringify({ session_id: 'x', prompt: 'hi' }),
-      { AGENTBRIDGE_WS_SESSION: TOKEN },
+      { AGENTBRIDGE_WS_SESSION: TOKEN, ...wsEnv() },
     );
     const capturedPath = join(userData, 'workspaces', WS, 'sessions', TOKEN, 'captured.json');
     assert.equal(existsSync(capturedPath), false);

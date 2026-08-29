@@ -16,24 +16,26 @@ const wid = '44444444-4444-4444-4444-444444444444';
 
 describe('adapter integration (M16 await chain regression guard)', () => {
   let storagePath: string;
+  let home: string;
   let workspaceCwd: string;
 
   beforeEach(async () => {
     storagePath = await fs.mkdtemp(join(tmpdir(), 'agentbridge-int-'));
+    home = await fs.mkdtemp(join(tmpdir(), 'agentbridge-int-home-'));
     workspaceCwd = await fs.mkdtemp(join(tmpdir(), 'agentbridge-int-ws-'));
-    initCoreForTest(storagePath);
-    await fs.mkdir(join(storagePath, 'workspaces', wid, 'settings'), { recursive: true });
+    initCoreForTest(storagePath, home);
   });
 
   afterEach(async () => {
-    await fs.rm(storagePath, { recursive: true, force: true });
-    await fs.rm(workspaceCwd, { recursive: true, force: true });
+    for (const d of [storagePath, home, workspaceCwd]) {
+      await fs.rm(d, { recursive: true, force: true });
+    }
   });
 
-  it('claudeAdapter.buildSpawnOptions writes settings.json BEFORE returning', async () => {
+  it('claudeAdapter.buildSpawnOptions writes global hooks BEFORE returning', async () => {
     const opts = await claudeAdapter.buildSpawnOptions(workspaceCwd, wid);
-    // After the await, settings must exist on disk — otherwise pty.spawn would race.
-    const settingsFile = join(storagePath, 'workspaces', wid, 'settings', 'claude-settings.json');
+    // After the await, hooks must exist on disk — otherwise pty.spawn would race.
+    const settingsFile = join(home, '.claude', 'settings.json');
     assert.ok(existsSync(settingsFile), `expected ${settingsFile} to exist after buildSpawnOptions`);
     const json = JSON.parse(await fs.readFile(settingsFile, 'utf8'));
     assert.ok(json.hooks?.UserPromptSubmit);
@@ -41,14 +43,16 @@ describe('adapter integration (M16 await chain regression guard)', () => {
     // SpawnOptions shape
     assert.equal(opts.model, 'claude');
     assert.equal(opts.workspaceId, wid);
-    assert.ok(opts.args.includes('--settings'));
-    assert.ok(opts.args.includes(settingsFile));
+    // 우리 폴더는 작업 폴더 밖이라 읽기 권한을 세션 인자로 연다. --settings는 폐기됐다.
+    assert.equal(opts.args.includes('--settings'), false);
+    assert.ok(opts.args.includes('--add-dir'));
+    assert.ok(opts.args.includes(join(storagePath, 'workspaces', wid)));
   });
 
-  it('codexAdapter.buildSpawnOptions writes .codex/hooks.json + config.toml BEFORE returning', async () => {
+  it('codexAdapter.buildSpawnOptions writes global codex hooks BEFORE returning', async () => {
     const opts = await codexAdapter.buildSpawnOptions(workspaceCwd, wid);
-    const hooksPath = join(workspaceCwd, '.codex', 'hooks.json');
-    const tomlPath = join(workspaceCwd, '.codex', 'config.toml');
+    const hooksPath = join(home, '.codex', 'hooks.json');
+    const tomlPath = join(home, '.codex', 'config.toml');
     assert.ok(existsSync(hooksPath), `expected ${hooksPath}`);
     assert.ok(existsSync(tomlPath), `expected ${tomlPath}`);
 
@@ -62,9 +66,9 @@ describe('adapter integration (M16 await chain regression guard)', () => {
     assert.equal(opts.model, 'codex');
   });
 
-  it('agyAdapter.buildSpawnOptions writes .agents/hooks.json BEFORE returning', async () => {
+  it('agyAdapter.buildSpawnOptions writes global agy hooks BEFORE returning', async () => {
     const opts = await agyAdapter.buildSpawnOptions(workspaceCwd, wid);
-    const hooksPath = join(workspaceCwd, '.agents', 'hooks.json');
+    const hooksPath = join(home, '.gemini', 'config', 'hooks.json');
     assert.ok(existsSync(hooksPath));
     const hooks = JSON.parse(await fs.readFile(hooksPath, 'utf8'));
     assert.ok(hooks['agentbridge-memory']);
@@ -73,29 +77,35 @@ describe('adapter integration (M16 await chain regression guard)', () => {
     assert.equal(opts.model, 'agy');
   });
 
-  it('preserves existing user content in .codex/config.toml', async () => {
-    await fs.mkdir(join(workspaceCwd, '.codex'), { recursive: true });
+  it('preserves existing user content in the global config.toml', async () => {
+    await fs.mkdir(join(home, '.codex'), { recursive: true });
     await fs.writeFile(
-      join(workspaceCwd, '.codex', 'config.toml'),
+      join(home, '.codex', 'config.toml'),
       '# user content\n[user]\nmy_key = "preserved"\n',
       'utf8',
     );
 
     await codexAdapter.buildSpawnOptions(workspaceCwd, wid);
-    const toml = await fs.readFile(join(workspaceCwd, '.codex', 'config.toml'), 'utf8');
+    const toml = await fs.readFile(join(home, '.codex', 'config.toml'), 'utf8');
     assert.match(toml, /my_key = "preserved"/);
     assert.match(toml, /# AgentBridge BEGIN/);
   });
 
+  it('세 하니스 어느 것도 프로젝트 폴더에 파일을 남기지 않는다', async () => {
+    await claudeAdapter.buildSpawnOptions(workspaceCwd, wid);
+    await codexAdapter.buildSpawnOptions(workspaceCwd, wid);
+    await agyAdapter.buildSpawnOptions(workspaceCwd, wid);
+    assert.deepEqual(await fs.readdir(workspaceCwd), []);
+  });
+
   it('claude hook command includes properly shell-quoted helper path (J1 + M16 cross-check)', async () => {
     await claudeAdapter.buildSpawnOptions(workspaceCwd, wid);
-    const settingsFile = join(storagePath, 'workspaces', wid, 'settings', 'claude-settings.json');
-    const json = JSON.parse(await fs.readFile(settingsFile, 'utf8'));
+    const json = JSON.parse(await fs.readFile(join(home, '.claude', 'settings.json'), 'utf8'));
     const cmd: string = json.hooks.UserPromptSubmit[0].hooks[0].command;
     // Command should be parseable by /bin/sh -c
-    assert.match(cmd, /^node /);
+    assert.match(cmd, /^if \[ -x /);
     assert.match(cmd, /agentbridge-memory\.js/);
-    assert.match(cmd, /--workspace /);
+    assert.equal(cmd.includes('--workspace '), false);
     assert.match(cmd, /--agent claude/);
     assert.match(cmd, /--event UserPromptSubmit/);
     // No unescaped single-quote breakage — the quote helper should produce balanced quoting.

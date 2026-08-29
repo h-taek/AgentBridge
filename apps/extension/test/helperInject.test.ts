@@ -14,7 +14,9 @@ describe('helper inject — 글로벌 메모리 검색 종단(§G3)', () => {
     this.timeout(30000); // esbuild 번들 빌드 여유
     tmp = await fsp.mkdtemp(join(tmpdir(), 'ab-helper-'));
     userData = join(tmp, 'userdata');
-    bundlePath = join(tmp, 'agentbridge-memory.js');
+    // 헬퍼는 <저장소 루트>/bin/에 산다. 자기 위치에서 루트를 계산하므로 배치를 실제와 맞춘다.
+    await fsp.mkdir(join(userData, 'bin'), { recursive: true });
+    bundlePath = join(userData, 'bin', 'agentbridge-memory.js');
 
     // 실제 번들 스크립트로 self-contained 헬퍼 생성(번들 정합성까지 검증).
     // ts-node(CommonJS)는 await import(file://)를 require로 다운레벨해 .mjs를 못 부른다 → 자식 프로세스로 spawn.
@@ -46,8 +48,12 @@ describe('helper inject — 글로벌 메모리 검색 종단(§G3)', () => {
   function run(stdin: string): any {
     const out = execFileSync(
       'node',
-      [bundlePath, 'inject', '--agent', 'claude', '--workspace', 'ws-1', '--user-data', userData, '--event', 'UserPromptSubmit'],
-      { input: stdin, encoding: 'utf8' },
+      [bundlePath, 'inject', '--agent', 'claude', '--event', 'UserPromptSubmit'],
+      {
+        input: stdin,
+        encoding: 'utf8',
+        env: { ...process.env, AGENTBRIDGE_WS_DIR: join(userData, 'workspaces', 'ws-1') },
+      },
     );
     return JSON.parse(out);
   }

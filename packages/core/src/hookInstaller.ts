@@ -1,12 +1,21 @@
-// CLI hook 설정 파일을 작성한다 — claude의 settings.json, codex의 hooks.json/config.toml,
-// agy의 hooks.json. 모두 atomic write + 사용자 콘텐츠 보존.
+// CLI hook 설정을 사용자 전역 설정에 심는다 (0.5.0 A-3).
 //
-// 호스트 차이 흡수:
-//   - helperPath: 번들된 agentbridge-memory.js 위치 — 호스트가 자기 번들 경로 전달
-//   - globalStoragePath: hook command에 전달되는 --user-data 값
-//   - workspaceClaudePath: claude settings.json이 들어갈 디렉토리(원본은 workspace storage 하위)
+//   claude  ~/.claude/settings.json 의 hooks 키
+//   codex   ~/.codex/hooks.json + ~/.codex/config.toml 의 [features] hooks
+//   agy     ~/.gemini/config/hooks.json
+//
+// 프로젝트 폴더에는 아무것도 쓰지 않는다. 사용자 저장소에 우리 파일을 남기지 않기 위해서이고,
+// 프로젝트 레이어가 가장 약한 자리(신뢰·worktree·실행 모드에 따라 안 뜬다)라는 점도 같이 피한다.
+// 구버전이 프로젝트와 전역에 남긴 우리 항목은 cleanupLegacyHooks가 걷어낸다.
+//
+// 커맨드에는 저장소 구조가 들어가지 않는다. 신원은 spawn 때 심는 AGENTBRIDGE_WS_DIR이 나른다.
+// 그래서 프로젝트가 몇 개든 커맨드 문자열이 동일하고, 하니스당 한 벌이면 전부 덮는다.
+//
+// 모두 atomic write + 사용자 콘텐츠 보존. 내용이 같으면 아예 쓰지 않는다 — codex는 훅 커맨드가
+// 바뀌면 신뢰를 다시 묻고, 불필요한 재작성은 그 관문을 괜히 건드린다.
 
 import { promises as fsp } from 'fs';
+import { homedir } from 'os';
 import { join, dirname } from 'path';
 import type { CliKind } from './shared/cli';
 import { quoteArg } from './shellQuote';
@@ -14,12 +23,12 @@ import { findBlockedGlobalCliConfigDir } from './cliGlobalDirs';
 import type { Logger } from './interfaces';
 import { noopLogger } from './interfaces';
 
-function assertWorkspaceCwd(cwd: string, label: string): void {
-  // 홈 자체 + CLI 글로벌 설정 디렉토리(~/.codex 등) 하위면 거부 — 글로벌 hook 덮어쓰기 방지.
-  const blocked = findBlockedGlobalCliConfigDir(cwd);
+function assertWorkspaceCwd(cwd: string, label: string, homeDir?: string): void {
+  // 홈 자체 + CLI 글로벌 설정 디렉토리(~/.codex 등) 하위면 거부.
+  const blocked = findBlockedGlobalCliConfigDir(cwd, homeDir);
   if (blocked) {
     throw new Error(
-      `${label}: refusing to install hooks under ${blocked} — CLI global config directory. Open a project folder first.`,
+      `${label}: refusing to touch ${blocked} — CLI global config directory. Open a project folder first.`,
     );
   }
 }
@@ -57,38 +66,58 @@ function isObject(v: unknown): v is Record<string, unknown> {
 }
 
 export type HookInstallerOptions = {
-  // 번들된 agentbridge-memory.js 절대 경로 — 호스트가 책임지고 전달.
+  // 설치된 agentbridge-memory.js 절대 경로 — 호스트가 책임지고 전달.
   helperPath: string;
-  // hook command에 --user-data로 전달되는 값. 원본은 workspaceStore.getGlobalStoragePath().
-  globalStoragePath: string;
+  // 훅을 실행할 런타임 절대 경로. 설치 시점의 process.execPath다 — 사용자 PATH의 node에
+  // 기대지 않는다(세 하니스 다 네이티브 바이너리라 node 없이 설치된다).
+  execPath: string;
+  // 전역 설정을 둘 홈 디렉토리. 테스트만 오버라이드한다.
+  homeDir?: string;
   logger?: Logger;
 };
 
 export interface HookInstaller {
-  installClaudeHooks(workspaceClaudeDir: string, workspaceId: string): Promise<string>;
-  installCodexHooks(cwd: string, workspaceId: string): Promise<{ hooksJsonPath: string; configTomlPath: string }>;
-  installAgyHooks(cwd: string, workspaceId: string): Promise<{ hooksJsonPath: string }>;
+  installClaudeHooks(): Promise<string>;
+  installCodexHooks(): Promise<{ hooksJsonPath: string; configTomlPath: string }>;
+  installAgyHooks(): Promise<{ hooksJsonPath: string }>;
+  // 구버전이 프로젝트 폴더와 전역에 남긴 우리 항목을 걷어낸다. 사용자 콘텐츠는 보존한다.
+  cleanupLegacyHooks(cwd: string): Promise<string[]>;
 }
 
 export function createHookInstaller(opts: HookInstallerOptions): HookInstaller {
   const log = opts.logger ?? noopLogger;
 
-  function buildHookCommand(agent: CliKind, event: HookEventName, workspaceId: string): string {
-    // agent/event는 코드가 정한 타입 리터럴이라 현재는 안전하나, quoteArg로 통일 (V-31 ④).
-    return [
-      'node',
-      quoteArg(opts.helperPath),
+  const home = opts.homeDir ?? homedir();
+
+  // 실행 파일과 헬퍼가 없으면 조용히 아무것도 안 한다. 매 턴 에러를 띄우는 것보다 낫다 —
+  // 구버전 커맨드가 `node`로 시작해 node 없는 사용자에게 매 턴 exit 127을 내던 것이 그 반례다.
+  function buildHookCommand(agent: CliKind, event: HookEventName): string {
+    const exec = quoteArg(opts.execPath);
+    const helper = quoteArg(opts.helperPath);
+    const run = [
+      'ELECTRON_RUN_AS_NODE=1',
+      exec,
+      helper,
       'inject',
       '--agent',
       quoteArg(agent),
-      '--workspace',
-      quoteArg(workspaceId),
-      '--user-data',
-      quoteArg(opts.globalStoragePath),
       '--event',
       quoteArg(event),
     ].join(' ');
+    return `if [ -x ${exec} ] && [ -f ${helper} ]; then ${run}; fi`;
   }
+
+  // 내용이 같으면 안 쓴다. 훅 커맨드가 바뀌면 codex가 신뢰를 다시 묻기 때문에,
+  // 재작성 자체를 줄이는 것이 그 관문을 지키는 방법이다.
+  async function writeIfChanged(filePath: string, content: string): Promise<boolean> {
+    if ((await readFileSafe(filePath)) === content) return false;
+    await atomicWrite(filePath, content);
+    return true;
+  }
+
+  // 우리 claude 훅 항목의 표식. settings.json의 hooks에는 이름 그룹이 없어서
+  // 커맨드 문자열로 가린다.
+  const CLAUDE_MARKER = 'agentbridge-memory.js';
 
   // ─── claude ────────────────────────────────────────────────────────────
 
@@ -100,39 +129,64 @@ export function createHookInstaller(opts: HookInstallerOptions): HookInstaller {
     matcher?: string;
     hooks: ClaudeHookCommand[];
   }
-  interface ClaudeHookConfig {
-    hooks?: {
-      [eventName: string]: ClaudeHookMatcher[];
-    };
+  // claude 훅은 사용자 전역 settings.json의 hooks 키에 들어간다. 남의 파일이므로 우리 항목만
+  // 갈아끼우고 나머지는 그대로 둔다.
+  function mergeClaudeHooks(
+    existing: Record<string, unknown>,
+    ours: Record<string, ClaudeHookMatcher>,
+  ): Record<string, unknown> {
+    const merged: Record<string, unknown> = { ...existing };
+    const hooks = isObject(existing.hooks) ? { ...(existing.hooks as Record<string, unknown>) } : {};
+
+    const eventNames = new Set([...Object.keys(hooks), ...Object.keys(ours)]);
+    for (const event of eventNames) {
+      const prev = Array.isArray(hooks[event]) ? (hooks[event] as ClaudeHookMatcher[]) : [];
+      // 우리 것으로 보이는 항목은 전부 걷어낸다 — 폐기한 이벤트에 남은 것까지 같이 사라진다.
+      const others = prev.filter(
+        (m) => !(m?.hooks ?? []).some((h) => typeof h?.command === 'string' && h.command.includes(CLAUDE_MARKER)),
+      );
+      const mine = ours[event];
+      const next = mine ? [...others, mine] : others;
+      if (next.length > 0) hooks[event] = next;
+      else delete hooks[event];
+    }
+
+    merged.hooks = hooks;
+    return merged;
   }
 
-  async function installClaudeHooks(
-    workspaceClaudeDir: string,
-    workspaceId: string,
-  ): Promise<string> {
-    const settingsDir = join(workspaceClaudeDir, 'settings');
+  async function installClaudeHooks(): Promise<string> {
+    const settingsDir = join(home, '.claude');
     await fsp.mkdir(settingsDir, { recursive: true });
-    const settingsFile = join(settingsDir, 'claude-settings.json');
+    const settingsFile = join(settingsDir, 'settings.json');
+
+    const raw = await readFileSafe(settingsFile);
+    let existing: Record<string, unknown> = {};
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw);
+        if (isObject(parsed)) existing = parsed;
+      } catch {
+        const backup = `${settingsFile}.broken.${Date.now()}.bak`;
+        try {
+          await fsp.writeFile(backup, raw, 'utf8');
+          log.warn(`claude settings.json parse failed — backed up to ${backup}`);
+        } catch {
+          /* noop */
+        }
+      }
+    }
 
     // SessionStart는 등록하지 않는다 — 세션 첫 턴에서 UserPromptSubmit와 같은 IR을 이중 주입하기 때문.
-    // 첫 프롬프트의 UserPromptSubmit가 어차피 IR을 넣고, 이후 매 턴 최신 IR로 갱신한다.
-    const config: ClaudeHookConfig = {
-      hooks: {
-        UserPromptSubmit: [
-          {
-            hooks: [
-              {
-                type: 'command',
-                command: buildHookCommand('claude', 'UserPromptSubmit', workspaceId),
-              },
-            ],
-          },
-        ],
+    const merged = mergeClaudeHooks(existing, {
+      UserPromptSubmit: {
+        hooks: [{ type: 'command', command: buildHookCommand('claude', 'UserPromptSubmit') }],
       },
-    };
+    });
 
-    await atomicWrite(settingsFile, JSON.stringify(config, null, 2));
-    log.log(`hookInstaller: wrote claude settings ${settingsFile}`);
+    if (await writeIfChanged(settingsFile, JSON.stringify(merged, null, 2))) {
+      log.log(`hookInstaller: wrote claude hooks ${settingsFile}`);
+    }
     return settingsFile;
   }
 
@@ -220,15 +274,29 @@ export function createHookInstaller(opts: HookInstallerOptions): HookInstaller {
     } else {
       newContent = wrapped + '\n';
     }
-    await atomicWrite(filePath, newContent);
+    await writeIfChanged(filePath, newContent);
   }
 
-  async function installCodexHooks(
-    cwd: string,
-    workspaceId: string,
-  ): Promise<{ hooksJsonPath: string; configTomlPath: string }> {
-    assertWorkspaceCwd(cwd, 'installCodexHooks');
-    const codexDir = join(cwd, '.codex');
+  // 구버전이 프로젝트 config.toml에 남긴 우리 마커 블록을 걷어낸다(새 마커와 legacy 둘 다).
+  async function removeTomlMarkerBlock(filePath: string): Promise<boolean> {
+    const raw = await readFileSafe(filePath);
+    if (raw === null) return false;
+    const esc = (v: string) => v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const patterns = [
+      new RegExp(`${esc(TOML_MARKER_START)}[\\s\\S]*?${esc(TOML_MARKER_END)}\\n?`, 'gm'),
+      new RegExp(`${esc(LEGACY_TOML_MARKER_START)}[\\s\\S]*?${esc(LEGACY_TOML_MARKER_END)}\\n?`, 'gm'),
+    ];
+    let next = raw;
+    for (const re of patterns) next = next.replace(re, '');
+    if (next === raw) return false;
+    next = next.replace(/\n{3,}/g, '\n\n');
+    await atomicWrite(filePath, next);
+    return true;
+  }
+
+  async function installCodexHooks(): Promise<{ hooksJsonPath: string; configTomlPath: string }> {
+    const codexDir = join(home, '.codex');
+    await fsp.mkdir(codexDir, { recursive: true });
     const hooksJsonPath = join(codexDir, 'hooks.json');
     const configTomlPath = join(codexDir, 'config.toml');
 
@@ -253,16 +321,14 @@ export function createHookInstaller(opts: HookInstallerOptions): HookInstaller {
     // mergeCodexHooks가 과거 버전이 심은 managed SessionStart 항목을 청소한다.
     const merged = mergeCodexHooks(existing, {
       UserPromptSubmit: {
-        hooks: [
-          { type: 'command', command: buildHookCommand('codex', 'UserPromptSubmit', workspaceId) },
-        ],
+        hooks: [{ type: 'command', command: buildHookCommand('codex', 'UserPromptSubmit') }],
       },
     });
 
-    await atomicWrite(hooksJsonPath, JSON.stringify(merged, null, 2));
+    if (await writeIfChanged(hooksJsonPath, JSON.stringify(merged, null, 2))) {
+      log.log(`hookInstaller: wrote codex hooks ${hooksJsonPath}`);
+    }
     await mergeTomlMarkerBlock(configTomlPath, ['[features]', 'hooks = true'].join('\n'));
-
-    log.log(`hookInstaller: wrote codex hooks ${hooksJsonPath} + ${configTomlPath}`);
     return { hooksJsonPath, configTomlPath };
   }
 
@@ -278,14 +344,12 @@ export function createHookInstaller(opts: HookInstallerOptions): HookInstaller {
     _agentbridge_managed?: true;
   }
   type AgyHooksRoot = Record<string, AgyHookGroup>;
+  const AGY_GROUP = 'agentbridge-memory';
 
-  async function installAgyHooks(
-    cwd: string,
-    workspaceId: string,
-  ): Promise<{ hooksJsonPath: string }> {
-    assertWorkspaceCwd(cwd, 'installAgyHooks');
-    const agentsDir = join(cwd, '.agents');
-    const hooksJsonPath = join(agentsDir, 'hooks.json');
+  async function installAgyHooks(): Promise<{ hooksJsonPath: string }> {
+    const configDir = join(home, '.gemini', 'config');
+    await fsp.mkdir(configDir, { recursive: true });
+    const hooksJsonPath = join(configDir, 'hooks.json');
 
     const raw = await readFileSafe(hooksJsonPath);
     let existing: AgyHooksRoot = {};
@@ -305,23 +369,96 @@ export function createHookInstaller(opts: HookInstallerOptions): HookInstaller {
     }
 
     const merged: AgyHooksRoot = { ...existing };
-    merged['agentbridge-memory'] = {
+    merged[AGY_GROUP] = {
       enabled: true,
-      PreInvocation: [
-        { type: 'command', command: buildHookCommand('agy', 'PreInvocation', workspaceId) },
-      ],
+      PreInvocation: [{ type: 'command', command: buildHookCommand('agy', 'PreInvocation') }],
       _agentbridge_managed: true,
     };
 
-    await atomicWrite(hooksJsonPath, JSON.stringify(merged, null, 2));
-    log.log(`hookInstaller: wrote agy hooks ${hooksJsonPath}`);
+    if (await writeIfChanged(hooksJsonPath, JSON.stringify(merged, null, 2))) {
+      log.log(`hookInstaller: wrote agy hooks ${hooksJsonPath}`);
+    }
     return { hooksJsonPath };
+  }
+
+  // ─── 구버전 잔재 정리 ──────────────────────────────────────────────────
+  //
+  // 구버전은 우리 훅을 프로젝트 폴더(.codex/, .agents/)에 심었고, 전역 ~/.agents/hooks.json에
+  // 남은 사례도 실물로 확인됐다. 그대로 두면 전역 훅과 함께 둘 다 로드돼 같은 맥락이 두 번
+  // 주입되고 같은 턴이 두 번 기록된다. 우리 항목만 걷어내고 사용자 콘텐츠는 보존한다.
+
+  async function removeOurJsonEntries(
+    filePath: string,
+    strip: (root: Record<string, unknown>) => boolean,
+  ): Promise<boolean> {
+    const raw = await readFileSafe(filePath);
+    if (raw === null) return false;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return false; // 못 읽는 파일은 건드리지 않는다.
+    }
+    if (!isObject(parsed)) return false;
+    if (!strip(parsed)) return false;
+    await atomicWrite(filePath, JSON.stringify(parsed, null, 2));
+    return true;
+  }
+
+  async function cleanupLegacyHooks(cwd: string): Promise<string[]> {
+    // cwd가 실은 하니스의 전역 설정 폴더인 경우를 막는다. 이제 이 가드가 남는 자리는
+    // 설치가 아니라 정리다 — 전역 설치 경로는 우리가 직접 조립하므로 가드를 안 지나간다.
+    assertWorkspaceCwd(cwd, 'cleanupLegacyHooks', home);
+    const cleaned: string[] = [];
+
+    // 프로젝트 codex — managed 항목만 제거
+    const codexProject = join(cwd, '.codex', 'hooks.json');
+    if (
+      await removeOurJsonEntries(codexProject, (root) => {
+        const hooks = isObject(root.hooks) ? (root.hooks as Record<string, unknown>) : null;
+        if (!hooks) return false;
+        let changed = false;
+        for (const [event, list] of Object.entries(hooks)) {
+          if (!Array.isArray(list)) continue;
+          const kept = (list as CodexHookEntry[]).filter((e) => e?._agentbridge_managed !== true);
+          if (kept.length !== list.length) {
+            changed = true;
+            if (kept.length > 0) hooks[event] = kept;
+            else delete hooks[event];
+          }
+        }
+        return changed;
+      })
+    ) {
+      cleaned.push(codexProject);
+    }
+
+    // 프로젝트 agy + 전역 agy — 이름 그룹 제거
+    for (const p of [join(cwd, '.agents', 'hooks.json'), join(home, '.agents', 'hooks.json')]) {
+      if (
+        await removeOurJsonEntries(p, (root) => {
+          if (!(AGY_GROUP in root)) return false;
+          delete root[AGY_GROUP];
+          return true;
+        })
+      ) {
+        cleaned.push(p);
+      }
+    }
+
+    // 프로젝트 codex config.toml — 마커 블록 제거
+    const codexToml = join(cwd, '.codex', 'config.toml');
+    if (await removeTomlMarkerBlock(codexToml)) cleaned.push(codexToml);
+
+    if (cleaned.length > 0) log.log(`hookInstaller: cleaned legacy hooks — ${cleaned.join(', ')}`);
+    return cleaned;
   }
 
   return {
     installClaudeHooks,
     installCodexHooks,
     installAgyHooks,
+    cleanupLegacyHooks,
   };
 }
 

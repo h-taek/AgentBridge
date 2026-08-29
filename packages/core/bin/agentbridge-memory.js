@@ -12,17 +12,19 @@
  * 패키지 안 .app/Contents/Resources/bin/agentbridge-memory.js로 들어간다 (M4 패키징 단계 검증).
  * dev에서는 <repo>/resources/bin/agentbridge-memory.js 그대로 실행.
  *
- * Hook command 형식:
- *   `node <abs-path> inject --agent <claude|codex|agy> --workspace <id> --user-data <path> --event <name>`
+ * Hook command 형식 (0.5.0 A-3에서 동결):
+ *   `<런타임> <abs-path> inject --agent <claude|codex|agy> --event <name>`
  *
- * 사용자 글로벌 데이터 위치는 호스트 앱(데스크탑/extension)이 --user-data로 주입한다.
- * 헬퍼가 경로를 추측하지 않는다 — 호스트마다 저장소가 다르므로 (데스크탑: Application Support,
- * extension: IDE globalStorage) 추측은 엉뚱한 메모리 주입으로 이어진다.
+ * 커맨드에 저장소 구조가 들어가지 않는다. 신원은 spawn 때 심는 AGENTBRIDGE_WS_DIR이 나르고,
+ * 장기 메모리 폴더는 이 파일의 위치(<루트>/bin/)에서 계산한다. 그래서 폴더를 옮기거나 이름을
+ * 바꿔도 커맨드가 그대로이고, codex 훅 신뢰가 다시 뜨지 않는다.
+ *
+ * 변수가 없으면 우리 앱 밖에서 켠 세션이므로 빈 컨텍스트로 조용히 끝낸다.
  */
 
 'use strict'
 
-// @agentbridge-helper-version 0.4.5
+// @agentbridge-helper-version 0.5.0
 // (단일 설치 버전 비교용 — 이 파일을 수정하면 반드시 버전을 올릴 것)
 
 const fs = require('fs')
@@ -58,12 +60,10 @@ const ALLOWED_EVENTS = new Set([
 ])
 
 function parseArgs(argv) {
-  // 형식: inject --agent <kind> --workspace <id> --user-data <path> --event <name>
+  // 형식: inject --agent <kind> --event <name>
   const out = {
     cmd: argv[0] || null,
     agent: null,
-    workspace: null,
-    userData: null,
     event: null
   }
   for (let i = 1; i < argv.length; i++) {
@@ -71,12 +71,6 @@ function parseArgs(argv) {
     const next = argv[i + 1]
     if (a === '--agent' && next) {
       out.agent = next
-      i++
-    } else if (a === '--workspace' && next) {
-      out.workspace = next
-      i++
-    } else if (a === '--user-data' && next) {
-      out.userData = next
       i++
     } else if (a === '--event' && next) {
       out.event = next
@@ -337,30 +331,35 @@ async function main() {
     process.stderr.write('agentbridge-memory: --agent must be claude|codex|agy\n')
     process.exit(2)
   }
-  if (!parsed.workspace) {
-    process.stderr.write('agentbridge-memory: --workspace required\n')
-    process.exit(2)
-  }
   if (!parsed.event || !ALLOWED_EVENTS.has(parsed.event)) {
     process.stderr.write(
       'agentbridge-memory: --event required, one of: ' + Array.from(ALLOWED_EVENTS).join('|') + '\n'
     )
     process.exit(2)
   }
-  if (!parsed.userData) {
-    process.stderr.write(
-      'agentbridge-memory: --user-data required (stale or broken hook command — reopen the session in the app to reinstall hooks)\n'
-    )
+  // 저장소 루트는 이 파일의 자리에서 계산한다 — <루트>/bin/agentbridge-memory.js.
+  // 양쪽을 실경로로 맞춘다: node는 __filename을 심링크 해소해서 주는데(macOS /var → /private/var)
+  // 환경변수로 오는 경로는 해소 전일 수 있어, 그대로 비교하면 같은 자리를 다른 곳으로 본다.
+  const realpath = (v) => {
+    try {
+      return fs.realpathSync(v)
+    } catch {
+      return path.resolve(v)
+    }
+  }
+  const storageRoot = realpath(path.dirname(path.dirname(__filename)))
+  const wsDir = process.env.AGENTBRIDGE_WS_DIR ? realpath(process.env.AGENTBRIDGE_WS_DIR) : ''
+  if (!wsDir) {
+    // 우리 앱 밖에서 켠 세션이다. 전역 설치라 훅은 돌지만 여기서 할 일은 없다.
     process.stdout.write(JSON.stringify(buildHookOutput(parsed.agent, parsed.event, '')))
     process.exit(0)
   }
-  const userData = parsed.userData
-  if (parsed.workspace !== path.basename(parsed.workspace) || parsed.workspace === '..') {
-    process.stderr.write('agentbridge-memory: --workspace must be a single path segment\n')
+  const rel = path.relative(storageRoot, wsDir)
+  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) {
+    process.stderr.write('agentbridge-memory: AGENTBRIDGE_WS_DIR must live under the storage root\n')
     process.stdout.write(JSON.stringify(buildHookOutput(parsed.agent, parsed.event, '')))
     process.exit(0)
   }
-  const wsDir = path.join(userData, 'workspaces', parsed.workspace)
   const irPath = path.join(wsDir, 'ir.json')
   const turnsPath = path.join(wsDir, 'turns.jsonl')
   const ir = readJsonSafe(irPath)
@@ -405,7 +404,7 @@ async function main() {
     const lastUserTurn = lastTurn && typeof lastTurn.user === 'string' ? lastTurn.user : ''
     const query = resolveQuery(stdinRaw, lastUserTurn)
     if (query && query.trim()) {
-      const globalDir = path.join(userData, 'global')
+      const globalDir = path.join(storageRoot, 'global')
       const matches = await resolveContext(globalDir, 'default', query, { topN: 5 })
       globalBlock = renderGlobalMatches(matches)
     }
@@ -420,10 +419,10 @@ async function main() {
   // (codex 훅 바인딩 한도 ~10KB·claude ~10,000자 회피. turn만 줄이고 IR/장기메모리는 건드리지 않음.)
   const INJECT_BYTE_LIMIT = 9 * 1024
   let injTurns = recentTurns
-  let additionalContext = buildAdditionalContext(ir, injTurns, parsed.workspace, globalBlock)
+  let additionalContext = buildAdditionalContext(ir, injTurns, path.basename(wsDir), globalBlock)
   while (Buffer.byteLength(additionalContext, 'utf8') > INJECT_BYTE_LIMIT && injTurns.length > 0) {
     injTurns = injTurns.slice(1) // 배열 앞 = 가장 오래된 턴 → 제거
-    additionalContext = buildAdditionalContext(ir, injTurns, parsed.workspace, globalBlock)
+    additionalContext = buildAdditionalContext(ir, injTurns, path.basename(wsDir), globalBlock)
   }
   process.stdout.write(
     JSON.stringify(buildHookOutput(parsed.agent, parsed.event, additionalContext))

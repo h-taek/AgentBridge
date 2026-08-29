@@ -10,12 +10,26 @@ const fakeEnvProbe = {
 function makeAdapters() {
   return createCliAdapters({
     envProbe: fakeEnvProbe,
-    workspaceClaudeDir: (id: string) => `/tmp/claude/${id}`,
-    hookCaptureDir: (id: string) => `/tmp/cap/${id}`,
+    workspaceDir: (id: string) => `/tmp/cap/${id}`,
   });
 }
 
 describe('buildSpawnOptions — env 토큰 + hookCaptureFilePath', () => {
+  it('세 하니스 모두 신원 변수로 워크스페이스 폴더를 심는다 (A-3)', async () => {
+    const a = makeAdapters();
+    for (const [kind, opts] of [
+      ['claude', await a.claude.buildSpawnOptions('/cwd', 'ws-0')],
+      ['codex', await a.codex.buildSpawnOptions('/cwd', 'ws-0')],
+      ['agy', await a.agy.buildSpawnOptions('/cwd', 'ws-0')],
+    ] as const) {
+      assert.equal(
+        (opts.env as Record<string, string>).AGENTBRIDGE_WS_DIR,
+        '/tmp/cap/ws-0',
+        `${kind}에 AGENTBRIDGE_WS_DIR이 없다`,
+      );
+    }
+  });
+
   it('codex: captureToken이 env와 캡처 경로에 반영된다', async () => {
     const opts = await makeAdapters().codex.buildSpawnOptions('/cwd', 'ws-1', undefined, undefined, 'tok-1');
     assert.equal((opts.env as Record<string, string>).AGENTBRIDGE_WS_SESSION, 'tok-1');

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// @agentbridge-helper-version 0.4.5
+// @agentbridge-helper-version 0.5.0
 "use strict";
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -453,8 +453,6 @@ function parseArgs(argv) {
   const out = {
     cmd: argv[0] || null,
     agent: null,
-    workspace: null,
-    userData: null,
     event: null
   };
   for (let i = 1; i < argv.length; i++) {
@@ -462,12 +460,6 @@ function parseArgs(argv) {
     const next = argv[i + 1];
     if (a === "--agent" && next) {
       out.agent = next;
-      i++;
-    } else if (a === "--workspace" && next) {
-      out.workspace = next;
-      i++;
-    } else if (a === "--user-data" && next) {
-      out.userData = next;
       i++;
     } else if (a === "--event" && next) {
       out.event = next;
@@ -690,30 +682,31 @@ async function main() {
     process.stderr.write("agentbridge-memory: --agent must be claude|codex|agy\n");
     process.exit(2);
   }
-  if (!parsed.workspace) {
-    process.stderr.write("agentbridge-memory: --workspace required\n");
-    process.exit(2);
-  }
   if (!parsed.event || !ALLOWED_EVENTS.has(parsed.event)) {
     process.stderr.write(
       "agentbridge-memory: --event required, one of: " + Array.from(ALLOWED_EVENTS).join("|") + "\n"
     );
     process.exit(2);
   }
-  if (!parsed.userData) {
-    process.stderr.write(
-      "agentbridge-memory: --user-data required (stale or broken hook command \u2014 reopen the session in the app to reinstall hooks)\n"
-    );
+  const realpath = (v) => {
+    try {
+      return fs.realpathSync(v);
+    } catch {
+      return path.resolve(v);
+    }
+  };
+  const storageRoot = realpath(path.dirname(path.dirname(__filename)));
+  const wsDir = process.env.AGENTBRIDGE_WS_DIR ? realpath(process.env.AGENTBRIDGE_WS_DIR) : "";
+  if (!wsDir) {
     process.stdout.write(JSON.stringify(buildHookOutput(parsed.agent, parsed.event, "")));
     process.exit(0);
   }
-  const userData = parsed.userData;
-  if (parsed.workspace !== path.basename(parsed.workspace) || parsed.workspace === "..") {
-    process.stderr.write("agentbridge-memory: --workspace must be a single path segment\n");
+  const rel = path.relative(storageRoot, wsDir);
+  if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) {
+    process.stderr.write("agentbridge-memory: AGENTBRIDGE_WS_DIR must live under the storage root\n");
     process.stdout.write(JSON.stringify(buildHookOutput(parsed.agent, parsed.event, "")));
     process.exit(0);
   }
-  const wsDir = path.join(userData, "workspaces", parsed.workspace);
   const irPath = path.join(wsDir, "ir.json");
   const turnsPath = path.join(wsDir, "turns.jsonl");
   const ir = readJsonSafe(irPath);
@@ -751,7 +744,7 @@ async function main() {
     const lastUserTurn = lastTurn && typeof lastTurn.user === "string" ? lastTurn.user : "";
     const query = resolveQuery2(stdinRaw, lastUserTurn);
     if (query && query.trim()) {
-      const globalDir = path.join(userData, "global");
+      const globalDir = path.join(storageRoot, "global");
       const matches = await resolveContext2(globalDir, "default", query, { topN: 5 });
       globalBlock = renderGlobalMatches2(matches);
     }
@@ -763,10 +756,10 @@ async function main() {
   }
   const INJECT_BYTE_LIMIT = 9 * 1024;
   let injTurns = recentTurns;
-  let additionalContext = buildAdditionalContext(ir, injTurns, parsed.workspace, globalBlock);
+  let additionalContext = buildAdditionalContext(ir, injTurns, path.basename(wsDir), globalBlock);
   while (Buffer.byteLength(additionalContext, "utf8") > INJECT_BYTE_LIMIT && injTurns.length > 0) {
     injTurns = injTurns.slice(1);
-    additionalContext = buildAdditionalContext(ir, injTurns, parsed.workspace, globalBlock);
+    additionalContext = buildAdditionalContext(ir, injTurns, path.basename(wsDir), globalBlock);
   }
   process.stdout.write(
     JSON.stringify(buildHookOutput(parsed.agent, parsed.event, additionalContext))

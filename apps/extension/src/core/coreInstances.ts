@@ -86,7 +86,7 @@ export function getBundledHelperPath(): string {
 export function initializeCore(
   context: vscode.ExtensionContext,
   // ⚠️ 테스트 전용 — 프로덕션 호출(extension.ts)은 두 번째 인자를 넘기지 않는다.
-  testOverrides?: { storageRootForTesting?: string },
+  testOverrides?: { storageRootForTesting?: string; homeDirForTesting?: string },
 ): void {
   _workspaceStore = createWorkspaceStore({
     logger,
@@ -104,8 +104,11 @@ export function initializeCore(
   _hookInstaller = createHookInstaller({
     // hook 명령은 번들 안 경로가 아니라 저장소 canonical 경로(<루트>/bin/)를 가리킨다 (V-12).
     helperPath: getCanonicalHelperPath(storageRoot),
-    // 저장소 루트와 hook --user-data가 같은 곳을 가리키도록 store에서 가져옴 (테스트 포함 일관성)
-    globalStoragePath: storageRoot,
+    // 훅을 돌릴 런타임 — 익스텐션 호스트의 실행 파일이다. ELECTRON_RUN_AS_NODE=1을 붙이면
+    // VS Code가 그대로 node로 동작하므로 사용자 PATH의 node 설치 여부와 무관해진다 (A-3).
+    execPath: process.execPath,
+    // 테스트만 오버라이드 — 실제 홈의 전역 설정을 건드리지 않게 한다.
+    homeDir: testOverrides?.homeDirForTesting,
     logger,
   });
 
@@ -116,8 +119,7 @@ export function initializeCore(
     envProbe: _envProbe,
     hookInstaller: _hookInstaller,
     hookStatusStore: _hookStatusStore,
-    workspaceClaudeDir: (workspaceId) => _workspaceStore!.getWorkspacePath(workspaceId),
-    hookCaptureDir: (workspaceId) => _workspaceStore!.getWorkspacePath(workspaceId),
+    workspaceDir: (workspaceId) => _workspaceStore!.getWorkspacePath(workspaceId),
     logger,
   });
 
