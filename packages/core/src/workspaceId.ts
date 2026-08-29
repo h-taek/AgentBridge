@@ -43,8 +43,13 @@ function safeName(canonical: string): string {
   return cleaned.slice(0, MAX_NAME_LEN);
 }
 
+// 경로 다이제스트만 따로. 워크스페이스 ID의 접미사이자, 첨부 파일명이 프로젝트를 가르는 표식이다.
+export function workspacePathDigest(folderFsPath: string): string {
+  const canonical = canonicalWorkspacePath(folderFsPath);
+  return createHash('sha256').update(canonical, 'utf8').digest('hex').slice(0, DIGEST_LEN);
+}
+
 export function deterministicWorkspaceId(folderFsPath: string): string {
   const canonical = canonicalWorkspacePath(folderFsPath);
-  const digest = createHash('sha256').update(canonical, 'utf8').digest('hex').slice(0, DIGEST_LEN);
-  return `${safeName(canonical)}-${digest}`;
+  return `${safeName(canonical)}-${workspacePathDigest(canonical)}`;
 }

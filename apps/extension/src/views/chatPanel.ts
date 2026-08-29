@@ -447,14 +447,11 @@ export class ChatPanel {
     try {
       const { attachmentPathFor, writeAttachment } = await import('../core/attachmentStore');
       const path = await import('path');
-      const safeName = (name || 'file').replace(/[\\/]/g, '_').slice(-150);
-      const ts = Date.now();
-      const filename = `${ts}-${safeName}`;
-      const wid = this.opts.workspaceId ?? 'no-workspace';
-      const sid = this.opts.sessionId ?? 'no-session';
-      const absPath = attachmentPathFor(wid, sid, filename);
+      // 자리는 저장소 루트의 attachments/ 하나. 파일명 정리와 프로젝트 구분(경로 다이제스트)은
+      // attachmentPathFor가 맡는다.
+      const absPath = attachmentPathFor(this.opts.cwd, name);
       await writeAttachment(absPath, base64);
-      // cwd 기준 relative — @ mention 단축용. 외부 cwd이면 절대경로 fallback.
+      // cwd 기준 relative — @ mention 단축용. 저장소가 프로젝트 밖이라 사실상 절대경로가 나간다.
       const rel = path.relative(this.opts.cwd, absPath);
       const useRel = rel && !rel.startsWith('..') && !path.isAbsolute(rel);
       const insertPath = useRel ? rel : absPath;
@@ -1135,8 +1132,9 @@ export class ChatPanel {
       }
       return t.startsWith('/') ? t : '';
     }
-    function quoteShellArg(p) {
-      return /[\\s'"]/.test(p) ? "'" + p.replace(/'/g, "'\\\\''") + "'" : p;
+    // @ 멘션 표기 — 공백이 있는 경로만 큰따옴표로 감싸고, 없으면 그대로 쓴다.
+    function quoteMentionPath(p) {
+      return /\s/.test(p) ? '"' + p.replace(/"/g, '\\"') + '"' : p;
     }
     function hasFileLikeType(types) {
       if (!types) return false;
@@ -1265,7 +1263,7 @@ export class ChatPanel {
           return;
         }
         // @<path> mention 형식 — claude/codex/agy 모두 지원.
-        const insertion = Array.from(paths).map(p => '@' + quoteShellArg(p)).join(' ') + ' ';
+        const insertion = Array.from(paths).map(p => '@' + quoteMentionPath(p)).join(' ') + ' ';
         vscode.postMessage({ type: 'input', data: insertion });
       });
     }, true);

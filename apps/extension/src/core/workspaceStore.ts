@@ -17,6 +17,11 @@ export function getWorkspacePath(workspaceId: string): string {
   return getWorkspaceStore().getWorkspacePath(workspaceId);
 }
 
+// 저장소 루트(~/agentbridge). 워크스페이스 밖에 두는 것(첨부 등)이 쓴다.
+export function getStorageRootPath(): string {
+  return getWorkspaceStore().getGlobalStoragePath();
+}
+
 export function getSessionDir(workspaceId: string, sessionId: string): string {
   return getWorkspaceStore().getSessionDir(workspaceId, sessionId);
 }

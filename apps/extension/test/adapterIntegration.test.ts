@@ -47,6 +47,11 @@ describe('adapter integration (M16 await chain regression guard)', () => {
     assert.equal(opts.args.includes('--settings'), false);
     assert.ok(opts.args.includes('--add-dir'));
     assert.ok(opts.args.includes(join(storagePath, 'workspaces', wid)));
+    // 첨부는 워크스페이스 폴더 밖(저장소 루트)에 있으므로 그 자리도 함께 열어야 읽힌다.
+    assert.ok(
+      opts.args.includes(join(storagePath, 'attachments')),
+      `첨부 폴더가 안 열렸다: ${opts.args.join(' ')}`,
+    );
   });
 
   it('codexAdapter.buildSpawnOptions writes global codex hooks BEFORE returning', async () => {

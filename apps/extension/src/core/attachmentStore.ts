@@ -1,16 +1,20 @@
-// 첨부파일을 워크스페이스 데이터 폴더의 attachments/ 아래에 저장한다 (0.5.0 B-1).
+// 첨부파일을 저장소 루트의 attachments/ 아래에 평평하게 저장한다 (0.5.0 B-1).
 //
-// 0.5.0 전에는 사용자 프로젝트 안 `<cwd>/.agentbridge/attachments/`에 썼다. 남의 저장소에
-// 우리 폴더를 만드는 일이라 `.gitignore`까지 고쳐야 했다. 이제 우리 저장소 안에 두므로
-// 프로젝트 폴더에 아무것도 남기지 않고, gitignore도 건드릴 이유가 없다.
+// 0.5.0 전에는 사용자 프로젝트 안 `<cwd>/.agentbridge/attachments/<세션>/`에 썼다. 남의 저장소에
+// 우리 폴더를 만드는 일이라 `.gitignore`까지 고쳐야 했다.
 //
-// 대신 저장 위치가 작업 폴더 밖이 된다. claude는 밖의 경로를 읽을 때 승인을 요구하므로
-// 기동 인자 `--add-dir <워크스페이스 폴더>`가 함께 있어야 첨부가 읽힌다 (research 06 §1).
+// 자리는 `~/agentbridge/attachments/<경로 다이제스트 4자>-<원본 이름>` 하나다.
+// 세션으로 나누지 않는다 — 첨부는 대화에 경로로 박혀 나가고 수명이 한 시간짜리라, 어느 세션이
+// 만들었는지가 쓰이는 자리가 없다. 다이제스트는 프로젝트를 가른다(같은 `screenshot.png`가
+// 다른 프로젝트에서 서로를 덮지 않게).
+//
+// 저장 위치가 작업 폴더 밖이므로 claude는 `--add-dir`로 이 폴더를 함께 열어야 읽는다
+// (research 06 §1).
 
 import { promises as fs } from 'fs';
 import { basename, dirname, join } from 'path';
-import { type Logger, noopLogger } from '@agentbridge/core';
-import { getWorkspacePath } from './workspaceStore';
+import { type Logger, noopLogger, workspacePathDigest } from '@agentbridge/core';
+import { getStorageRootPath } from './workspaceStore';
 
 // 단방향 의존: coreInstances가 init 시점에 setAttachmentLogger로 logger 주입.
 let _logger: Logger = noopLogger;
@@ -22,18 +26,33 @@ const TTL_MS = 60 * 60 * 1000; // 1 hour
 // 구버전이 사용자 프로젝트 안에 만들던 폴더 이름. 이제 만들지 않고 정리만 한다.
 const LEGACY_DIR_NAME = '.agentbridge';
 
-function attachmentsRoot(workspaceId: string): string {
-  return join(getWorkspacePath(workspaceId), 'attachments');
+export function attachmentsRoot(): string {
+  return join(getStorageRootPath(), 'attachments');
 }
 
-// sessionId는 디렉토리 분리용. 반환은 절대 경로.
-// path.basename으로 filename에 포함된 경로 분리자(../, /)를 제거해 traversal 방어층을 둔다.
-export function attachmentPathFor(
-  workspaceId: string,
-  sessionId: string,
-  filename: string,
-): string {
-  return join(attachmentsRoot(workspaceId), basename(sessionId), basename(filename));
+// 파일명을 한 세그먼트로 못박는다. 경로 분리자와 제어문자를 걷어내고, 앞뒤 점·하이픈을 떨어뜨려
+// 숨김 파일이나 인자처럼 보이는 이름이 되지 않게 한다. 확장자는 따로 떼어 보존한다.
+export function sanitizeAttachmentName(raw: string): string {
+  const name = basename(String(raw ?? '')).replace(/[\u0000-\u001f\u007f]/g, '');
+  const dot = name.lastIndexOf('.');
+  // 앞이 비어 있으면(.gitignore 같은) 확장자로 치지 않는다.
+  const hasExt = dot > 0 && dot < name.length - 1;
+  const ext = hasExt ? name.slice(dot + 1).slice(0, 16) : '';
+  const base = (hasExt ? name.slice(0, dot) : name)
+    .replace(/\s+/g, ' ')
+    .replace(/^[.\-\s]+/, '')
+    .replace(/[.\-\s]+$/, '')
+    .slice(0, 80)
+    .trim();
+  const safeBase = base || 'file';
+  return ext ? `${safeBase}.${ext}` : safeBase;
+}
+
+// 반환은 절대 경로. 같은 프로젝트에서 같은 이름을 다시 넣으면 같은 자리에 덮어쓴다 —
+// 첨부는 방금 넣은 것만 쓰이므로 그게 맞고, 경로가 예측 가능해진다.
+export function attachmentPathFor(workspacePath: string, filename: string): string {
+  const digest = workspacePathDigest(workspacePath);
+  return join(attachmentsRoot(), `${digest}-${sanitizeAttachmentName(filename)}`);
 }
 
 export async function writeAttachment(absPath: string, base64: string): Promise<void> {
@@ -41,54 +60,25 @@ export async function writeAttachment(absPath: string, base64: string): Promise<
   await fs.writeFile(absPath, Buffer.from(base64, 'base64'));
 }
 
-export async function cleanupSessionAttachments(
-  workspaceId: string,
-  sessionId: string,
-): Promise<void> {
-  const dir = join(attachmentsRoot(workspaceId), basename(sessionId));
+export async function cleanupStaleAttachments(): Promise<void> {
+  const attRoot = attachmentsRoot();
+  let files: string[];
   try {
-    await fs.rm(dir, { recursive: true, force: true });
-    _logger.log(`attachments cleaned for session ${sessionId.slice(0, 8)}`);
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
-      _logger.warn(`attachment cleanup failed: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  }
-}
-
-export async function cleanupStaleAttachments(workspaceId: string): Promise<void> {
-  const attRoot = attachmentsRoot(workspaceId);
-  let sessionDirs: string[];
-  try {
-    sessionDirs = await fs.readdir(attRoot);
+    files = await fs.readdir(attRoot);
   } catch {
     return;
   }
 
   const now = Date.now();
   let deleted = 0;
-  for (const sid of sessionDirs) {
-    const sDir = join(attRoot, sid);
-    let files: string[];
+  for (const f of files) {
+    const fp = join(attRoot, f);
     try {
-      files = await fs.readdir(sDir);
-    } catch {
-      continue;
-    }
-    for (const f of files) {
-      const fp = join(sDir, f);
-      try {
-        const st = await fs.stat(fp);
-        if (now - st.mtimeMs > TTL_MS) {
-          await fs.unlink(fp);
-          deleted++;
-        }
-      } catch {
-        /* skip */
+      const st = await fs.stat(fp);
+      if (st.isFile() && now - st.mtimeMs > TTL_MS) {
+        await fs.unlink(fp);
+        deleted++;
       }
-    }
-    try {
-      if ((await fs.readdir(sDir)).length === 0) await fs.rmdir(sDir);
     } catch {
       /* skip */
     }

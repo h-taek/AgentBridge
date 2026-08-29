@@ -102,7 +102,7 @@ export function activate(context: vscode.ExtensionContext) {
     .then(async (m) => {
       const folder = vscode.workspace.workspaceFolders?.[0]?.uri;
       if (!folder) return;
-      await m.cleanupStaleAttachments(workspaceStore.getOrCreateWorkspaceId(folder.fsPath));
+      await m.cleanupStaleAttachments();
       await m.cleanupLegacyProjectFolder(folder.fsPath);
     })
     .catch(() => { /* noop */ });

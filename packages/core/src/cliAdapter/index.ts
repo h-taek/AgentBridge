@@ -3,7 +3,7 @@
 
 import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
-import { join } from 'path';
+import { join, dirname } from 'path';
 import { homedir } from 'os';
 import type { SpawnOptions } from '../pty/types';
 import type { EnvProbe, ProbeResult } from '../envProbe';
@@ -14,6 +14,12 @@ import { noopLogger } from '../interfaces';
 import { resolveResumeArgs } from './agyResume';
 import { resolveHookCaptureFile } from './hookSessionCapture';
 import { resolveTurnSignalFile } from './turnSignal';
+
+// 첨부는 저장소 루트의 attachments/에 평평하게 쌓인다 (0.5.0 B-1).
+// 워크스페이스 폴더가 <루트>/workspaces/<id>이므로 두 단계 올라가면 루트다.
+function attachmentsDir(workspaceDirPath: string): string {
+  return join(dirname(dirname(workspaceDirPath)), 'attachments');
+}
 
 export type CliAdapterOptions = {
   envProbe: EnvProbe;
@@ -102,10 +108,11 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
           }
         }
 
-        // 우리 폴더는 작업 폴더 밖이라 claude가 읽기 전에 승인을 요구한다(첨부가 여기 있다).
+        // 우리 폴더는 작업 폴더 밖이라 claude가 읽기 전에 승인을 요구한다. 워크스페이스 데이터와
+        // 첨부는 서로 다른 자리에 있어(첨부는 저장소 루트의 attachments/) 둘 다 열어야 한다.
         // 세션 인자라 우리가 띄운 세션에만 걸린다. 에이전트용 CLI 명령 허용(--allowedTools)은
         // 그 CLI가 생기는 3단계(B-5)에서 같은 자리에 붙는다.
-        const accessArgs = ['--add-dir', wsDir];
+        const accessArgs = ['--add-dir', wsDir, '--add-dir', attachmentsDir(workspaceDir(workspaceId))];
         const sessionArgs = !resumeSessionId
           ? ['--session-id', sessionId]
           : (await claudeSessionFileExists(sessionId))
