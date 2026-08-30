@@ -8,7 +8,15 @@ import {
   computeSessionActivity,
   type SessionActivity,
 } from '@agentbridge/core';
-import { rowKindOf, rootSessions, childSessions, iconKey, rowActivity, type RowKind } from './sessionTreeModel';
+import {
+  rowKindOf,
+  rootSessions,
+  childSessions,
+  iconKey,
+  rowActivity,
+  visibleActivity,
+  type RowKind,
+} from './sessionTreeModel';
 
 // dot SVG는 빌드 때 esbuild가 colors.json 색을 박아 media/dots/에 생성한다(단일 출처=colors.json, gitignore).
 // TreeItem.iconPath는 파일 Uri/코디콘만 받으므로 색칠한 dot은 파일이어야 한다. 여기서는 경로만 참조한다.
@@ -88,9 +96,10 @@ export class SessionTreeProvider implements vscode.TreeDataProvider<SessionItem>
   }
 
   private async computeActivity(session: SessionMeta, wsDir: string): Promise<SessionActivity> {
+    if (!session.active) return 'idle'; // 닫힘은 파일을 읽을 것도 없다
     const inputs = await readSessionActivityInputs(wsDir, session.sessionId);
     const viewedAt = session.lastOpenedAt ? new Date(session.lastOpenedAt).getTime() : undefined;
-    return computeSessionActivity({ ...inputs, viewedAt }, Date.now());
+    return visibleActivity(session.active, computeSessionActivity({ ...inputs, viewedAt }, Date.now()));
   }
 
   // 세션 하나를 행으로 만든다. kind가 'session'이면 직속 자식도 함께 만들어 집계값에 반영한다.

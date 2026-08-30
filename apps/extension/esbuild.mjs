@@ -93,6 +93,7 @@ function vendorAssets() {
   // 파일명 규칙(sessionTreeModel.ts의 iconKey와 맞춘다): <model>[-closed][-<activity>].svg
   // idle은 접미사 없음(기존 파일명 유지, 상태 표시 자체가 없는 것이 노는 상태라는 스펙과 일치).
   const colors = JSON.parse(readFileSync(join(A, 'colors.json'), 'utf8'));
+  rmSync('media/dots', { recursive: true, force: true });
   mkdirSync('media/dots', { recursive: true });
 
   // 도형은 16×16 캔버스 가운데를 기준으로 75%로 줄여 그린다(선 굵기도 같은 비율로 얇아진다).
@@ -103,11 +104,8 @@ function vendorAssets() {
     `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">` +
     `<g transform="translate(8,8) scale(${SCALE}) translate(-8,-8)" opacity="${opacity}">${body}</g></svg>`;
   // 완료·모름이 공유하는 옅은 링 — 글리프를 담는 그릇이라 색을 죽인다.
-  // 닫힘 세션은 그룹 전체가 이미 0.4로 죽으므로 링까지 0.4를 곱하면 사라진다. 그쪽은 링 자체를
-  // 진하게 줘서 곱한 결과가 열린 세션의 링과 비슷하게 남게 한다.
-  const faintRing = (color, groupOpacity) =>
-    `<circle cx="8" cy="8" r="${R}" fill="none" stroke="${color}" stroke-width="1.3"` +
-    ` opacity="${groupOpacity < 1 ? 0.85 : 0.4}"/>`;
+  const faintRing = (color) =>
+    `<circle cx="8" cy="8" r="${R}" fill="none" stroke="${color}" stroke-width="1.3" opacity="0.4"/>`;
 
   // idle — 채운 원.
   const dot = (color, opacity) => svg(`<circle cx="8" cy="8" r="${R}" fill="${color}"/>`, opacity);
@@ -123,7 +121,7 @@ function vendorAssets() {
   // done — 옅은 링 안에 체크.
   const check = (color, opacity) =>
     svg(
-      faintRing(color, opacity) +
+      faintRing(color) +
         `<path d="M5.0 8.3 L6.9 10.2 L11.0 6.0" fill="none" stroke="${color}"` +
         ` stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>`,
       opacity,
@@ -131,7 +129,7 @@ function vendorAssets() {
   // unknown — 옅은 링 안에 물음표(글리프가 아니라 선으로 그린다. 폰트에 안 기댄다).
   const unknown = (color, opacity) =>
     svg(
-      faintRing(color, opacity) +
+      faintRing(color) +
         `<path d="M6.0 6.3 a2.05 2.05 0 1 1 2.0 2.05 v1.0" fill="none" stroke="${color}"` +
         ` stroke-width="1.5" stroke-linecap="round"/>` +
         `<circle cx="8" cy="11.4" r="0.85" fill="${color}"/>`,
@@ -144,12 +142,12 @@ function vendorAssets() {
     ['-done', check],
     ['-unknown', unknown],
   ];
+  // 닫힌 세션은 상태를 안 그린다(sessionTreeModel.visibleActivity) — 기본 원 하나면 된다.
   for (const [model, color] of Object.entries(colors)) {
-    for (const [closedSuffix, opacity] of [['', 1], ['-closed', 0.4]]) {
-      for (const [stateSuffix, draw] of STATES) {
-        writeFileSync(join('media', 'dots', `${model}${closedSuffix}${stateSuffix}.svg`), draw(color, opacity));
-      }
+    for (const [stateSuffix, draw] of STATES) {
+      writeFileSync(join('media', 'dots', `${model}${stateSuffix}.svg`), draw(color, 1));
     }
+    writeFileSync(join('media', 'dots', `${model}-closed.svg`), dot(color, 0.4));
   }
 }
 

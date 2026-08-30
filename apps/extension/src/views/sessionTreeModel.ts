@@ -35,10 +35,20 @@ export function childSessions(allSessions: SessionMeta[], parentSessionId: strin
   );
 }
 
+// 닫힌 세션에는 상태가 없다. 탭을 닫으면 그 PTY가 죽으므로 진행 중일 수도, 뒤늦게 완료될
+// 수도 없다. 세션 폴더에 남은 신호는 과거의 흔적일 뿐이라 그대로 읽으면 도는 중에 닫은
+// 세션이 모름으로, 끝나고 닫은 세션이 완료로 남는다. 그래서 표시 전에 여기서 잘라낸다.
+// 집계보다 앞에 걸어야 닫힌 자식이 부모 행을 물들이지 않는다.
+export function visibleActivity(active: boolean, activity: SessionActivity): SessionActivity {
+  return active ? activity : 'idle';
+}
+
 // 아이콘 키 — esbuild가 굽는 media/dots/<key> 파일명과 맞춘다. idle은 접미사 없음(기존 파일명 유지).
+// 닫힘은 상태를 안 그리므로 조합이 하나다 — 위 규칙이 뚫려도 없는 파일을 가리키지 않게 막는다.
 export function iconKey(model: string, closed: boolean, activity: SessionActivity): string {
+  if (closed) return `${model}-closed.svg`;
   const suffix = activity === 'idle' ? '' : `-${activity}`;
-  return `${model}${closed ? '-closed' : ''}${suffix}.svg`;
+  return `${model}${suffix}.svg`;
 }
 
 // 행의 표시 값. 메인 행은 자기 활동과 접힌 자식들 값을 core aggregateActivity로 모으고,

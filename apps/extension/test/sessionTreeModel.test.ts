@@ -7,6 +7,7 @@ import {
   rootSessions,
   childSessions,
   iconKey,
+  visibleActivity,
   rowActivity,
   planDeleteConfirm,
 } from '../src/views/sessionTreeModel';
@@ -76,9 +77,10 @@ describe('sessionTreeModel — 아이콘 키 조합', () => {
   });
 
   it('닫힘이 상태 접미사보다 앞에 온다', () => {
-    assert.equal(iconKey('agy', true, 'running'), 'agy-closed-running.svg');
-    assert.equal(iconKey('agy', true, 'done'), 'agy-closed-done.svg');
-    assert.equal(iconKey('agy', true, 'unknown'), 'agy-closed-unknown.svg');
+    // 닫힘은 상태를 안 그린다 — 어떤 값이 들어와도 기본 원 하나다.
+    assert.equal(iconKey('agy', true, 'running'), 'agy-closed.svg');
+    assert.equal(iconKey('agy', true, 'done'), 'agy-closed.svg');
+    assert.equal(iconKey('agy', true, 'unknown'), 'agy-closed.svg');
   });
 
   it('모델 3종 전부 같은 규칙을 탄다', () => {
@@ -137,5 +139,22 @@ describe('sessionTreeModel — 삭제 확인 문구 조립', () => {
       childCount: 2,
       childNames: ['서브1', '서브2'],
     });
+  });
+});
+
+describe('sessionTreeModel — 닫힌 세션의 표시 값', () => {
+  it('열린 세션은 계산된 값을 그대로 쓴다', () => {
+    assert.equal(visibleActivity(true, 'running'), 'running');
+    assert.equal(visibleActivity(true, 'done'), 'done');
+    assert.equal(visibleActivity(true, 'unknown'), 'unknown');
+  });
+
+  it('닫힌 세션은 무슨 값이 나와도 표시 없음이다', () => {
+    // 도는 중에 탭을 닫으면 신호가 진행 중인 채로 남고, 끝나고 닫으면 안 본 완료로 남는다.
+    // 둘 다 프로세스가 없는 상태라 표시하지 않는다.
+    assert.equal(visibleActivity(false, 'running'), 'idle');
+    assert.equal(visibleActivity(false, 'done'), 'idle');
+    assert.equal(visibleActivity(false, 'unknown'), 'idle');
+    assert.equal(visibleActivity(false, 'idle'), 'idle');
   });
 });
