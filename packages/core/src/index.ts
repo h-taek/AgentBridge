@@ -66,6 +66,7 @@ export * from './hookInstaller';
 // refine
 export * from './refineHeadless';
 export * from './refineDispatcher';
+export * from './sessionNamePrompt';
 export * from './refineCliArgs';
 export * from './refineHome';
 
@@ -83,3 +84,4 @@ export * from './cliAdapter/index';
 export * from './cliAdapter/agyResume';
 export * from './cliAdapter/hookSessionCapture';
 export * from './cliAdapter/turnSignal';
+export * from './sessionStatus';

@@ -75,4 +75,43 @@ describe('workspaceStore (V-12 통일 동작)', () => {
     const ids = meta.sessions.map((s) => s.sessionId).sort();
     assert.deepEqual(ids, [sidA, sidB]);
   });
+
+  it('deleteSession이 자식·손자 레코드까지 함께 지운다 (0.5.0 B-2)', async () => {
+    const store = createWorkspaceStore({ rootPathForTesting: storagePath });
+    const wid = store.getOrCreateWorkspaceId('/tmp/agentbridge-unified-project');
+    const parent = await store.addSession(wid, 'claude', 'cli', '11111111-1111-4111-8111-111111111111');
+    const child = await store.addSession(wid, 'claude', 'cli', '22222222-2222-4222-8222-222222222222');
+    const grandchild = await store.addSession(wid, 'claude', 'cli', '33333333-3333-4333-8333-333333333333');
+    await store.updateSessionMeta(wid, child.sessionId, { parentSessionId: parent.sessionId });
+    await store.updateSessionMeta(wid, grandchild.sessionId, { parentSessionId: child.sessionId });
+
+    await store.deleteSession(wid, parent.sessionId);
+
+    const meta = await store.loadWorkspace(wid);
+    assert.deepEqual(meta.sessions, []);
+  });
+
+  it('없는 부모를 가리키는 고아 레코드는 저장 층이 걸러내지 않는다', async () => {
+    const store = createWorkspaceStore({ rootPathForTesting: storagePath });
+    const wid = store.getOrCreateWorkspaceId('/tmp/agentbridge-unified-project');
+    const orphan = await store.addSession(wid, 'claude', 'cli', '44444444-4444-4444-8444-444444444444');
+    await store.updateSessionMeta(wid, orphan.sessionId, { parentSessionId: 'no-such-session' });
+
+    const meta = await store.loadWorkspace(wid);
+    assert.equal(meta.sessions.length, 1);
+    assert.equal(meta.sessions[0].parentSessionId, 'no-such-session');
+  });
+
+  it('두 필드가 없는 기존 workspace.json을 읽어도 깨지지 않는다', async () => {
+    const store = createWorkspaceStore({ rootPathForTesting: storagePath });
+    const wid = store.getOrCreateWorkspaceId('/tmp/agentbridge-unified-project');
+    await store.addSession(wid, 'claude', 'cli', '55555555-5555-4555-8555-555555555555');
+    const metaPath = join(storagePath, 'workspaces', wid, 'workspace.json');
+    const raw = JSON.parse(await fs.readFile(metaPath, 'utf8'));
+    assert.equal(raw.sessions[0].parentSessionId, undefined);
+    assert.equal(raw.sessions[0].lastOpenedAt, undefined);
+
+    const meta = await store.loadWorkspace(wid);
+    assert.equal(meta.sessions.length, 1);
+  });
 });

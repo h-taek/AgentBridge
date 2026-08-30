@@ -77,6 +77,56 @@ export async function readTurnSignal(signalFilePath: string): Promise<TurnSignal
   return parseTurnSignal(raw);
 }
 
+// 턴 시작 신호 (0.5.0 W1) — 헬퍼가 주입 훅에서 쓴다. 종료 신호와 같은 폴더·같은 규약(매번
+// 덮어쓰기, best-effort). 내용은 트리거가 아니라 시각이 전부라 값은 넷뿐이다.
+//
+// 감시자는 두지 않는다. 상태 판정이 트리 갱신 주기에 맞춰 읽는다.
+
+export const TURN_START_FILENAME = 'turn-start.json';
+
+export interface TurnStart {
+  agent: CliKind;
+  event: string;
+  sessionId: string;
+  at: number;
+}
+
+export function resolveTurnStartFile(workspaceDir: string, sessionId: string): string {
+  return join(workspaceDir, 'sessions', sessionId, TURN_START_FILENAME);
+}
+
+export function parseTurnStart(raw: string): TurnStart | null {
+  let obj: unknown;
+  try {
+    obj = JSON.parse(raw);
+  } catch {
+    return null; // 부분 write 중 — 다음 트리거에 재시도
+  }
+  if (!obj || typeof obj !== 'object') return null;
+  const o = obj as Record<string, unknown>;
+  const agent = str(o.agent);
+  if (agent !== 'claude' && agent !== 'codex' && agent !== 'agy') return null;
+  const event = str(o.event);
+  if (!event) return null;
+  const at = typeof o.at === 'number' && Number.isFinite(o.at) ? o.at : 0;
+  return {
+    agent,
+    event,
+    sessionId: str(o.sessionId),
+    at,
+  };
+}
+
+export async function readTurnStart(startFilePath: string): Promise<TurnStart | null> {
+  let raw: string;
+  try {
+    raw = await fs.readFile(startFilePath, 'utf8');
+  } catch {
+    return null; // 아직 없음
+  }
+  return parseTurnStart(raw);
+}
+
 export interface TurnSignalWatcher {
   stop(): void;
 }

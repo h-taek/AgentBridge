@@ -5,7 +5,7 @@ import { promises as fs } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { spawn } from 'child_process';
-import { parseTurnSignal, parseHookError } from '@agentbridge/core';
+import { parseTurnSignal, parseHookError, parseTurnStart } from '@agentbridge/core';
 
 const BUNDLED_HELPER = join(__dirname, '..', 'resources', 'bin', 'agentbridge-memory.js');
 
@@ -178,6 +178,36 @@ describe('종료 훅 신호 — 호스트 파싱', () => {
     assert.equal(parseTurnSignal(JSON.stringify({ ...base, agent: 'gemini' })), null);
     assert.equal(parseTurnSignal('{"agent":"claude","ev'), null);
     assert.equal(parseTurnSignal(JSON.stringify({ ...base, event: '' })), null);
+  });
+});
+
+describe('턴 시작 신호 — 호스트 파싱', () => {
+  it('정상 페이로드를 파싱한다', () => {
+    const s = parseTurnStart(
+      JSON.stringify({ agent: 'codex', event: 'UserPromptSubmit', sessionId: 's-1', at: 123 }),
+    );
+    assert.ok(s);
+    assert.equal(s!.agent, 'codex');
+    assert.equal(s!.event, 'UserPromptSubmit');
+    assert.equal(s!.sessionId, 's-1');
+    assert.equal(s!.at, 123);
+  });
+
+  it('깨진 JSON은 null — 부분 write 중 다음 신호에 재시도', () => {
+    assert.equal(parseTurnStart('{"agent":"claude","ev'), null);
+  });
+
+  it('모르는 agent는 null', () => {
+    assert.equal(
+      parseTurnStart(JSON.stringify({ agent: 'gemini', event: 'UserPromptSubmit', at: 1 })),
+      null,
+    );
+  });
+
+  it('at이 없으면 0으로 떨어진다 — 트리거일 뿐 판정은 상위(W2)의 몫', () => {
+    const s = parseTurnStart(JSON.stringify({ agent: 'agy', event: 'PreInvocation' }));
+    assert.ok(s);
+    assert.equal(s!.at, 0);
   });
 });
 

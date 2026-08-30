@@ -53,6 +53,10 @@ export interface SessionMeta {
   kind?: SessionKind;
   // 가장 최근 채팅 시점. 탭 정렬용.
   lastChattedAt?: string;
+  // 이 세션을 띄운 부모 세션. 없으면 메인 세션이다 (0.5.0 B-2).
+  parentSessionId?: string;
+  // 사용자가 이 세션을 마지막으로 연 시각(ISO). 완료 표시를 끄는 기준 (0.5.0 B-2).
+  lastOpenedAt?: string;
 }
 
 export interface WorkspaceMeta {
@@ -81,6 +85,8 @@ export type SessionUpdatePatch = Partial<{
   closedAt: string | null;
   title: string | undefined;
   lastChattedAt: string;
+  parentSessionId: string | undefined;
+  lastOpenedAt: string;
 }>;
 
 export type WorkspaceUpdatePatch = Partial<{
@@ -488,23 +494,39 @@ export function createWorkspaceStore(opts: WorkspaceStoreOptions = {}): Workspac
     },
 
     async deleteSession(workspaceId, sessionId) {
-      let deletedSession: SessionMeta | null = null;
+      let deletedSessions: SessionMeta[] = [];
       await withWorkspaceLock(workspaceId, async () => {
         const meta = await readWorkspaceMeta(workspaceId);
         const target = meta.sessions.find((s) => s.sessionId === sessionId);
         if (!target) return;
-        deletedSession = target;
-        meta.sessions = meta.sessions.filter((s) => s.sessionId !== sessionId);
-        if (meta.primarySessionId === sessionId) meta.primarySessionId = null;
+        // 자식·손자까지 재귀로 모은다 — 부모만 지우면 부모 없는 레코드가 남는다 (0.5.0 B-2).
+        const toDelete = new Set<string>([sessionId]);
+        let grew = true;
+        while (grew) {
+          grew = false;
+          for (const s of meta.sessions) {
+            if (s.parentSessionId && toDelete.has(s.parentSessionId) && !toDelete.has(s.sessionId)) {
+              toDelete.add(s.sessionId);
+              grew = true;
+            }
+          }
+        }
+        deletedSessions = meta.sessions.filter((s) => toDelete.has(s.sessionId));
+        meta.sessions = meta.sessions.filter((s) => !toDelete.has(s.sessionId));
+        if (meta.primarySessionId && toDelete.has(meta.primarySessionId)) meta.primarySessionId = null;
         meta.updatedAt = new Date().toISOString();
         await writeWorkspaceMetaAtomic(meta);
-        await fsp.rm(sessionDir(workspaceId, sessionId), { recursive: true, force: true });
+        for (const sid of toDelete) {
+          await fsp.rm(sessionDir(workspaceId, sid), { recursive: true, force: true });
+        }
       });
-      if (deletedSession && onAfterDeleteSession) {
-        try {
-          await onAfterDeleteSession(workspaceId, deletedSession);
-        } catch (err) {
-          log.warn(`workspaceStore: onAfterDeleteSession failed — ${err instanceof Error ? err.message : String(err)}`);
+      if (onAfterDeleteSession) {
+        for (const deleted of deletedSessions) {
+          try {
+            await onAfterDeleteSession(workspaceId, deleted);
+          } catch (err) {
+            log.warn(`workspaceStore: onAfterDeleteSession failed — ${err instanceof Error ? err.message : String(err)}`);
+          }
         }
       }
     },

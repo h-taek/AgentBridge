@@ -52,6 +52,11 @@ const { wrapInjectedContext } = require('../src/contextTag')
 // 호스트가 그 신호를 받아 transcript를 읽는다 — 폴링으로 파일이 자랐는지 훔쳐보지 않는다.
 const TERMINATION_EVENTS = new Set(['Stop', 'StopFailure'])
 
+// 턴 시작 이벤트 (0.5.0 W1). hookInstaller가 실제로 컨텍스트 주입용으로 등록하는 이벤트만
+// 담는다 — claude·codex는 UserPromptSubmit, agy는 PreInvocation. 종료 이벤트가 아닌 전부를
+// 대상으로 하면 향후 등록될 다른 이벤트(PostInvocation 등)가 조용히 시작 신호로 새기 쉽다.
+const INJECTION_EVENTS = new Set(['UserPromptSubmit', 'PreInvocation'])
+
 // 종료 페이로드를 하니스 차이 없는 한 모양으로 정규화한다.
 // claude/codex: session_id·transcript_path·agent_id (research 04 §1·§2)
 // agy: conversationId·transcriptPath·fullyIdle·terminationReason (§3)
@@ -454,6 +459,31 @@ async function main() {
     const msg = String(e && e.message ? e.message : e)
     process.stderr.write('agentbridge-memory: capture write skipped — ' + msg + '\n')
     writeHookError(wsDir, parsed.agent, parsed.event, '세션 id 캡처 실패 — ' + msg)
+  }
+
+  // 턴 시작 신호 (0.5.0 W1) — 주입 훅이 도는 시점을 파일로 남긴다. 종료 신호와 같은 폴더·
+  // 같은 규약(tmp→rename, 매번 덮어쓰기, best-effort). 내용은 트리거가 아니라 시각이 전부다.
+  // agy는 한 턴에 PreInvocation이 여러 번 올 수 있으나 시각만 갱신하므로 판정이 흔들리지 않는다.
+  if (INJECTION_EVENTS.has(parsed.event)) {
+    try {
+      const token = process.env.AGENTBRIDGE_WS_SESSION || ''
+      if (token && token === path.basename(token)) {
+        const sid = extractSessionIdFromStdin(stdinRaw, parsed.agent)
+        const dir = path.join(wsDir, 'sessions', token)
+        fs.mkdirSync(dir, { recursive: true })
+        const out = path.join(dir, 'turn-start.json')
+        const tmp = out + '.' + process.pid + '.tmp'
+        fs.writeFileSync(
+          tmp,
+          JSON.stringify({ agent: parsed.agent, event: parsed.event, sessionId: sid, at: Date.now() })
+        )
+        fs.renameSync(tmp, out)
+      }
+    } catch (e) {
+      const msg = String(e && e.message ? e.message : e)
+      process.stderr.write('agentbridge-memory: turn start write skipped — ' + msg + '\n')
+      writeHookError(wsDir, parsed.agent, parsed.event, '턴 시작 신호 쓰기 실패 — ' + msg)
+    }
   }
 
   // 턴 종료 신호 — 호스트가 이걸 받아 transcript를 읽는다 (0.5.0 A-2).

@@ -1,6 +1,8 @@
-// 자동 세션 이름 — 첫 user 턴 텍스트를 잘라 세션 title로 채운다.
+// 자동 세션 이름 — 첫 user 턴으로 세션 title을 채운다(B-2 W7).
 //   deriveSessionTitle: 순수 절단(공백 접기 + 코드포인트 단위 20자 + …). 슬래시 명령 등 원문 보존.
 //   maybeAutoNameSession: title이 비어 있을 때만, 이름 만들 수 있는 첫 턴으로 1회 명명. 기존 title 보호.
+//     이름 생성은 generateName(헤드리스 모델 호출)을 우선 시도하고, 없거나 실패·빈 값이면
+//     deriveSessionTitle 절단으로 폴백한다(runSessionNaming — sessionNamePrompt.ts·refineDispatcher.ts).
 
 import { readAllTurns } from './turnsStore';
 
@@ -17,6 +19,9 @@ export function deriveSessionTitle(userText: string): string | null {
   return points.slice(0, MAX_TITLE_CODEPOINTS).join('') + '…';
 }
 
+// 첫 턴 원문 → 이름 한 줄(헤드리스 모델 호출). 실패·던짐·빈 값은 호출자가 폴백으로 받는다.
+export type SessionNameGenerator = (userText: string) => Promise<string | null>;
+
 export interface AutoNameSessionArgs {
   workspaceRoot: string;
   // 명명 대상 세션. turns.jsonl은 워크스페이스 내 여러 세션이 공유하므로, 이 id로 걸러야
@@ -26,6 +31,26 @@ export interface AutoNameSessionArgs {
   getCurrentTitle: () => Promise<string | undefined>;
   // 명명 확정 시 호출 — workspace.json sessions[].title 갱신.
   setTitle: (title: string) => Promise<void>;
+  // 있으면 우선 시도하는 헤드리스 명명 생성기. 없으면 곧장 절단(deriveSessionTitle)로 명명한다.
+  generateName?: SessionNameGenerator;
+}
+
+// 헤드리스 생성기를 시도하고, 없거나 실패하거나 빈 값이면 절단으로 떨어뜨린다.
+// 폴백이 도는 이유: 여기서 이름을 비워 두면 title이 계속 미설정으로 남아 다음 턴마다
+// 명명을 다시 시도하게 되고, 그때마다 헤드리스 모델 호출 비용이 든다.
+async function resolveName(
+  userText: string,
+  fallback: string,
+  generateName?: SessionNameGenerator,
+): Promise<string> {
+  if (!generateName) return fallback;
+  try {
+    const generated = await generateName(userText);
+    if (generated && generated.trim() !== '') return generated;
+  } catch {
+    /* 헤드리스 실패 — 절단으로 폴백 */
+  }
+  return fallback;
 }
 
 // 턴 flush 시점마다 호출(turnRecorder onTurnFlushed). 이미 title이 있으면 즉시 반환하므로
@@ -36,10 +61,10 @@ export async function maybeAutoNameSession(args: AutoNameSessionArgs): Promise<v
   const turns = await readAllTurns(args.workspaceRoot);
   for (const turn of turns) {
     if (turn.sessionId !== args.sessionId) continue; // 이 세션의 턴만 — 공유 버퍼 내 타세션 턴 무시
-    const title = deriveSessionTitle(turn.user);
-    if (title) {
-      await args.setTitle(title);
-      return;
-    }
+    const fallback = deriveSessionTitle(turn.user);
+    if (!fallback) continue; // 이 턴으로는 이름을 만들 수 없음(빈 텍스트) — 다음 턴으로
+    const title = await resolveName(turn.user, fallback, args.generateName);
+    await args.setTitle(title);
+    return;
   }
 }

@@ -4,6 +4,7 @@
 import { runRefineSpawn, type SpawnRefineResult } from './refineHeadless';
 import { parseRefineOutput } from './irModule/parse';
 import { parseProposalOutput } from './proposalParse';
+import { parseSessionName } from './sessionNamePrompt';
 import type { CliKind } from './shared/cli';
 import type { EnvProbe } from './envProbe';
 import type { Logger } from './interfaces';
@@ -238,4 +239,9 @@ export async function runRefine(args: RunRefineArgs): Promise<RefineModelChoice>
 // 자동제안 분석 — 같은 디스패처, proposalParse 게이트.
 export async function runProposalAnalysis(args: RunRefineArgs): Promise<RefineModelChoice> {
   return runHeadlessAnalysis(args, (t) => parseProposalOutput(t), 'proposals');
+}
+
+// 세션 명명 — 같은 디스패처, parseSessionName 게이트(B-2 W7).
+export async function runSessionNaming(args: RunRefineArgs): Promise<RefineModelChoice> {
+  return runHeadlessAnalysis(args, (t) => parseSessionName(t), 'session name');
 }

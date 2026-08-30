@@ -2,12 +2,29 @@
 // chatPanel은 세션을 매니저에 등록만 하고, 매니저가 종료 훅 신호를 받아 그 신호가 실어 온
 // transcript를 읽어 turns.jsonl을 쌓는다(0.5.0 A-2). 표시는 PTY 유지.
 
-import { CaptureManager, maybeAutoNameSession, type TurnsAssistantDetail } from '@agentbridge/core';
+import {
+  CaptureManager,
+  maybeAutoNameSession,
+  runSessionNaming,
+  buildSessionNamePrompt,
+  parseSessionName,
+  type TurnsAssistantDetail,
+} from '@agentbridge/core';
 import type { CliKind } from '../../shared/types';
 import * as workspaceStore from '../workspaceStore';
-import { getCompactionScheduler, getWorkspaceStore, getLogger } from '../coreInstances';
+import {
+  getCompactionScheduler,
+  getWorkspaceStore,
+  getCoreEnvProbe,
+  getLogger,
+  resolveRefineDecision,
+} from '../coreInstances';
 import { getConfig } from '../../settings/config';
 import { setHookDisabled } from '../hookStatusStore';
+
+// 자동 명명 헤드리스 호출 상한. 정제·자동제안과 다른 값 — 명명은 짧은 첫 턴 하나만 보내는
+// 가벼운 호출이라 더 짧게 잡는다(B-2 W7).
+const SESSION_NAMING_TIMEOUT_MS = 20_000;
 
 // logger는 호출 시점에 lazily 조회 (모듈 로드 시 coreInstances 미초기화 가능).
 const manager = new CaptureManager({
@@ -64,6 +81,20 @@ export function registerCapture(args: {
           setTitle: async (title) => {
             await store.updateSessionMeta(workspaceId, sessionId, { title });
             args.onAutoNamed?.(title);
+          },
+          // 헤드리스 모델 호출로 이름을 짓는다(runHeadlessAnalysis의 세 번째 소비자). refine 결정은
+          // compaction 정제와 같은 계산을 쓴다. 실패는 non-fatal — maybeAutoNameSession이 절단으로
+          // 폴백한다.
+          generateName: async (userText) => {
+            const choice = await runSessionNaming({
+              decision: resolveRefineDecision(args.model),
+              prompt: buildSessionNamePrompt({ userText }),
+              envProbe: getCoreEnvProbe(),
+              logger: { log: (m) => getLogger().log(m), warn: (m) => getLogger().warn(m) },
+              timeoutMs: SESSION_NAMING_TIMEOUT_MS,
+            });
+            const parsed = parseSessionName(choice.result.assistantText);
+            return parsed.ok ? parsed.name : null;
           },
         });
       } catch {

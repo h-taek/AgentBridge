@@ -30,6 +30,8 @@ export interface SessionMeta {
   lastActiveAt: string;
   active: boolean;
   modelSessionId?: string;
+  parentSessionId?: string;
+  lastOpenedAt?: string;
 }
 
 function toLegacy(workspaceId: string, s: CoreSessionMeta): SessionMeta {
@@ -42,6 +44,8 @@ function toLegacy(workspaceId: string, s: CoreSessionMeta): SessionMeta {
     lastActiveAt: s.lastChattedAt ?? s.createdAt,
     active: s.closedAt === null,
     modelSessionId: s.modelSessionId ?? undefined,
+    parentSessionId: s.parentSessionId,
+    lastOpenedAt: s.lastOpenedAt,
   };
 }
 
@@ -92,6 +96,13 @@ export async function markSessionActive(workspaceId: string, sessionId: string):
   await getWorkspaceStore().updateSessionMeta(workspaceId, sessionId, {
     closedAt: null,
     lastChattedAt: new Date().toISOString(),
+  });
+}
+
+// 사용자가 이 세션을 열어본 시각을 갱신한다. 완료 표시를 끄는 기준 (0.5.0 B-2).
+export async function markSessionOpened(workspaceId: string, sessionId: string): Promise<void> {
+  await getWorkspaceStore().updateSessionMeta(workspaceId, sessionId, {
+    lastOpenedAt: new Date().toISOString(),
   });
 }
 

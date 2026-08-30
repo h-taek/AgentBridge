@@ -22,7 +22,9 @@ import {
   type CompactionNotifications,
   type QuotaTracker,
   type Logger,
+  type RefineDecision,
 } from '@agentbridge/core';
+import type { CliKind } from '../shared/types';
 import * as output from '../log/output';
 import { getConfig } from '../settings/config';
 import * as notifications from './notifications';
@@ -65,6 +67,21 @@ export function getCliAdapters(): CliAdapterSet {
 export function getCompactionScheduler(): CompactionScheduler {
   return ensureInitialized(_compactionScheduler, 'compactionScheduler');
 }
+// 설정값 → refine 결정. compaction 정제와 세션 자동 명명이 같은 계산을 쓴다.
+// 변환 switch는 core resolveRefineDecisionFromConfig 단일 구현 (V-11).
+export function resolveRefineDecision(activeModel: CliKind): RefineDecision {
+  const cfg = getConfig();
+  return resolveRefineDecisionFromConfig(
+    {
+      policy: cfg.refinePolicy,
+      fixedCli: cfg.refineFixedCli,
+      priorityOrder: cfg.refinePriorityOrder,
+      useClaude: cfg.refineUseClaude,
+    },
+    activeModel,
+  );
+}
+
 // 자동제안 트리거(runProposalTrigger)에 넘길 envProbe.
 export function getCoreEnvProbe(): EnvProbe {
   return ensureInitialized(_envProbe, 'envProbe');
@@ -142,20 +159,8 @@ export function initializeCore(
         await getQuotaTracker().markForcedFallback(event.cli);
       }
     },
-    resolveRefineDecision: (activeModel) => {
-      // 변환 switch는 core resolveRefineDecisionFromConfig 단일 구현 사용 (V-11).
-      // 빈 priority 목록 → 기본 순서 폴백도 core가 처리.
-      const cfg = getConfig();
-      return resolveRefineDecisionFromConfig(
-        {
-          policy: cfg.refinePolicy,
-          fixedCli: cfg.refineFixedCli,
-          priorityOrder: cfg.refinePriorityOrder,
-          useClaude: cfg.refineUseClaude,
-        },
-        activeModel,
-      );
-    },
+    // 빈 priority 목록 → 기본 순서 폴백은 core가 처리.
+    resolveRefineDecision,
     maxArchiveSnapshots: getConfig().maxArchiveSnapshots,
     logger,
   });

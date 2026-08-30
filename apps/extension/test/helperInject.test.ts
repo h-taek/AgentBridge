@@ -80,3 +80,80 @@ describe('helper inject — 글로벌 메모리 검색 종단(§G3)', () => {
     assert.match(src, /@agentbridge-helper-version \d+\.\d+\.\d+/);
   });
 });
+
+describe('helper inject — 턴 시작 신호(0.5.0 W1)', () => {
+  let tmp: string;
+  let bundlePath: string;
+  let userData: string;
+
+  before(async function () {
+    this.timeout(30000); // esbuild 번들 빌드 여유
+    tmp = await fsp.mkdtemp(join(tmpdir(), 'ab-turnstart-'));
+    userData = join(tmp, 'userdata');
+    await fsp.mkdir(join(userData, 'bin'), { recursive: true });
+    bundlePath = join(userData, 'bin', 'agentbridge-memory.js');
+    const bundlerScript = join(process.cwd(), '..', '..', 'scripts', 'bundle-helper.mjs');
+    execFileSync('node', [bundlerScript, bundlePath], { encoding: 'utf8' });
+    await fsp.mkdir(join(userData, 'workspaces', 'ws-1'), { recursive: true });
+    await fsp.mkdir(join(userData, 'workspaces', 'ws-notoken'), { recursive: true });
+  });
+
+  after(async () => {
+    if (tmp) await fsp.rm(tmp, { recursive: true, force: true });
+  });
+
+  function run(agent: string, event: string, stdin: string, token?: string, ws = 'ws-1'): void {
+    execFileSync('node', [bundlePath, 'inject', '--agent', agent, '--event', event], {
+      input: stdin,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        AGENTBRIDGE_WS_DIR: join(userData, 'workspaces', ws),
+        ...(token ? { AGENTBRIDGE_WS_SESSION: token } : {}),
+      },
+    });
+  }
+
+  async function readTurnStart(token: string, ws = 'ws-1'): Promise<any> {
+    const raw = await fsp.readFile(
+      join(userData, 'workspaces', ws, 'sessions', token, 'turn-start.json'),
+      'utf8',
+    );
+    return JSON.parse(raw);
+  }
+
+  it('claude UserPromptSubmit — turn-start.json을 쓴다', async () => {
+    const token = 'sess-claude-start';
+    run('claude', 'UserPromptSubmit', JSON.stringify({ prompt: 'hi', session_id: 's-claude' }), token);
+    const s = await readTurnStart(token);
+    assert.equal(s.agent, 'claude');
+    assert.equal(s.event, 'UserPromptSubmit');
+    assert.equal(typeof s.at, 'number');
+  });
+
+  it('codex UserPromptSubmit — turn-start.json을 쓴다', async () => {
+    const token = 'sess-codex-start';
+    run('codex', 'UserPromptSubmit', JSON.stringify({ prompt: 'hi', session_id: 's-codex' }), token);
+    const s = await readTurnStart(token);
+    assert.equal(s.agent, 'codex');
+    assert.equal(s.event, 'UserPromptSubmit');
+    assert.equal(s.sessionId, 's-codex');
+    assert.equal(typeof s.at, 'number');
+  });
+
+  it('agy PreInvocation — turn-start.json을 쓴다', async () => {
+    const token = 'sess-agy-start';
+    run('agy', 'PreInvocation', JSON.stringify({ conversationId: 'c-agy' }), token);
+    const s = await readTurnStart(token);
+    assert.equal(s.agent, 'agy');
+    assert.equal(s.event, 'PreInvocation');
+    assert.equal(s.sessionId, 'c-agy');
+    assert.equal(typeof s.at, 'number');
+  });
+
+  it('토큰 env가 없으면 무동작 — 세션 폴더 자체가 안 생긴다', async () => {
+    run('claude', 'UserPromptSubmit', JSON.stringify({ prompt: 'hi' }), undefined, 'ws-notoken');
+    const sessionsDir = join(userData, 'workspaces', 'ws-notoken', 'sessions');
+    await assert.rejects(() => fsp.stat(sessionsDir));
+  });
+});

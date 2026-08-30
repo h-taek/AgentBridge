@@ -3,7 +3,13 @@ import { promises as fs } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import * as workspaceStore from '../src/core/workspaceStore';
-import { getSessions, registerSession } from '../src/core/sessionRegistry';
+import {
+  getSessions,
+  registerSession,
+  markSessionOpened,
+  renameSession,
+  markSessionClosed,
+} from '../src/core/sessionRegistry';
 import { initCoreForTest } from './helpers';
 
 describe('sessionRegistry', () => {
@@ -53,5 +59,19 @@ describe('sessionRegistry', () => {
 
   it('rejects a non-UUID sessionId (V-04 path traversal guard)', async () => {
     await assert.rejects(() => registerSession(wid, '../escape', 'claude'), /invalid sessionId/);
+  });
+
+  it('markSessionOpened가 lastOpenedAt을 갱신하고 다른 필드를 덮지 않는다', async () => {
+    const sid = '12345678-1234-1234-1234-123456789abc';
+    await registerSession(wid, sid, 'claude');
+    await renameSession(wid, sid, '내 세션');
+    await markSessionClosed(wid, sid);
+
+    await markSessionOpened(wid, sid);
+
+    const sessions = await getSessions(wid);
+    assert.equal(sessions[0].name, '내 세션');
+    assert.equal(sessions[0].active, false);
+    assert.equal(sessions[0].lastOpenedAt !== undefined, true);
   });
 });
