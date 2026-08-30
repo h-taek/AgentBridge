@@ -21,6 +21,7 @@ import {
 } from '../coreInstances';
 import { getConfig } from '../../settings/config';
 import { setHookDisabled } from '../hookStatusStore';
+import { getSessions, pickNamingCli } from '../sessionRegistry';
 
 // 자동 명명 헤드리스 호출 상한. 정제·자동제안과 다른 값 — 명명은 짧은 첫 턴 하나만 보내는
 // 가벼운 호출이라 더 짧게 잡는다(B-2 W7).
@@ -86,8 +87,9 @@ export function registerCapture(args: {
           // compaction 정제와 같은 계산을 쓴다. 실패는 non-fatal — maybeAutoNameSession이 절단으로
           // 폴백한다.
           generateName: async (userText) => {
+            const cli = pickNamingCli(await getSessions(workspaceId), args.model);
             const choice = await runSessionNaming({
-              decision: resolveRefineDecision(args.model),
+              decision: resolveRefineDecision(cli),
               prompt: buildSessionNamePrompt({ userText }),
               envProbe: getCoreEnvProbe(),
               logger: { log: (m) => getLogger().log(m), warn: (m) => getLogger().warn(m) },

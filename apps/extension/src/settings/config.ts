@@ -23,7 +23,7 @@ const PROPOSAL_EVERY_N = 5;
 function read(): AgentBridgeConfig {
   const cfg = vscode.workspace.getConfiguration(SECTION);
   return {
-    refinePolicy: cfg.get<RefinePolicy>('refine.policy', 'priority'),
+    refinePolicy: cfg.get<RefinePolicy>('refine.policy', 'active'),
     refinePriorityOrder: cfg.get<CliKind[]>('refine.priorityOrder', ['agy', 'codex', 'claude']),
     refineFixedCli: cfg.get<CliKind>('refine.fixedCli', 'agy'),
     refineUseClaude: cfg.get<boolean>('refine.useClaude', true),

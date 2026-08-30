@@ -134,6 +134,18 @@ export async function getSessions(workspaceId: string): Promise<SessionMeta[]> {
     .map((s) => toLegacy(workspaceId, s));
 }
 
+// 자동 명명이 어느 하니스로 돌지 고른다 (0.5.0 W7).
+//
+// 명명은 그 세션 하나를 위한 짧은 호출이라, 지금 사용자가 실제로 쓰고 있는 하니스로 도는 것이
+// 자연스럽다. 열려 있는 메인 세션 중 가장 최근에 대화한 것을 고르고, 그런 세션이 없으면
+// 명명 대상 세션 자신의 하니스로 떨어진다. 서브 세션은 사용자가 고른 자리가 아니라 제외한다.
+export function pickNamingCli(sessions: SessionMeta[], fallback: CliKind): CliKind {
+  const openMains = sessions.filter((s) => s.active && !s.parentSessionId);
+  if (openMains.length === 0) return fallback;
+  const latest = openMains.reduce((a, b) => (b.lastActiveAt.localeCompare(a.lastActiveAt) > 0 ? b : a));
+  return latest.model;
+}
+
 // 미확정으로 남은 세션 id를 회수한다 (0.5.0 A-1).
 //
 // codex·agy는 세션 id를 훅이 알려준다. 훅이 캡처 파일을 쓰기 전에 탭이 닫히면 감시자는 죽지만
