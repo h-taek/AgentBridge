@@ -24,7 +24,7 @@
 
 'use strict'
 
-// @agentbridge-helper-version 0.5.0
+// @agentbridge-helper-version 0.5.1
 // (단일 설치 버전 비교용 — 이 파일을 수정하면 반드시 버전을 올릴 것)
 
 const fs = require('fs')

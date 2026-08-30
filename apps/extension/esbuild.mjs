@@ -95,23 +95,53 @@ function vendorAssets() {
   const colors = JSON.parse(readFileSync(join(A, 'colors.json'), 'utf8'));
   mkdirSync('media/dots', { recursive: true });
 
-  // idle — 점 하나(기존 그대로).
-  const dot = (color, opacity) =>
-    `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><circle cx="8" cy="8" r="3.5" fill="${color}" opacity="${opacity}"/></svg>`;
-  // running — 점 둘레에 링.
-  const ring = (color, opacity) =>
-    `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><circle cx="8" cy="8" r="3" fill="${color}" opacity="${opacity}"/><circle cx="8" cy="8" r="6" fill="none" stroke="${color}" stroke-width="1.3" opacity="${opacity}"/></svg>`;
-  // done — 점 우상단에 작은 배지.
-  const badge = (color, opacity) =>
-    `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><circle cx="7" cy="9" r="3.2" fill="${color}" opacity="${opacity}"/><circle cx="12" cy="4" r="2.1" fill="${color}" opacity="${opacity}"/></svg>`;
-  // unknown — 원 안의 물음표.
+  // 도형은 16×16 캔버스 가운데를 기준으로 75%로 줄여 그린다(선 굵기도 같은 비율로 얇아진다).
+  // 네 상태의 바깥 원 반지름이 6으로 같아서 행이 바뀌어도 아이콘 크기가 흔들리지 않는다.
+  const SCALE = 0.75;
+  const R = 6;
+  const svg = (body, opacity) =>
+    `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">` +
+    `<g transform="translate(8,8) scale(${SCALE}) translate(-8,-8)" opacity="${opacity}">${body}</g></svg>`;
+  // 완료·모름이 공유하는 옅은 링 — 글리프를 담는 그릇이라 색을 죽인다.
+  // 닫힘 세션은 그룹 전체가 이미 0.4로 죽으므로 링까지 0.4를 곱하면 사라진다. 그쪽은 링 자체를
+  // 진하게 줘서 곱한 결과가 열린 세션의 링과 비슷하게 남게 한다.
+  const faintRing = (color, groupOpacity) =>
+    `<circle cx="8" cy="8" r="${R}" fill="none" stroke="${color}" stroke-width="1.3"` +
+    ` opacity="${groupOpacity < 1 ? 0.85 : 0.4}"/>`;
+
+  // idle — 채운 원.
+  const dot = (color, opacity) => svg(`<circle cx="8" cy="8" r="${R}" fill="${color}"/>`, opacity);
+  // running — 3/4 호가 도는 스피너. VS Code가 SMIL을 안 돌리면 정지한 호로 보인다.
+  const spinner = (color, opacity) =>
+    svg(
+      `<g><animateTransform attributeName="transform" attributeType="XML" type="rotate"` +
+        ` from="0 8 8" to="360 8 8" dur="0.9s" repeatCount="indefinite"/>` +
+        `<path d="M8 ${8 - R} A${R} ${R} 0 1 1 ${8 - R} 8" fill="none" stroke="${color}"` +
+        ` stroke-width="2" stroke-linecap="round"/></g>`,
+      opacity,
+    );
+  // done — 옅은 링 안에 체크.
+  const check = (color, opacity) =>
+    svg(
+      faintRing(color, opacity) +
+        `<path d="M5.0 8.3 L6.9 10.2 L11.0 6.0" fill="none" stroke="${color}"` +
+        ` stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>`,
+      opacity,
+    );
+  // unknown — 옅은 링 안에 물음표(글리프가 아니라 선으로 그린다. 폰트에 안 기댄다).
   const unknown = (color, opacity) =>
-    `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><circle cx="8" cy="8" r="6" fill="${color}" opacity="${opacity}"/><text x="8" y="11.5" font-family="sans-serif" font-size="8" font-weight="700" text-anchor="middle" fill="#fff" opacity="${opacity}">?</text></svg>`;
+    svg(
+      faintRing(color, opacity) +
+        `<path d="M6.0 6.3 a2.05 2.05 0 1 1 2.0 2.05 v1.0" fill="none" stroke="${color}"` +
+        ` stroke-width="1.5" stroke-linecap="round"/>` +
+        `<circle cx="8" cy="11.4" r="0.85" fill="${color}"/>`,
+      opacity,
+    );
 
   const STATES = [
     ['', dot],
-    ['-running', ring],
-    ['-done', badge],
+    ['-running', spinner],
+    ['-done', check],
     ['-unknown', unknown],
   ];
   for (const [model, color] of Object.entries(colors)) {

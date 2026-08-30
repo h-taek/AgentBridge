@@ -557,14 +557,22 @@ export async function installHelperToCanonicalPath(
   const bundledVer = HELPER_VERSION_RE.exec(bundled)?.[1] ?? '0.0.0';
 
   let installedVer: string | null = null;
+  let installedSame = false;
   try {
     const installed = await fsp.readFile(canonical, 'utf8');
     installedVer = HELPER_VERSION_RE.exec(installed)?.[1] ?? '0.0.0';
+    installedSame = installed === bundled;
   } catch {
     // 미설치
   }
 
-  if (installedVer === null || compareSemver(bundledVer, installedVer) > 0) {
+  // 버전이 같은데 내용이 다르면 갱신한다. 마커를 올리는 것을 잊으면 헬퍼 수정이 조용히
+  // 안 깔리고, 그 상태는 훅이 옛 동작을 하는 것으로만 드러나 찾기 어렵다. 같은 버전의
+  // 정식 빌드끼리는 내용이 같으므로 이 분기가 실제로 도는 것은 개발 중뿐이다.
+  const staleSameVersion =
+    installedVer !== null && compareSemver(bundledVer, installedVer) === 0 && !installedSame;
+
+  if (installedVer === null || compareSemver(bundledVer, installedVer) > 0 || staleSameVersion) {
     const tmp = `${canonical}.${process.pid}.${Date.now()}.tmp`;
     await fsp.mkdir(dirname(canonical), { recursive: true });
     await fsp.writeFile(tmp, bundled, 'utf8');

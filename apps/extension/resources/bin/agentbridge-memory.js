@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// @agentbridge-helper-version 0.5.0
+// @agentbridge-helper-version 0.5.1
 "use strict";
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -453,6 +453,7 @@ var { resolveContext: resolveContext2 } = (init_globalSearch(), __toCommonJS(glo
 var { resolveQuery: resolveQuery2, renderGlobalMatches: renderGlobalMatches2, extractSessionIdFromStdin: extractSessionIdFromStdin2 } = (init_globalInject(), __toCommonJS(globalInject_exports));
 var { wrapInjectedContext: wrapInjectedContext2 } = (init_contextTag(), __toCommonJS(contextTag_exports));
 var TERMINATION_EVENTS = /* @__PURE__ */ new Set(["Stop", "StopFailure"]);
+var INJECTION_EVENTS = /* @__PURE__ */ new Set(["UserPromptSubmit", "PreInvocation"]);
 function writeHookError(wsDir, agent, event, message) {
   try {
     const token = process.env.AGENTBRIDGE_WS_SESSION || "";
@@ -797,6 +798,27 @@ async function main() {
     const msg = String(e && e.message ? e.message : e);
     process.stderr.write("agentbridge-memory: capture write skipped \u2014 " + msg + "\n");
     writeHookError(wsDir, parsed.agent, parsed.event, "\uC138\uC158 id \uCEA1\uCC98 \uC2E4\uD328 \u2014 " + msg);
+  }
+  if (INJECTION_EVENTS.has(parsed.event)) {
+    try {
+      const token = process.env.AGENTBRIDGE_WS_SESSION || "";
+      if (token && token === path.basename(token)) {
+        const sid = extractSessionIdFromStdin2(stdinRaw, parsed.agent);
+        const dir = path.join(wsDir, "sessions", token);
+        fs.mkdirSync(dir, { recursive: true });
+        const out = path.join(dir, "turn-start.json");
+        const tmp = out + "." + process.pid + ".tmp";
+        fs.writeFileSync(
+          tmp,
+          JSON.stringify({ agent: parsed.agent, event: parsed.event, sessionId: sid, at: Date.now() })
+        );
+        fs.renameSync(tmp, out);
+      }
+    } catch (e) {
+      const msg = String(e && e.message ? e.message : e);
+      process.stderr.write("agentbridge-memory: turn start write skipped \u2014 " + msg + "\n");
+      writeHookError(wsDir, parsed.agent, parsed.event, "\uD134 \uC2DC\uC791 \uC2E0\uD638 \uC4F0\uAE30 \uC2E4\uD328 \u2014 " + msg);
+    }
   }
   if (TERMINATION_EVENTS.has(parsed.event)) {
     try {

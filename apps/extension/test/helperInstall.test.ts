@@ -56,6 +56,26 @@ describe('hook helper 단일 설치', () => {
     assert.match(content, /helper 0\.3\.0/);
   });
 
+  it('버전이 같아도 내용이 다르면 덮어쓴다 (마커 안 올린 헬퍼 수정 자가 치유)', async () => {
+    const first = await writeBundledHelper('0.2.0');
+    await installHelperToCanonicalPath(first, root);
+    // 같은 버전으로 내용만 바꾼 번들 — 개발 중 헬퍼를 고치고 마커를 안 올린 상태다.
+    const changed = join(bundleDir, 'agentbridge-memory.js');
+    await fs.writeFile(changed, "// @agentbridge-helper-version 0.2.0\nconsole.log('helper changed')\n", 'utf8');
+    const canonical = await installHelperToCanonicalPath(changed, root);
+    const content = await fs.readFile(canonical, 'utf8');
+    assert.match(content, /helper changed/);
+  });
+
+  it('버전과 내용이 모두 같으면 다시 쓰지 않는다', async () => {
+    const bundled = await writeBundledHelper('0.2.0');
+    const canonical = await installHelperToCanonicalPath(bundled, root);
+    const before = (await fs.stat(canonical)).mtimeMs;
+    await new Promise((r) => setTimeout(r, 20));
+    await installHelperToCanonicalPath(bundled, root);
+    assert.equal((await fs.stat(canonical)).mtimeMs, before);
+  });
+
   it('실제 번들 helper(packages/core/bin)에 버전 마커가 있다', async () => {
     const realHelper = join(__dirname, '..', '..', '..', 'packages', 'core', 'bin', 'agentbridge-memory.js');
     const content = await fs.readFile(realHelper, 'utf8');
