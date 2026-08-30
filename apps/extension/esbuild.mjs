@@ -88,15 +88,38 @@ function vendorAssets() {
   cpSync(join(A, 'brand', 'agentbridge-light.svg'), 'media/icon-light.svg', { dereference: true });
   cpSync(join(A, 'brand', 'agentbridge-dark.svg'), 'media/icon-dark.svg', { dereference: true });
 
-  // dot — colors.json 색을 박아 모델 3종 × 정상/닫힘 6개 생성. 단일 출처=colors.json.
+  // dot — colors.json 색을 박아 모델 3종 × 닫힘 2종 × 상태 4종 생성. 단일 출처=colors.json.
   // VS Code TreeItem.iconPath가 파일 Uri만 받아 인라인 색을 못 줘서 파일로 굽는다.
+  // 파일명 규칙(sessionTreeModel.ts의 iconKey와 맞춘다): <model>[-closed][-<activity>].svg
+  // idle은 접미사 없음(기존 파일명 유지, 상태 표시 자체가 없는 것이 노는 상태라는 스펙과 일치).
   const colors = JSON.parse(readFileSync(join(A, 'colors.json'), 'utf8'));
   mkdirSync('media/dots', { recursive: true });
+
+  // idle — 점 하나(기존 그대로).
   const dot = (color, opacity) =>
     `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><circle cx="8" cy="8" r="3.5" fill="${color}" opacity="${opacity}"/></svg>`;
+  // running — 점 둘레에 링.
+  const ring = (color, opacity) =>
+    `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><circle cx="8" cy="8" r="3" fill="${color}" opacity="${opacity}"/><circle cx="8" cy="8" r="6" fill="none" stroke="${color}" stroke-width="1.3" opacity="${opacity}"/></svg>`;
+  // done — 점 우상단에 작은 배지.
+  const badge = (color, opacity) =>
+    `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><circle cx="7" cy="9" r="3.2" fill="${color}" opacity="${opacity}"/><circle cx="12" cy="4" r="2.1" fill="${color}" opacity="${opacity}"/></svg>`;
+  // unknown — 원 안의 물음표.
+  const unknown = (color, opacity) =>
+    `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><circle cx="8" cy="8" r="6" fill="${color}" opacity="${opacity}"/><text x="8" y="11.5" font-family="sans-serif" font-size="8" font-weight="700" text-anchor="middle" fill="#fff" opacity="${opacity}">?</text></svg>`;
+
+  const STATES = [
+    ['', dot],
+    ['-running', ring],
+    ['-done', badge],
+    ['-unknown', unknown],
+  ];
   for (const [model, color] of Object.entries(colors)) {
-    writeFileSync(join('media', 'dots', `${model}.svg`), dot(color, 1));
-    writeFileSync(join('media', 'dots', `${model}-closed.svg`), dot(color, 0.4));
+    for (const [closedSuffix, opacity] of [['', 1], ['-closed', 0.4]]) {
+      for (const [stateSuffix, draw] of STATES) {
+        writeFileSync(join('media', 'dots', `${model}${closedSuffix}${stateSuffix}.svg`), draw(color, opacity));
+      }
+    }
   }
 }
 

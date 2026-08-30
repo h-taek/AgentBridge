@@ -20,9 +20,10 @@ import * as output from './log/output';
 import { MemoryPanelProvider } from './views/memoryPanel';
 import { ProfilePanelProvider } from './views/profilePanel';
 import { SessionTreeProvider, SessionItem } from './views/sessionTreeView';
+import { rowKindOf, childSessions, planDeleteConfirm } from './views/sessionTreeModel';
 import { ChatPanel, getActivePanel, getAllPanels, chatPanelEvents, updateSessionTabTitle } from './views/chatPanel';
 import { compactionEvents } from './core/compactionScheduler';
-import { registerSession, markSessionClosed, markSessionActive, renameSession, deleteSession, reclaimPendingModelSessionId } from './core/sessionRegistry';
+import { registerSession, markSessionClosed, markSessionActive, markSessionOpened, renameSession, deleteSession, reclaimPendingModelSessionId } from './core/sessionRegistry';
 import { registerConfigWatcher, getConfig } from './settings/config';
 import * as notifications from './core/notifications';
 import { CLI_DISPLAY_NAME, type CliKind } from './shared/types';
@@ -213,6 +214,14 @@ export function activate(context: vscode.ExtensionContext) {
   // 보이는 상태일 때만 reveal — 다른 사이드바(Explorer 등)를 사용 중인 사용자의 화면을
   // 우리 패널로 강제 전환시키지 않기 위함.
   chatPanelEvents.event(async ({ sessionId }) => {
+    // 완료 표시는 여기서 끈다 — 탭을 열어봤다는 사실이 곧 "확인했다"는 사실이다(B-2).
+    // 사이드바가 안 보이는 상태에서도 열람 시각은 남겨야 다음에 트리를 볼 때 정정돼 있다.
+    const folderUri = vscode.workspace.workspaceFolders?.[0]?.uri;
+    if (folderUri) {
+      const wid = workspaceStore.getOrCreateWorkspaceId(folderUri.fsPath);
+      await markSessionOpened(wid, sessionId);
+    }
+
     if (!treeView.visible) return;
     await sessionTree.getChildren();
     const item = sessionTree.findItemBySessionId(sessionId);
@@ -234,7 +243,9 @@ export function activate(context: vscode.ExtensionContext) {
     onChange: () => sessionTree.refresh(),
     logger: { warn: (m, e) => output.warn(`${m} ${e ? String(e) : ''}`) },
   });
-  const storagePoll = setInterval(() => sessionTree.refresh(), 4000);
+  // 상태(진행 중/완료/모름)가 이 주기를 탄다. 값이 안 바뀌었으면 refresh하지 않는다 —
+  // 4초마다 전체 리렌더하면 선택 상태가 흔들린다.
+  const storagePoll = setInterval(() => { void sessionTree.refreshIfChanged(); }, 4000);
   context.subscriptions.push({
     dispose: () => {
       storageWatcher.stop();
@@ -363,8 +374,34 @@ export function activate(context: vscode.ExtensionContext) {
   const deleteCmd = vscode.commands.registerCommand('agentbridge.deleteSession', async (item?: SessionItem) => {
     const session = (item ?? selectedSessionItem)?.session;
     if (!session) return;
+
+    // 확인 문구를 행 종류에 맞춘다(0.5.0 W5, B-3) — 메인 행은 아래 서브 개수·이름을 함께 낸다.
+    // 서브 삭제의 영수증 항목(worktree·브랜치·변경 파일 수)은 정리(B-7)가 생기는 단계의 몫이라
+    // 여기서는 레코드가 지워진다는 사실만 알린다.
+    const allSessions = await getSessions(session.workspaceId);
+    const rowKind = rowKindOf(session, allSessions);
+    const children = childSessions(allSessions, session.sessionId);
+    const plan = planDeleteConfirm(rowKind, children);
+
+    let message: string;
+    if (plan.kind === 'subsession') {
+      message = vscode.l10n.t('Delete sub-session "{0}"? This deletes the session record.', session.name);
+    } else if (plan.childCount === 0) {
+      message = vscode.l10n.t('Delete session "{0}"?', session.name);
+    } else if (plan.childCount === 1) {
+      message = vscode.l10n.t(
+        'Delete session "{0}"? Its sub-session "{1}" will also be removed.',
+        session.name, plan.childNames[0],
+      );
+    } else {
+      message = vscode.l10n.t(
+        'Delete session "{0}"? Its {1} sub-sessions ({2}) will also be removed.',
+        session.name, plan.childCount, plan.childNames.join(', '),
+      );
+    }
+
     const answer = await vscode.window.showWarningMessage(
-      vscode.l10n.t('Delete session "{0}"?', session.name),
+      message,
       { modal: true },
       vscode.l10n.t('Delete'),
     );

@@ -140,22 +140,22 @@
       "view/item/context": [
         {
           "command": "agentbridge.renameSession",
-          "when": "viewItem =~ /^session-/",
+          "when": "viewItem =~ /^(session|subsession)-/",
           "group": "inline@1"
         },
         {
           "command": "agentbridge.deleteSession",
-          "when": "viewItem =~ /^session-/",
+          "when": "viewItem =~ /^(session|subsession)-/",
           "group": "inline@2"
         },
         {
           "command": "agentbridge.renameSession",
-          "when": "viewItem =~ /^session-/",
+          "when": "viewItem =~ /^(session|subsession)-/",
           "group": "context@1"
         },
         {
           "command": "agentbridge.deleteSession",
-          "when": "viewItem =~ /^session-/",
+          "when": "viewItem =~ /^(session|subsession)-/",
           "group": "context@2"
         }
       ]
