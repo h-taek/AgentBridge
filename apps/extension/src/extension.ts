@@ -385,7 +385,10 @@ export function activate(context: vscode.ExtensionContext) {
 
     let message: string;
     if (plan.kind === 'subsession') {
-      message = vscode.l10n.t('Delete sub-session "{0}"? This deletes the session record.', session.name);
+      message = vscode.l10n.t(
+        'Delete sub-session "{0}"? Its record and conversation log are removed.',
+        session.name,
+      );
     } else if (plan.childCount === 0) {
       message = vscode.l10n.t('Delete session "{0}"?', session.name);
     } else if (plan.childCount === 1) {

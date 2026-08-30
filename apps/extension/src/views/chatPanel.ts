@@ -172,7 +172,6 @@ export class ChatPanel {
       switch (msg.type) {
         case 'ready':
           void this.spawnPty(msg.cols ?? 120, msg.rows ?? 30);
-          void this.notifySubSessionLock();
           break;
         case 'log':
           output.log(`[webview] ${msg.data}`);
@@ -473,28 +472,6 @@ export class ChatPanel {
     const wid = workspaceStore.getOrCreateWorkspaceId(folderUri.fsPath);
     const sessions = await getSessions(wid);
     this.panel.webview.postMessage({ type: 'sessions', sessions });
-  }
-
-  // 서브 세션(부모가 있는 세션)이면 웹뷰 입력을 잠근다 — 사용자가 대화하는 자리는 메인 세션뿐
-  // 이다(0.5.0 B-2, spec B-2 "사용자가 대화하는 자리는 메인 세션뿐이다"). PTY는 그대로 두고
-  // 웹뷰가 입력 전송을 스스로 멈추게 알리기만 한다. 레코드를 못 읽으면 잠그지 않는다 — 판정
-  // 실패로 메인 세션까지 잠기면 사용자가 대화를 못 하게 된다.
-  private async notifySubSessionLock(): Promise<void> {
-    const { workspaceId, sessionId } = this.opts;
-    if (!workspaceId || !sessionId) return;
-    try {
-      const sessions = await getSessions(workspaceId);
-      const own = sessions.find((s) => s.sessionId === sessionId);
-      if (!own?.parentSessionId) return;
-      this.panel.webview.postMessage({
-        type: 'readOnly',
-        notice: vscode.l10n.t(
-          '\r\n[AgentBridge] This is a sub-session started by the main session — input is locked. Talk to the main session instead.\r\n',
-        ),
-      });
-    } catch (err) {
-      output.warn(`chatPanel: 서브 세션 판정 실패 — 잠그지 않음: ${err instanceof Error ? err.message : String(err)}`);
-    }
   }
 
   // webview 메시지의 소유권 검증 (V-29) — 메시지는 세션을 "지목"만 할 수 있고, 실제 데이터는
@@ -1096,36 +1073,17 @@ export class ChatPanel {
     let lastShiftEnterAt = 0;
     let pendingFallbackTimer = null;
 
-    // 서브 세션 읽기 전용 잠금(0.5.0 B-2) — 호스트가 'readOnly' 메시지를 보내면 켜진다.
-    // 입력을 PTY로 보내는 모든 경로(타이핑/붙여넣기/Shift+Enter/드롭 첨부 삽입)가 이 한 함수를 지난다.
-    let inputLocked = false;
-    let lockNotice = '';
-    let lastLockNoticeAt = 0;
-    function sendInput(data) {
-      if (inputLocked) {
-        // 왜 안 들어가는지 모른 채 계속 두드리는 상태를 막는다. 매 키마다 찍으면 화면이
-        // 안내로 덮이므로 3초에 한 번만.
-        const now = Date.now();
-        if (lockNotice && now - lastLockNoticeAt > 3000) {
-          lastLockNoticeAt = now;
-          term.write(lockNotice);
-        }
-        return;
-      }
-      vscode.postMessage({ type: 'input', data });
-    }
-
     const emitShiftEnterNewline = () => {
       if (pendingFallbackTimer) {
         clearTimeout(pendingFallbackTimer);
         pendingFallbackTimer = null;
       }
       pendingShiftEnter = false;
-      sendInput('\\x1b\\r');
+      vscode.postMessage({ type: 'input', data: '\\x1b\\r' });
     };
 
     term.onData((data) => {
-      sendInput(data);
+      vscode.postMessage({ type: 'input', data });
       // composition commit된 글자가 PTY로 흘러나간 직후 pending \\x1b\\r 처리.
       if (pendingShiftEnter) {
         emitShiftEnterNewline();
@@ -1361,7 +1319,7 @@ export class ChatPanel {
         }
         // @<path> mention 형식 — claude/codex/agy 모두 지원.
         const insertion = Array.from(paths).map(p => '@' + quoteMentionPath(p)).join(' ') + ' ';
-        sendInput(insertion);
+        vscode.postMessage({ type: 'input', data: insertion });
       });
     }, true);
 
@@ -1478,12 +1436,6 @@ export class ChatPanel {
         const q = spSearchInput.value.toLowerCase();
         const filtered = q ? allSessions.filter(s => s.name.toLowerCase().includes(q)) : allSessions;
         renderSessions(filtered);
-      }
-      if (msg.type === 'readOnly') {
-        inputLocked = true;
-        lockNotice = msg.notice;
-        lastLockNoticeAt = Date.now();
-        term.write(msg.notice);
       }
     });
 
