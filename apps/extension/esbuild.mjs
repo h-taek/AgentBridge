@@ -103,9 +103,9 @@ function vendorAssets() {
   const svg = (body, opacity) =>
     `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">` +
     `<g transform="translate(8,8) scale(${SCALE}) translate(-8,-8)" opacity="${opacity}">${body}</g></svg>`;
-  // 완료·모름이 공유하는 옅은 링 — 글리프를 담는 그릇이라 색을 죽인다.
-  const faintRing = (color) =>
-    `<circle cx="8" cy="8" r="${R}" fill="none" stroke="${color}" stroke-width="1.3" opacity="0.4"/>`;
+  // 완료·모름이 공유하는 링. 스피너와 같은 반지름이라 상태가 바뀌어도 크기가 흔들리지 않는다.
+  const ring = (color) =>
+    `<circle cx="8" cy="8" r="${R}" fill="none" stroke="${color}" stroke-width="1.3"/>`;
 
   // idle — 채운 원.
   const dot = (color, opacity) => svg(`<circle cx="8" cy="8" r="${R}" fill="${color}"/>`, opacity);
@@ -121,18 +121,18 @@ function vendorAssets() {
   // done — 옅은 링 안에 체크.
   const check = (color, opacity) =>
     svg(
-      faintRing(color) +
+      ring(color) +
         `<path d="M5.0 8.3 L6.9 10.2 L11.0 6.0" fill="none" stroke="${color}"` +
-        ` stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>`,
+        ` stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/>`,
       opacity,
     );
   // unknown — 옅은 링 안에 물음표(글리프가 아니라 선으로 그린다. 폰트에 안 기댄다).
   const unknown = (color, opacity) =>
     svg(
-      faintRing(color) +
+      ring(color) +
         `<path d="M6.0 6.3 a2.05 2.05 0 1 1 2.0 2.05 v1.0" fill="none" stroke="${color}"` +
-        ` stroke-width="1.5" stroke-linecap="round"/>` +
-        `<circle cx="8" cy="11.4" r="0.85" fill="${color}"/>`,
+        ` stroke-width="1.9" stroke-linecap="round"/>` +
+        `<circle cx="8" cy="11.4" r="1" fill="${color}"/>`,
       opacity,
     );
 
