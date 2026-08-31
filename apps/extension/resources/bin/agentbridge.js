@@ -22,17 +22,528 @@ var __copyProps = (to, from, except, desc) => {
 };
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
-// packages/core/src/agentCli/irRender.ts
-var irRender_exports = {};
-__export(irRender_exports, {
-  renderCommands: () => renderCommands,
-  renderDecisions: () => renderDecisions,
-  renderFiles: () => renderFiles,
-  renderIntent: () => renderIntent,
-  renderIrSections: () => renderIrSections,
-  renderPending: () => renderPending,
-  renderTests: () => renderTests
+// packages/core/src/irStore.ts
+async function readIR(workspaceRoot) {
+  const irPath = (0, import_path.join)(workspaceRoot, "ir.json");
+  try {
+    const raw = await import_fs.promises.readFile(irPath, "utf8");
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || !("meta" in parsed)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+var import_fs, import_path;
+var init_irStore = __esm({
+  "packages/core/src/irStore.ts"() {
+    "use strict";
+    import_fs = require("fs");
+    import_path = require("path");
+  }
 });
+
+// packages/core/src/shared/turns.ts
+var TURN_CAP, COMPACTION_TRIGGER, TURNS_ROTATE;
+var init_turns = __esm({
+  "packages/core/src/shared/turns.ts"() {
+    "use strict";
+    TURN_CAP = {
+      userBytes: 8 * 1024,
+      assistantBodyChars: 500,
+      toolCallArgChars: 500
+    };
+    COMPACTION_TRIGGER = {
+      countThreshold: 6,
+      bytesThreshold: 192 * 1024,
+      keepRecent: 3
+    };
+    TURNS_ROTATE = {
+      maxBytes: 5 * 1024 * 1024,
+      maxRecords: 1e3
+    };
+  }
+});
+
+// packages/core/src/interfaces.ts
+var noopLogger;
+var init_interfaces = __esm({
+  "packages/core/src/interfaces.ts"() {
+    "use strict";
+    noopLogger = {
+      log: () => {
+      },
+      warn: () => {
+      }
+    };
+  }
+});
+
+// packages/core/src/turnsStore.ts
+function turnsPath(workspaceRoot) {
+  return (0, import_path2.join)(workspaceRoot, "turns.jsonl");
+}
+function deserialize(line) {
+  const trimmed = line.trim();
+  if (!trimmed) return null;
+  try {
+    const obj = JSON.parse(trimmed);
+    if (!obj || typeof obj !== "object" || typeof obj.id !== "string") return null;
+    return obj;
+  } catch {
+    return null;
+  }
+}
+async function readAllTurns(workspaceRoot) {
+  const p = turnsPath(workspaceRoot);
+  let raw;
+  try {
+    raw = await import_fs2.promises.readFile(p, "utf8");
+  } catch (err) {
+    if (err.code === "ENOENT") return [];
+    throw err;
+  }
+  const out = [];
+  for (const line of raw.split("\n")) {
+    const t = deserialize(line);
+    if (t) out.push(t);
+  }
+  return out;
+}
+var import_fs2, import_path2;
+var init_turnsStore = __esm({
+  "packages/core/src/turnsStore.ts"() {
+    "use strict";
+    import_fs2 = require("fs");
+    import_path2 = require("path");
+    init_turns();
+    init_interfaces();
+  }
+});
+
+// packages/core/src/fileLock.ts
+var ACQUIRE_TIMEOUT_MS, STALE_LOCK_MS;
+var init_fileLock = __esm({
+  "packages/core/src/fileLock.ts"() {
+    "use strict";
+    ACQUIRE_TIMEOUT_MS = 5e3;
+    STALE_LOCK_MS = 1e4;
+    if (STALE_LOCK_MS <= ACQUIRE_TIMEOUT_MS) {
+      throw new Error(
+        `fileLock: STALE_LOCK_MS(${STALE_LOCK_MS}) must be > ACQUIRE_TIMEOUT_MS(${ACQUIRE_TIMEOUT_MS})`
+      );
+    }
+  }
+});
+
+// packages/core/src/storageRoot.ts
+function getStorageRoot() {
+  return (0, import_path3.join)((0, import_os.homedir)(), "agentbridge");
+}
+var import_os, import_path3;
+var init_storageRoot = __esm({
+  "packages/core/src/storageRoot.ts"() {
+    "use strict";
+    import_os = require("os");
+    import_path3 = require("path");
+  }
+});
+
+// packages/core/src/globalPaths.ts
+function getGlobalDir(rootOverride) {
+  return (0, import_node_path.join)(rootOverride ?? getStorageRoot(), "global");
+}
+function profilesRoot(globalDir) {
+  return (0, import_node_path.join)(globalDir, "profiles");
+}
+function projectsRoot(globalDir) {
+  return (0, import_node_path.join)(globalDir, "projects");
+}
+function scopeRoot(globalDir, scope) {
+  return scope === "project" ? projectsRoot(globalDir) : profilesRoot(globalDir);
+}
+function assertProfileSegment(profileId) {
+  const v = String(profileId ?? "");
+  if (!v || v === "." || v === ".." || /[\\/\u0000]/.test(v)) {
+    throw new Error(`Invalid profileId "${v}": must be a single path segment.`);
+  }
+  return v;
+}
+function profileDir(globalDir, profileId, scope = "user") {
+  return (0, import_node_path.join)(scopeRoot(globalDir, scope), assertProfileSegment(profileId));
+}
+function profileDocsDir(globalDir, profileId, scope = "user") {
+  return (0, import_node_path.join)(profileDir(globalDir, profileId, scope), "docs");
+}
+var import_node_path, DEFAULT_PROFILE_ID;
+var init_globalPaths = __esm({
+  "packages/core/src/globalPaths.ts"() {
+    "use strict";
+    import_node_path = require("node:path");
+    init_storageRoot();
+    DEFAULT_PROFILE_ID = "default";
+  }
+});
+
+// packages/core/src/shared/global.ts
+var GLOBAL_CATEGORIES, DOC_CAPS, PROPOSAL_CAPS;
+var init_global = __esm({
+  "packages/core/src/shared/global.ts"() {
+    "use strict";
+    GLOBAL_CATEGORIES = [
+      "role",
+      "repos",
+      "domain",
+      "workflows",
+      "conventions",
+      "infra",
+      "verification"
+    ];
+    DOC_CAPS = {
+      title: 200,
+      summary: 2e3,
+      body: 2e4,
+      indexEntries: 50
+    };
+    PROPOSAL_CAPS = {
+      title: DOC_CAPS.title,
+      summary: DOC_CAPS.summary,
+      body: DOC_CAPS.body,
+      maxPerPass: 12
+      // 한 패스가 만들 제안 상한 — 폭주 방지
+    };
+  }
+});
+
+// packages/core/src/globalMarkdown.ts
+function extractTitle(markdown) {
+  return String(markdown || "").match(/^#\s+(.+)$/m)?.[1]?.trim() || "";
+}
+function extractSummary(markdown) {
+  return String(markdown || "").match(/## Summary\s+([\s\S]*?)(?:\n## |$)/)?.[1]?.trim() || "";
+}
+function extractIndexEntries(markdown) {
+  const m = String(markdown || "").match(/## Index Entries\s+([\s\S]*?)(?:\n## |$)/);
+  if (!m?.[1]) return [];
+  return m[1].split(/\r?\n/).map((l) => l.trim()).filter((l) => l.startsWith("- ")).map((l) => l.slice(2).trim()).filter(Boolean);
+}
+var CATEGORY_ORDER;
+var init_globalMarkdown = __esm({
+  "packages/core/src/globalMarkdown.ts"() {
+    "use strict";
+    init_global();
+    CATEGORY_ORDER = [...GLOBAL_CATEGORIES, "general"];
+  }
+});
+
+// packages/core/src/globalValidate.ts
+var CATS;
+var init_globalValidate = __esm({
+  "packages/core/src/globalValidate.ts"() {
+    "use strict";
+    init_global();
+    CATS = new Set(GLOBAL_CATEGORIES);
+  }
+});
+
+// packages/core/src/globalStore.ts
+function resolveProfile(_workspaceId) {
+  return DEFAULT_PROFILE_ID;
+}
+async function listDocRelPaths(dir, prefix = "") {
+  const entries = await import_node_fs.promises.readdir(dir, { withFileTypes: true }).catch(() => []);
+  const files = [];
+  for (const entry of entries) {
+    const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) files.push(...await listDocRelPaths((0, import_node_path2.join)(dir, entry.name), rel));
+    else if (entry.isFile() && entry.name.endsWith(".md")) files.push(rel);
+  }
+  return files.sort();
+}
+async function readProfileDocs(globalDir, profileId, scope = "user") {
+  const docsDir = profileDocsDir(globalDir, profileId, scope);
+  const files = (await listDocRelPaths(docsDir)).filter((f) => !/(^|\/)index\.md$/i.test(f));
+  const recs = [];
+  for (const file of files) {
+    const raw = await import_node_fs.promises.readFile((0, import_node_path2.join)(docsDir, file), "utf8");
+    const category = file.includes("/") ? file.split("/")[0] : "general";
+    const slug = file.replace(/\.md$/i, "").split("/").slice(1).join("/") || file.replace(/\.md$/i, "");
+    const detailsMatch = raw.match(/## Details\s+([\s\S]*?)$/);
+    recs.push({
+      category,
+      slug,
+      title: extractTitle(raw),
+      summary: extractSummary(raw),
+      indexEntries: extractIndexEntries(raw),
+      body: detailsMatch?.[1]?.trim() || ""
+    });
+  }
+  return recs;
+}
+var import_node_fs, import_node_path2;
+var init_globalStore = __esm({
+  "packages/core/src/globalStore.ts"() {
+    "use strict";
+    import_node_fs = require("node:fs");
+    import_node_path2 = require("node:path");
+    init_fileLock();
+    init_globalPaths();
+    init_globalMarkdown();
+    init_globalValidate();
+  }
+});
+
+// packages/core/src/workspaceId.ts
+function canonicalWorkspacePath(folderFsPath) {
+  let canonical;
+  try {
+    canonical = (0, import_fs3.realpathSync)(folderFsPath);
+  } catch {
+    canonical = (0, import_path4.resolve)(folderFsPath);
+  }
+  return canonical.normalize("NFC");
+}
+var import_fs3, import_path4;
+var init_workspaceId = __esm({
+  "packages/core/src/workspaceId.ts"() {
+    "use strict";
+    import_fs3 = require("fs");
+    import_path4 = require("path");
+  }
+});
+
+// packages/core/src/gitRemote.ts
+function normalizeRemoteUrl(raw) {
+  let s = String(raw ?? "").trim();
+  if (!s) return "";
+  s = s.replace(/^[a-z][a-z0-9+.-]*:\/\//i, "");
+  s = s.replace(/^[^@/]+@/, "");
+  s = s.replace(/:(\d+)\//, "/");
+  s = s.replace(/:/, "/");
+  s = s.replace(/\/+$/, "");
+  s = s.replace(/\.git$/i, "");
+  s = s.replace(/\/+$/, "");
+  s = s.replace(/\/{2,}/g, "/");
+  return s.toLowerCase();
+}
+function profileIdForRemote(normalized) {
+  const digest = (0, import_node_crypto.createHash)("sha256").update(normalized, "utf8").digest("hex").slice(0, PROFILE_DIGEST_LEN);
+  const tail = normalized.split("/").filter(Boolean).slice(-2).join("-");
+  const name = tail.replace(/[^a-z0-9._-]+/gi, "-").replace(/^[.\-]+/, "").replace(/[.\-]+$/, "").slice(0, MAX_NAME_LEN);
+  return `${name || "repo"}-${digest}`;
+}
+function profileIdForPath(folderFsPath) {
+  const canonical = canonicalWorkspacePath(folderFsPath);
+  const digest = (0, import_node_crypto.createHash)("sha256").update(canonical, "utf8").digest("hex").slice(0, PROFILE_DIGEST_LEN);
+  const name = (canonical.split("/").filter(Boolean).pop() ?? "").replace(/[^a-z0-9._-]+/gi, "-").replace(/^[.\-]+/, "").replace(/[.\-]+$/, "").slice(0, MAX_NAME_LEN);
+  return `${name || "project"}-${digest}`;
+}
+async function resolveProjectProfileId(cwd, opts = {}) {
+  const log = opts.logger ?? noopLogger;
+  const read = opts.readRemote ?? readOriginUrl;
+  let url = null;
+  try {
+    url = await read(cwd);
+  } catch (err) {
+    log.warn(`gitRemote: origin \uC870\uD68C \uC2E4\uD328 \u2014 ${err instanceof Error ? err.message : String(err)}`);
+  }
+  const normalized = url ? normalizeRemoteUrl(url) : "";
+  return normalized ? profileIdForRemote(normalized) : profileIdForPath(cwd);
+}
+var import_node_child_process, import_node_crypto, GIT_TIMEOUT_MS, PROFILE_DIGEST_LEN, MAX_NAME_LEN, readOriginUrl;
+var init_gitRemote = __esm({
+  "packages/core/src/gitRemote.ts"() {
+    "use strict";
+    import_node_child_process = require("node:child_process");
+    import_node_crypto = require("node:crypto");
+    init_workspaceId();
+    init_interfaces();
+    GIT_TIMEOUT_MS = 3e3;
+    PROFILE_DIGEST_LEN = 8;
+    MAX_NAME_LEN = 48;
+    readOriginUrl = (cwd) => new Promise((resolve2) => {
+      (0, import_node_child_process.execFile)(
+        "git",
+        ["config", "--get", "remote.origin.url"],
+        { cwd, timeout: GIT_TIMEOUT_MS, windowsHide: true },
+        (err, stdout) => {
+          if (err) return resolve2(null);
+          const v = String(stdout ?? "").trim();
+          resolve2(v || null);
+        }
+      );
+    });
+  }
+});
+
+// packages/core/src/globalSearch.ts
+function tokenizeRaw(text) {
+  return String(text || "").toLowerCase().split(/[^\p{L}\p{N}]+/u).flatMap((t) => t.split(/(?<=[a-z0-9])(?=[가-힣])|(?<=[가-힣])(?=[a-z0-9])/u)).map((t) => t.trim()).filter((t) => t.length >= 2 && !STOP_WORDS.has(t));
+}
+function koreanVariant(token) {
+  if (!HANGUL.test(token)) return null;
+  for (const p of KOREAN_PARTICLES) {
+    if (token.length > p.length && token.endsWith(p)) {
+      const stem = token.slice(0, token.length - p.length);
+      if (stem.length >= 2) return stem;
+    }
+  }
+  return null;
+}
+function tokenizeQuery(query) {
+  const out = /* @__PURE__ */ new Set();
+  for (const tok of tokenizeRaw(query)) {
+    const v = koreanVariant(tok);
+    if (v && STOP_WORDS.has(v)) continue;
+    out.add(tok);
+    if (v) out.add(v);
+  }
+  return [...out];
+}
+function countTokenMatches(text, tokens) {
+  const haystack = String(text || "").toLowerCase();
+  let sum = 0;
+  for (const token of tokens) {
+    if (HANGUL.test(token)) {
+      if (token.length >= 2 && haystack.includes(token)) sum += 1;
+      continue;
+    }
+    const re = new RegExp(`(?<![a-z0-9])${escapeRegExp(token)}(?![a-z0-9])`);
+    if (re.test(haystack)) {
+      sum += 1;
+    } else if (token.length >= 9) {
+      const stem = escapeRegExp(token.slice(0, 7));
+      if (new RegExp(`\\b${stem}[a-z]*\\b`).test(haystack)) sum += 1;
+    }
+  }
+  return sum;
+}
+function escapeRegExp(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+function exactPhraseScore(text, query) {
+  const phrase = String(query || "").trim().toLowerCase();
+  if (phrase.length < 3) return 0;
+  return String(text || "").toLowerCase().includes(phrase) ? 1 : 0;
+}
+function scoreDoc(rec, tokens) {
+  const label = rec.indexEntries.join(" ");
+  const path2 = `${rec.category}/${rec.slug}`;
+  let score = 0;
+  score += countTokenMatches(label, tokens) * 10;
+  score += countTokenMatches(rec.title, tokens) * 7;
+  score += countTokenMatches(rec.summary, tokens) * 5;
+  score += countTokenMatches(rec.category, tokens) * 2;
+  score += countTokenMatches(path2, tokens) * 2;
+  score += countTokenMatches(rec.body, tokens) * 1;
+  return score;
+}
+function minimumUsefulScore(tokens) {
+  return tokens.length <= 1 ? 1 : 2;
+}
+async function resolveContext(globalDir, profileId, query, opts) {
+  const tokens = tokenizeQuery(query);
+  if (tokens.length === 0) return [];
+  const minScore = minimumUsefulScore(tokens);
+  const phrase = String(query || "").trim().toLowerCase();
+  const docs = await readProfileDocs(globalDir, profileId, opts?.scope ?? "user");
+  const scored = [];
+  for (const rec of docs) {
+    let score = scoreDoc(rec, tokens);
+    score += exactPhraseScore(`${rec.title} ${rec.summary} ${rec.indexEntries.join(" ")}`, phrase) * 3;
+    if (score < minScore) continue;
+    scored.push({ category: rec.category, slug: rec.slug, title: rec.title, summary: rec.summary, score });
+  }
+  scored.sort((a, b) => b.score - a.score || a.title.localeCompare(b.title));
+  return scored.slice(0, opts?.topN ?? 5);
+}
+var STOP_WORDS, KOREAN_PARTICLES, HANGUL;
+var init_globalSearch = __esm({
+  "packages/core/src/globalSearch.ts"() {
+    "use strict";
+    init_globalStore();
+    STOP_WORDS = /* @__PURE__ */ new Set([
+      // 영어 기능어
+      "the",
+      "a",
+      "an",
+      "of",
+      "to",
+      "in",
+      "on",
+      "for",
+      "and",
+      "or",
+      "is",
+      "are",
+      "be",
+      "this",
+      "that",
+      "it",
+      "as",
+      "at",
+      "by",
+      "with",
+      // 한국어 의문사·지시어 (1글자는 토크나이저가 이미 제거 → 2음절↑만 등록)
+      "\uC5B4\uB5BB\uAC8C",
+      "\uBB34\uC5C7",
+      "\uBB34\uC2A8",
+      "\uC5B4\uB5A4",
+      "\uC5B4\uB290",
+      "\uC5B4\uB514",
+      "\uC5B8\uC81C",
+      "\uB204\uAD6C",
+      "\uC5BC\uB9C8",
+      // 한국어 기능어·형식명사·흔한 동사(보수적: recall 보호 위해 '작업·사용·처리' 등은 제외)
+      "\uBC29\uBC95",
+      "\uACBD\uC6B0",
+      "\uC815\uB3C4",
+      "\uB54C\uBB38",
+      "\uD1B5\uD574",
+      "\uC704\uD574",
+      "\uB300\uD574",
+      "\uAD00\uD574",
+      "\uC790\uCCB4",
+      "\uC9C4\uD589",
+      "\uD655\uC778"
+    ]);
+    KOREAN_PARTICLES = [
+      "\uC73C\uB85C",
+      "\uC5D0\uC11C",
+      "\uAE4C\uC9C0",
+      "\uBD80\uD130",
+      "\uC5D0\uAC8C",
+      "\uD55C\uD14C",
+      "\uCC98\uB7FC",
+      "\uBCF4\uB2E4",
+      "\uB9C8\uB2E4",
+      "\uC870\uCC28",
+      "\uBC16\uC5D0",
+      "\uC744",
+      "\uB97C",
+      "\uC774",
+      "\uAC00",
+      "\uC740",
+      "\uB294",
+      "\uC5D0",
+      "\uC758",
+      "\uB85C",
+      "\uB3C4",
+      "\uB9CC",
+      "\uACFC",
+      "\uC640",
+      "\uB791",
+      "\uBA70",
+      "\uD558\uB2E4",
+      "\uD588\uB2E4",
+      "\uD558\uB294",
+      "\uD558\uACE0"
+    ];
+    HANGUL = /[가-힣]/;
+  }
+});
+
+// packages/core/src/agentCli/irRender.ts
 function fmtList(items, indent = "") {
   if (!Array.isArray(items) || items.length === 0) return `${indent}(none)`;
   return items.map((s) => `${indent}- ${String(s)}`).join("\n");
@@ -114,11 +625,139 @@ var init_irRender = __esm({
   }
 });
 
+// packages/core/src/agentCli/read.ts
+var read_exports = {};
+__export(read_exports, {
+  readContext: () => readContext,
+  readMemory: () => readMemory,
+  readTurns: () => readTurns,
+  searchMemory: () => searchMemory
+});
+async function readContext(wsDir) {
+  const ir = await readIR(wsDir);
+  if (!ir) return "\uC800\uC7A5\uB41C \uC791\uC5C5 \uC0C1\uD0DC\uAC00 \uC5C6\uB2E4. \uC544\uC9C1 \uC555\uCD95\uB41C \uB9E5\uB77D\uC774 \uC313\uC774\uC9C0 \uC54A\uC558\uB2E4.";
+  return `## \uC791\uC5C5 \uC0C1\uD0DC (\uC555\uCD95\uB41C \uB9E5\uB77D)
+
+${renderIrSections(ir)}`;
+}
+async function readTurns(wsDir, lastN) {
+  const all = await readAllTurns(wsDir);
+  if (all.length === 0) return "\uAE30\uB85D\uB41C \uD134\uC774 \uC5C6\uB2E4.";
+  const turns = all.slice(-lastN);
+  const lines = [`## \uCD5C\uADFC \uB300\uD654 \uC6D0\uBB38 (${turns.length}\uD134, \uC624\uB798\uB41C \uAC83\uBD80\uD130)`, ""];
+  for (const t of turns) {
+    lines.push(`[${t.model || "?"} \xB7 ${t.completedAt || ""}]`);
+    lines.push(`user: ${t.user || ""}`);
+    lines.push(`assistant: ${t.assistantBody || ""}`);
+    if (Array.isArray(t.toolCalls) && t.toolCalls.length > 0) {
+      lines.push("tools:");
+      for (const c of t.toolCalls) lines.push(`  - ${c.tool || "?"}(${c.arg || ""})`);
+    }
+    lines.push("");
+  }
+  return lines.join("\n").trimEnd();
+}
+async function resolveProjectId(wsDir) {
+  try {
+    const raw = await import_fs4.promises.readFile((0, import_path5.join)(wsDir, "workspace.json"), "utf8");
+    const workspacePath = JSON.parse(raw)?.workspacePath;
+    if (typeof workspacePath !== "string" || !workspacePath) return null;
+    return await resolveProjectProfileId(workspacePath);
+  } catch {
+    return null;
+  }
+}
+function docId(rec) {
+  return `${rec.category}/${rec.slug}`;
+}
+function renderDocs(docs, full) {
+  const byCategory = /* @__PURE__ */ new Map();
+  for (const d of docs) {
+    if (!byCategory.has(d.category)) byCategory.set(d.category, []);
+    byCategory.get(d.category).push(d);
+  }
+  const lines = [];
+  for (const category of [...byCategory.keys()].sort()) {
+    lines.push(`### ${category}`);
+    for (const d of byCategory.get(category)) {
+      lines.push(`- ${docId(d)} \u2014 ${d.title}`);
+      if (d.summary) lines.push(`  ${d.summary}`);
+      if (full && d.body) lines.push(`  ${d.body.split("\n").join("\n  ")}`);
+    }
+    lines.push("");
+  }
+  return lines.join("\n").trimEnd();
+}
+async function readMemory(storageRoot, wsDir, scope, full) {
+  const globalDir = getGlobalDir(storageRoot);
+  const profileId = scope === "project" ? await resolveProjectId(wsDir) : resolveProfile(basenameOf(wsDir));
+  if (!profileId) return "\uC774 \uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4\uC758 \uD504\uB85C\uC81D\uD2B8 \uC9C0\uC2DD \uC790\uB9AC\uB97C \uCC3E\uC744 \uC218 \uC5C6\uB2E4.";
+  const docs = await readProfileDocs(globalDir, profileId, scope).catch(() => []);
+  if (docs.length === 0) return `${SCOPE_LABEL[scope]}\uC774 \uC544\uC9C1 \uC5C6\uB2E4.`;
+  const head = full ? `## ${SCOPE_LABEL[scope]} (${docs.length}\uAC74, \uC804\uBB38)` : `## ${SCOPE_LABEL[scope]} (${docs.length}\uAC74, \uC694\uC57D)
+
+\uC904 \uC55E\uC758 \uAC12\uC774 \uC2DD\uBCC4\uC790\uB2E4. \uC804\uBB38\uC740 --full\uB85C \uBCF8\uB2E4.`;
+  return `${head}
+
+${renderDocs(docs, full)}`;
+}
+function basenameOf(p) {
+  const parts = p.split(/[\\/]/).filter(Boolean);
+  return parts[parts.length - 1] ?? p;
+}
+async function searchMemory(storageRoot, wsDir, query) {
+  const globalDir = getGlobalDir(storageRoot);
+  const userId = resolveProfile(basenameOf(wsDir));
+  const projectId = await resolveProjectId(wsDir);
+  const [user, project] = await Promise.all([
+    resolveContext(globalDir, userId, query, { topN: 5 }).catch(() => []),
+    projectId ? resolveContext(globalDir, projectId, query, { topN: 5, scope: "project" }).catch(() => []) : Promise.resolve([])
+  ]);
+  if (user.length === 0 && project.length === 0) return `"${query}"\uC5D0 \uAC78\uB9AC\uB294 \uC9C0\uC2DD\uC774 \uC5C6\uB2E4.`;
+  const lines = [`## "${query}" \uAC80\uC0C9 \uACB0\uACFC`, ""];
+  for (const [scope, matches] of [
+    ["user", user],
+    ["project", project]
+  ]) {
+    if (matches.length === 0) continue;
+    lines.push(`### ${SCOPE_LABEL[scope]}`);
+    for (const m of matches) {
+      lines.push(`- ${m.category}/${m.slug} \u2014 ${m.title}`);
+      if (m.summary) lines.push(`  ${m.summary}`);
+    }
+    lines.push("");
+  }
+  return lines.join("\n").trimEnd();
+}
+var import_fs4, import_path5, SCOPE_LABEL;
+var init_read = __esm({
+  "packages/core/src/agentCli/read.ts"() {
+    "use strict";
+    import_fs4 = require("fs");
+    import_path5 = require("path");
+    init_irStore();
+    init_turnsStore();
+    init_globalStore();
+    init_globalPaths();
+    init_gitRemote();
+    init_globalSearch();
+    init_irRender();
+    SCOPE_LABEL = { user: "\uC0AC\uC6A9\uC790 \uC9C0\uC2DD", project: "\uD504\uB85C\uC81D\uD2B8 \uC9C0\uC2DD" };
+  }
+});
+
 // packages/core/bin/agentbridge.js
-var fs = require("fs");
+var fs3 = require("fs");
 var path = require("path");
-var { renderIrSections: renderIrSections2 } = (init_irRender(), __toCommonJS(irRender_exports));
-var COMMANDS = [["context", "\uD604\uC7AC \uD504\uB85C\uC81D\uD2B8\uC758 \uC555\uCD95\uB41C \uC791\uC5C5 \uC0C1\uD0DC"]];
+var { readContext: readContext2, readTurns: readTurns2, readMemory: readMemory2, searchMemory: searchMemory2 } = (init_read(), __toCommonJS(read_exports));
+var DEFAULT_TURNS = 3;
+var COMMANDS = [
+  ["context", "\uD604\uC7AC \uD504\uB85C\uC81D\uD2B8\uC758 \uC555\uCD95\uB41C \uC791\uC5C5 \uC0C1\uD0DC"],
+  ["turns [--last N]", "\uCD5C\uADFC \uB300\uD654 \uC6D0\uBB38 (\uAE30\uBCF8 " + DEFAULT_TURNS + "\uD134)"],
+  ["memory user [--full]", "\uC0AC\uC6A9\uC790 \uC9C0\uC2DD. \uAE30\uBCF8\uC740 \uC694\uC57D, --full\uC774 \uC804\uBB38"],
+  ["memory project [--full]", "\uC774 \uC800\uC7A5\uC18C\uC758 \uD504\uB85C\uC81D\uD2B8 \uC9C0\uC2DD"],
+  ["memory search <\uC9C8\uC758>", "\uB450 \uC9C0\uC2DD\uC744 \uC9C8\uC758\uB85C \uAC80\uC0C9"]
+];
 var USAGE = [
   "agentbridge \u2014 AgentBridge \uB9E5\uB77D \uC77D\uAE30",
   "",
@@ -136,7 +775,7 @@ function fail(msg) {
 }
 function realpath(v) {
   try {
-    return fs.realpathSync(v);
+    return fs3.realpathSync(v);
   } catch {
     return path.resolve(v);
   }
@@ -152,23 +791,38 @@ function resolveWorkspaceDir() {
   }
   return wsDir;
 }
-function readJsonSafe(p) {
-  try {
-    return JSON.parse(fs.readFileSync(p, "utf8"));
-  } catch {
-    return null;
+function intOption(args, name, fallback) {
+  const i = args.indexOf(name);
+  if (i === -1) return fallback;
+  const n = Number(args[i + 1]);
+  if (!Number.isInteger(n) || n <= 0) fail(name + "\uC5D0\uB294 1 \uC774\uC0C1\uC758 \uC815\uC218\uAC00 \uC628\uB2E4");
+  return n;
+}
+async function dispatch(cmd, args, wsDir, storageRoot) {
+  switch (cmd) {
+    case "context":
+      return readContext2(wsDir);
+    case "turns":
+      return readTurns2(wsDir, intOption(args, "--last", DEFAULT_TURNS));
+    case "memory": {
+      const sub = args[0];
+      if (sub === "user" || sub === "project") {
+        return readMemory2(storageRoot, wsDir, sub, args.includes("--full"));
+      }
+      if (sub === "search") {
+        const query = args.slice(1).join(" ").trim();
+        if (!query) fail("memory search\uC5D0\uB294 \uC9C8\uC758\uAC00 \uC628\uB2E4");
+        return searchMemory2(storageRoot, wsDir, query);
+      }
+      return usageAndExit();
+    }
+    default:
+      return usageAndExit();
   }
 }
-function cmdContext(wsDir) {
-  const ir = readJsonSafe(path.join(wsDir, "ir.json"));
-  if (!ir) {
-    process.stdout.write("\uC800\uC7A5\uB41C \uC791\uC5C5 \uC0C1\uD0DC\uAC00 \uC5C6\uB2E4. \uC544\uC9C1 \uC555\uCD95\uB41C \uB9E5\uB77D\uC774 \uC313\uC774\uC9C0 \uC54A\uC558\uB2E4.\n");
-    return;
-  }
-  process.stdout.write("## \uC791\uC5C5 \uC0C1\uD0DC (\uC555\uCD95\uB41C \uB9E5\uB77D)\n\n" + renderIrSections2(ir) + "\n");
-}
-function main() {
+async function main() {
   const cmd = process.argv[2];
+  const args = process.argv.slice(3);
   const wsDir = resolveWorkspaceDir();
   if (!wsDir) {
     process.stdout.write(
@@ -177,12 +831,10 @@ function main() {
     process.exit(0);
   }
   if (!cmd) usageAndExit();
-  switch (cmd) {
-    case "context":
-      cmdContext(wsDir);
-      break;
-    default:
-      usageAndExit();
-  }
+  const storageRoot = realpath(path.dirname(path.dirname(__filename)));
+  const out = await dispatch(cmd, args, wsDir, storageRoot);
+  process.stdout.write(out + "\n");
 }
-main();
+main().catch((err) => {
+  fail(String(err && err.message || err));
+});

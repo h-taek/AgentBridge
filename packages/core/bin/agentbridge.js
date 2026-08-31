@@ -25,10 +25,18 @@
 const fs = require('fs')
 const path = require('path')
 
-// 렌더는 코어 단일 소스. esbuild가 빌드 때 이 require를 인라인한다 — CLI 옆엔 node_modules가 없다.
-const { renderIrSections } = require('../src/agentCli/irRender')
+// 명령 본체는 코어 단일 소스. esbuild가 빌드 때 이 require를 인라인한다 — CLI 옆엔 node_modules가 없다.
+const { readContext, readTurns, readMemory, searchMemory } = require('../src/agentCli/read')
 
-const COMMANDS = [['context', '현재 프로젝트의 압축된 작업 상태']]
+const DEFAULT_TURNS = 3
+
+const COMMANDS = [
+  ['context', '현재 프로젝트의 압축된 작업 상태'],
+  ['turns [--last N]', '최근 대화 원문 (기본 ' + DEFAULT_TURNS + '턴)'],
+  ['memory user [--full]', '사용자 지식. 기본은 요약, --full이 전문'],
+  ['memory project [--full]', '이 저장소의 프로젝트 지식'],
+  ['memory search <질의>', '두 지식을 질의로 검색']
+]
 
 const USAGE = [
   'agentbridge — AgentBridge 맥락 읽기',
@@ -72,25 +80,42 @@ function resolveWorkspaceDir() {
   return wsDir
 }
 
-function readJsonSafe(p) {
-  try {
-    return JSON.parse(fs.readFileSync(p, 'utf8'))
-  } catch {
-    return null
+// `--last 5` 형태만 받는다. 값이 숫자가 아니거나 0 이하면 거절한다 — 조용히 기본값으로
+// 떨어지면 모델은 자기가 시킨 만큼 받았다고 믿는다.
+function intOption(args, name, fallback) {
+  const i = args.indexOf(name)
+  if (i === -1) return fallback
+  const n = Number(args[i + 1])
+  if (!Number.isInteger(n) || n <= 0) fail(name + '에는 1 이상의 정수가 온다')
+  return n
+}
+
+async function dispatch(cmd, args, wsDir, storageRoot) {
+  switch (cmd) {
+    case 'context':
+      return readContext(wsDir)
+    case 'turns':
+      return readTurns(wsDir, intOption(args, '--last', DEFAULT_TURNS))
+    case 'memory': {
+      const sub = args[0]
+      if (sub === 'user' || sub === 'project') {
+        return readMemory(storageRoot, wsDir, sub, args.includes('--full'))
+      }
+      if (sub === 'search') {
+        const query = args.slice(1).join(' ').trim()
+        if (!query) fail('memory search에는 질의가 온다')
+        return searchMemory(storageRoot, wsDir, query)
+      }
+      return usageAndExit()
+    }
+    default:
+      return usageAndExit()
   }
 }
 
-function cmdContext(wsDir) {
-  const ir = readJsonSafe(path.join(wsDir, 'ir.json'))
-  if (!ir) {
-    process.stdout.write('저장된 작업 상태가 없다. 아직 압축된 맥락이 쌓이지 않았다.\n')
-    return
-  }
-  process.stdout.write('## 작업 상태 (압축된 맥락)\n\n' + renderIrSections(ir) + '\n')
-}
-
-function main() {
+async function main() {
   const cmd = process.argv[2]
+  const args = process.argv.slice(3)
 
   // 신원이 먼저다. 변수가 없는 자리(앱 밖 터미널)에서는 어떤 명령도 낼 것이 없다.
   const wsDir = resolveWorkspaceDir()
@@ -103,13 +128,11 @@ function main() {
 
   if (!cmd) usageAndExit()
 
-  switch (cmd) {
-    case 'context':
-      cmdContext(wsDir)
-      break
-    default:
-      usageAndExit()
-  }
+  const storageRoot = realpath(path.dirname(path.dirname(__filename)))
+  const out = await dispatch(cmd, args, wsDir, storageRoot)
+  process.stdout.write(out + '\n')
 }
 
-main()
+main().catch((err) => {
+  fail(String((err && err.message) || err))
+})

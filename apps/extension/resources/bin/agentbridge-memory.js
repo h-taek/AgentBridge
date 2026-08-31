@@ -261,7 +261,7 @@ async function resolveContext(globalDir, profileId, query, opts) {
   if (tokens.length === 0) return [];
   const minScore = minimumUsefulScore(tokens);
   const phrase = String(query || "").trim().toLowerCase();
-  const docs = await readProfileDocs(globalDir, profileId);
+  const docs = await readProfileDocs(globalDir, profileId, opts?.scope ?? "user");
   const scored = [];
   for (const rec of docs) {
     let score = scoreDoc(rec, tokens);

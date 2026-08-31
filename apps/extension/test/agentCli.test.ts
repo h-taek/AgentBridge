@@ -3,7 +3,13 @@ import { execFileSync, spawnSync } from 'child_process';
 import { promises as fsp } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { getCanonicalBinPath, installBinToCanonicalPath } from '@agentbridge/core';
+import {
+  getCanonicalBinPath,
+  installBinToCanonicalPath,
+  getGlobalDir,
+  writeProfileDocs,
+  profileIdForPath,
+} from '@agentbridge/core';
 
 // 에이전트용 CLI (0.5.0 3단계 W1) — 골격, 신원 해소, 설치 배관.
 // 헬퍼와 같은 모양으로 실제 번들을 만들어 자식 프로세스로 돌린다. 신원은 인자가 아니라
@@ -74,6 +80,9 @@ describe('agent CLI — 골격과 신원 해소 (0.5.0 W1)', () => {
     await fsp.writeFile(
       join(wsDir, 'ir.json'),
       JSON.stringify({
+        contextId: 'ctx-1',
+        // meta가 없으면 손상된 ir.json으로 본다(clearIR이 '{}'를 쓰는 계약) — 실제 모양과 맞춘다.
+        meta: { createdAt: '2026-08-31T00:00:00.000Z', updatedAt: '2026-08-31T00:10:00.000Z' },
         intent: { goal: '3단계 CLI를 세운다', constraints: ['주입은 마지막에 걷는다'] },
         decisions: [{ topic: '신원', choice: '환경변수로 받는다', rationale: '모델이 틀릴 여지가 없다' }],
         files: [{ status: 'read', path: 'packages/core/bin/agentbridge.js', summary: '엔트리' }],
@@ -89,6 +98,114 @@ describe('agent CLI — 골격과 신원 해소 (0.5.0 W1)', () => {
     }
     assert.match(r.stdout, /3단계 CLI를 세운다/);
     assert.match(r.stdout, /환경변수로 받는다/);
+  });
+
+  it('turns — 기록이 없으면 그 사실을 말한다', () => {
+    const r = run(['turns']);
+    assert.equal(r.status, 0);
+    assert.match(r.stdout, /턴이 없다/);
+  });
+
+  it('turns — 기본은 최근 세 턴, --last로 자른다', async () => {
+    const turn = (n: number) => JSON.stringify({
+      id: `t${n}`,
+      workspaceId: 'ws-1',
+      sessionId: 's1',
+      model: 'claude',
+      startedAt: `2026-08-31T00:0${n}:00.000Z`,
+      completedAt: `2026-08-31T00:0${n}:30.000Z`,
+      user: `질문 ${n}`,
+      userBytes: 5,
+      assistantBody: `답 ${n}`,
+      assistantBodyBytes: 3,
+      toolCalls: [],
+    });
+    await fsp.writeFile(join(wsDir, 'turns.jsonl'), [1, 2, 3, 4, 5].map(turn).join('\n') + '\n');
+
+    const def = run(['turns']);
+    assert.equal(def.status, 0);
+    assert.match(def.stdout, /질문 5/);
+    assert.match(def.stdout, /질문 3/);
+    assert.doesNotMatch(def.stdout, /질문 2/);
+
+    const one = run(['turns', '--last', '1']);
+    assert.match(one.stdout, /질문 5/);
+    assert.doesNotMatch(one.stdout, /질문 4/);
+  });
+
+  it('turns — --last에 숫자가 아닌 값이 오면 거절한다', () => {
+    const r = run(['turns', '--last', '많이']);
+    assert.equal(r.status, 2);
+    assert.match(r.stderr, /정수/);
+  });
+
+  it('memory user — 기본은 식별자와 요약, --full이 전문을 붙인다', async () => {
+    await writeProfileDocs(getGlobalDir(root), 'default', {
+      docs: [{
+        category: 'workflows',
+        slug: 'isolated-debug',
+        title: '격리 환경 디버깅',
+        summary: '문제를 최소 환경으로 좁혀 확인한다.',
+        body: '주변 요소를 배제하고 재현 경로만 남긴다.',
+        indexEntries: ['격리 디버깅'],
+      }],
+    });
+
+    const brief = run(['memory', 'user']);
+    assert.equal(brief.status, 0);
+    assert.match(brief.stdout, /workflows\/isolated-debug/);
+    assert.match(brief.stdout, /격리 환경 디버깅/);
+    assert.doesNotMatch(brief.stdout, /주변 요소를 배제/);
+
+    const full = run(['memory', 'user', '--full']);
+    assert.match(full.stdout, /주변 요소를 배제/);
+  });
+
+  it('memory project — 워크스페이스 폴더 키로 읽는다', async () => {
+    const projectFolder = join(tmp, 'project');
+    await fsp.mkdir(projectFolder, { recursive: true });
+    await fsp.writeFile(
+      join(wsDir, 'workspace.json'),
+      JSON.stringify({ workspaceId: 'ws-1', workspacePath: projectFolder, sessions: [] }),
+    );
+    await writeProfileDocs(
+      getGlobalDir(root),
+      profileIdForPath(projectFolder),
+      {
+        docs: [{
+          category: 'conventions',
+          slug: 'release-flow',
+          title: '발행 절차',
+          summary: 'develop을 main에 병합하고 태그를 단다.',
+          body: '',
+          indexEntries: ['발행'],
+        }],
+      },
+      'project',
+    );
+
+    const r = run(['memory', 'project']);
+    assert.equal(r.status, 0);
+    assert.match(r.stdout, /conventions\/release-flow/);
+    assert.match(r.stdout, /발행 절차/);
+  });
+
+  it('memory search — 두 지식을 함께 훑는다', () => {
+    const r = run(['memory', 'search', '발행 절차']);
+    assert.equal(r.status, 0);
+    assert.match(r.stdout, /발행 절차/);
+  });
+
+  it('memory search — 걸리는 것이 없으면 그 사실을 말한다', () => {
+    const r = run(['memory', 'search', 'zzzqqq']);
+    assert.equal(r.status, 0);
+    assert.match(r.stdout, /없다/);
+  });
+
+  it('memory에 알 수 없는 하위 명령이 오면 사용법을 낸다', () => {
+    const r = run(['memory', 'nope']);
+    assert.equal(r.status, 2);
+    assert.match(r.stderr, /memory/);
   });
 });
 
