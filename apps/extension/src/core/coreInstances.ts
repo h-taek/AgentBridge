@@ -8,7 +8,7 @@ import {
   createHookStatusStore,
   createEnvProbe,
   createHookInstaller,
-  getCanonicalHelperPath,
+  getCanonicalBinPath,
   createCliAdapters,
   createCompactionScheduler,
   createQuotaTracker,
@@ -44,6 +44,7 @@ let _cliAdapters: CliAdapterSet | null = null;
 let _compactionScheduler: CompactionScheduler | null = null;
 let _quotaTracker: QuotaTracker | null = null;
 let _bundledHelperPath: string | null = null;
+let _bundledCliPath: string | null = null;
 
 function ensureInitialized<T>(v: T | null, name: string): T {
   if (v === null) {
@@ -100,6 +101,11 @@ export function getBundledHelperPath(): string {
   return ensureInitialized(_bundledHelperPath, 'bundledHelperPath');
 }
 
+// extension.ts activate()가 에이전트용 CLI 설치에 사용 (0.5.0 B-5).
+export function getBundledCliPath(): string {
+  return ensureInitialized(_bundledCliPath, 'bundledCliPath');
+}
+
 export function initializeCore(
   context: vscode.ExtensionContext,
   // ⚠️ 테스트 전용 — 프로덕션 호출(extension.ts)은 두 번째 인자를 넘기지 않는다.
@@ -112,15 +118,16 @@ export function initializeCore(
   _hookStatusStore = createHookStatusStore();
   _envProbe = createEnvProbe({ logger });
 
-  // resources/bin/agentbridge-memory.js 위치. dev: src/.. 빌드: out/.. 모두에서 동작하게
-  // extensionPath 기준 resolve. 번들 경로는 activate()의 helper 설치에 쓰려고 보관.
-  const bundledHelperPath = path.join(context.extensionPath, 'resources', 'bin', 'agentbridge-memory.js');
-  _bundledHelperPath = bundledHelperPath;
+  // resources/bin/ 위치. dev: src/.. 빌드: out/.. 모두에서 동작하게 extensionPath 기준 resolve.
+  // 번들 경로는 activate()의 설치에 쓰려고 보관한다.
+  const binDir = path.join(context.extensionPath, 'resources', 'bin');
+  _bundledHelperPath = path.join(binDir, 'agentbridge-memory.js');
+  _bundledCliPath = path.join(binDir, 'agentbridge.js');
   const storageRoot = _workspaceStore.getGlobalStoragePath();
 
   _hookInstaller = createHookInstaller({
     // hook 명령은 번들 안 경로가 아니라 저장소 canonical 경로(<루트>/bin/)를 가리킨다 (V-12).
-    helperPath: getCanonicalHelperPath(storageRoot),
+    helperPath: getCanonicalBinPath(storageRoot, 'helper'),
     // 훅을 돌릴 런타임 — 익스텐션 호스트의 실행 파일이다. ELECTRON_RUN_AS_NODE=1을 붙이면
     // VS Code가 그대로 node로 동작하므로 사용자 PATH의 node 설치 여부와 무관해진다 (A-3).
     execPath: process.execPath,

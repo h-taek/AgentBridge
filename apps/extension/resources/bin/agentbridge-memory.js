@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// @agentbridge-helper-version 0.5.1
+// @agentbridge-helper-version 0.5.2
 "use strict";
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -446,12 +446,105 @@ var init_contextTag = __esm({
   }
 });
 
+// packages/core/src/agentCli/irRender.ts
+var irRender_exports = {};
+__export(irRender_exports, {
+  renderCommands: () => renderCommands,
+  renderDecisions: () => renderDecisions,
+  renderFiles: () => renderFiles,
+  renderIntent: () => renderIntent,
+  renderIrSections: () => renderIrSections,
+  renderPending: () => renderPending,
+  renderTests: () => renderTests
+});
+function fmtList(items, indent = "") {
+  if (!Array.isArray(items) || items.length === 0) return `${indent}(none)`;
+  return items.map((s) => `${indent}- ${String(s)}`).join("\n");
+}
+function renderIntent(ir) {
+  const intent = ir?.intent ?? {};
+  const lines = [`goal: ${intent.goal || "(unset)"}`];
+  if (intent.role) lines.push(`role: ${intent.role}`);
+  if (Array.isArray(intent.constraints) && intent.constraints.length > 0) {
+    lines.push("constraints:");
+    lines.push(fmtList(intent.constraints, "  "));
+  }
+  return lines.join("\n");
+}
+function renderDecisions(ir) {
+  const ds = ir?.decisions ?? [];
+  if (ds.length === 0) return "(no decisions)";
+  return ds.slice(-10).map((d) => {
+    const head = d.topic ? `${d.topic} \u2192 ${d.choice}` : d.choice;
+    const lines = [`- ${head}`];
+    if (d.rationale) lines.push(`  rationale: ${d.rationale}`);
+    return lines.join("\n");
+  }).join("\n");
+}
+function renderFiles(ir) {
+  const files = ir?.files ?? [];
+  if (files.length === 0) return "(no file changes)";
+  return files.slice(-15).map((f) => `- [${f.status}] ${f.path}${f.summary ? ` \u2014 ${f.summary}` : ""}`).join("\n");
+}
+function renderCommands(ir) {
+  const cs = ir?.commands ?? [];
+  if (cs.length === 0) return "(no commands run)";
+  return cs.slice(-10).map((c) => {
+    const ec = c.exitCode != null ? ` (exit ${c.exitCode})` : "";
+    return `- \`${c.cmd}\`${ec}${c.summary ? ` \u2014 ${c.summary}` : ""}`;
+  }).join("\n");
+}
+function renderTests(ir) {
+  const ts = ir?.tests ?? [];
+  if (ts.length === 0) return "(no test results)";
+  return ts.slice(-5).map((t) => `- [${t.status}] ${t.name}${t.failureSummary ? ` \u2014 ${t.failureSummary}` : ""}`).join("\n");
+}
+function renderPending(ir) {
+  const ps = ir?.pending ?? [];
+  if (ps.length === 0) return "(no pending items)";
+  return ps.slice(-5).map((p) => {
+    const lines = [`- ${p.task}`];
+    if (Array.isArray(p.blockers) && p.blockers.length > 0) {
+      lines.push(`  blockers: ${p.blockers.join(", ")}`);
+    }
+    if (p.nextStep) lines.push(`  next: ${p.nextStep}`);
+    return lines.join("\n");
+  }).join("\n");
+}
+function renderIrSections(ir) {
+  return [
+    "### Intent",
+    renderIntent(ir),
+    "",
+    "### Decisions",
+    renderDecisions(ir),
+    "",
+    "### Files",
+    renderFiles(ir),
+    "",
+    "### Commands",
+    renderCommands(ir),
+    "",
+    "### Tests",
+    renderTests(ir),
+    "",
+    "### Pending",
+    renderPending(ir)
+  ].join("\n");
+}
+var init_irRender = __esm({
+  "packages/core/src/agentCli/irRender.ts"() {
+    "use strict";
+  }
+});
+
 // packages/core/bin/agentbridge-memory.js
 var fs = require("fs");
 var path = require("path");
 var { resolveContext: resolveContext2 } = (init_globalSearch(), __toCommonJS(globalSearch_exports));
 var { resolveQuery: resolveQuery2, renderGlobalMatches: renderGlobalMatches2, extractSessionIdFromStdin: extractSessionIdFromStdin2 } = (init_globalInject(), __toCommonJS(globalInject_exports));
 var { wrapInjectedContext: wrapInjectedContext2 } = (init_contextTag(), __toCommonJS(contextTag_exports));
+var { renderIrSections: renderIrSections2 } = (init_irRender(), __toCommonJS(irRender_exports));
 var TERMINATION_EVENTS = /* @__PURE__ */ new Set(["Stop", "StopFailure"]);
 var INJECTION_EVENTS = /* @__PURE__ */ new Set(["UserPromptSubmit", "PreInvocation"]);
 function writeHookError(wsDir, agent, event, message) {
@@ -589,65 +682,6 @@ function readRecentTurns(p, n) {
   if (n <= 0 || out.length <= n) return out;
   return out.slice(out.length - n);
 }
-function fmtList(items, indent) {
-  indent = indent || "";
-  if (!Array.isArray(items) || items.length === 0) return indent + "(none)";
-  return items.map((s) => indent + "- " + s).join("\n");
-}
-function renderIntent(ir) {
-  const intent = ir && ir.intent || {};
-  const lines = ["goal: " + (intent.goal || "(unset)")];
-  if (intent.role) lines.push("role: " + intent.role);
-  if (Array.isArray(intent.constraints) && intent.constraints.length > 0) {
-    lines.push("constraints:");
-    lines.push(fmtList(intent.constraints, "  "));
-  }
-  return lines.join("\n");
-}
-function renderDecisions(ir) {
-  const ds = ir && ir.decisions || [];
-  if (ds.length === 0) return "(no decisions)";
-  return ds.slice(-10).map((d) => {
-    const head = d.topic ? d.topic + " \u2192 " + d.choice : d.choice;
-    const lines = ["- " + head];
-    if (d.rationale) lines.push("  rationale: " + d.rationale);
-    return lines.join("\n");
-  }).join("\n");
-}
-function renderFiles(ir) {
-  const fs2 = ir && ir.files || [];
-  if (fs2.length === 0) return "(no file changes)";
-  return fs2.slice(-15).map((f) => "- [" + f.status + "] " + f.path + (f.summary ? " \u2014 " + f.summary : "")).join("\n");
-}
-function renderCommands(ir) {
-  const cs = ir && ir.commands || [];
-  if (cs.length === 0) return "(no commands run)";
-  return cs.slice(-10).map((c) => {
-    const head = "- `" + c.cmd + "`";
-    const ec = c.exitCode != null ? " (exit " + c.exitCode + ")" : "";
-    const sum = c.summary ? " \u2014 " + c.summary : "";
-    return head + ec + sum;
-  }).join("\n");
-}
-function renderTests(ir) {
-  const ts = ir && ir.tests || [];
-  if (ts.length === 0) return "(no test results)";
-  return ts.slice(-5).map(
-    (t) => "- [" + t.status + "] " + t.name + (t.failureSummary ? " \u2014 " + t.failureSummary : "")
-  ).join("\n");
-}
-function renderPending(ir) {
-  const ps = ir && ir.pending || [];
-  if (ps.length === 0) return "(no pending items)";
-  return ps.slice(-5).map((p) => {
-    const lines = ["- " + p.task];
-    if (Array.isArray(p.blockers) && p.blockers.length > 0) {
-      lines.push("  blockers: " + p.blockers.join(", "));
-    }
-    if (p.nextStep) lines.push("  next: " + p.nextStep);
-    return lines.join("\n");
-  }).join("\n");
-}
 var HOOK_INSTRUCTIONS = [
   "The following block is working context maintained and compacted by AgentBridge.",
   "",
@@ -700,23 +734,7 @@ function buildAdditionalContext(ir, recentTurns, workspaceId, globalBlock) {
   if (ir) {
     parts.push("## Memory (compacted \u2014 IR)");
     parts.push("");
-    parts.push("### Intent");
-    parts.push(renderIntent(ir));
-    parts.push("");
-    parts.push("### Decisions");
-    parts.push(renderDecisions(ir));
-    parts.push("");
-    parts.push("### Files");
-    parts.push(renderFiles(ir));
-    parts.push("");
-    parts.push("### Commands");
-    parts.push(renderCommands(ir));
-    parts.push("");
-    parts.push("### Tests");
-    parts.push(renderTests(ir));
-    parts.push("");
-    parts.push("### Pending");
-    parts.push(renderPending(ir));
+    parts.push(renderIrSections2(ir));
     parts.push("");
   } else if (hasTurns) {
     parts.push("## Memory (IR uninitialized \u2014 only recent turns available)");

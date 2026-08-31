@@ -5,7 +5,7 @@ import * as codexAdapter from './core/cliAdapter/codexAdapter';
 import * as agyAdapter from './core/cliAdapter/agyAdapter';
 import * as workspaceStore from './core/workspaceStore';
 import {
-  installHelperToCanonicalPath,
+  installBinToCanonicalPath,
   createSessionFileWatcher,
   getStorageRoot,
   runProposalTrigger,
@@ -15,7 +15,7 @@ import {
   readIR,
   migrateLegacyGlobalIfNeeded,
 } from '@agentbridge/core';
-import { initializeCore, getBundledHelperPath, getWorkspaceStore, getLogger, getCoreEnvProbe } from './core/coreInstances';
+import { initializeCore, getBundledHelperPath, getBundledCliPath, getWorkspaceStore, getLogger, getCoreEnvProbe } from './core/coreInstances';
 import * as output from './log/output';
 import { MemoryPanelProvider } from './views/memoryPanel';
 import { ProfilePanelProvider } from './views/profilePanel';
@@ -77,13 +77,20 @@ export function activate(context: vscode.ExtensionContext) {
     output.warn(`장기 메모리 이전 실패: ${String(err)}`);
   }
 
-  // hook helper를 <저장소 루트>/bin/에 설치 (V-12 — canonical 경로).
-  // 실패해도 익스텐션 동작에는 지장 없음 (hook만 비활성) — 로그만 남김.
-  void installHelperToCanonicalPath(
+  // hook helper와 에이전트용 CLI를 <저장소 루트>/bin/에 설치 (V-12 — canonical 경로).
+  // 실패해도 익스텐션 동작에는 지장 없음 (훅·CLI만 비활성) — 로그만 남김.
+  void installBinToCanonicalPath(
     getBundledHelperPath(),
     getWorkspaceStore().getGlobalStoragePath(),
+    'helper',
     getLogger(),
   ).catch((err) => output.warn(`helper 설치 실패: ${String(err)}`));
+  void installBinToCanonicalPath(
+    getBundledCliPath(),
+    getWorkspaceStore().getGlobalStoragePath(),
+    'cli',
+    getLogger(),
+  ).catch((err) => output.warn(`CLI 설치 실패: ${String(err)}`));
 
   workspaceStore.init(context.globalStorageUri.fsPath);
 

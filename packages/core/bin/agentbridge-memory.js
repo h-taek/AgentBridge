@@ -24,7 +24,7 @@
 
 'use strict'
 
-// @agentbridge-helper-version 0.5.1
+// @agentbridge-helper-version 0.5.2
 // (단일 설치 버전 비교용 — 이 파일을 수정하면 반드시 버전을 올릴 것)
 
 const fs = require('fs')
@@ -35,6 +35,8 @@ const path = require('path')
 const { resolveContext } = require('../src/globalSearch')
 const { resolveQuery, renderGlobalMatches, extractSessionIdFromStdin } = require('../src/globalInject')
 const { wrapInjectedContext } = require('../src/contextTag')
+// IR 여섯 절 렌더는 코어 단일 소스 — CLI의 `context`가 같은 텍스트를 낸다 (0.5.0 W1).
+const { renderIrSections } = require('../src/agentCli/irRender')
 
 // claude/codex/agy 모두 stdout JSON의 `hookEventName`이 *호출된 hook event 이름과 정확히 일치*
 // 해야 한다. 일치 안 하면 CLI host가 "expected X but got Y" 에러로 hook을 거부 (claude는 warning,
@@ -200,87 +202,6 @@ function readRecentTurns(p, n) {
   return out.slice(out.length - n)
 }
 
-function fmtList(items, indent) {
-  indent = indent || ''
-  if (!Array.isArray(items) || items.length === 0) return indent + '(none)'
-  return items.map((s) => indent + '- ' + s).join('\n')
-}
-
-function renderIntent(ir) {
-  const intent = (ir && ir.intent) || {}
-  const lines = ['goal: ' + (intent.goal || '(unset)')]
-  if (intent.role) lines.push('role: ' + intent.role)
-  if (Array.isArray(intent.constraints) && intent.constraints.length > 0) {
-    lines.push('constraints:')
-    lines.push(fmtList(intent.constraints, '  '))
-  }
-  return lines.join('\n')
-}
-
-function renderDecisions(ir) {
-  const ds = (ir && ir.decisions) || []
-  if (ds.length === 0) return '(no decisions)'
-  return ds
-    .slice(-10)
-    .map((d) => {
-      const head = d.topic ? d.topic + ' → ' + d.choice : d.choice
-      const lines = ['- ' + head]
-      if (d.rationale) lines.push('  rationale: ' + d.rationale)
-      return lines.join('\n')
-    })
-    .join('\n')
-}
-
-function renderFiles(ir) {
-  const fs2 = (ir && ir.files) || []
-  if (fs2.length === 0) return '(no file changes)'
-  return fs2
-    .slice(-15)
-    .map((f) => '- [' + f.status + '] ' + f.path + (f.summary ? ' — ' + f.summary : ''))
-    .join('\n')
-}
-
-function renderCommands(ir) {
-  const cs = (ir && ir.commands) || []
-  if (cs.length === 0) return '(no commands run)'
-  return cs
-    .slice(-10)
-    .map((c) => {
-      const head = '- `' + c.cmd + '`'
-      const ec = c.exitCode != null ? ' (exit ' + c.exitCode + ')' : ''
-      const sum = c.summary ? ' — ' + c.summary : ''
-      return head + ec + sum
-    })
-    .join('\n')
-}
-
-function renderTests(ir) {
-  const ts = (ir && ir.tests) || []
-  if (ts.length === 0) return '(no test results)'
-  return ts
-    .slice(-5)
-    .map(
-      (t) => '- [' + t.status + '] ' + t.name + (t.failureSummary ? ' — ' + t.failureSummary : '')
-    )
-    .join('\n')
-}
-
-function renderPending(ir) {
-  const ps = (ir && ir.pending) || []
-  if (ps.length === 0) return '(no pending items)'
-  return ps
-    .slice(-5)
-    .map((p) => {
-      const lines = ['- ' + p.task]
-      if (Array.isArray(p.blockers) && p.blockers.length > 0) {
-        lines.push('  blockers: ' + p.blockers.join(', '))
-      }
-      if (p.nextStep) lines.push('  next: ' + p.nextStep)
-      return lines.join('\n')
-    })
-    .join('\n')
-}
-
 // 모델에 inject되는 컨텍스트의 처리 규칙 — 본문 상단에 prepend해 모델 행태 가이드.
 // 과거 IR_SENTINEL_INSTRUCTIONS(legacy argv inject 경로, dead)에 있던 내용을 hook payload로 이전.
 // 모델이 IR을 *별개 산출물*로 다루지 않게(예: "the IR" 호칭, 재요약) 하고 자연스러운 대화 연속성으로
@@ -349,23 +270,7 @@ function buildAdditionalContext(ir, recentTurns, workspaceId, globalBlock) {
   if (ir) {
     parts.push('## Memory (compacted — IR)')
     parts.push('')
-    parts.push('### Intent')
-    parts.push(renderIntent(ir))
-    parts.push('')
-    parts.push('### Decisions')
-    parts.push(renderDecisions(ir))
-    parts.push('')
-    parts.push('### Files')
-    parts.push(renderFiles(ir))
-    parts.push('')
-    parts.push('### Commands')
-    parts.push(renderCommands(ir))
-    parts.push('')
-    parts.push('### Tests')
-    parts.push(renderTests(ir))
-    parts.push('')
-    parts.push('### Pending')
-    parts.push(renderPending(ir))
+    parts.push(renderIrSections(ir))
     parts.push('')
   } else if (hasTurns) {
     parts.push('## Memory (IR uninitialized — only recent turns available)')

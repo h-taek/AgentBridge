@@ -524,16 +524,29 @@ export function createHookInstaller(opts: HookInstallerOptions): HookInstaller {
   };
 }
 
-// ─── hook helper 단일 설치 (V-12) ─────────────────────────────────────────
+// ─── 실행 파일 단일 설치 (V-12) ───────────────────────────────────────────
 //
 // 두 앱이 각자 번들 내부 경로로 hook을 설치하면, 같은 프로젝트의 hooks.json을 서로
-// 다른 경로로 덮어쓰는 쟁탈전이 생긴다. helper를 ~/.agentbridge/bin/에 한 부만 설치하고
+// 다른 경로로 덮어쓰는 쟁탈전이 생긴다. 실행 파일을 <저장소 루트>/bin/에 한 부만 설치하고
 // 양쪽 hook 명령이 그 canonical 경로를 가리키게 해 쟁탈전을 없앤다.
 
-const HELPER_VERSION_RE = /@agentbridge-helper-version (\d+\.\d+\.\d+)/;
+// 설치 대상은 둘이다(0.5.0 B-5). 훅 헬퍼는 커맨드가 동결이라 버전이 거의 안 오르고,
+// 에이전트용 CLI는 사이클마다 자란다. 그래서 파일도 버전 마커도 따로 둔다.
+export type CanonicalBin = 'helper' | 'cli';
 
-export function getCanonicalHelperPath(storageRoot: string): string {
-  return join(storageRoot, 'bin', 'agentbridge-memory.js');
+const CANONICAL_BINS: Record<CanonicalBin, { filename: string; versionRe: RegExp }> = {
+  helper: {
+    filename: 'agentbridge-memory.js',
+    versionRe: /@agentbridge-helper-version (\d+\.\d+\.\d+)/,
+  },
+  cli: {
+    filename: 'agentbridge.js',
+    versionRe: /@agentbridge-cli-version (\d+\.\d+\.\d+)/,
+  },
+};
+
+export function getCanonicalBinPath(storageRoot: string, bin: CanonicalBin): string {
+  return join(storageRoot, 'bin', CANONICAL_BINS[bin].filename);
 }
 
 function compareSemver(a: string, b: string): number {
@@ -545,22 +558,24 @@ function compareSemver(a: string, b: string): number {
   return 0;
 }
 
-// 번들 helper를 canonical 위치에 설치. 설치본이 더 새것이면 건드리지 않는다.
-// 반환값: canonical 경로 (hook command에 사용).
-export async function installHelperToCanonicalPath(
-  bundledHelperPath: string,
+// 번들 실행 파일을 canonical 위치에 설치. 설치본이 더 새것이면 건드리지 않는다.
+// 반환값: canonical 경로 (hook command와 스킬 본문에 사용).
+export async function installBinToCanonicalPath(
+  bundledPath: string,
   storageRoot: string,
+  bin: CanonicalBin,
   logger: Logger = noopLogger,
 ): Promise<string> {
-  const canonical = getCanonicalHelperPath(storageRoot);
-  const bundled = await fsp.readFile(bundledHelperPath, 'utf8');
-  const bundledVer = HELPER_VERSION_RE.exec(bundled)?.[1] ?? '0.0.0';
+  const versionRe = CANONICAL_BINS[bin].versionRe;
+  const canonical = getCanonicalBinPath(storageRoot, bin);
+  const bundled = await fsp.readFile(bundledPath, 'utf8');
+  const bundledVer = versionRe.exec(bundled)?.[1] ?? '0.0.0';
 
   let installedVer: string | null = null;
   let installedSame = false;
   try {
     const installed = await fsp.readFile(canonical, 'utf8');
-    installedVer = HELPER_VERSION_RE.exec(installed)?.[1] ?? '0.0.0';
+    installedVer = versionRe.exec(installed)?.[1] ?? '0.0.0';
     installedSame = installed === bundled;
   } catch {
     // 미설치
@@ -577,7 +592,7 @@ export async function installHelperToCanonicalPath(
     await fsp.mkdir(dirname(canonical), { recursive: true });
     await fsp.writeFile(tmp, bundled, 'utf8');
     await fsp.rename(tmp, canonical);
-    logger.log(`hookInstaller: helper ${bundledVer} → ${canonical} (이전: ${installedVer ?? '미설치'})`);
+    logger.log(`hookInstaller: ${bin} ${bundledVer} → ${canonical} (이전: ${installedVer ?? '미설치'})`);
   }
   return canonical;
 }
