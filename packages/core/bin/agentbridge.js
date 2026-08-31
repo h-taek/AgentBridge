@@ -52,7 +52,7 @@ const USAGE = [
   '',
   '사용법: agentbridge <명령>',
   '',
-  ...COMMANDS.map(([name, desc]) => '  ' + name.padEnd(18) + desc)
+  ...COMMANDS.map(([name, desc]) => '  ' + name.padEnd(26) + desc)
 ].join('\n')
 
 function usageAndExit() {

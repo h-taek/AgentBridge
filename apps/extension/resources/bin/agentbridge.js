@@ -963,7 +963,7 @@ var USAGE = [
   "",
   "\uC0AC\uC6A9\uBC95: agentbridge <\uBA85\uB839>",
   "",
-  ...COMMANDS.map(([name, desc]) => "  " + name.padEnd(18) + desc)
+  ...COMMANDS.map(([name, desc]) => "  " + name.padEnd(26) + desc)
 ].join("\n");
 function usageAndExit() {
   process.stderr.write(USAGE + "\n");
