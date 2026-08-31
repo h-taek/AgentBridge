@@ -8,7 +8,10 @@ import {
   installBinToCanonicalPath,
   getGlobalDir,
   writeProfileDocs,
+  readProfileDocs,
   profileIdForPath,
+  readProposals,
+  approveProposal,
 } from '@agentbridge/core';
 
 // 에이전트용 CLI (0.5.0 3단계 W1) — 골격, 신원 해소, 설치 배관.
@@ -206,6 +209,89 @@ describe('agent CLI — 골격과 신원 해소 (0.5.0 W1)', () => {
     const r = run(['memory', 'nope']);
     assert.equal(r.status, 2);
     assert.match(r.stderr, /memory/);
+  });
+
+  // ── 쓰기 (W3) ─────────────────────────────────────────────────────────
+
+  it('memory add — 제안 큐로 가고 문서는 안 바뀐다', async () => {
+    const r = run([
+      'memory', 'add',
+      '--category', 'conventions',
+      '--title', '커밋 트레일러 금지',
+      '--summary', '커밋 메시지에 세션 식별자를 남기지 않는다.',
+      '--body', '공개 이력에 대화 식별자가 영구히 남는다.',
+    ]);
+    assert.equal(r.status, 0);
+    assert.match(r.stdout, /제안 큐/);
+
+    const pending = await readProposals(getGlobalDir(root), 'default');
+    assert.equal(pending.filter((p) => p.title === '커밋 트레일러 금지').length, 1);
+
+    // 승인 전에는 읽기에 안 섞인다.
+    assert.doesNotMatch(run(['memory', 'user']).stdout, /커밋 트레일러 금지/);
+  });
+
+  it('memory add — 카테고리가 목록 밖이면 거절하고 목록을 낸다', () => {
+    const r = run(['memory', 'add', '--category', 'nope', '--title', 'a', '--summary', 'b', '--body', 'c']);
+    assert.equal(r.status, 2);
+    assert.match(r.stderr, /conventions/);
+  });
+
+  it('memory add — 빈 필드는 거절한다', () => {
+    const r = run(['memory', 'add', '--category', 'infra', '--title', 'a', '--summary', 'b']);
+    assert.equal(r.status, 2);
+    assert.match(r.stderr, /--body/);
+  });
+
+  it('memory add — 이미 있는 제목이면 update로 안내한다', () => {
+    const r = run([
+      'memory', 'add',
+      '--category', 'workflows',
+      '--title', '격리 환경 디버깅',
+      '--summary', '다시 쓴 요약',
+      '--body', '다시 쓴 본문',
+    ]);
+    assert.equal(r.status, 0);
+    assert.match(r.stdout, /update/);
+  });
+
+  it('memory update — 없는 식별자는 거절한다', () => {
+    const r = run(['memory', 'update', 'workflows/없는-것', '--body', 'x']);
+    assert.equal(r.status, 2);
+    assert.match(r.stderr, /없다/);
+  });
+
+  it('memory update — 식별자 형식이 아니면 거절한다', () => {
+    const r = run(['memory', 'update', '그냥이름', '--body', 'x']);
+    assert.equal(r.status, 2);
+    assert.match(r.stderr, /형식/);
+  });
+
+  it('memory update — 안 준 필드는 원래 값을 잇고, 승인이 같은 자리를 덮는다', async () => {
+    const globalDir = getGlobalDir(root);
+    const before = (await readProfileDocs(globalDir, 'default')).find(
+      (d) => d.slug === 'isolated-debug',
+    )!;
+
+    const r = run([
+      'memory', 'update', 'workflows/isolated-debug',
+      '--body', '재현 경로만 남기고 나머지는 끈다.',
+    ]);
+    assert.equal(r.status, 0);
+    assert.match(r.stdout, /고침 제안/);
+
+    const proposal = (await readProposals(globalDir, 'default')).find(
+      (p) => p.targetSlug === 'isolated-debug',
+    )!;
+    assert.ok(proposal, '대상을 지목한 제안이 있어야 한다');
+    assert.equal(proposal.title, before.title); // 안 준 필드는 그대로
+    assert.equal(proposal.body, '재현 경로만 남기고 나머지는 끈다.');
+
+    await approveProposal(globalDir, 'default', proposal.id);
+    const after = await readProfileDocs(globalDir, 'default');
+    const hits = after.filter((d) => d.slug === 'isolated-debug');
+    assert.equal(hits.length, 1, '같은 항목이 둘로 갈리지 않는다');
+    assert.match(hits[0]!.body, /재현 경로만 남기고/);
   });
 });
 

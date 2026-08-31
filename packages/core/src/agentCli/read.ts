@@ -52,6 +52,13 @@ export async function readTurns(wsDir: string, lastN: number): Promise<string> {
 // 프로젝트 지식의 키는 정규화한 git remote다(없으면 폴더 경로). 워크스페이스 폴더는
 // workspace.json이 안다 — CLI가 도는 셸의 cwd로 정하지 않는다. 에이전트가 하위 폴더로
 // 옮겨 앉거나 worktree에서 도는 경우에 값이 달라지기 때문이다.
+export async function resolveProfileIdForScope(
+  wsDir: string,
+  scope: ProposalScope,
+): Promise<string | null> {
+  return scope === 'project' ? resolveProjectId(wsDir) : resolveProfile(basenameOf(wsDir));
+}
+
 async function resolveProjectId(wsDir: string): Promise<string | null> {
   try {
     const raw = await fsp.readFile(join(wsDir, 'workspace.json'), 'utf8');
@@ -95,8 +102,7 @@ export async function readMemory(
   full: boolean,
 ): Promise<string> {
   const globalDir = getGlobalDir(storageRoot);
-  const profileId =
-    scope === 'project' ? await resolveProjectId(wsDir) : resolveProfile(basenameOf(wsDir));
+  const profileId = await resolveProfileIdForScope(wsDir, scope);
   if (!profileId) return '이 워크스페이스의 프로젝트 지식 자리를 찾을 수 없다.';
 
   const docs = await readProfileDocs(globalDir, profileId, scope).catch(() => []);
@@ -122,7 +128,7 @@ export async function searchMemory(
 ): Promise<string> {
   const globalDir = getGlobalDir(storageRoot);
   const userId = resolveProfile(basenameOf(wsDir));
-  const projectId = await resolveProjectId(wsDir);
+  const projectId = await resolveProfileIdForScope(wsDir, 'project');
 
   const [user, project] = await Promise.all([
     resolveContext(globalDir, userId, query, { topN: 5 }).catch(() => []),

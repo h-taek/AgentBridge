@@ -40,6 +40,10 @@ export type ProposalInput = {
   body: string;
   confidence: number; // 0..1
   indexEntries?: string[]; // 검색 전용 한↔영 키워드(§C). 없으면 승인 시 제목으로 폴백. UI 비노출.
+  // 고칠 대상 문서의 slug (0.5.0 B-5 `memory update`). 있으면 이 제안은 새 항목이 아니라
+  // 그 문서를 고치는 것이다 — 승인이 제목에서 slug를 새로 뽑지 않고 이 자리를 덮는다.
+  // 제목이 바뀌어도 식별자가 그대로라 같은 항목이 둘로 갈리지 않는다.
+  targetSlug?: string;
 };
 
 // 디스크 저장 봉투 — 입력 + id/생성시각. (sourceTurnIds 미포함 — 출처 UI 미표시.)

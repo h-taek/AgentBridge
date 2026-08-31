@@ -77,7 +77,9 @@ export async function writeProposals(
   await fsp.mkdir(dir, { recursive: true });
 
   const seen = new Set<string>();
-  for (const p of await readProposals(globalDir, profileId)) seen.add(dedupKey(p.category, p.title));
+  // 같은 scope의 대기 제안만 본다. 자리가 갈려 있는데 남의 큐와 비교하면 프로젝트 지식이
+  // 사용자 지식의 같은 제목에 막힌다.
+  for (const p of await readProposals(globalDir, profileId, scope)) seen.add(dedupKey(p.category, p.title));
   for (const d of opts.existingDocTitles) seen.add(dedupKey(d.category, d.title));
 
   const written: StoredProposal[] = [];
@@ -86,7 +88,9 @@ export async function writeProposals(
   for (const inp of inputs) {
     if (n >= PROPOSAL_CAPS.maxPerPass) { skipped.push(inp); continue; }
     const key = dedupKey(inp.category, inp.title);
-    if (seen.has(key)) { skipped.push(inp); continue; }
+    // 대상을 지목한 제안은 이미 있는 문서를 고치는 것이므로 중복이 아니다. 대기 큐의 같은
+    // 제목과는 여전히 겹치면 안 되는데, 그때는 id가 같아 최신 제안이 앞의 것을 덮는다.
+    if (seen.has(key) && !inp.targetSlug) { skipped.push(inp); continue; }
     seen.add(key);
     const rec: StoredProposal = {
       id: proposalId(inp.category, inp.title),
@@ -100,6 +104,7 @@ export async function writeProposals(
       body: clampLen(inp.body, PROPOSAL_CAPS.body),
       confidence: typeof inp.confidence === 'number' ? Math.max(0, Math.min(1, inp.confidence)) : 0.5,
       ...(inp.indexEntries?.length ? { indexEntries: inp.indexEntries.slice(0, DOC_CAPS.indexEntries) } : {}),
+      ...(inp.targetSlug ? { targetSlug: inp.targetSlug } : {}),
     };
     await fsp.writeFile(join(dir, `${rec.id}.json`), JSON.stringify(rec, null, 2) + '\n', 'utf8');
     written.push(rec);
@@ -124,7 +129,9 @@ export async function approveProposal(
   const res = await writeProfileDocs(globalDir, profileId, {
     docs: [{
       category: p.category,
-      slug: docSlug(p.category, p.title),
+      // 대상을 지목한 제안(memory update)은 그 자리를 덮는다. 제목에서 slug를 새로 뽑으면
+      // 제목이 바뀐 순간 같은 항목이 둘이 된다.
+      slug: p.targetSlug || docSlug(p.category, p.title),
       title: p.title,
       summary: p.summary,
       body: p.body,

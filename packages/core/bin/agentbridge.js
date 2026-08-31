@@ -26,7 +26,14 @@ const fs = require('fs')
 const path = require('path')
 
 // 명령 본체는 코어 단일 소스. esbuild가 빌드 때 이 require를 인라인한다 — CLI 옆엔 node_modules가 없다.
-const { readContext, readTurns, readMemory, searchMemory } = require('../src/agentCli/read')
+const {
+  readContext,
+  readTurns,
+  readMemory,
+  searchMemory,
+  resolveProfileIdForScope
+} = require('../src/agentCli/read')
+const { addMemory, updateMemory, WriteError } = require('../src/agentCli/write')
 
 const DEFAULT_TURNS = 3
 
@@ -35,7 +42,9 @@ const COMMANDS = [
   ['turns [--last N]', '최근 대화 원문 (기본 ' + DEFAULT_TURNS + '턴)'],
   ['memory user [--full]', '사용자 지식. 기본은 요약, --full이 전문'],
   ['memory project [--full]', '이 저장소의 프로젝트 지식'],
-  ['memory search <질의>', '두 지식을 질의로 검색']
+  ['memory search <질의>', '두 지식을 질의로 검색'],
+  ['memory add', '새 사실을 제안 큐에 넣는다 (--scope --category --title --summary --body)'],
+  ['memory update <식별자>', '이미 있는 항목을 고치는 제안 (같은 인자, 안 준 것은 그대로)']
 ]
 
 const USAGE = [
@@ -90,6 +99,28 @@ function intOption(args, name, fallback) {
   return n
 }
 
+function strOption(args, name) {
+  const i = args.indexOf(name)
+  if (i === -1) return undefined
+  const v = args[i + 1]
+  if (v === undefined || v.startsWith('--')) fail(name + '에 값이 없다')
+  return v
+}
+
+function scopeOption(args) {
+  const v = strOption(args, '--scope') || 'user'
+  if (v !== 'user' && v !== 'project') fail('--scope는 user 또는 project다')
+  return v
+}
+
+function writeFields(args) {
+  return {
+    title: strOption(args, '--title'),
+    summary: strOption(args, '--summary'),
+    body: strOption(args, '--body')
+  }
+}
+
 async function dispatch(cmd, args, wsDir, storageRoot) {
   switch (cmd) {
     case 'context':
@@ -105,6 +136,17 @@ async function dispatch(cmd, args, wsDir, storageRoot) {
         const query = args.slice(1).join(' ').trim()
         if (!query) fail('memory search에는 질의가 온다')
         return searchMemory(storageRoot, wsDir, query)
+      }
+      if (sub === 'add' || sub === 'update') {
+        const scope = scopeOption(args)
+        const profileId = await resolveProfileIdForScope(wsDir, scope)
+        if (!profileId) fail('이 워크스페이스의 프로젝트 지식 자리를 찾을 수 없다')
+        if (sub === 'add') {
+          return addMemory(storageRoot, profileId, scope, strOption(args, '--category'), writeFields(args))
+        }
+        const id = args[1]
+        if (!id || id.startsWith('--')) fail('memory update에는 식별자가 온다')
+        return updateMemory(storageRoot, profileId, scope, id, writeFields(args))
       }
       return usageAndExit()
     }
@@ -134,5 +176,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  fail(String((err && err.message) || err))
+  // 입력이 틀린 것과 우리가 깨진 것을 가른다. 앞은 모델이 고쳐 다시 부를 수 있다.
+  fail(err instanceof WriteError ? err.message : String((err && err.message) || err))
 })
