@@ -37,10 +37,11 @@ async function readJson(path: string): Promise<Record<string, unknown> | null> {
 }
 
 // 하니스는 세션 레코드가 안다. CLI는 자기가 어느 하니스 안에서 도는지 모른다.
+// 레코드의 키는 `sessionId`다 — `id`가 아니다(workspaceStore의 SessionRecord).
 async function resolveAgent(wsDir: string, sessionId: string): Promise<string> {
   const ws = await readJson(join(wsDir, 'workspace.json'));
   const sessions = Array.isArray(ws?.sessions) ? (ws!.sessions as Record<string, unknown>[]) : [];
-  const found = sessions.find((s) => s && s.id === sessionId);
+  const found = sessions.find((s) => s && s.sessionId === sessionId);
   return typeof found?.model === 'string' ? found.model : '';
 }
 

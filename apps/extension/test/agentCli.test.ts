@@ -279,6 +279,26 @@ describe('agent CLI — 골격과 신원 해소 (0.5.0 W1)', () => {
     assert.ok(names.includes('memory user'), `기록: ${JSON.stringify(names)}`);
   });
 
+  it('기록에 하니스가 함께 남는다 — 산출물이 하니스별 차이라서', async () => {
+    await fsp.writeFile(
+      join(wsDir, 'workspace.json'),
+      JSON.stringify({
+        workspaceId: 'ws-1',
+        workspacePath: join(tmp, 'project'),
+        // 레코드의 키는 sessionId다. id로 찾으면 영영 빈 값이 찍힌다(라이브에서 걸린 것).
+        sessions: [{ sessionId: 'sess-1', model: 'codex' }],
+      }),
+    );
+    const r = spawnSync('node', [cliPath, 'context'], {
+      encoding: 'utf8',
+      env: { ...process.env, AGENTBRIDGE_WS_DIR: wsDir, AGENTBRIDGE_WS_SESSION: 'sess-1' },
+    });
+    assert.equal(r.status, 0);
+    const last = (await readCalls(wsDir)).pop()!;
+    assert.equal(last.agent, 'codex');
+    assert.equal(last.sessionId, 'sess-1');
+  });
+
   it('사용자 명령은 세지 않는다 — 재려는 것은 모델의 자발적 호출이다', async () => {
     const before = (await readCalls(wsDir)).length;
     run(['uninstall']);

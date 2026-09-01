@@ -1296,7 +1296,7 @@ async function readJson2(path2) {
 async function resolveAgent(wsDir, sessionId) {
   const ws = await readJson2((0, import_path11.join)(wsDir, "workspace.json"));
   const sessions = Array.isArray(ws?.sessions) ? ws.sessions : [];
-  const found = sessions.find((s) => s && s.id === sessionId);
+  const found = sessions.find((s) => s && s.sessionId === sessionId);
   return typeof found?.model === "string" ? found.model : "";
 }
 async function recordCall(wsDir, command, sessionId, now = Date.now()) {
