@@ -19,8 +19,14 @@ function quote(p: string): string {
   return /[\s'"$`\\]/.test(p) ? `'${p.replace(/'/g, `'\\''`)}'` : p;
 }
 
+// 모델이 실제로 치는 문자열의 앞부분. 스킬 본문과 claude의 허용 규칙(--allowedTools)이 같은
+// 값을 써야 한다 — 둘이 어긋나면 모델이 부르는 족족 승인 창이 뜬다.
+export function renderRunPrefix(opts: { execPath: string; cliPath: string }): string {
+  return `${quote(opts.execPath)} ${quote(opts.cliPath)}`;
+}
+
 export function renderSkillMarkdown(opts: { execPath: string; cliPath: string }): string {
-  const run = `${quote(opts.execPath)} ${quote(opts.cliPath)}`;
+  const run = renderRunPrefix(opts);
   return `---
 name: agentbridge
 description: >-

@@ -88,4 +88,5 @@ export * from './cliAdapter/index';
 export * from './cliAdapter/agyResume';
 export * from './cliAdapter/hookSessionCapture';
 export * from './cliAdapter/turnSignal';
+export * from './cliAdapter/codexSandbox';
 export * from './sessionStatus';

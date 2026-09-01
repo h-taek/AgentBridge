@@ -10,6 +10,7 @@ import {
   createHookInstaller,
   getCanonicalBinPath,
   createSkillInstaller,
+  renderRunPrefix,
   createCliAdapters,
   createCompactionScheduler,
   createQuotaTracker,
@@ -140,10 +141,10 @@ export function initializeCore(
   // attachmentStore에 logger 단방향 주입 (circular dep 제거).
   setAttachmentLogger(logger);
 
+  // 스킬 본문에 박히는 것은 번들 안 경로가 아니라 저장소 canonical 경로다 — 훅과 같은 규칙.
+  const cliRun = { execPath: process.execPath, cliPath: getCanonicalBinPath(storageRoot, 'cli') };
   const skillInstaller = createSkillInstaller({
-    execPath: process.execPath,
-    // 스킬 본문에 박히는 것은 번들 안 경로가 아니라 저장소 canonical 경로다 — 훅과 같은 규칙.
-    cliPath: getCanonicalBinPath(storageRoot, 'cli'),
+    ...cliRun,
     homeDir: testOverrides?.homeDirForTesting,
     logger,
   });
@@ -154,6 +155,10 @@ export function initializeCore(
     skillInstaller,
     hookStatusStore: _hookStatusStore,
     workspaceDir: (workspaceId) => _workspaceStore!.getWorkspacePath(workspaceId),
+    storageRoot,
+    // 스킬이 모델에게 가르치는 문자열과 같은 값이어야 한다 — 어긋나면 부르는 족족 승인 창이 뜬다.
+    cliRunPrefix: renderRunPrefix(cliRun),
+    homeDir: testOverrides?.homeDirForTesting,
     logger,
   });
 

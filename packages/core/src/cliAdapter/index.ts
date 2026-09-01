@@ -16,6 +16,7 @@ import { noopLogger } from '../interfaces';
 import { resolveResumeArgs } from './agyResume';
 import { resolveHookCaptureFile } from './hookSessionCapture';
 import { resolveTurnSignalFile } from './turnSignal';
+import { parseWritableRoots, buildWritableRootsArgs } from './codexSandbox';
 
 export type CliAdapterOptions = {
   envProbe: EnvProbe;
@@ -28,6 +29,13 @@ export type CliAdapterOptions = {
   // <storageRoot>/workspaces/<workspaceId> — 그 워크스페이스의 데이터 폴더.
   // 훅이 신원으로 쓰는 AGENTBRIDGE_WS_DIR이자 캡처 파일이 떨어지는 자리다.
   workspaceDir: (workspaceId: string) => string;
+  // 저장소 루트. codex 샌드박스에 쓰기 허용으로 더할 폴더다(B-5). 없으면 그 인자를 붙이지 않는다.
+  storageRoot?: string;
+  // 모델이 우리 CLI를 부를 때 치는 문자열의 앞부분(renderRunPrefix). claude의 --allowedTools가
+  // 이 값으로 규칙을 만든다. 없으면 승인 개방 인자를 붙이지 않는다.
+  cliRunPrefix?: string;
+  // 테스트만 오버라이드 — codex 설정을 읽을 홈.
+  homeDir?: string;
   logger?: Logger;
 };
 
@@ -59,6 +67,16 @@ export interface CliAdapterSet {
 export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
   const log = opts.logger ?? noopLogger;
   const { envProbe, hookInstaller, skillInstaller, hookStatusStore, workspaceDir } = opts;
+  const home = opts.homeDir ?? homedir();
+
+  // codex 설정의 쓰기 허용 폴더. 못 읽으면 빈 목록으로 본다 — 그 경우 우리 폴더만 열린다.
+  async function readCodexWritableRoots(): Promise<string[]> {
+    try {
+      return parseWritableRoots(await fs.readFile(join(home, '.codex', 'config.toml'), 'utf8'));
+    } catch {
+      return [];
+    }
+  }
 
   // 스킬은 발견 가능성을 높이는 수단이지 전제가 아니다(B-5). 실패해도 명령은 그대로 돌므로
   // 훅과 달리 세션 상태를 내리지 않고 로그만 남긴다.
@@ -119,12 +137,18 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
         }
 
         // 우리 워크스페이스 폴더는 작업 폴더 밖이라 claude가 읽기 전에 승인을 요구한다.
-        // 세션 인자라 우리가 띄운 세션에만 걸린다. 에이전트용 CLI 명령 허용(--allowedTools)은
-        // 그 CLI가 생기는 3단계(B-5)에서 같은 자리에 붙는다.
+        // 세션 인자라 우리가 띄운 세션에만 걸린다.
         //
         // 첨부 폴더(저장소 루트의 attachments/)는 열지 않는다. 프로젝트 공용이라 열면 이 세션이
         // 다른 프로젝트의 첨부까지 읽게 된다. 첨부는 대화형 승인 한 번으로 읽힌다.
-        const accessArgs = ['--add-dir', wsDir];
+        //
+        // 우리 CLI 하나만 승인 없이 열어준다(B-5). 호출마다 승인 창이 뜨면 맥락을 모델의
+        // 자발적 호출에 건 것이 성립하지 않는다. 여는 것은 이 명령 하나이고 세션에만 걸린다.
+        const accessArgs = [
+          '--add-dir',
+          wsDir,
+          ...(opts.cliRunPrefix ? ['--allowedTools', `Bash(${opts.cliRunPrefix} *)`] : []),
+        ];
         const sessionArgs = !resumeSessionId
           ? ['--session-id', sessionId]
           : (await claudeSessionFileExists(sessionId))
@@ -178,18 +202,24 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
           }
         }
 
+        // 우리 저장소 한 폴더만 쓰기 허용으로 더한다. 샌드박스 모드는 건드리지 않는다 —
+        // 사용자가 read-only로 두었으면 그 결정이 유지된다.
+        const sandboxArgs = opts.storageRoot
+          ? buildWritableRootsArgs(opts.storageRoot, await readCodexWritableRoots())
+          : [];
+
         let args: string[];
         let modelSessionId: string | undefined = resumeModelSessionId;
 
         if (!resumeSessionId) {
-          args = [];
+          args = [...sandboxArgs];
         } else if (resumeModelSessionId) {
-          args = ['resume', resumeModelSessionId];
+          args = [...sandboxArgs, 'resume', resumeModelSessionId];
         } else {
           log.warn(
             `codexAdapter: resume 요청이지만 thread_id 없음 — 새 세션으로 fallback (sessionId=${sessionId.slice(0, 8)})`,
           );
-          args = [];
+          args = [...sandboxArgs];
           modelSessionId = undefined;
         }
 
