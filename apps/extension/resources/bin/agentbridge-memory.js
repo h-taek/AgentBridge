@@ -79,7 +79,40 @@ async function readTurnSignal(signalFilePath) {
   }
   return parseTurnSignal(raw);
 }
-var import_fs, import_path, TURN_SIGNAL_FILENAME;
+function resolveTurnStartFile(workspaceDir, sessionId) {
+  return (0, import_path.join)(workspaceDir, "sessions", sessionId, TURN_START_FILENAME);
+}
+function parseTurnStart(raw) {
+  let obj;
+  try {
+    obj = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!obj || typeof obj !== "object") return null;
+  const o = obj;
+  const agent = str(o.agent);
+  if (agent !== "claude" && agent !== "codex" && agent !== "agy") return null;
+  const event = str(o.event);
+  if (!event) return null;
+  const at = typeof o.at === "number" && Number.isFinite(o.at) ? o.at : 0;
+  return {
+    agent,
+    event,
+    sessionId: str(o.sessionId),
+    at
+  };
+}
+async function readTurnStart(startFilePath) {
+  let raw;
+  try {
+    raw = await import_fs.promises.readFile(startFilePath, "utf8");
+  } catch {
+    return null;
+  }
+  return parseTurnStart(raw);
+}
+var import_fs, import_path, TURN_SIGNAL_FILENAME, TURN_START_FILENAME;
 var init_turnSignal = __esm({
   "packages/core/src/cliAdapter/turnSignal.ts"() {
     "use strict";
@@ -88,6 +121,7 @@ var init_turnSignal = __esm({
     init_interfaces();
     init_sessionFileWatcher();
     TURN_SIGNAL_FILENAME = "turn-signal.json";
+    TURN_START_FILENAME = "turn-start.json";
   }
 });
 
@@ -143,6 +177,94 @@ var init_reportState = __esm({
     import_path2 = require("path");
     init_turnSignal();
     REPORT_READ_FILENAME = "report-read.json";
+  }
+});
+
+// packages/core/src/sessionStatus.ts
+var sessionStatus_exports = {};
+__export(sessionStatus_exports, {
+  SILENCE_MS: () => SILENCE_MS,
+  aggregateActivity: () => aggregateActivity,
+  computeSessionActivity: () => computeSessionActivity,
+  readSessionActivityInputs: () => readSessionActivityInputs
+});
+function computeSessionActivity(input, now) {
+  const { startAt, endAt, lastOutputAt, viewedAt } = input;
+  const running = startAt !== void 0 && (endAt === void 0 || startAt > endAt);
+  if (!running) {
+    if (endAt !== void 0 && (viewedAt === void 0 || endAt > viewedAt)) return "done";
+    return "idle";
+  }
+  const lastOutput = lastOutputAt ?? startAt;
+  return now - lastOutput >= SILENCE_MS ? "unknown" : "running";
+}
+function aggregateActivity(self, children) {
+  let best = self;
+  for (const child of children) {
+    if (PRIORITY.indexOf(child) < PRIORITY.indexOf(best)) best = child;
+  }
+  return best;
+}
+async function cachedRead(cache, path2, stat, read) {
+  let mtimeMs;
+  try {
+    mtimeMs = (await stat(path2)).mtimeMs;
+  } catch {
+    cache.delete(path2);
+    return void 0;
+  }
+  const cached = cache.get(path2);
+  if (cached && cached.mtimeMs === mtimeMs) return cached.value;
+  const value = await read(path2);
+  cache.set(path2, { mtimeMs, value });
+  return value;
+}
+async function cachedLastOutputAt(cache, path2, stat) {
+  let mtimeMs;
+  try {
+    mtimeMs = (await stat(path2)).mtimeMs;
+  } catch {
+    cache.delete(path2);
+    return void 0;
+  }
+  cache.set(path2, { mtimeMs, value: mtimeMs });
+  return mtimeMs;
+}
+function resolveReplayLogFile(workspaceDir, sessionId) {
+  return (0, import_path3.join)(workspaceDir, "sessions", sessionId, "replay.log");
+}
+async function readSessionActivityInputs(workspaceDir, sessionId, io = defaultIo) {
+  const startFile = resolveTurnStartFile(workspaceDir, sessionId);
+  const signalFile = resolveTurnSignalFile(workspaceDir, sessionId);
+  const replayLogFile = resolveReplayLogFile(workspaceDir, sessionId);
+  const [start, signal, lastOutputAt] = await Promise.all([
+    cachedRead(startCache, startFile, io.stat, io.readTurnStart),
+    cachedRead(signalCache, signalFile, io.stat, io.readTurnSignal),
+    cachedLastOutputAt(outputCache, replayLogFile, io.stat)
+  ]);
+  return {
+    startAt: start?.at,
+    endAt: signal?.at,
+    lastOutputAt
+  };
+}
+var import_fs3, import_path3, SILENCE_MS, PRIORITY, defaultIo, startCache, signalCache, outputCache;
+var init_sessionStatus = __esm({
+  "packages/core/src/sessionStatus.ts"() {
+    "use strict";
+    import_fs3 = require("fs");
+    import_path3 = require("path");
+    init_turnSignal();
+    SILENCE_MS = 6e4;
+    PRIORITY = ["unknown", "running", "done", "idle"];
+    defaultIo = {
+      stat: (path2) => import_fs3.promises.stat(path2),
+      readTurnStart,
+      readTurnSignal
+    };
+    startCache = /* @__PURE__ */ new Map();
+    signalCache = /* @__PURE__ */ new Map();
+    outputCache = /* @__PURE__ */ new Map();
   }
 });
 
@@ -296,6 +418,11 @@ returns as soon as one finishes (up to a minute, \`--for\` raises it), or go do
 something else \u2014 the next turn tells you how many finished subs are unread.
 Reading a report with \`agent read\` is what clears that.
 
+A sub can also go quiet without finishing: the user interrupted its turn, or it
+is stuck waiting on something. \`check\` and the next-turn line both report those
+separately from finished ones. That state is what we observed, not a verdict \u2014
+read the sub to see how far it got, then send it more instructions or close it.
+
 Every read output item starts with its identifier (\`<category>/<slug>\`) \u2014
 that is what \`memory update\` takes.
 
@@ -334,15 +461,16 @@ var SKILL_VERSION, SKILL_DIR_NAME;
 var init_skillTemplate = __esm({
   "packages/core/src/skillTemplate.ts"() {
     "use strict";
-    SKILL_VERSION = "0.5.6";
+    SKILL_VERSION = "0.5.7";
     SKILL_DIR_NAME = "agentbridge";
   }
 });
 
 // packages/core/bin/agentbridge-memory.js
-var fs3 = require("fs");
+var fs4 = require("fs");
 var path = require("path");
 var { isUnread: isUnread2 } = (init_reportState(), __toCommonJS(reportState_exports));
+var { computeSessionActivity: computeSessionActivity2, readSessionActivityInputs: readSessionActivityInputs2 } = (init_sessionStatus(), __toCommonJS(sessionStatus_exports));
 var { extractSessionIdFromStdin: extractSessionIdFromStdin2 } = (init_globalInject(), __toCommonJS(globalInject_exports));
 var { wrapInjectedContext: wrapInjectedContext2 } = (init_contextTag(), __toCommonJS(contextTag_exports));
 var { renderRunPrefix: renderRunPrefix2 } = (init_skillTemplate(), __toCommonJS(skillTemplate_exports));
@@ -353,11 +481,11 @@ function writeHookError(wsDir, agent, event, message) {
     const token = process.env.AGENTBRIDGE_WS_SESSION || "";
     if (!wsDir || !token || token !== path.basename(token)) return;
     const dir = path.join(wsDir, "sessions", token);
-    fs3.mkdirSync(dir, { recursive: true });
+    fs4.mkdirSync(dir, { recursive: true });
     const out = path.join(dir, "hook-error.json");
     const tmp = out + "." + process.pid + ".tmp";
-    fs3.writeFileSync(tmp, JSON.stringify({ agent, event, message: String(message), at: Date.now() }));
-    fs3.renameSync(tmp, out);
+    fs4.writeFileSync(tmp, JSON.stringify({ agent, event, message: String(message), at: Date.now() }));
+    fs4.renameSync(tmp, out);
   } catch {
   }
 }
@@ -457,18 +585,41 @@ async function buildSubagentLine(wsDir, sessionToken, run) {
   if (!sessionToken || sessionToken !== path.basename(sessionToken)) return "";
   let sessions = [];
   try {
-    sessions = JSON.parse(fs3.readFileSync(path.join(wsDir, "workspace.json"), "utf8")).sessions || [];
+    sessions = JSON.parse(fs4.readFileSync(path.join(wsDir, "workspace.json"), "utf8")).sessions || [];
   } catch {
     return "";
   }
-  const mine = sessions.filter((s) => s.parentSessionId === sessionToken && s.agentName);
+  const mine = sessions.filter(
+    (s) => s.parentSessionId === sessionToken && s.agentName && !s.cleanedAt
+  );
   if (mine.length === 0) return "";
   const unread = [];
+  const stuck = [];
   for (const s of mine) {
-    if (await isUnread2(wsDir, s.sessionId)) unread.push(s.agentName);
+    if (await isUnread2(wsDir, s.sessionId)) {
+      unread.push(s.agentName);
+      continue;
+    }
+    if (s.closedAt !== null) continue;
+    try {
+      const inputs = await readSessionActivityInputs2(wsDir, s.sessionId);
+      if (computeSessionActivity2(inputs, Date.now()) === "unknown") stuck.push(s.agentName);
+    } catch {
+    }
   }
-  if (unread.length === 0) return "";
-  return "\n\n" + unread.length + " subagent report(s) finished and unread (" + unread.join(", ") + "). Read with `" + run + " agent read <name>`.";
+  if (unread.length === 0 && stuck.length === 0) return "";
+  const parts = [];
+  if (unread.length > 0) {
+    parts.push(
+      unread.length + " subagent report(s) finished and unread (" + unread.join(", ") + "). Read with `" + run + " agent read <name>`."
+    );
+  }
+  if (stuck.length > 0) {
+    parts.push(
+      stuck.length + " subagent(s) went quiet without finishing (" + stuck.join(", ") + ") \u2014 the user may have interrupted them, or they may be stuck. Check with `" + run + " agent read <name>`, then send more instructions or close them."
+    );
+  }
+  return "\n\n" + parts.join("\n");
 }
 function buildInstructions(storageRoot) {
   const run = renderRunPrefix2({
@@ -523,7 +674,7 @@ async function main() {
   }
   const realpath = (v) => {
     try {
-      return fs3.realpathSync(v);
+      return fs4.realpathSync(v);
     } catch {
       return path.resolve(v);
     }
@@ -551,10 +702,10 @@ async function main() {
     }
     if (parsed.agent !== "claude" && token && sid && token === path.basename(token)) {
       const dir = path.join(wsDir, "sessions", token);
-      fs3.mkdirSync(dir, { recursive: true });
+      fs4.mkdirSync(dir, { recursive: true });
       const out = path.join(dir, "captured.json");
       const tmp = out + "." + process.pid + ".tmp";
-      fs3.writeFileSync(
+      fs4.writeFileSync(
         tmp,
         JSON.stringify({
           agent: parsed.agent,
@@ -563,7 +714,7 @@ async function main() {
           capturedAt: Date.now()
         })
       );
-      fs3.renameSync(tmp, out);
+      fs4.renameSync(tmp, out);
     }
   } catch (e) {
     const msg = String(e && e.message ? e.message : e);
@@ -576,14 +727,14 @@ async function main() {
       if (token && token === path.basename(token)) {
         const sid = extractSessionIdFromStdin2(stdinRaw, parsed.agent);
         const dir = path.join(wsDir, "sessions", token);
-        fs3.mkdirSync(dir, { recursive: true });
+        fs4.mkdirSync(dir, { recursive: true });
         const out = path.join(dir, "turn-start.json");
         const tmp = out + "." + process.pid + ".tmp";
-        fs3.writeFileSync(
+        fs4.writeFileSync(
           tmp,
           JSON.stringify({ agent: parsed.agent, event: parsed.event, sessionId: sid, at: Date.now() })
         );
-        fs3.renameSync(tmp, out);
+        fs4.renameSync(tmp, out);
       }
     } catch (e) {
       const msg = String(e && e.message ? e.message : e);
@@ -602,11 +753,11 @@ async function main() {
           payload = null;
         }
         const dir = path.join(wsDir, "sessions", token);
-        fs3.mkdirSync(dir, { recursive: true });
+        fs4.mkdirSync(dir, { recursive: true });
         const out = path.join(dir, "turn-signal.json");
         const tmp = out + "." + process.pid + ".tmp";
-        fs3.writeFileSync(tmp, JSON.stringify(buildTurnSignal(parsed.agent, parsed.event, payload)));
-        fs3.renameSync(tmp, out);
+        fs4.writeFileSync(tmp, JSON.stringify(buildTurnSignal(parsed.agent, parsed.event, payload)));
+        fs4.renameSync(tmp, out);
       }
     } catch (e) {
       const msg = String(e && e.message ? e.message : e);

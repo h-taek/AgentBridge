@@ -32,6 +32,7 @@ const path = require('path')
 
 // 미읽음 판정은 코어 단일 소스를 쓴다. esbuild가 빌드 때 이 require를 인라인한다.
 const { isUnread } = require('../src/agent/reportState')
+const { computeSessionActivity, readSessionActivityInputs } = require('../src/sessionStatus')
 
 // 코어 단일 소스. esbuild가 빌드 때 이 require를 인라인한다(옵션 나) — 런타임 헬퍼 옆엔
 // node_modules가 없어 require('@agentbridge/core')가 불가하다.
@@ -199,22 +200,52 @@ async function buildSubagentLine(wsDir, sessionToken, run) {
   } catch {
     return ''
   }
-  const mine = sessions.filter((s) => s.parentSessionId === sessionToken && s.agentName)
-  if (mine.length === 0) return ''
-  const unread = []
-  for (const s of mine) {
-    if (await isUnread(wsDir, s.sessionId)) unread.push(s.agentName)
-  }
-  if (unread.length === 0) return ''
-  return (
-    '\n\n' +
-    unread.length +
-    ' subagent report(s) finished and unread (' +
-    unread.join(', ') +
-    '). Read with `' +
-    run +
-    ' agent read <name>`.'
+  const mine = sessions.filter(
+    (s) => s.parentSessionId === sessionToken && s.agentName && !s.cleanedAt
   )
+  if (mine.length === 0) return ''
+
+  const unread = []
+  const stuck = []
+  for (const s of mine) {
+    if (await isUnread(wsDir, s.sessionId)) {
+      unread.push(s.agentName)
+      continue
+    }
+    // 완료 신호가 없는데 출력이 한참 멈춘 서브. 사용자가 턴을 끊었으면 어떤 신호도 오지 않으므로
+    // 미읽음으로는 절대 안 잡힌다 — 메인이 묻지 않으면 영영 모르는 자리가 여기다.
+    if (s.closedAt !== null) continue
+    try {
+      const inputs = await readSessionActivityInputs(wsDir, s.sessionId)
+      if (computeSessionActivity(inputs, Date.now()) === 'unknown') stuck.push(s.agentName)
+    } catch {
+      /* 판정할 수 없으면 세지 않는다 */
+    }
+  }
+  if (unread.length === 0 && stuck.length === 0) return ''
+
+  const parts = []
+  if (unread.length > 0) {
+    parts.push(
+      unread.length +
+        ' subagent report(s) finished and unread (' +
+        unread.join(', ') +
+        '). Read with `' +
+        run +
+        ' agent read <name>`.'
+    )
+  }
+  if (stuck.length > 0) {
+    parts.push(
+      stuck.length +
+        ' subagent(s) went quiet without finishing (' +
+        stuck.join(', ') +
+        ') — the user may have interrupted them, or they may be stuck. Check with `' +
+        run +
+        ' agent read <name>`, then send more instructions or close them.'
+    )
+  }
+  return '\n\n' + parts.join('\n')
 }
 
 function buildInstructions(storageRoot) {

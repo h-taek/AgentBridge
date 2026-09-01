@@ -1559,10 +1559,24 @@ async function replayTail(wsDir, sessionId) {
     return "";
   }
 }
-function renderDone(done) {
-  const lines = [`## \uB05D\uB09C \uC11C\uBE0C ${done.length}\uAC1C`, ""];
-  for (const s of done) lines.push(`  ${s.name}  (${s.model})  ${s.title}`);
-  lines.push("", "`agent read <\uC774\uB984>`\uC73C\uB85C \uBCF4\uACE0\uB97C \uC77D\uB294\uB2E4.");
+function renderWoke(done, stuck) {
+  const lines = [];
+  if (done.length > 0) {
+    lines.push(`## \uB05D\uB09C \uC11C\uBE0C ${done.length}\uAC1C`, "");
+    for (const s of done) lines.push(`  ${s.name}  (${s.model})  ${s.title}`);
+    lines.push("", "`agent read <\uC774\uB984>`\uC73C\uB85C \uBCF4\uACE0\uB97C \uC77D\uB294\uB2E4.");
+  }
+  if (stuck.length > 0) {
+    if (lines.length > 0) lines.push("");
+    lines.push(`## \uC0C1\uD0DC\uB97C \uC54C \uC218 \uC5C6\uB294 \uC11C\uBE0C ${stuck.length}\uAC1C`, "");
+    for (const s of stuck) lines.push(`  ${s.name}  (${s.model})  ${s.title}`);
+    lines.push(
+      "",
+      "\uC644\uB8CC \uC2E0\uD638 \uC5C6\uC774 \uCD9C\uB825\uC774 \uBA48\uCD98 \uC9C0 \uC624\uB798\uB2E4. \uC0AC\uC6A9\uC790\uAC00 \uD134\uC744 \uB04A\uC5C8\uAC70\uB098 \uC11C\uBE0C\uAC00 \uB9C9\uD600 \uC788\uC744 \uC218 \uC788\uB2E4.",
+      "`agent read <\uC774\uB984>`\uC73C\uB85C \uC5B4\uB514\uAE4C\uC9C0 \uAC14\uB294\uC9C0 \uBCF4\uACE0, \uC774\uC5B4\uC11C \uC2DC\uD0AC \uAC83\uC774 \uC788\uC73C\uBA74 `agent send`,",
+      "\uC544\uB2C8\uBA74 `agent close`\uB85C \uC815\uB9AC\uD55C\uB2E4."
+    );
+  }
   return lines.join("\n");
 }
 async function renderEmpty(wsDir, subs, waited) {
@@ -1582,19 +1596,25 @@ async function renderEmpty(wsDir, subs, waited) {
   }
   return lines.join("\n");
 }
+function wakers(subs) {
+  return {
+    done: subs.filter((s) => s.unread),
+    stuck: subs.filter((s) => !s.unread && s.activity === "unknown")
+  };
+}
 async function agentCheck(wsDir, callerSessionId, opts = {}) {
   const now = opts.now ?? Date.now;
   const sleep = opts.sleep ?? defaultSleep2;
   let subs = await listSubs(wsDir, callerSessionId);
-  let done = subs.filter((s) => s.unread);
-  if (done.length > 0) return renderDone(done);
+  let woke = wakers(subs);
+  if (woke.done.length + woke.stuck.length > 0) return renderWoke(woke.done, woke.stuck);
   if (!opts.wait) return renderEmpty(wsDir, subs, false);
   const deadline = now() + (opts.forSec ?? DEFAULT_WAIT_SEC) * 1e3;
   while (now() < deadline) {
     await sleep(WAIT_POLL_MS);
     subs = await listSubs(wsDir, callerSessionId);
-    done = subs.filter((s) => s.unread);
-    if (done.length > 0) return renderDone(done);
+    woke = wakers(subs);
+    if (woke.done.length + woke.stuck.length > 0) return renderWoke(woke.done, woke.stuck);
   }
   return renderEmpty(wsDir, subs, true);
 }

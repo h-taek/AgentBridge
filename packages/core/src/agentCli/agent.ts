@@ -195,10 +195,24 @@ async function replayTail(wsDir: string, sessionId: string): Promise<string> {
   }
 }
 
-function renderDone(done: SubRow[]): string {
-  const lines = [`## 끝난 서브 ${done.length}개`, ''];
-  for (const s of done) lines.push(`  ${s.name}  (${s.model})  ${s.title}`);
-  lines.push('', '`agent read <이름>`으로 보고를 읽는다.');
+function renderWoke(done: SubRow[], stuck: SubRow[]): string {
+  const lines: string[] = [];
+  if (done.length > 0) {
+    lines.push(`## 끝난 서브 ${done.length}개`, '');
+    for (const s of done) lines.push(`  ${s.name}  (${s.model})  ${s.title}`);
+    lines.push('', '`agent read <이름>`으로 보고를 읽는다.');
+  }
+  if (stuck.length > 0) {
+    if (lines.length > 0) lines.push('');
+    lines.push(`## 상태를 알 수 없는 서브 ${stuck.length}개`, '');
+    for (const s of stuck) lines.push(`  ${s.name}  (${s.model})  ${s.title}`);
+    lines.push(
+      '',
+      '완료 신호 없이 출력이 멈춘 지 오래다. 사용자가 턴을 끊었거나 서브가 막혀 있을 수 있다.',
+      '`agent read <이름>`으로 어디까지 갔는지 보고, 이어서 시킬 것이 있으면 `agent send`,',
+      '아니면 `agent close`로 정리한다.',
+    );
+  }
   return lines.join('\n');
 }
 
@@ -222,6 +236,18 @@ async function renderEmpty(wsDir: string, subs: SubRow[], waited: boolean): Prom
   return lines.join('\n');
 }
 
+// 대기를 깨우는 것은 둘이다. 끝난 서브와, 우리가 더는 상태를 말할 수 없게 된 서브.
+//
+// 둘째가 필요한 이유는 사용자가 턴을 끊었을 때 완료 신호가 안 오기 때문이다. 그 경우 끝난 것이
+// 없으므로 대기는 상한까지 돌고, 메인은 아무 일도 없었던 것처럼 다시 기다린다. 볼 것이 생겼다는
+// 점에서 둘은 같다 — 무엇을 할지는 메인이 정한다(B-6).
+function wakers(subs: SubRow[]): { done: SubRow[]; stuck: SubRow[] } {
+  return {
+    done: subs.filter((s) => s.unread),
+    stuck: subs.filter((s) => !s.unread && s.activity === 'unknown'),
+  };
+}
+
 export async function agentCheck(
   wsDir: string,
   callerSessionId: string,
@@ -233,18 +259,18 @@ export async function agentCheck(
   // 기다리기 전에 먼저 확인한다. 메인이 항상 대기 중인 것은 아니어서 부르기 전에 이미 끝나
   // 있는 서브가 있을 수 있고, 기다리기부터 시작하면 그것을 놓친다(B-6).
   let subs = await listSubs(wsDir, callerSessionId);
-  let done = subs.filter((s) => s.unread);
-  if (done.length > 0) return renderDone(done);
+  let woke = wakers(subs);
+  if (woke.done.length + woke.stuck.length > 0) return renderWoke(woke.done, woke.stuck);
   if (!opts.wait) return renderEmpty(wsDir, subs, false);
 
   const deadline = now() + (opts.forSec ?? DEFAULT_WAIT_SEC) * 1000;
   while (now() < deadline) {
     await sleep(WAIT_POLL_MS);
     subs = await listSubs(wsDir, callerSessionId);
-    done = subs.filter((s) => s.unread);
+    woke = wakers(subs);
     // 조건이 이뤄지면 즉시 반환한다. 상한은 고정된 대기 시간이 아니라 한 번의 호출이
     // 기다리는 최대 시간이다.
-    if (done.length > 0) return renderDone(done);
+    if (woke.done.length + woke.stuck.length > 0) return renderWoke(woke.done, woke.stuck);
   }
   return renderEmpty(wsDir, subs, true);
 }

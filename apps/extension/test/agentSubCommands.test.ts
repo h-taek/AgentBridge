@@ -182,6 +182,51 @@ describe('agent list·read·check (0.5.0 W4)', () => {
     assert.match(out, /마지막 화면 줄/);
   });
 
+  it('완료 신호 없이 출력이 멈춘 서브를 check가 따로 낸다', async () => {
+    await writeSessions(ws, [
+      { sessionId: PARENT },
+      { sessionId: 'sub', parentSessionId: PARENT, agentName: 'tower-bridge' },
+    ]);
+    // 2분 전에 턴이 시작됐고 종료 신호가 없다. 사용자가 끊었을 때의 모양이다.
+    const old = Date.now() - 120_000;
+    await fsp.writeFile(
+      join(ws, 'sessions', 'sub', 'turn-start.json'),
+      JSON.stringify({ agent: 'codex', event: 'UserPromptSubmit', sessionId: 'sub', at: old }),
+      'utf8',
+    );
+    const out = await agentCheck(ws, PARENT);
+    assert.match(out, /상태를 알 수 없는 서브/);
+    assert.match(out, /tower-bridge/);
+  });
+
+  it('멈춘 서브가 생기면 --wait이 상한을 안 채우고 돌아온다', async () => {
+    await writeSessions(ws, [
+      { sessionId: PARENT },
+      { sessionId: 'sub', parentSessionId: PARENT, agentName: 'tower-bridge' },
+    ]);
+    let ticks = 0;
+    const out = await agentCheck(ws, PARENT, {
+      wait: true,
+      sleep: async () => {
+        ticks += 1;
+        if (ticks === 2) {
+          await fsp.writeFile(
+            join(ws, 'sessions', 'sub', 'turn-start.json'),
+            JSON.stringify({
+              agent: 'codex',
+              event: 'UserPromptSubmit',
+              sessionId: 'sub',
+              at: Date.now() - 120_000,
+            }),
+            'utf8',
+          );
+        }
+      },
+    });
+    assert.match(out, /상태를 알 수 없는 서브/);
+    assert.equal(ticks, 2);
+  });
+
   it('read가 읽음 표시를 쓰고 그 뒤 check가 조용해진다. check는 아무것도 안 쓴다', async () => {
     await writeSessions(ws, [
       { sessionId: PARENT },

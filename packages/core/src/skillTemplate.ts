@@ -11,7 +11,7 @@
 //
 // `uninstall`은 싣지 않는다. 사용자 명령이지 에이전트 명령이 아니다.
 
-export const SKILL_VERSION = '0.5.6';
+export const SKILL_VERSION = '0.5.7';
 export const SKILL_DIR_NAME = 'agentbridge';
 
 // 셸에서 그대로 쓸 수 있게 공백 있는 경로를 감싼다.
@@ -111,6 +111,11 @@ A sub does not tell you when it is done. Either \`agent check --wait\`, which
 returns as soon as one finishes (up to a minute, \`--for\` raises it), or go do
 something else — the next turn tells you how many finished subs are unread.
 Reading a report with \`agent read\` is what clears that.
+
+A sub can also go quiet without finishing: the user interrupted its turn, or it
+is stuck waiting on something. \`check\` and the next-turn line both report those
+separately from finished ones. That state is what we observed, not a verdict —
+read the sub to see how far it got, then send it more instructions or close it.
 
 Every read output item starts with its identifier (\`<category>/<slug>\`) —
 that is what \`memory update\` takes.
