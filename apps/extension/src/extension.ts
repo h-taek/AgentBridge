@@ -16,6 +16,7 @@ import {
   resolveProjectProfileId,
   readIR,
   migrateLegacyGlobalIfNeeded,
+  renderReceipt,
   type SpawnExtras,
 } from '@agentbridge/core';
 import { initializeCore, getBundledHelperPath, getBundledCliPath, getWorkspaceStore, getLogger, getCoreEnvProbe } from './core/coreInstances';
@@ -24,12 +25,18 @@ import { MemoryPanelProvider } from './views/memoryPanel';
 import { ProfilePanelProvider } from './views/profilePanel';
 import { SessionTreeProvider, SessionItem } from './views/sessionTreeView';
 import { rowKindOf, childSessions, planDeleteConfirm } from './views/sessionTreeModel';
-import { ChatPanel, getActivePanel, getAllPanels, chatPanelEvents, updateSessionTabTitle } from './views/chatPanel';
+import { ChatPanel, getActivePanel, getAllPanels, chatPanelEvents, updateSessionTabTitle, markShuttingDown } from './views/chatPanel';
 import { compactionEvents } from './core/compactionScheduler';
 import { registerSession, markSessionClosed, markSessionActive, markSessionOpened, renameSession, deleteSession, reclaimPendingModelSessionId } from './core/sessionRegistry';
 import { registerConfigWatcher, getConfig } from './settings/config';
 import * as notifications from './core/notifications';
-import { initSubagents, subagentHostHandlers } from './core/subagents';
+import {
+  initSubagents,
+  subagentHostHandlers,
+  cleanupOne,
+  cleanupChildrenOf,
+  sweepOrphanTrees,
+} from './core/subagents';
 import { CLI_DISPLAY_NAME, type CliKind } from './shared/types';
 import { getSessions, type SessionMeta } from './core/sessionRegistry';
 
@@ -290,6 +297,26 @@ export function activate(context: vscode.ExtensionContext) {
     });
   }
 
+  // 프로젝트를 열 때 고아 worktree를 훑는다 (0.5.0 B-7 정리 시점 셋째). 레코드가 아예 없는
+  // 폴더만 지운다 — 앱이 비정상 종료해 레코드를 못 쓴 흔적이다. 알릴 상대가 없던 시점의 일이라
+  // 지금 알린다. 훑는 것은 이 프로젝트의 trees/ 하나뿐이고 다른 프로젝트는 훑지 않는다.
+  void (async () => {
+    const folderUri = vscode.workspace.workspaceFolders?.[0]?.uri;
+    if (!folderUri) return;
+    try {
+      const wid = workspaceStore.getOrCreateWorkspaceId(folderUri.fsPath);
+      const swept = await sweepOrphanTrees(wid);
+      if (swept.length > 0) {
+        output.log(`고아 worktree 정리: ${swept.join(', ')}`);
+        void vscode.window.showInformationMessage(
+          vscode.l10n.t('AgentBridge cleaned up {0} leftover sub-agent worktree(s): {1}', swept.length, swept.join(', ')),
+        );
+      }
+    } catch (err) {
+      output.warn(`고아 스캔 실패: ${String(err)}`);
+    }
+  })();
+
   // 서브에이전트 스폰은 위 배선을 그대로 쓴다 — 어느 경로로 뜬 세션이든 닫힘 처리가 같아야 한다.
   initSubagents({
     buildOpts,
@@ -444,6 +471,14 @@ export function activate(context: vscode.ExtensionContext) {
       vscode.l10n.t('Delete'),
     );
     if (answer !== vscode.l10n.t('Delete')) return;
+
+    // 서브를 지울 때는 레코드만 지우는 것이 아니라 정리를 탄다 — worktree와 브랜치가 함께
+    // 사라지고 영수증이 나온다 (0.5.0 B-7). 어느 경로로 지우든 결과가 같아야 하므로
+    // `agent close`와 같은 함수로 들어간다.
+    const receipts = plan.kind === 'subsession'
+      ? [await cleanupOne(session.workspaceId, session.sessionId, session.agentName ?? '')]
+      : await cleanupChildrenOf(session.workspaceId, session.sessionId);
+
     const activePanel = getActivePanel(session.sessionId);
     if (activePanel) {
       activePanel.markDeleted();
@@ -451,6 +486,13 @@ export function activate(context: vscode.ExtensionContext) {
     }
     await deleteSession(session.workspaceId, session.sessionId);
     sessionTree.refresh();
+
+    // 영수증은 무엇이 사라졌고 어떻게 되살리는지를 담는다. 강제로 지워도 커밋은 남으므로
+    // 사용자가 되살릴 수 있어야 한다.
+    const shown = receipts.filter((r) => r.isolated || !r.ok);
+    if (shown.length > 0) {
+      void vscode.window.showInformationMessage(shown.map(renderReceipt).join('\n'), { modal: false });
+    }
   });
 
   const newSessionFromTab = vscode.commands.registerCommand('agentbridge.newSessionFromTab', () => {
@@ -547,6 +589,8 @@ function timeAgo(iso: string): string {
 
 export async function deactivate(): Promise<void> {
   // 진행 중 turn flush를 await한 뒤 종료 — 모델 응답 직후 종료 시 마지막 턴 유실 방지 (V-07).
+  // 내려가는 중임을 알린다 — 이때 닫히는 탭에는 닫기 확인을 띄우지 않는다 (0.5.0 W8).
+  markShuttingDown();
   // VS Code는 deactivate가 반환한 Promise를 (타임아웃 한도 내에서) 기다린다.
   await Promise.allSettled(getAllPanels().map((p) => p.disposeAndFlush()));
 }

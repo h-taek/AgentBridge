@@ -10,6 +10,8 @@ import { getSessions, renameSession, deleteSession, setModelSessionId, type Sess
 import { captureSessionIdFromHook, watchHookErrors, resolveHookErrorFile } from '@agentbridge/core';
 import * as workspaceStore from '../core/workspaceStore';
 import {
+  computeSessionActivity,
+  readSessionActivityInputs,
   acquireOwnership,
   updateOwnerSize,
   releaseOwnership,
@@ -26,6 +28,12 @@ const MAX_TAB_TITLE_LENGTH = 11;
 
 // 붙여넣기와 제출 사이의 간격(ms). sendPrompt 참조.
 const SUBMIT_DELAY_MS = 300;
+
+// 익스텐션이 내려가는 중인가. 그때는 패널이 통째로 사라지는 중이라 닫기 확인을 띄우지 않는다.
+let shuttingDown = false;
+export function markShuttingDown(): void {
+  shuttingDown = true;
+}
 
 function tabTitle(title: string): string {
   return title.length > MAX_TAB_TITLE_LENGTH ? title.substring(0, MAX_TAB_TITLE_LENGTH) + '…' : title;
@@ -157,18 +165,23 @@ export class ChatPanel {
     this.extensionUri = extensionUri;
     this.opts = opts;
     this.shouldLock = shouldLock;
+    this.groupLocker = createGroupLocker({
+      executeCommand: (cmd) => vscode.commands.executeCommand(cmd),
+      warn: (msg) => output.warn(msg),
+    });
+    if (opts.sessionId) activePanels.set(opts.sessionId, this);
+    this.wirePanel();
+  }
+
+  // 패널 하나에 붙는 배선 전부. 생성자와 재부착(W8)이 같은 것을 쓴다 — 둘이 갈리면 다시 연
+  // 탭에서만 입력이나 리사이즈가 안 먹는 상태가 생긴다.
+  private wirePanel(): void {
+    const { extensionUri, opts } = this;
     // revive(reload 복원) 경로도 media 리소스 루트를 갖도록 보장 — 로딩 화면 로고 차단 방지.
     this.panel.webview.options = {
       enableScripts: true,
       localResourceRoots: ChatPanel.localRoots(extensionUri),
     };
-    this.groupLocker = createGroupLocker({
-      executeCommand: (cmd) => vscode.commands.executeCommand(cmd),
-      warn: (msg) => output.warn(msg),
-    });
-
-    if (opts.sessionId) activePanels.set(opts.sessionId, this);
-
     const modelLogo = vscode.Uri.joinPath(extensionUri, 'media', 'logos', `${opts.model ?? 'claude'}.svg`);
     this.panel.iconPath = { light: modelLogo, dark: modelLogo };
 
@@ -177,7 +190,11 @@ export class ChatPanel {
     this.panel.webview.onDidReceiveMessage((msg) => {
       switch (msg.type) {
         case 'ready':
-          void this.spawnPty(msg.cols ?? 120, msg.rows ?? 30);
+          // 재부착이면 PTY가 이미 살아 있다. 새로 띄우는 대신 크기만 넘긴다 — 세 하니스 모두
+          // 크기 변경 신호를 받으면 화면 전체를 스스로 다시 그린다(research 10 §3). 우리가
+          // 화면 기록을 재생하지 않는 근거다.
+          if (this.ptyProcess) this.repaint(msg.cols ?? 120, msg.rows ?? 30);
+          else void this.spawnPty(msg.cols ?? 120, msg.rows ?? 30);
           break;
         case 'log':
           output.log(`[webview] ${msg.data}`);
@@ -221,7 +238,7 @@ export class ChatPanel {
     });
 
     this.panel.onDidDispose(() => {
-      this.dispose();
+      void this.onPanelClosed();
     });
 
     this.panel.onDidChangeViewState((e) => {
@@ -254,6 +271,86 @@ export class ChatPanel {
 
   onDispose(cb: () => void): void {
     this.onDisposeCallback = cb;
+  }
+
+  // ─── 닫기 전 확인 (0.5.0 W8, B-2) ────────────────────────────────────
+  //
+  // 웹뷰 탭의 닫기는 가로챌 수 없다. VS Code가 주는 것은 닫힌 뒤에 오는 onDidDispose 하나뿐이고
+  // 취소할 수 있는 이벤트가 없다. 그래서 순서를 뒤집는다 — 닫힌 직후에 묻고, 계속을 고르면
+  // 탭을 다시 연다. 죽이는 시점이 우리 손에 있어서 성립한다.
+  //
+  // 진행 중이 아니면 안 묻는다. 매번 물으면 확인 자체가 무시된다.
+  private async onPanelClosed(): Promise<void> {
+    if (this.disposed) return;
+    // 창을 닫거나 IDE를 끄는 중이면 되돌릴 자리가 없다. 종료 경로는 지금 동작을 그대로 둔다.
+    if (shuttingDown || this.deletedExternally || !this.ptyProcess) {
+      this.dispose();
+      return;
+    }
+    const running = await this.isTurnRunning();
+    if (!running) {
+      this.dispose();
+      return;
+    }
+    const keep = await vscode.window.showWarningMessage(
+      vscode.l10n.t('"{0}" is still working. Close it anyway?', this.opts.terminalName),
+      { modal: true, detail: vscode.l10n.t('Closing ends the session and the turn in progress is lost.') },
+      vscode.l10n.t('Keep running'),
+    );
+    if (keep !== vscode.l10n.t('Keep running')) {
+      this.dispose();
+      return;
+    }
+    this.reattach();
+  }
+
+  // 상태 표시가 쓰는 판정을 그대로 쓴다 — 우리가 따로 매기는 값이 아니다.
+  private async isTurnRunning(): Promise<boolean> {
+    const { workspaceId, sessionId } = this.opts;
+    if (!workspaceId || !sessionId) return false;
+    try {
+      const wsDir = workspaceStore.getWorkspacePath(workspaceId);
+      const inputs = await readSessionActivityInputs(wsDir, sessionId);
+      return computeSessionActivity(inputs, Date.now()) === 'running';
+    } catch {
+      return false; // 판정할 수 없으면 묻지 않는다. 못 묻는 것이 잘못 막는 것보다 낫다
+    }
+  }
+
+  // 계속을 고른 경우. PTY는 아직 살아 있으므로 새 탭을 만들어 다시 붙인다. 화면은 웹뷰가
+  // 준비되면 크기 신호로 하니스가 스스로 다시 그린다.
+  private reattach(): void {
+    this.panel = vscode.window.createWebviewPanel(
+      'agentbridge.chat',
+      tabTitle(this.opts.terminalName),
+      { viewColumn: ChatPanel.findUnusedColumn(), preserveFocus: false },
+      {
+        enableScripts: true,
+        retainContextWhenHidden: true,
+        localResourceRoots: ChatPanel.localRoots(this.extensionUri),
+      },
+    );
+    this.wirePanel();
+    output.log(`ChatPanel 재부착: ${this.opts.sessionId?.slice(0, 8)}`);
+  }
+
+  // 크기 신호로 하니스가 화면 전체를 다시 그리게 한다. 같은 크기를 그대로 주면 신호가 안 가는
+  // 터미널이 있어 한 줄 줄였다가 되돌린다.
+  private repaint(cols: number, rows: number): void {
+    const pty = this.ptyProcess;
+    if (!pty) return;
+    try {
+      pty.resize(cols, Math.max(1, rows - 1));
+      setTimeout(() => {
+        try {
+          pty.resize(cols, rows);
+        } catch {
+          /* 그 사이 죽었다 */
+        }
+      }, 50);
+    } catch {
+      /* 그 사이 죽었다 */
+    }
   }
 
   // 이 세션의 프로세스가 살아 있는가. `agent check`가 빈손으로 돌아올 때 "아직 일하는 중"과

@@ -19,7 +19,7 @@
 
 'use strict'
 
-// @agentbridge-cli-version 0.5.1
+// @agentbridge-cli-version 0.5.2
 // (단일 설치 버전 비교용 — 이 파일을 수정하면 반드시 버전을 올릴 것)
 
 const fs = require('fs')
@@ -58,12 +58,13 @@ const COMMANDS = [
   ['memory add', '새 사실을 제안 큐에 넣는다 (--scope --category --title --summary --body)'],
   ['memory update <식별자>', '이미 있는 항목을 고치는 제안 (같은 인자, 안 준 것은 그대로)'],
   ['status', '어디에 무엇이 깔려 있는지와 배선 자가 진단'],
-  ['agent start', '서브에이전트를 띄운다 (--prompt "..." [--harness claude,codex,agy])'],
+  ['agent start', '서브에이전트를 띄운다 (--prompt "..." [--harness claude,codex,agy] [--isolate])'],
   ['agent list', '띄운 서브의 목록과 상태'],
   ['agent check', '끝난 서브가 있는지 본다 (--wait면 생길 때까지, --for <초>로 상한 조정)'],
   ['agent read <이름>', '그 서브의 기록 전문 (--last N으로 자름)'],
   ['agent send <이름>', '도는 서브에 지침을 더 보낸다 (--prompt "...")'],
-  ['agent stop <이름>', '서브를 끝낸다']
+  ['agent stop <이름>', '서브를 끝낸다'],
+  ['agent close <이름>', '서브를 정리한다 (격리였으면 폴더와 브랜치도 지운다)']
 ]
 
 const USAGE = [
@@ -206,7 +207,7 @@ async function dispatch(cmd, args, wsDir, storageRoot) {
           if (!prompt) fail('agent start에는 --prompt가 온다')
           const raw = strOption(rest, '--harness')
           const harnesses = raw ? raw.split(',').map((h) => h.trim()).filter(Boolean) : ['claude']
-          return agentStart(sessionDir(wsDir), prompt, harnesses)
+          return agentStart(sessionDir(wsDir), prompt, harnesses, rest.includes('--isolate'))
         }
         case 'send': {
           const name = nameArg()
@@ -216,8 +217,6 @@ async function dispatch(cmd, args, wsDir, storageRoot) {
         }
         case 'stop':
           return agentStop(sessionDir(wsDir), nameArg())
-        // close는 아직 stop과 같은 일만 한다. 정리(B-7의 여섯 단계)가 실리는 W7 전까지는 목록에
-        // 내놓지 않는다 — 같은 일을 하는 이름 둘을 모델에게 주면 고르는 데만 턴을 쓴다.
         case 'close':
           return agentClose(sessionDir(wsDir), nameArg())
         default:

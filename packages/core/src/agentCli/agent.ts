@@ -236,8 +236,9 @@ export function agentStart(
   sessionDir: string | undefined,
   prompt: string,
   harnesses: string[],
+  isolate: boolean,
 ): Promise<string> {
-  return callHost(sessionDir, HOST_AGENT_START, { prompt, harnesses });
+  return callHost(sessionDir, HOST_AGENT_START, { prompt, harnesses, isolate });
 }
 
 export function agentSend(

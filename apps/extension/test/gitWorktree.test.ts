@@ -14,7 +14,7 @@ import {
   commitAll,
   removeWorktree,
   deleteBranch,
-} from '@agentbridge/core/dist/agent/gitWorktree';
+} from '@agentbridge/core';
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8' });

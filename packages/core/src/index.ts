@@ -108,3 +108,6 @@ export * from './sessionStatus';
 export * from './agent/reportState';
 export * from './agent/gitWorktree';
 export * from './agent/bridgeNames';
+export * from './agent/cleanup';
+export * from './agent/subEnvironment';
+export * from './agent/agyTrust';

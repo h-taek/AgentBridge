@@ -51,6 +51,10 @@ export type SpawnExtras = {
   // 이 세션이 서브라면 부모의 세션 id. 기록의 뿌리를 세션 폴더로 가르는 것은 호스트 몫이고
   // 여기서는 SpawnOptions에 실어 나르기만 한다.
   parentSessionId?: string;
+  // 넘긴 세션 id가 '이어서 여는 것'이 아니라 '방금 발급한 것'임을 알린다. 서브 스폰은 레코드를
+  // 먼저 쓰기 위해 id를 밖에서 발급하는데(B-7), 그 값을 resume 자리로 받으면 어댑터가 이어서
+  // 여는 세션으로 보고 첫 프롬프트를 빼 버린다.
+  freshSession?: boolean;
 };
 
 export interface CliAdapterSet {
@@ -135,6 +139,8 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
 
       async buildSpawnOptions(cwd, workspaceId, resumeSessionId, extras) {
         const sessionId = resumeSessionId ?? randomUUID();
+        // 방금 발급한 id면 이어서 여는 것이 아니다.
+        const resuming = !!resumeSessionId && !extras?.freshSession;
         const wsDir = workspaceDir(workspaceId);
         const env = {
           ...envProbe.getShellEnv(),
@@ -170,7 +176,7 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
           wsDir,
           ...(opts.cliRunPrefix ? ['--allowedTools', `Bash(${opts.cliRunPrefix} *)`] : []),
         ];
-        const sessionArgs = !resumeSessionId
+        const sessionArgs = !resuming
           ? ['--session-id', sessionId]
           : (await claudeSessionFileExists(sessionId))
             ? ['--resume', sessionId]
@@ -182,7 +188,7 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
         // 옵션이라, 구분자 없이 뒤에 붙이면 프롬프트가 그 옵션의 값으로 먹힌다(라이브에서 확인:
         // "Input must be provided ... when using --print"). resume에는 붙이지 않는다 — 이어서
         // 여는 세션은 이미 그 말을 들었다.
-        const promptArgs = !resumeSessionId && extras?.initialPrompt ? ['--', extras.initialPrompt] : [];
+        const promptArgs = !resuming && extras?.initialPrompt ? ['--', extras.initialPrompt] : [];
         const args = [...sessionArgs, ...accessArgs, ...promptArgs];
 
         return {
@@ -205,6 +211,7 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
 
       async buildSpawnOptions(cwd, workspaceId, resumeSessionId, resumeModelSessionId, extras) {
         const sessionId = resumeSessionId ?? randomUUID();
+        const resuming = !!resumeSessionId && !extras?.freshSession;
         const wsDir = workspaceDir(workspaceId);
         const env = {
           ...envProbe.getShellEnv(),
@@ -239,9 +246,9 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
         let modelSessionId: string | undefined = resumeModelSessionId;
 
         // 첫 프롬프트는 위치 인자다. 새 세션일 때만 붙는다.
-        const promptArgs = !resumeSessionId && extras?.initialPrompt ? [extras.initialPrompt] : [];
+        const promptArgs = !resuming && extras?.initialPrompt ? [extras.initialPrompt] : [];
 
-        if (!resumeSessionId) {
+        if (!resuming) {
           args = [...sandboxArgs, ...promptArgs];
         } else if (resumeModelSessionId) {
           args = [...sandboxArgs, 'resume', resumeModelSessionId];
@@ -275,6 +282,7 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
 
       async buildSpawnOptions(cwd, workspaceId, resumeSessionId, resumeModelSessionId, extras) {
         const sessionId = resumeSessionId ?? randomUUID();
+        const resuming = !!resumeSessionId && !extras?.freshSession;
         const wsDir = workspaceDir(workspaceId);
         const env = {
           ...envProbe.getShellEnv(),
@@ -301,12 +309,12 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
 
         const cwdArgs = cwd ? ['--add-dir', cwd] : [];
         // agy의 첫 프롬프트는 위치 인자가 아니라 -i다. --print와 달리 답한 뒤에도 대화형으로 남는다.
-        const promptArgs = !resumeSessionId && extras?.initialPrompt ? ['-i', extras.initialPrompt] : [];
+        const promptArgs = !resuming && extras?.initialPrompt ? ['-i', extras.initialPrompt] : [];
 
         let args: string[];
         let modelSessionId: string | undefined = resumeModelSessionId;
 
-        if (!resumeSessionId) {
+        if (!resuming) {
           args = [...cwdArgs, '--dangerously-skip-permissions', ...promptArgs];
         } else if (resumeModelSessionId) {
           try {

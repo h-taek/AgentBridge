@@ -1,6 +1,6 @@
 // 0.5.0 3단계 — 서브 이름 발급(순수 로직). 근거: docs/0.5.0/spec/01_orca_adoption.md B-7 "이름".
 import { strict as assert } from 'assert';
-import { BRIDGE_NAMES, issueBridgeName, type NameUsage } from '@agentbridge/core/dist/agent/bridgeNames';
+import { BRIDGE_NAMES, issueBridgeName, type NameUsage } from '@agentbridge/core';
 
 describe('BRIDGE_NAMES 불변식', () => {
   it('500개다', () => {

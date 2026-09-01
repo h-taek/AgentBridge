@@ -32,6 +32,8 @@ export interface SessionMeta {
   modelSessionId?: string;
   parentSessionId?: string;
   lastOpenedAt?: string;
+  // 서브에 발급한 교량 이름. 정리(worktree·브랜치 삭제)가 이 값으로 대상을 찾는다 (0.5.0 B-7).
+  agentName?: string;
 }
 
 function toLegacy(workspaceId: string, s: CoreSessionMeta): SessionMeta {
@@ -46,6 +48,7 @@ function toLegacy(workspaceId: string, s: CoreSessionMeta): SessionMeta {
     modelSessionId: s.modelSessionId ?? undefined,
     parentSessionId: s.parentSessionId,
     lastOpenedAt: s.lastOpenedAt,
+    agentName: s.agentName,
   };
 }
 

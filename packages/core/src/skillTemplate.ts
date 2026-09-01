@@ -11,7 +11,7 @@
 //
 // `uninstall`은 싣지 않는다. 사용자 명령이지 에이전트 명령이 아니다.
 
-export const SKILL_VERSION = '0.5.5';
+export const SKILL_VERSION = '0.5.6';
 export const SKILL_DIR_NAME = 'agentbridge';
 
 // 셸에서 그대로 쓸 수 있게 공백 있는 경로를 감싼다.
@@ -89,15 +89,23 @@ Categories: role, repos, domain, workflows, conventions, infra, verification.
 You can run other coding agents as subagents. Each gets its own session and
 tab; you give it work, it reports back, you read the report.
 
-    agent start --prompt "..." [--harness claude,codex,agy]
+    agent start --prompt "..." [--harness claude,codex,agy] [--isolate]
     agent list                    the subs you started, and their state
     agent check [--wait] [--for <seconds>]
     agent read <name> [--last N]  that sub's full conversation
     agent send <name> --prompt "..."
-    agent stop <name>
+    agent stop <name>             end it
+    agent close <name>            end it and clean up what it left
 
 \`agent start\` returns the names it issued — that is what the other commands
 take. Default harness is claude; pass several to run the same prompt on each.
+
+\`--isolate\` gives the sub its own git worktree, so several subs can edit files
+without colliding. Skip it for research or review — a fresh checkout has no
+dependencies and no instruction files, and paying that cost buys nothing when
+nothing is edited. Isolated subs must be closed with \`agent close\` when the
+round is over; that removes the worktree and its branch and tells you how to
+recover the work.
 
 A sub does not tell you when it is done. Either \`agent check --wait\`, which
 returns as soon as one finishes (up to a minute, \`--for\` raises it), or go do

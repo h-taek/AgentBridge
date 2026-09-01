@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// @agentbridge-cli-version 0.5.1
+// @agentbridge-cli-version 0.5.2
 "use strict";
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -1483,8 +1483,8 @@ async function callHost(sessionDir2, kind, payload) {
   const result = await sendHostRequest(sessionDir2, newRequest(kind, payload));
   return result.output;
 }
-function agentStart(sessionDir2, prompt, harnesses) {
-  return callHost(sessionDir2, HOST_AGENT_START, { prompt, harnesses });
+function agentStart(sessionDir2, prompt, harnesses, isolate) {
+  return callHost(sessionDir2, HOST_AGENT_START, { prompt, harnesses, isolate });
 }
 function agentSend(sessionDir2, name, prompt) {
   return callHost(sessionDir2, HOST_AGENT_SEND, { name, prompt });
@@ -1589,12 +1589,13 @@ var COMMANDS = [
   ["memory add", "\uC0C8 \uC0AC\uC2E4\uC744 \uC81C\uC548 \uD050\uC5D0 \uB123\uB294\uB2E4 (--scope --category --title --summary --body)"],
   ["memory update <\uC2DD\uBCC4\uC790>", "\uC774\uBBF8 \uC788\uB294 \uD56D\uBAA9\uC744 \uACE0\uCE58\uB294 \uC81C\uC548 (\uAC19\uC740 \uC778\uC790, \uC548 \uC900 \uAC83\uC740 \uADF8\uB300\uB85C)"],
   ["status", "\uC5B4\uB514\uC5D0 \uBB34\uC5C7\uC774 \uAE54\uB824 \uC788\uB294\uC9C0\uC640 \uBC30\uC120 \uC790\uAC00 \uC9C4\uB2E8"],
-  ["agent start", '\uC11C\uBE0C\uC5D0\uC774\uC804\uD2B8\uB97C \uB744\uC6B4\uB2E4 (--prompt "..." [--harness claude,codex,agy])'],
+  ["agent start", '\uC11C\uBE0C\uC5D0\uC774\uC804\uD2B8\uB97C \uB744\uC6B4\uB2E4 (--prompt "..." [--harness claude,codex,agy] [--isolate])'],
   ["agent list", "\uB744\uC6B4 \uC11C\uBE0C\uC758 \uBAA9\uB85D\uACFC \uC0C1\uD0DC"],
   ["agent check", "\uB05D\uB09C \uC11C\uBE0C\uAC00 \uC788\uB294\uC9C0 \uBCF8\uB2E4 (--wait\uBA74 \uC0DD\uAE38 \uB54C\uAE4C\uC9C0, --for <\uCD08>\uB85C \uC0C1\uD55C \uC870\uC815)"],
   ["agent read <\uC774\uB984>", "\uADF8 \uC11C\uBE0C\uC758 \uAE30\uB85D \uC804\uBB38 (--last N\uC73C\uB85C \uC790\uB984)"],
   ["agent send <\uC774\uB984>", '\uB3C4\uB294 \uC11C\uBE0C\uC5D0 \uC9C0\uCE68\uC744 \uB354 \uBCF4\uB0B8\uB2E4 (--prompt "...")'],
-  ["agent stop <\uC774\uB984>", "\uC11C\uBE0C\uB97C \uB05D\uB0B8\uB2E4"]
+  ["agent stop <\uC774\uB984>", "\uC11C\uBE0C\uB97C \uB05D\uB0B8\uB2E4"],
+  ["agent close <\uC774\uB984>", "\uC11C\uBE0C\uB97C \uC815\uB9AC\uD55C\uB2E4 (\uACA9\uB9AC\uC600\uC73C\uBA74 \uD3F4\uB354\uC640 \uBE0C\uB79C\uCE58\uB3C4 \uC9C0\uC6B4\uB2E4)"]
 ];
 var USAGE = [
   "agentbridge \u2014 AgentBridge \uB9E5\uB77D \uC77D\uAE30",
@@ -1717,7 +1718,7 @@ async function dispatch(cmd, args, wsDir, storageRoot) {
           if (!prompt) fail("agent start\uC5D0\uB294 --prompt\uAC00 \uC628\uB2E4");
           const raw = strOption(rest, "--harness");
           const harnesses = raw ? raw.split(",").map((h) => h.trim()).filter(Boolean) : ["claude"];
-          return agentStart2(sessionDir(wsDir), prompt, harnesses);
+          return agentStart2(sessionDir(wsDir), prompt, harnesses, rest.includes("--isolate"));
         }
         case "send": {
           const name = nameArg();
@@ -1727,8 +1728,6 @@ async function dispatch(cmd, args, wsDir, storageRoot) {
         }
         case "stop":
           return agentStop2(sessionDir(wsDir), nameArg());
-        // close는 아직 stop과 같은 일만 한다. 정리(B-7의 여섯 단계)가 실리는 W7 전까지는 목록에
-        // 내놓지 않는다 — 같은 일을 하는 이름 둘을 모델에게 주면 고르는 데만 턴을 쓴다.
         case "close":
           return agentClose2(sessionDir(wsDir), nameArg());
         default:

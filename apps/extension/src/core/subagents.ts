@@ -11,6 +11,7 @@
 // 있고 메인 세션과 같아야 하므로, 그 함수를 주입받아 부른다.
 
 import { join } from 'path';
+import { randomUUID } from 'crypto';
 import { promises as fsp } from 'fs';
 import {
   deriveSessionTitle,
@@ -23,10 +24,21 @@ import {
   HOST_AGENT_SEND,
   HOST_AGENT_STOP,
   HOST_AGENT_CLOSE,
+  addWorktree,
+  trustWorkspace,
+  listMissingPaths,
+  buildIsolationPreamble,
+  cleanupSubagent,
+  renderReceipt,
+  resolveTreePath,
+  findOrphanTrees,
   type NameUsage,
+  type SpawnExtras,
   type HostRequest,
   type SpawnOptions,
+  type CleanupReceipt,
 } from '@agentbridge/core';
+import { homedir } from 'os';
 import type { CliKind } from '../shared/types';
 import { getActivePanel, updateSessionTabTitle } from '../views/chatPanel';
 import * as workspaceStore from './workspaceStore';
@@ -44,7 +56,7 @@ export interface SubagentDeps {
     workspaceId: string,
     resumeSessionId?: string,
     resumeModelSessionId?: string,
-    extras?: { initialPrompt?: string; parentSessionId?: string },
+    extras?: SpawnExtras,
   ) => Promise<SpawnOptions>;
   // 메인 세션과 같은 배선으로 탭을 연다. preserveFocus는 서브에서 참이다.
   openPanel: (opts: SpawnOptions, workspaceId: string, preserveFocus: boolean) => void;
@@ -65,6 +77,9 @@ export interface SpawnRequest {
   prompt: string;
   // 같은 프롬프트로 띄울 하니스들. 하나일 수도 여럿일 수도 있다.
   harnesses: CliKind[];
+  // 참이면 서브마다 새 worktree를 만들고 거기서 띄운다 (0.5.0 B-7). 기본은 원본이다 —
+  // 새 폴더에는 git이 추적하는 것만 들어가므로 그것을 채우는 비용을 매번 치른다.
+  isolate?: boolean;
 }
 
 export interface SpawnedSub {
@@ -148,6 +163,30 @@ async function renameBatch(
   }
 }
 
+// 우리가 만든 폴더이므로 신뢰를 선점한다. 필요한 것은 agy 하나다 — claude는 저장소 단위로
+// 판단해 worktree가 자동 통과하고 codex는 프롬프트가 뜨지 않았다(research 02 §2). 사용자가
+// 만든 폴더에서는 이 우회를 하지 않는다(A-3).
+async function prepareIsolatedWorkspace(treePath: string): Promise<void> {
+  try {
+    await trustWorkspace(treePath, homedir());
+  } catch (err) {
+    // 신뢰를 못 넣어도 스폰은 진행한다. agy 세션에서 프롬프트가 한 번 뜰 뿐이다.
+    output.warn(`subagents: agy 신뢰 선점 실패 — ${String(err)}`);
+  }
+}
+
+// 새 체크아웃에 없는 것들을 첫 프롬프트 앞에 알린다(B-8). 조용히 실패하는 쪽, 즉 지침 파일이
+// 없는 상황만 다룬다 — 의존성은 시끄럽게 실패하므로 에이전트가 알아서 처리한다.
+async function buildPreamble(repoPath: string, treePath: string): Promise<string> {
+  try {
+    const missing = await listMissingPaths(repoPath);
+    return buildIsolationPreamble({ parentPath: repoPath, worktreePath: treePath, missing });
+  } catch (err) {
+    output.warn(`subagents: 결손 목록 조회 실패 — ${String(err)}`);
+    return '';
+  }
+}
+
 export async function spawnSubagents(req: SpawnRequest): Promise<SpawnedSub[]> {
   if (!deps) throw new Error('subagents: 초기화되지 않았다');
   if (req.harnesses.length === 0) throw new Error('subagents: 하니스가 비어 있다');
@@ -165,25 +204,49 @@ export async function spawnSubagents(req: SpawnRequest): Promise<SpawnedSub[]> {
   for (let i = 0; i < req.harnesses.length; i++) {
     const model = req.harnesses[i];
     const name = names[i];
-    const opts = await deps.buildOpts(model, cwd, req.workspaceId, undefined, undefined, {
-      initialPrompt: req.prompt,
-      parentSessionId: req.parentSessionId,
-    });
 
-    // 레코드가 먼저다. 띄우다 실패해도 레코드는 남고, 레코드 없이 뜬 서브는 없다.
-    await store.addSession(req.workspaceId, model, 'cli', opts.sessionId!, {
+    // 레코드가 먼저다. 띄우다 실패해도 레코드는 남고, 레코드 없이 뜬 서브는 없다. 격리에서는
+    // 이 순서가 고아 판정의 근거가 된다 — 레코드 없이 남은 폴더만 비정상 종료의 흔적이다(B-7).
+    const sessionId = randomUUID();
+    await store.addSession(req.workspaceId, model, 'cli', sessionId, {
       parentSessionId: req.parentSessionId,
       agentName: name,
     });
+
+    // 격리를 골랐으면 여기서 폴더가 생긴다. 실패하면 그 서브만 접고 나머지는 계속 띄운다 —
+    // 레코드는 이미 남아 있어 다음 정리가 주워 간다.
+    let workDir = cwd;
+    let preamble = '';
+    if (req.isolate) {
+      try {
+        const treePath = resolveTreePath(workspaceStore.getWorkspacePath(req.workspaceId), name);
+        await addWorktree(cwd, treePath, name);
+        await prepareIsolatedWorkspace(treePath);
+        preamble = await buildPreamble(cwd, treePath);
+        workDir = treePath;
+      } catch (err) {
+        output.warn(`subagents: ${name} 격리 실패 — ${String(err)}`);
+        await store.updateSessionMeta(req.workspaceId, sessionId, {
+          closedAt: new Date().toISOString(),
+        });
+        continue;
+      }
+    }
+
+    const opts = await deps.buildOpts(model, workDir, req.workspaceId, sessionId, undefined, {
+      initialPrompt: preamble ? `${preamble}\n\n${req.prompt}` : req.prompt,
+      parentSessionId: req.parentSessionId,
+      freshSession: true,
+    });
     // 제목을 지금 박는 이유는 둘이다. 트리에 이름 없는 행이 잠깐 뜨는 것을 막고, 세션별 자동
     // 명명이 서브마다 따로 도는 것을 막는다(그쪽은 제목이 비어 있을 때만 돈다).
-    await store.updateSessionMeta(req.workspaceId, opts.sessionId!, {
+    await store.updateSessionMeta(req.workspaceId, sessionId, {
       title: displayTitle(fallbackBase, model),
     });
     opts.terminalName = displayTitle(fallbackBase, model);
 
     deps.openPanel(opts, req.workspaceId, true);
-    spawned.push({ name, sessionId: opts.sessionId!, model });
+    spawned.push({ name, sessionId, model });
     output.log(`subagents: ${name} (${model}) 스폰 — 부모 ${req.parentSessionId.slice(0, 8)}`);
   }
 
@@ -267,10 +330,22 @@ async function handleStart(req: HostRequest, sessionDir: string): Promise<string
     return h as CliKind;
   });
 
-  const spawned = await spawnSubagents({ workspaceId, parentSessionId: sessionId, prompt, harnesses });
-  const lines = [`서브 ${spawned.length}개를 띄웠다.`, ''];
+  const isolate = p.isolate === true;
+  const spawned = await spawnSubagents({
+    workspaceId,
+    parentSessionId: sessionId,
+    prompt,
+    harnesses,
+    isolate,
+  });
+  if (spawned.length === 0) throw new Error('서브를 하나도 띄우지 못했다');
+  const lines = [
+    `서브 ${spawned.length}개를 띄웠다${isolate ? ' (각자 새 worktree에서 돈다)' : ''}.`,
+    '',
+  ];
   for (const s of spawned) lines.push(`  ${s.name}  (${s.model})`);
   lines.push('', '보고는 `agent check`로 확인하고 `agent read <이름>`으로 읽는다.');
+  if (isolate) lines.push('끝나면 `agent close <이름>`으로 정리한다 — 폴더와 브랜치가 함께 사라진다.');
   return lines.join('\n');
 }
 
@@ -289,6 +364,78 @@ async function handleSend(req: HostRequest, sessionDir: string): Promise<string>
   return `${name}에 지침을 보냈다.`;
 }
 
+// ─── 정리 (0.5.0 W7) ─────────────────────────────────────────────────────
+//
+// 부르는 자리는 셋이고 들어가는 곳은 하나다 — `agent close`, 메인 세션 삭제의 캐스케이드,
+// 트리의 삭제 액션. 어느 경로로 지우든 결과가 같아야 한다.
+//
+// 탭을 닫는 것은 여기가 아니다. 탭 닫힘은 세션을 끝낼 뿐이고 worktree는 그대로 남는다 —
+// 탭이 닫혔는지는 삭제의 근거가 아니다(B-7).
+export async function cleanupOne(
+  workspaceId: string,
+  sessionId: string,
+  agentName: string,
+): Promise<CleanupReceipt> {
+  const store = getWorkspaceStore();
+  const meta = await store.loadWorkspace(workspaceId);
+  const wsDir = workspaceStore.getWorkspacePath(workspaceId);
+  const treePath = resolveTreePath(wsDir, agentName);
+
+  return cleanupSubagent(
+    { name: agentName, repoPath: meta.workspacePath, treePath },
+    {
+      stopSession: () => {
+        const panel = getActivePanel(sessionId);
+        if (panel) {
+          panel.markDeleted(); // 정리가 레코드를 직접 닫으므로 패널의 닫힘 처리를 이중으로 태우지 않는다
+          panel.dispose();
+        }
+      },
+      markClosed: () =>
+        store.updateSessionMeta(workspaceId, sessionId, { closedAt: new Date().toISOString() }),
+    },
+  );
+}
+
+// 메인 세션을 지울 때 그 아래 서브 전부. 레코드를 지우는 것은 되돌릴 수 없는 명시 행위이므로
+// 함께 간다(B-7 정리 시점 둘째).
+export async function cleanupChildrenOf(
+  workspaceId: string,
+  parentSessionId: string,
+): Promise<CleanupReceipt[]> {
+  const meta = await getWorkspaceStore().loadWorkspace(workspaceId);
+  const children = meta.sessions.filter(
+    (s) => s.parentSessionId === parentSessionId && s.agentName,
+  );
+  const receipts: CleanupReceipt[] = [];
+  for (const child of children) {
+    receipts.push(await cleanupOne(workspaceId, child.sessionId, child.agentName as string));
+  }
+  return receipts;
+}
+
+// 프로젝트를 열 때 도는 고아 스캔. 레코드가 아예 없는 폴더만 지운다 — 앱이 비정상 종료해
+// 레코드를 못 쓴 흔적이다. 알릴 상대가 없는 시점이라 결과를 돌려주고, 보여주는 것은 호출처가
+// 다음에 프로젝트를 열 때 한다(B-7 정리 시점 셋째).
+export async function sweepOrphanTrees(workspaceId: string): Promise<string[]> {
+  const store = getWorkspaceStore();
+  const meta = await store.loadWorkspace(workspaceId);
+  const wsDir = workspaceStore.getWorkspacePath(workspaceId);
+  const known = meta.sessions.map((s) => s.agentName).filter((n): n is string => !!n);
+  const orphans = await findOrphanTrees(wsDir, known);
+
+  const swept: string[] = [];
+  for (const name of orphans) {
+    const receipt = await cleanupSubagent(
+      { name, repoPath: meta.workspacePath, treePath: resolveTreePath(wsDir, name) },
+      { stopSession: () => {}, markClosed: async () => {} },
+    );
+    if (receipt.ok) swept.push(name);
+    else output.warn(`subagents: 고아 ${name} 정리 실패 — ${receipt.error}`);
+  }
+  return swept;
+}
+
 async function handleStop(req: HostRequest, sessionDir: string): Promise<string> {
   const { workspaceId, sessionId } = callerFromSessionDir(sessionDir);
   const name = str(payloadOf(req).name);
@@ -301,10 +448,14 @@ async function handleStop(req: HostRequest, sessionDir: string): Promise<string>
   return `${name}을 끝냈다.`;
 }
 
-// 정리(B-7의 여섯 단계)는 W7에서 이 자리에 들어온다. 그때까지는 끝내는 것까지만 한다 —
-// 아직 만들 수 있는 worktree가 없으므로 지울 것도 없다.
 async function handleClose(req: HostRequest, sessionDir: string): Promise<string> {
-  return handleStop(req, sessionDir);
+  const { workspaceId, sessionId } = callerFromSessionDir(sessionDir);
+  const name = str(payloadOf(req).name);
+  if (!name) throw new Error('서브 이름이 없다');
+  const sub = await findSub(workspaceId, sessionId, name);
+  const receipt = await cleanupOne(workspaceId, sub.sessionId, name);
+  deps?.refreshTree();
+  return renderReceipt(receipt);
 }
 
 export const subagentHostHandlers = {
