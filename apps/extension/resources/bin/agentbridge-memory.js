@@ -219,7 +219,11 @@ description: >-
   project not seen this session, when the answer turns on how this user works
   (style, tooling, workflow, conventions) or on this repository's own rules,
   when the user states something durable worth remembering, or when a context
-  or memory command fails and the wiring may be broken.
+  or memory command fails and the wiring may be broken. Also use whenever the
+  user asks to run work in another agent session \u2014 "\uC11C\uBE0C\uC5D0\uC774\uC804\uD2B8 \uB744\uC6CC", "\uC11C\uBE0C
+  \uB744\uC6CC\uC11C ~\uD558\uAC8C \uD574", "spawn a subagent", "run this in codex/claude/agy", "get a
+  second opinion from another model", "run these in parallel" \u2014 or asks about
+  subagents already started ("\uC11C\uBE0C \uB05D\uB0AC\uC5B4?", "\uBCF4\uACE0 \uC77D\uC5B4\uC918", "what did it say").
 ---
 
 # AgentBridge
@@ -322,7 +326,7 @@ var SKILL_VERSION, SKILL_DIR_NAME;
 var init_skillTemplate = __esm({
   "packages/core/src/skillTemplate.ts"() {
     "use strict";
-    SKILL_VERSION = "0.5.4";
+    SKILL_VERSION = "0.5.5";
     SKILL_DIR_NAME = "agentbridge";
   }
 });
@@ -480,6 +484,11 @@ function buildInstructions(storageRoot) {
     "- The user states something durable (a preference, a convention, a decision that should",
     "  outlive this session) \u2014 read that side in full first, then `memory add` or",
     "  `memory update <id>`. Both go to a queue the user approves.",
+    '- The user asks for work to run in another agent session \u2014 "\uC11C\uBE0C\uC5D0\uC774\uC804\uD2B8 \uB744\uC6CC", spawn a',
+    "  subagent, run it in another harness, a second opinion, several in parallel \u2014",
+    '  `agent start --prompt "..." [--harness claude,codex,agy]`. These are AgentBridge',
+    "  sessions with their own tabs, not your own built-in subagent tool. Follow up with",
+    '  `agent check`, `agent read <name>`, `agent send <name> --prompt "..."`.',
     "",
     "Run `status` if a command fails and you need to know whether the wiring is alive.",
     "",

@@ -11,7 +11,7 @@
 //
 // `uninstall`은 싣지 않는다. 사용자 명령이지 에이전트 명령이 아니다.
 
-export const SKILL_VERSION = '0.5.4';
+export const SKILL_VERSION = '0.5.5';
 export const SKILL_DIR_NAME = 'agentbridge';
 
 // 셸에서 그대로 쓸 수 있게 공백 있는 경로를 감싼다.
@@ -35,7 +35,11 @@ description: >-
   project not seen this session, when the answer turns on how this user works
   (style, tooling, workflow, conventions) or on this repository's own rules,
   when the user states something durable worth remembering, or when a context
-  or memory command fails and the wiring may be broken.
+  or memory command fails and the wiring may be broken. Also use whenever the
+  user asks to run work in another agent session — "서브에이전트 띄워", "서브
+  띄워서 ~하게 해", "spawn a subagent", "run this in codex/claude/agy", "get a
+  second opinion from another model", "run these in parallel" — or asks about
+  subagents already started ("서브 끝났어?", "보고 읽어줘", "what did it say").
 ---
 
 # AgentBridge

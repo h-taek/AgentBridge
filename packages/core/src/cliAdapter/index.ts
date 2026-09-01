@@ -178,8 +178,11 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
                 `claudeAdapter: resume 불가 (jsonl 없음) — 새 세션으로 fallback (sessionId=${sessionId.slice(0, 8)})`,
               ),
               ['--session-id', sessionId]);
-        // 첫 프롬프트는 위치 인자다. resume에는 붙이지 않는다 — 이어서 여는 세션은 이미 들었다.
-        const promptArgs = !resumeSessionId && extras?.initialPrompt ? [extras.initialPrompt] : [];
+        // 첫 프롬프트 앞에는 `--`가 필요하다. `--add-dir`와 `--allowedTools`가 값을 여러 개 받는
+        // 옵션이라, 구분자 없이 뒤에 붙이면 프롬프트가 그 옵션의 값으로 먹힌다(라이브에서 확인:
+        // "Input must be provided ... when using --print"). resume에는 붙이지 않는다 — 이어서
+        // 여는 세션은 이미 그 말을 들었다.
+        const promptArgs = !resumeSessionId && extras?.initialPrompt ? ['--', extras.initialPrompt] : [];
         const args = [...sessionArgs, ...accessArgs, ...promptArgs];
 
         return {

@@ -187,6 +187,11 @@ export async function spawnSubagents(req: SpawnRequest): Promise<SpawnedSub[]> {
     output.log(`subagents: ${name} (${model}) 스폰 — 부모 ${req.parentSessionId.slice(0, 8)}`);
   }
 
+  // 새 탭은 메인과 같은 에디터 그룹에 합류하므로, 포커스를 안 뺏어도 화면에 보이는 탭이
+  // 서브로 바뀐다. 메인을 다시 앞으로 보낸다 — 사용자는 서브를 띄우라고 했지 보겠다고 한 것이
+  // 아니다. 서브 탭은 그 그룹에 그대로 남아 있고 트리와 탭 목록에서 언제든 열 수 있다.
+  getActivePanel(req.parentSessionId)?.reveal(true);
+
   deps.refreshTree();
 
   // 헤드리스 명명은 스폰 한 번에 한 번이다. 실패해도 절단 이름이 남으므로 기다리지 않는다.

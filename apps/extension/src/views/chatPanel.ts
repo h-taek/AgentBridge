@@ -283,8 +283,10 @@ export class ChatPanel {
     return true;
   }
 
-  reveal(): void {
-    this.panel.reveal(undefined, false);
+  // preserveFocus를 켜면 이 탭이 자기 그룹에서 앞으로 나오되 키보드 포커스는 있던 자리에
+  // 남는다. 서브가 뜬 뒤 메인을 다시 앞으로 보낼 때 쓴다 (0.5.0 B-6).
+  reveal(preserveFocus = false): void {
+    this.panel.reveal(undefined, preserveFocus);
   }
 
   // 탭 제목 갱신 — 패널 생성 후 세션 이름이 바뀌면 호출(자기 세션 자동명명 또는 updateSessionTabTitle 경유).
