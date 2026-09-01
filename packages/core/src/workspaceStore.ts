@@ -58,6 +58,9 @@ export interface SessionMeta {
   // 서브에이전트에 발급한 교량 이름. 폴더(trees/<이름>)와 브랜치(agentbridge/<이름>)와 명령이
   // 받는 id를 겸한다 (0.5.0 B-7). 메인 세션에는 없다.
   agentName?: string;
+  // 정리된 시각 (0.5.0 B-7). 레코드를 보존하는 이유는 이름 재사용의 마지막 사용 시각 하나뿐이라,
+  // 정리된 서브는 트리와 목록에서 빠진다 — 화면에는 열 수도 이어갈 수도 없는 행이 남지 않는다.
+  cleanedAt?: string;
   // 사용자가 이 세션을 마지막으로 연 시각(ISO). 완료 표시를 끄는 기준 (0.5.0 B-2).
   lastOpenedAt?: string;
 }
@@ -91,6 +94,7 @@ export type SessionUpdatePatch = Partial<{
   parentSessionId: string | undefined;
   lastOpenedAt: string;
   agentName: string | undefined;
+  cleanedAt: string;
 }>;
 
 export type WorkspaceUpdatePatch = Partial<{

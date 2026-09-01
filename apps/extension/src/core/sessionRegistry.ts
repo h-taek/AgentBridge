@@ -124,6 +124,9 @@ export async function deleteSession(workspaceId: string, sessionId: string): Pro
 export async function getSessions(workspaceId: string): Promise<SessionMeta[]> {
   const ws = await getWorkspaceStore().loadWorkspace(workspaceId);
   return ws.sessions
+    // 정리된 서브는 화면에서 뺀다 (0.5.0 B-7). 레코드를 남기는 이유는 이름 재사용의 마지막
+    // 사용 시각 하나뿐이고, 열 수도 이어갈 수도 없는 행을 목록에 두면 그것대로 고장으로 보인다.
+    .filter((s) => !s.cleanedAt)
     .slice()
     .sort((a, b) => {
       // active(closedAt === null) 우선, 그 다음 lastChattedAt/createdAt 내림차순

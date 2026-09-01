@@ -25,7 +25,9 @@ import {
   HOST_AGENT_STOP,
   HOST_AGENT_CLOSE,
   addWorktree,
+  isGitRepo,
   trustWorkspace,
+  trustFolder,
   listMissingPaths,
   buildIsolationPreamble,
   cleanupSubagent,
@@ -167,11 +169,19 @@ async function renameBatch(
 // 판단해 worktree가 자동 통과하고 codex는 프롬프트가 뜨지 않았다(research 02 §2). 사용자가
 // 만든 폴더에서는 이 우회를 하지 않는다(A-3).
 async function prepareIsolatedWorkspace(treePath: string): Promise<void> {
+  const home = homedir();
+  // 신뢰를 못 넣어도 스폰은 진행한다. 그 세션에서 신뢰 창이 한 번 뜰 뿐이다.
   try {
-    await trustWorkspace(treePath, homedir());
+    await trustWorkspace(treePath, home);
   } catch (err) {
-    // 신뢰를 못 넣어도 스폰은 진행한다. agy 세션에서 프롬프트가 한 번 뜰 뿐이다.
     output.warn(`subagents: agy 신뢰 선점 실패 — ${String(err)}`);
+  }
+  // claude도 필요하다. 저장소 단위로 판단해 worktree가 통과할 것으로 봤는데 라이브에서 창이
+  // 떴다 — 그 화면은 단일 키를 읽으므로 첫 프롬프트가 답으로 먹힌다.
+  try {
+    await trustFolder(treePath, home);
+  } catch (err) {
+    output.warn(`subagents: claude 신뢰 선점 실패 — ${String(err)}`);
   }
 }
 
@@ -195,6 +205,15 @@ export async function spawnSubagents(req: SpawnRequest): Promise<SpawnedSub[]> {
   const store = getWorkspaceStore();
   const meta = await store.loadWorkspace(req.workspaceId);
   const cwd = meta.workspacePath;
+
+  // 격리는 worktree를 만드는 일이라 git 저장소가 아니면 성립하지 않는다. 시작하기 전에 거절해야
+  // 레코드도 세션도 안 남는다 — 중간에 실패하면 트리에 아무것도 아닌 행이 남는다.
+  if (req.isolate && !(await isGitRepo(cwd))) {
+    throw new Error(
+      `이 프로젝트는 git 저장소가 아니라 격리할 수 없다 (${cwd}). --isolate 없이 띄우거나 먼저 git init 한다.`,
+    );
+  }
+
   const names = await issueNames(req.workspaceId, req.harnesses.length, cwd);
 
   // 명명이 스폰을 막지 않는다. 절단 이름으로 먼저 띄우고 헤드리스 이름은 나중에 얹는다.
@@ -225,10 +244,10 @@ export async function spawnSubagents(req: SpawnRequest): Promise<SpawnedSub[]> {
         preamble = await buildPreamble(cwd, treePath);
         workDir = treePath;
       } catch (err) {
+        // 폴더를 못 만들었으면 그 서브는 아예 없던 것이다. 레코드를 닫아 두면 트리에 아무것도
+        // 아닌 행이 남고 이름도 계속 물고 있게 된다.
         output.warn(`subagents: ${name} 격리 실패 — ${String(err)}`);
-        await store.updateSessionMeta(req.workspaceId, sessionId, {
-          closedAt: new Date().toISOString(),
-        });
+        await store.deleteSession(req.workspaceId, sessionId);
         continue;
       }
     }
@@ -391,8 +410,11 @@ export async function cleanupOne(
           panel.dispose();
         }
       },
-      markClosed: () =>
-        store.updateSessionMeta(workspaceId, sessionId, { closedAt: new Date().toISOString() }),
+      sessionDir: workspaceStore.getSessionDir(workspaceId, sessionId),
+      markClosed: async () => {
+        const now = new Date().toISOString();
+        await store.updateSessionMeta(workspaceId, sessionId, { closedAt: now, cleanedAt: now });
+      },
     },
   );
 }

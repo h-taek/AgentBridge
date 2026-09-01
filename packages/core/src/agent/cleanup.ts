@@ -68,8 +68,12 @@ export interface CleanupTarget {
 export interface CleanupDeps {
   // PTY 세션을 끝낸다. 이미 끝나 있으면 그냥 참을 낸다.
   stopSession: () => Promise<void> | void;
-  // 세션 레코드에 닫힘 표시. 레코드 자체는 지우지 않는다.
+  // 세션 레코드에 닫힘·정리 표시. 레코드 자체는 지우지 않는다 — 이름 재사용의 근거다.
   markClosed: () => Promise<void>;
+  // 이 서브의 세션 폴더. 주면 기록을 함께 지운다 — 서브의 대화는 정리될 때 사라진다(B-8).
+  // 메인이 검수 시점에 전문을 읽어 가고, 읽은 것을 자기 말로 쓰면 그것이 프로젝트의 기록에
+  // 남는다. 원문을 두 벌로 보관하지 않는다.
+  sessionDir?: string;
 }
 
 // worktree 폴더가 실제로 있는가. 격리 여부를 레코드에 적지 않고 디스크로 판단하는 근거다 —
@@ -156,8 +160,9 @@ export async function cleanupSubagent(
     }
   }
 
-  // 5. 레코드에 닫힘 표시. 레코드는 보존한다.
+  // 5. 레코드에 닫힘·정리 표시. 레코드는 보존하고 기록만 지운다.
   try {
+    if (deps.sessionDir) await fsp.rm(deps.sessionDir, { recursive: true, force: true });
     await deps.markClosed();
     done('record');
   } catch (err) {

@@ -127,12 +127,18 @@ export function initializeCore(
   _bundledCliPath = path.join(binDir, 'agentbridge.js');
   const storageRoot = _workspaceStore.getGlobalStoragePath();
 
+  // 스킬 본문과 훅의 허용 규칙에 박히는 것은 번들 안 경로가 아니라 저장소 canonical 경로다.
+  const cliRun = { execPath: process.execPath, cliPath: getCanonicalBinPath(storageRoot, 'cli') };
+
   _hookInstaller = createHookInstaller({
     // hook 명령은 번들 안 경로가 아니라 저장소 canonical 경로(<루트>/bin/)를 가리킨다 (V-12).
     helperPath: getCanonicalBinPath(storageRoot, 'helper'),
     // 훅을 돌릴 런타임 — 익스텐션 호스트의 실행 파일이다. ELECTRON_RUN_AS_NODE=1을 붙이면
     // VS Code가 그대로 node로 동작하므로 사용자 PATH의 node 설치 여부와 무관해진다 (A-3).
     execPath: process.execPath,
+    // 모델이 우리 CLI를 승인 없이 부를 수 있게 하는 허용 규칙이 여기서 전역 설정에 들어간다.
+    // 스킬이 모델에게 가르치는 문자열과 같은 값이어야 한다 — 어긋나면 부르는 족족 승인 창이 뜬다.
+    cliRunPrefix: renderRunPrefix(cliRun),
     // 테스트만 오버라이드 — 실제 홈의 전역 설정을 건드리지 않게 한다.
     homeDir: testOverrides?.homeDirForTesting,
     logger,
@@ -141,8 +147,6 @@ export function initializeCore(
   // attachmentStore에 logger 단방향 주입 (circular dep 제거).
   setAttachmentLogger(logger);
 
-  // 스킬 본문에 박히는 것은 번들 안 경로가 아니라 저장소 canonical 경로다 — 훅과 같은 규칙.
-  const cliRun = { execPath: process.execPath, cliPath: getCanonicalBinPath(storageRoot, 'cli') };
   const skillInstaller = createSkillInstaller({
     ...cliRun,
     homeDir: testOverrides?.homeDirForTesting,
@@ -156,8 +160,6 @@ export function initializeCore(
     hookStatusStore: _hookStatusStore,
     workspaceDir: (workspaceId) => _workspaceStore!.getWorkspacePath(workspaceId),
     storageRoot,
-    // 스킬이 모델에게 가르치는 문자열과 같은 값이어야 한다 — 어긋나면 부르는 족족 승인 창이 뜬다.
-    cliRunPrefix: renderRunPrefix(cliRun),
     homeDir: testOverrides?.homeDirForTesting,
     logger,
   });

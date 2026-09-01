@@ -89,23 +89,7 @@ export class ChatPanel {
     // "탭이 전부 AgentBridge 챗 웹뷰인 에디터 그룹"을 찾아 그 컬럼에 새 탭으로 합류한다.
     // 그런 그룹이 없으면 빈 컬럼에 새로 만들고(startedInNewColumn=true), 그때만 그룹을 잠근다.
     // 배치/포커스에 좌우되지 않으므로 "잠긴 오른쪽 대신 왼쪽에 스폰" 현상이 사라진다.
-    const abGroup = vscode.window.tabGroups.all.find(
-      (g) =>
-        g.tabs.length > 0 &&
-        g.tabs.every(
-          (t) =>
-            t.input instanceof vscode.TabInputWebview &&
-            t.input.viewType.includes('agentbridge.chat'),
-        ),
-    );
-    let startedInNewColumn = false;
-    let targetColumn: vscode.ViewColumn;
-    if (abGroup && abGroup.viewColumn) {
-      targetColumn = abGroup.viewColumn;
-    } else {
-      targetColumn = ChatPanel.findUnusedColumn();
-      startedInNewColumn = true;
-    }
+    const { column: targetColumn, startedInNewColumn } = ChatPanel.pickColumn();
 
     const panel = vscode.window.createWebviewPanel(
       'agentbridge.chat',
@@ -119,6 +103,23 @@ export class ChatPanel {
     );
 
     return new ChatPanel(panel, extensionUri, opts, startedInNewColumn);
+  }
+
+  // 붙을 컬럼을 고른다. 탭이 전부 AgentBridge 챗인 그룹이 있으면 그 컬럼에 합류하고, 없으면
+  // 빈 컬럼을 새로 잡는다. 새 탭을 만드는 자리(생성·재부착)가 같은 규칙을 써야 재부착된 탭이
+  // 엉뚱한 자리에 스플릿으로 열리지 않는다 (0.5.0 W8).
+  private static pickColumn(): { column: vscode.ViewColumn; startedInNewColumn: boolean } {
+    const abGroup = vscode.window.tabGroups.all.find(
+      (g) =>
+        g.tabs.length > 0 &&
+        g.tabs.every(
+          (t) =>
+            t.input instanceof vscode.TabInputWebview &&
+            t.input.viewType.includes('agentbridge.chat'),
+        ),
+    );
+    if (abGroup && abGroup.viewColumn) return { column: abGroup.viewColumn, startedInNewColumn: false };
+    return { column: ChatPanel.findUnusedColumn(), startedInNewColumn: true };
   }
 
   // 안 쓰는 에디터 컬럼(One..Nine 중 첫 빈 칸, 없으면 Beside). 공식 claude-code 익스텐션과 동일.
@@ -323,7 +324,7 @@ export class ChatPanel {
     this.panel = vscode.window.createWebviewPanel(
       'agentbridge.chat',
       tabTitle(this.opts.terminalName),
-      { viewColumn: ChatPanel.findUnusedColumn(), preserveFocus: false },
+      { viewColumn: ChatPanel.pickColumn().column, preserveFocus: false },
       {
         enableScripts: true,
         retainContextWhenHidden: true,

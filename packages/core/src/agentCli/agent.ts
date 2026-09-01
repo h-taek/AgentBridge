@@ -11,6 +11,11 @@ import { promises as fsp } from 'fs';
 import { join } from 'path';
 import type { CliKind } from '../shared/cli';
 import { readAllTurns } from '../turnsStore';
+import {
+  computeSessionActivity,
+  readSessionActivityInputs,
+  type SessionActivity,
+} from '../sessionStatus';
 import { isUnread, markReported } from '../agent/reportState';
 import {
   sendHostRequest,
@@ -39,6 +44,7 @@ interface SessionRecord {
   title?: string;
   parentSessionId?: string;
   agentName?: string;
+  cleanedAt?: string;
 }
 
 export interface SubRow {
@@ -48,6 +54,8 @@ export interface SubRow {
   title: string;
   closed: boolean;
   unread: boolean;
+  // 관측한 활동. 트리의 행 표시와 같은 판정을 쓴다 — 우리가 따로 매기는 값이 아니다(B-2).
+  activity: SessionActivity;
 }
 
 async function readSessions(wsDir: string): Promise<SessionRecord[]> {
@@ -63,16 +71,27 @@ async function readSessions(wsDir: string): Promise<SessionRecord[]> {
 // 부르는 세션의 자식만 본다. 남의 서브는 목록에도 안 나오고 만질 수도 없다.
 export async function listSubs(wsDir: string, callerSessionId: string): Promise<SubRow[]> {
   const sessions = await readSessions(wsDir);
-  const mine = sessions.filter((s) => s.parentSessionId === callerSessionId && s.agentName);
+  // 정리된 서브는 목록에서 뺀다. 레코드는 이름 이력으로만 남는다 (0.5.0 B-7).
+  const mine = sessions.filter(
+    (s) => s.parentSessionId === callerSessionId && s.agentName && !s.cleanedAt,
+  );
   return Promise.all(
-    mine.map(async (s) => ({
-      name: s.agentName as string,
-      sessionId: s.sessionId,
-      model: s.model,
-      title: s.title ?? s.model,
-      closed: s.closedAt !== null,
-      unread: await isUnread(wsDir, s.sessionId),
-    })),
+    mine.map(async (s) => {
+      const closed = s.closedAt !== null;
+      // 닫힌 세션에는 상태가 없다 — PTY가 죽었으므로 진행 중일 수도 뒤늦게 완료될 수도 없다.
+      const activity: SessionActivity = closed
+        ? 'idle'
+        : computeSessionActivity(await readSessionActivityInputs(wsDir, s.sessionId), Date.now());
+      return {
+        name: s.agentName as string,
+        sessionId: s.sessionId,
+        model: s.model,
+        title: s.title ?? s.model,
+        closed,
+        unread: await isUnread(wsDir, s.sessionId),
+        activity,
+      };
+    }),
   );
 }
 
@@ -88,10 +107,25 @@ async function findSub(wsDir: string, callerSessionId: string, name: string): Pr
 
 // ─── list ───────────────────────────────────────────────────────────────
 
+// 상태 문구. '모름'은 우리가 더는 말할 수 없게 된 자리다 — 출력이 한참 멈췄거나 프로세스가
+// 사라졌는데 완료 신호가 없는 경우가 함께 들어간다(B-2). 사용자가 턴을 끊었을 때가 여기 걸린다.
+function stateText(s: SubRow): string {
+  if (s.closed) return '끝남';
+  switch (s.activity) {
+    case 'running':
+      return '도는 중';
+    case 'unknown':
+      return '모름 — 출력이 멈춘 지 오래다. 끊겼을 수 있으니 열어 보거나 지침을 다시 보낸다';
+    case 'done':
+      return '턴 끝남';
+    default:
+      return '노는 중';
+  }
+}
+
 function rowLine(s: SubRow): string {
-  const state = s.closed ? '끝남' : '도는 중';
   const mark = s.unread ? '  · 안 읽은 보고 있음' : '';
-  return `  ${s.name}  (${s.model}, ${state})  ${s.title}${mark}`;
+  return `  ${s.name}  (${s.model}, ${stateText(s)})  ${s.title}${mark}`;
 }
 
 export async function agentList(wsDir: string, callerSessionId: string): Promise<string> {
@@ -174,7 +208,7 @@ async function renderEmpty(wsDir: string, subs: SubRow[], waited: boolean): Prom
   if (subs.length === 0) return '띄운 서브가 없다.';
   const lines = [waited ? '기다리는 동안 끝난 서브가 없다.' : '끝났는데 안 읽은 서브가 없다.', ''];
   for (const s of subs) {
-    lines.push(`  ${s.name}  (${s.model}, ${s.closed ? '끝남' : '도는 중'})`);
+    lines.push(`  ${s.name}  (${s.model}, ${stateText(s)})`);
     if (s.closed) {
       const tail = await replayTail(wsDir, s.sessionId);
       if (tail) {

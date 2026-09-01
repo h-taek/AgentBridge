@@ -4,6 +4,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import {
   createCliAdapters,
+  createHookInstaller,
   parseWritableRoots,
   buildWritableRootsArgs,
   renderRunPrefix,
@@ -37,26 +38,63 @@ describe('기동 인자 — 승인과 샌드박스 (0.5.0 W5)', () => {
       envProbe,
       workspaceDir: (id) => join(storageRoot, 'workspaces', id),
       storageRoot,
-      cliRunPrefix: renderRunPrefix({ execPath, cliPath }),
       homeDir: home,
     });
   }
 
-  it('claude — 우리 명령 하나만 연다', async () => {
-    const opts = await adapters().claude.buildSpawnOptions('/tmp/proj', 'ws-1');
-    const i = opts.args.indexOf('--allowedTools');
-    assert.notEqual(i, -1, '--allowedTools가 붙어야 한다');
+  // 승인 개방은 기동 인자가 아니라 전역 설정에 있다. `--allowedTools`는 값을 공백으로 쪼개므로
+  // 우리 규칙처럼 공백이 든 것은 claude가 통째로 버린다(라이브에서 확인).
+  async function installClaude(): Promise<Record<string, unknown>> {
+    const installer = createHookInstaller({
+      helperPath: join(storageRoot, 'bin', 'agentbridge-memory.js'),
+      execPath,
+      cliRunPrefix: renderRunPrefix({ execPath, cliPath }),
+      homeDir: home,
+    });
+    const file = await installer.installClaudeHooks();
+    return JSON.parse(await fsp.readFile(file, 'utf8')) as Record<string, unknown>;
+  }
+
+  it('claude — 우리 명령 하나를 전역 설정의 허용 규칙으로 연다', async () => {
+    const settings = await installClaude();
+    const allow = (settings.permissions as { allow: string[] }).allow;
     // 공백이 든 런타임 경로만 감싼다 — 감쌀 필요가 없는 것을 감싸면 모델이 치는 문자열과 어긋난다.
-    assert.equal(opts.args[i + 1], `Bash('${execPath}' ${cliPath} *)`);
-    // 승인 전체를 여는 인자는 붙이지 않는다.
+    assert.deepEqual(allow, [`Bash('${execPath}' ${cliPath} *)`]);
+
+    // 기동 인자로는 안 연다. 그 옵션은 값을 공백으로 쪼개 규칙을 깨뜨린다.
+    const opts = await adapters().claude.buildSpawnOptions('/tmp/proj', 'ws-1');
+    assert.ok(!opts.args.includes('--allowedTools'));
+    // 승인 전체를 여는 인자도 붙이지 않는다.
     assert.ok(!opts.args.some((a) => a.includes('bypassPermissions') || a.includes('dangerously')));
   });
 
   it('claude — 허용 규칙이 스킬이 가르치는 문자열과 같은 값이다', async () => {
-    const opts = await adapters().claude.buildSpawnOptions('/tmp/proj', 'ws-1');
-    const rule = opts.args[opts.args.indexOf('--allowedTools') + 1]!;
+    const settings = await installClaude();
+    const rule = (settings.permissions as { allow: string[] }).allow[0]!;
     const prefix = rule.slice('Bash('.length, -' *)'.length);
     assert.ok(renderSkillMarkdown({ execPath, cliPath }).includes(prefix));
+  });
+
+  it('claude — 사용자의 기존 허용 규칙과 다른 설정을 보존한다', async () => {
+    await fsp.mkdir(join(home, '.claude'), { recursive: true });
+    await fsp.writeFile(
+      join(home, '.claude', 'settings.json'),
+      JSON.stringify({
+        model: 'opus',
+        permissions: { allow: ['Bash(git status)'], defaultMode: 'auto' },
+      }),
+      'utf8',
+    );
+    const settings = await installClaude();
+    const permissions = settings.permissions as { allow: string[]; defaultMode: string };
+    assert.equal(settings.model, 'opus');
+    assert.equal(permissions.defaultMode, 'auto');
+    assert.equal(permissions.allow[0], 'Bash(git status)');
+    assert.equal(permissions.allow.length, 2);
+
+    // 두 번 깔아도 중복이 안 생긴다.
+    const again = (await installClaude()).permissions as { allow: string[] };
+    assert.equal(again.allow.length, 2);
   });
 
   it('codex — 저장소 폴더 하나를 쓰기 허용으로 더하고 샌드박스 모드는 안 건드린다', async () => {

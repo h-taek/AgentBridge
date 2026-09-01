@@ -1289,7 +1289,40 @@ async function readTurnSignal(signalFilePath) {
   }
   return parseTurnSignal(raw);
 }
-var import_fs8, import_path10, TURN_SIGNAL_FILENAME;
+function resolveTurnStartFile(workspaceDir, sessionId) {
+  return (0, import_path10.join)(workspaceDir, "sessions", sessionId, TURN_START_FILENAME);
+}
+function parseTurnStart(raw) {
+  let obj;
+  try {
+    obj = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!obj || typeof obj !== "object") return null;
+  const o = obj;
+  const agent = str(o.agent);
+  if (agent !== "claude" && agent !== "codex" && agent !== "agy") return null;
+  const event = str(o.event);
+  if (!event) return null;
+  const at = typeof o.at === "number" && Number.isFinite(o.at) ? o.at : 0;
+  return {
+    agent,
+    event,
+    sessionId: str(o.sessionId),
+    at
+  };
+}
+async function readTurnStart(startFilePath) {
+  let raw;
+  try {
+    raw = await import_fs8.promises.readFile(startFilePath, "utf8");
+  } catch {
+    return null;
+  }
+  return parseTurnStart(raw);
+}
+var import_fs8, import_path10, TURN_SIGNAL_FILENAME, TURN_START_FILENAME;
 var init_turnSignal = __esm({
   "packages/core/src/cliAdapter/turnSignal.ts"() {
     "use strict";
@@ -1298,17 +1331,91 @@ var init_turnSignal = __esm({
     init_interfaces();
     init_sessionFileWatcher();
     TURN_SIGNAL_FILENAME = "turn-signal.json";
+    TURN_START_FILENAME = "turn-start.json";
+  }
+});
+
+// packages/core/src/sessionStatus.ts
+function computeSessionActivity(input, now) {
+  const { startAt, endAt, lastOutputAt, viewedAt } = input;
+  const running = startAt !== void 0 && (endAt === void 0 || startAt > endAt);
+  if (!running) {
+    if (endAt !== void 0 && (viewedAt === void 0 || endAt > viewedAt)) return "done";
+    return "idle";
+  }
+  const lastOutput = lastOutputAt ?? startAt;
+  return now - lastOutput >= SILENCE_MS ? "unknown" : "running";
+}
+async function cachedRead(cache, path2, stat, read) {
+  let mtimeMs;
+  try {
+    mtimeMs = (await stat(path2)).mtimeMs;
+  } catch {
+    cache.delete(path2);
+    return void 0;
+  }
+  const cached = cache.get(path2);
+  if (cached && cached.mtimeMs === mtimeMs) return cached.value;
+  const value = await read(path2);
+  cache.set(path2, { mtimeMs, value });
+  return value;
+}
+async function cachedLastOutputAt(cache, path2, stat) {
+  let mtimeMs;
+  try {
+    mtimeMs = (await stat(path2)).mtimeMs;
+  } catch {
+    cache.delete(path2);
+    return void 0;
+  }
+  cache.set(path2, { mtimeMs, value: mtimeMs });
+  return mtimeMs;
+}
+function resolveReplayLogFile(workspaceDir, sessionId) {
+  return (0, import_path11.join)(workspaceDir, "sessions", sessionId, "replay.log");
+}
+async function readSessionActivityInputs(workspaceDir, sessionId, io = defaultIo) {
+  const startFile = resolveTurnStartFile(workspaceDir, sessionId);
+  const signalFile = resolveTurnSignalFile(workspaceDir, sessionId);
+  const replayLogFile = resolveReplayLogFile(workspaceDir, sessionId);
+  const [start, signal, lastOutputAt] = await Promise.all([
+    cachedRead(startCache, startFile, io.stat, io.readTurnStart),
+    cachedRead(signalCache, signalFile, io.stat, io.readTurnSignal),
+    cachedLastOutputAt(outputCache, replayLogFile, io.stat)
+  ]);
+  return {
+    startAt: start?.at,
+    endAt: signal?.at,
+    lastOutputAt
+  };
+}
+var import_fs9, import_path11, SILENCE_MS, defaultIo, startCache, signalCache, outputCache;
+var init_sessionStatus = __esm({
+  "packages/core/src/sessionStatus.ts"() {
+    "use strict";
+    import_fs9 = require("fs");
+    import_path11 = require("path");
+    init_turnSignal();
+    SILENCE_MS = 6e4;
+    defaultIo = {
+      stat: (path2) => import_fs9.promises.stat(path2),
+      readTurnStart,
+      readTurnSignal
+    };
+    startCache = /* @__PURE__ */ new Map();
+    signalCache = /* @__PURE__ */ new Map();
+    outputCache = /* @__PURE__ */ new Map();
   }
 });
 
 // packages/core/src/agent/reportState.ts
 function resolveReportReadFile(workspaceDir, sessionId) {
-  return (0, import_path11.join)(workspaceDir, "sessions", sessionId, REPORT_READ_FILENAME);
+  return (0, import_path12.join)(workspaceDir, "sessions", sessionId, REPORT_READ_FILENAME);
 }
 async function readReportReadAt(workspaceDir, sessionId) {
   let raw;
   try {
-    raw = await import_fs9.promises.readFile(resolveReportReadFile(workspaceDir, sessionId), "utf8");
+    raw = await import_fs10.promises.readFile(resolveReportReadFile(workspaceDir, sessionId), "utf8");
   } catch {
     return 0;
   }
@@ -1322,9 +1429,9 @@ async function readReportReadAt(workspaceDir, sessionId) {
 async function markReported(workspaceDir, sessionId, at = Date.now()) {
   const target = resolveReportReadFile(workspaceDir, sessionId);
   const tmp = `${target}.${process.pid}.${Date.now()}.tmp`;
-  await import_fs9.promises.mkdir((0, import_path11.join)(workspaceDir, "sessions", sessionId), { recursive: true });
-  await import_fs9.promises.writeFile(tmp, JSON.stringify({ at }), "utf8");
-  await import_fs9.promises.rename(tmp, target);
+  await import_fs10.promises.mkdir((0, import_path12.join)(workspaceDir, "sessions", sessionId), { recursive: true });
+  await import_fs10.promises.writeFile(tmp, JSON.stringify({ at }), "utf8");
+  await import_fs10.promises.rename(tmp, target);
 }
 async function isUnread(workspaceDir, sessionId) {
   const signal = await readTurnSignal(resolveTurnSignalFile(workspaceDir, sessionId));
@@ -1332,12 +1439,12 @@ async function isUnread(workspaceDir, sessionId) {
   const readAt = await readReportReadAt(workspaceDir, sessionId);
   return signal.at > readAt;
 }
-var import_fs9, import_path11, REPORT_READ_FILENAME;
+var import_fs10, import_path12, REPORT_READ_FILENAME;
 var init_reportState = __esm({
   "packages/core/src/agent/reportState.ts"() {
     "use strict";
-    import_fs9 = require("fs");
-    import_path11 = require("path");
+    import_fs10 = require("fs");
+    import_path12 = require("path");
     init_turnSignal();
     REPORT_READ_FILENAME = "report-read.json";
   }
@@ -1358,7 +1465,7 @@ __export(agent_exports, {
 });
 async function readSessions(wsDir) {
   try {
-    const raw = await import_fs10.promises.readFile((0, import_path12.join)(wsDir, "workspace.json"), "utf8");
+    const raw = await import_fs11.promises.readFile((0, import_path13.join)(wsDir, "workspace.json"), "utf8");
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed.sessions) ? parsed.sessions : [];
   } catch {
@@ -1367,16 +1474,23 @@ async function readSessions(wsDir) {
 }
 async function listSubs(wsDir, callerSessionId) {
   const sessions = await readSessions(wsDir);
-  const mine = sessions.filter((s) => s.parentSessionId === callerSessionId && s.agentName);
+  const mine = sessions.filter(
+    (s) => s.parentSessionId === callerSessionId && s.agentName && !s.cleanedAt
+  );
   return Promise.all(
-    mine.map(async (s) => ({
-      name: s.agentName,
-      sessionId: s.sessionId,
-      model: s.model,
-      title: s.title ?? s.model,
-      closed: s.closedAt !== null,
-      unread: await isUnread(wsDir, s.sessionId)
-    }))
+    mine.map(async (s) => {
+      const closed = s.closedAt !== null;
+      const activity = closed ? "idle" : computeSessionActivity(await readSessionActivityInputs(wsDir, s.sessionId), Date.now());
+      return {
+        name: s.agentName,
+        sessionId: s.sessionId,
+        model: s.model,
+        title: s.title ?? s.model,
+        closed,
+        unread: await isUnread(wsDir, s.sessionId),
+        activity
+      };
+    })
   );
 }
 async function findSub(wsDir, callerSessionId, name) {
@@ -1388,10 +1502,22 @@ async function findSub(wsDir, callerSessionId, name) {
   }
   return found;
 }
+function stateText(s) {
+  if (s.closed) return "\uB05D\uB0A8";
+  switch (s.activity) {
+    case "running":
+      return "\uB3C4\uB294 \uC911";
+    case "unknown":
+      return "\uBAA8\uB984 \u2014 \uCD9C\uB825\uC774 \uBA48\uCD98 \uC9C0 \uC624\uB798\uB2E4. \uB04A\uACBC\uC744 \uC218 \uC788\uC73C\uB2C8 \uC5F4\uC5B4 \uBCF4\uAC70\uB098 \uC9C0\uCE68\uC744 \uB2E4\uC2DC \uBCF4\uB0B8\uB2E4";
+    case "done":
+      return "\uD134 \uB05D\uB0A8";
+    default:
+      return "\uB178\uB294 \uC911";
+  }
+}
 function rowLine(s) {
-  const state = s.closed ? "\uB05D\uB0A8" : "\uB3C4\uB294 \uC911";
   const mark = s.unread ? "  \xB7 \uC548 \uC77D\uC740 \uBCF4\uACE0 \uC788\uC74C" : "";
-  return `  ${s.name}  (${s.model}, ${state})  ${s.title}${mark}`;
+  return `  ${s.name}  (${s.model}, ${stateText(s)})  ${s.title}${mark}`;
 }
 async function agentList(wsDir, callerSessionId) {
   const subs = await listSubs(wsDir, callerSessionId);
@@ -1400,7 +1526,7 @@ async function agentList(wsDir, callerSessionId) {
 }
 async function agentRead(wsDir, callerSessionId, name, lastN) {
   const sub = await findSub(wsDir, callerSessionId, name);
-  const sessionDir2 = (0, import_path12.join)(wsDir, "sessions", sub.sessionId);
+  const sessionDir2 = (0, import_path13.join)(wsDir, "sessions", sub.sessionId);
   const all = await readAllTurns(sessionDir2);
   await markReported(wsDir, sub.sessionId);
   if (all.length === 0) {
@@ -1417,11 +1543,11 @@ async function agentRead(wsDir, callerSessionId, name, lastN) {
   return lines.join("\n");
 }
 async function replayTail(wsDir, sessionId) {
-  const path2 = (0, import_path12.join)(wsDir, "sessions", sessionId, "replay.log");
+  const path2 = (0, import_path13.join)(wsDir, "sessions", sessionId, "replay.log");
   try {
-    const stat = await import_fs10.promises.stat(path2);
+    const stat = await import_fs11.promises.stat(path2);
     const start = Math.max(0, stat.size - TAIL_BYTES);
-    const handle = await import_fs10.promises.open(path2, "r");
+    const handle = await import_fs11.promises.open(path2, "r");
     try {
       const buf = Buffer.alloc(stat.size - start);
       await handle.read(buf, 0, buf.length, start);
@@ -1443,7 +1569,7 @@ async function renderEmpty(wsDir, subs, waited) {
   if (subs.length === 0) return "\uB744\uC6B4 \uC11C\uBE0C\uAC00 \uC5C6\uB2E4.";
   const lines = [waited ? "\uAE30\uB2E4\uB9AC\uB294 \uB3D9\uC548 \uB05D\uB09C \uC11C\uBE0C\uAC00 \uC5C6\uB2E4." : "\uB05D\uB0AC\uB294\uB370 \uC548 \uC77D\uC740 \uC11C\uBE0C\uAC00 \uC5C6\uB2E4.", ""];
   for (const s of subs) {
-    lines.push(`  ${s.name}  (${s.model}, ${s.closed ? "\uB05D\uB0A8" : "\uB3C4\uB294 \uC911"})`);
+    lines.push(`  ${s.name}  (${s.model}, ${stateText(s)})`);
     if (s.closed) {
       const tail = await replayTail(wsDir, s.sessionId);
       if (tail) {
@@ -1495,13 +1621,14 @@ function agentStop(sessionDir2, name) {
 function agentClose(sessionDir2, name) {
   return callHost(sessionDir2, HOST_AGENT_CLOSE, { name });
 }
-var import_fs10, import_path12, DEFAULT_WAIT_SEC, WAIT_POLL_MS, TAIL_BYTES, defaultSleep2, requestSeq;
+var import_fs11, import_path13, DEFAULT_WAIT_SEC, WAIT_POLL_MS, TAIL_BYTES, defaultSleep2, requestSeq;
 var init_agent = __esm({
   "packages/core/src/agentCli/agent.ts"() {
     "use strict";
-    import_fs10 = require("fs");
-    import_path12 = require("path");
+    import_fs11 = require("fs");
+    import_path13 = require("path");
     init_turnsStore();
+    init_sessionStatus();
     init_reportState();
     init_hostRequest();
     DEFAULT_WAIT_SEC = 60;
@@ -1523,13 +1650,13 @@ async function uninstallGlobal(homeDir) {
   for (const agent of AGENTS2) {
     const path2 = skillFilePath(agent, homeDir);
     try {
-      await import_fs11.promises.unlink(path2);
+      await import_fs12.promises.unlink(path2);
       removed.push(path2);
     } catch {
       continue;
     }
     try {
-      await import_fs11.promises.rmdir((0, import_path13.dirname)(path2));
+      await import_fs12.promises.rmdir((0, import_path14.dirname)(path2));
     } catch {
     }
   }
@@ -1544,12 +1671,12 @@ async function uninstallGlobal(homeDir) {
     "\uC800\uC7A5\uC18C(\uB300\uD654 \uAE30\uB85D\uACFC \uC9C0\uC2DD)\uB294 \uADF8\uB300\uB85C \uB454\uB2E4."
   ].join("\n");
 }
-var import_fs11, import_path13, AGENTS2;
+var import_fs12, import_path14, AGENTS2;
 var init_uninstall = __esm({
   "packages/core/src/agentCli/uninstall.ts"() {
     "use strict";
-    import_fs11 = require("fs");
-    import_path13 = require("path");
+    import_fs12 = require("fs");
+    import_path14 = require("path");
     init_hookInstaller();
     init_skillInstaller();
     AGENTS2 = ["claude", "codex", "agy"];
@@ -1557,7 +1684,7 @@ var init_uninstall = __esm({
 });
 
 // packages/core/bin/agentbridge.js
-var fs5 = require("fs");
+var fs6 = require("fs");
 var path = require("path");
 var {
   readContext: readContext2,
@@ -1614,7 +1741,7 @@ function fail(msg) {
 }
 function realpath(v) {
   try {
-    return fs5.realpathSync(v);
+    return fs6.realpathSync(v);
   } catch {
     return path.resolve(v);
   }

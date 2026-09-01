@@ -60,6 +60,17 @@ function lines(out: string): string[] {
 // 장부를 두지 않고 그때그때 git에게 묻는 이유는 우리 삭제 경로 밖에서 남은 브랜치도 잡아야 하기
 // 때문이다. 사용자가 손으로 만들었거나, 옛 버전이 남겼거나, 정리가 중간에서 멈췄을 수 있다.
 // 이름 발급이 이 목록을 '살아 있는 자리' 셋 중 하나로 본다(W1).
+// 여기가 git 저장소인가. 격리는 worktree를 만드는 일이라 저장소가 아니면 성립하지 않는다.
+// 스폰을 시작하기 전에 이걸 먼저 봐야 레코드도 세션도 안 남기고 거절할 수 있다.
+export async function isGitRepo(repoPath: string): Promise<boolean> {
+  try {
+    const out = await runGit(repoPath, ['rev-parse', '--is-inside-work-tree']);
+    return out.trim() === 'true';
+  } catch {
+    return false;
+  }
+}
+
 export async function listAgentBranches(repoPath: string): Promise<string[]> {
   const out = await runGit(repoPath, [
     'for-each-ref',

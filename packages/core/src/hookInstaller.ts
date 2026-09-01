@@ -81,6 +81,9 @@ export type HookInstallerOptions = {
   // 훅을 실행할 런타임 절대 경로. 설치 시점의 process.execPath다 — 사용자 PATH의 node에
   // 기대지 않는다(세 하니스 다 네이티브 바이너리라 node 없이 설치된다).
   execPath: string;
+  // 모델이 우리 CLI를 부를 때 치는 문자열의 앞부분(renderRunPrefix). claude의 권한 허용 규칙이
+  // 이 값으로 만들어진다. 없으면 규칙을 안 넣는다.
+  cliRunPrefix?: string;
   // 전역 설정을 둘 홈 디렉토리. 테스트만 오버라이드한다.
   homeDir?: string;
   logger?: Logger;
@@ -162,6 +165,18 @@ export function createHookInstaller(opts: HookInstallerOptions): HookInstaller {
     return merged;
   }
 
+  // 사용자의 규칙은 하나도 안 건드리고 우리 것 하나만 더한다. 이미 있으면 아무것도 안 한다.
+  function mergeClaudePermission(
+    settings: Record<string, unknown>,
+    rule: string,
+  ): Record<string, unknown> {
+    const permissions = isObject(settings.permissions) ? { ...settings.permissions } : {};
+    const allow = Array.isArray(permissions.allow) ? [...(permissions.allow as unknown[])] : [];
+    if (allow.includes(rule)) return settings;
+    allow.push(rule);
+    return { ...settings, permissions: { ...permissions, allow } };
+  }
+
   async function installClaudeHooks(): Promise<string> {
     const settingsDir = join(home, '.claude');
     await fsp.mkdir(settingsDir, { recursive: true });
@@ -200,7 +215,16 @@ export function createHookInstaller(opts: HookInstallerOptions): HookInstaller {
       },
     });
 
-    if (await writeIfChanged(settingsFile, JSON.stringify(merged, null, 2))) {
+    // 우리 CLI를 승인 없이 부를 수 있게 허용 규칙을 더한다 (0.5.0 B-5).
+    //
+    // 기동 인자 `--allowedTools`로는 안 된다. 그 옵션은 값을 공백으로 나눠 여러 개로 받으므로
+    // 규칙 안의 공백에서 쪼개지고, claude가 "Wildcard tool name ... is not supported"로 통째로
+    // 버린다(라이브에서 확인). 설정 파일은 JSON이라 공백이 든 규칙이 그대로 산다.
+    const withPermissions = opts.cliRunPrefix
+      ? mergeClaudePermission(merged, `Bash(${opts.cliRunPrefix} *)`)
+      : merged;
+
+    if (await writeIfChanged(settingsFile, JSON.stringify(withPermissions, null, 2))) {
       log.log(`hookInstaller: wrote claude hooks ${settingsFile}`);
     }
     return settingsFile;

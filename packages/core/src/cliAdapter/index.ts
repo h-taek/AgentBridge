@@ -31,9 +31,6 @@ export type CliAdapterOptions = {
   workspaceDir: (workspaceId: string) => string;
   // 저장소 루트. codex 샌드박스에 쓰기 허용으로 더할 폴더다(B-5). 없으면 그 인자를 붙이지 않는다.
   storageRoot?: string;
-  // 모델이 우리 CLI를 부를 때 치는 문자열의 앞부분(renderRunPrefix). claude의 --allowedTools가
-  // 이 값으로 규칙을 만든다. 없으면 승인 개방 인자를 붙이지 않는다.
-  cliRunPrefix?: string;
   // 테스트만 오버라이드 — codex 설정을 읽을 홈.
   homeDir?: string;
   logger?: Logger;
@@ -171,11 +168,9 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
         //
         // 우리 CLI 하나만 승인 없이 열어준다(B-5). 호출마다 승인 창이 뜨면 맥락을 모델의
         // 자발적 호출에 건 것이 성립하지 않는다. 여는 것은 이 명령 하나이고 세션에만 걸린다.
-        const accessArgs = [
-          '--add-dir',
-          wsDir,
-          ...(opts.cliRunPrefix ? ['--allowedTools', `Bash(${opts.cliRunPrefix} *)`] : []),
-        ];
+        // 승인 개방은 기동 인자가 아니라 전역 설정의 permissions.allow에 있다(hookInstaller).
+        // `--allowedTools`는 값을 공백으로 쪼개므로 우리 규칙처럼 공백이 든 것은 통째로 버려진다.
+        const accessArgs = ['--add-dir', wsDir];
         const sessionArgs = !resuming
           ? ['--session-id', sessionId]
           : (await claudeSessionFileExists(sessionId))
