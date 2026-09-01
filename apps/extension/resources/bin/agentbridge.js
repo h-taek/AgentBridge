@@ -1274,6 +1274,73 @@ var init_uninstall = __esm({
   }
 });
 
+// packages/core/src/agentCli/callLog.ts
+var callLog_exports = {};
+__export(callLog_exports, {
+  CALL_LOG_FILENAME: () => CALL_LOG_FILENAME,
+  callLogPath: () => callLogPath,
+  readCalls: () => readCalls,
+  recordCall: () => recordCall
+});
+function callLogPath(wsDir) {
+  return (0, import_path11.join)(wsDir, CALL_LOG_FILENAME);
+}
+async function readJson2(path2) {
+  try {
+    const parsed = JSON.parse(await (0, import_promises.readFile)(path2, "utf8"));
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+async function resolveAgent(wsDir, sessionId) {
+  const ws = await readJson2((0, import_path11.join)(wsDir, "workspace.json"));
+  const sessions = Array.isArray(ws?.sessions) ? ws.sessions : [];
+  const found = sessions.find((s) => s && s.id === sessionId);
+  return typeof found?.model === "string" ? found.model : "";
+}
+async function recordCall(wsDir, command, sessionId, now = Date.now()) {
+  try {
+    const turnStart = sessionId ? await readJson2((0, import_path11.join)(wsDir, "sessions", sessionId, "turn-start.json")) : null;
+    const entry = {
+      at: now,
+      command,
+      sessionId,
+      agent: sessionId ? await resolveAgent(wsDir, sessionId) : "",
+      ...typeof turnStart?.at === "number" ? { turnStartAt: turnStart.at } : {}
+    };
+    await (0, import_promises.appendFile)(callLogPath(wsDir), JSON.stringify(entry) + "\n", "utf8");
+  } catch {
+  }
+}
+async function readCalls(wsDir) {
+  let raw;
+  try {
+    raw = await (0, import_promises.readFile)(callLogPath(wsDir), "utf8");
+  } catch {
+    return [];
+  }
+  const out = [];
+  for (const line of raw.split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      const v = JSON.parse(line);
+      if (typeof v?.at === "number" && typeof v.command === "string") out.push(v);
+    } catch {
+    }
+  }
+  return out;
+}
+var import_promises, import_path11, CALL_LOG_FILENAME;
+var init_callLog = __esm({
+  "packages/core/src/agentCli/callLog.ts"() {
+    "use strict";
+    import_promises = require("fs/promises");
+    import_path11 = require("path");
+    CALL_LOG_FILENAME = "cli-calls.jsonl";
+  }
+});
+
 // packages/core/bin/agentbridge.js
 var fs3 = require("fs");
 var path = require("path");
@@ -1287,6 +1354,7 @@ var {
 var { addMemory: addMemory2, updateMemory: updateMemory2, WriteError: WriteError2 } = (init_write(), __toCommonJS(write_exports));
 var { readStatus: readStatus2 } = (init_status(), __toCommonJS(status_exports));
 var { uninstallGlobal: uninstallGlobal2 } = (init_uninstall(), __toCommonJS(uninstall_exports));
+var { recordCall: recordCall2 } = (init_callLog(), __toCommonJS(callLog_exports));
 var DEFAULT_TURNS = 3;
 var COMMANDS = [
   ["context", "\uD604\uC7AC \uD504\uB85C\uC81D\uD2B8\uC758 \uC555\uCD95\uB41C \uC791\uC5C5 \uC0C1\uD0DC"],
@@ -1413,6 +1481,10 @@ async function main() {
   }
   if (!cmd) usageAndExit();
   const storageRoot = realpath(path.dirname(path.dirname(__filename)));
+  if (cmd !== "uninstall") {
+    const sub = args[0] && !args[0].startsWith("--") ? ` ${args[0]}` : "";
+    await recordCall2(wsDir, cmd + sub, process.env.AGENTBRIDGE_WS_SESSION || "");
+  }
   const out = await dispatch(cmd, args, wsDir, storageRoot);
   process.stdout.write(out + "\n");
 }
