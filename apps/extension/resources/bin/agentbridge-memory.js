@@ -90,20 +90,18 @@ function renderSkillMarkdown(opts) {
   return `---
 name: agentbridge
 description: >-
-  Read and write the working context AgentBridge carries between coding agent
-  sessions \u2014 the compacted state of this project, the raw recent conversation,
-  and the user's durable preferences. Use it when the user refers to earlier
-  work ("what we decided", "the thing from before", "continue"), when starting
-  a task in a project you have not seen this session, when you need to know how
-  this user wants things done, or when something worth remembering comes up.
-  Nothing is pushed into your prompt \u2014 you must run these commands to see it.
+  Use when the user refers to earlier work or an earlier session ("\uC544\uAE4C \uADF8\uAC70",
+  "what we decided", "continue where we left off"), when starting a task in a
+  project not seen this session, when the answer turns on how this user works
+  (style, tooling, workflow, conventions) or on this repository's own rules,
+  when the user states something durable worth remembering, or when a context
+  or memory command fails and the wiring may be broken.
 ---
 
 # AgentBridge
 
-AgentBridge keeps working context across sessions and across different coding
-agents. None of it is injected into your prompt. If you do not run a command,
-you do not have it.
+AgentBridge keeps working context across sessions and across coding agents.
+None of it is in your prompt. If you do not run a command, you do not have it.
 
 Every command is:
 
@@ -151,23 +149,22 @@ Every item in the read output starts with its identifier
 When the user states a durable preference, a convention, or a decision that
 should outlive this session:
 
-1. Read the whole side first \u2014 \`memory user --full\` (or
-   \`memory project --full\`). Not a search. You need to see everything to know
-   whether this is new.
-2. If nothing covers it, \`memory add\`.
-3. If something covers it, \`memory update <id>\` \u2014 pass only the flags you are
-   changing; the rest is carried over.
+1. Read that whole side first \u2014 \`memory user --full\` (or
+   \`memory project --full\`). Not a search: you need everything to know whether
+   this is new.
+2. Nothing covers it \u2014 \`memory add\`.
+3. Something covers it \u2014 \`memory update <id>\`, passing only the flags you are
+   changing.
 
-Both go to a proposal queue. The user approves them; they do not become
-knowledge on their own, and they will not appear in reads until approved.
+Both go to a queue the user approves. They do not appear in reads until then.
 
-Record what would change how someone works next time. Do not record what the
-repository already says, or what only matters in this conversation.
+Record what would change how someone works next time. Not what the repository
+already says, not what only matters in this conversation.
 
 ## Outside AgentBridge
 
-These commands do nothing in a session that AgentBridge did not open \u2014 there is
-no context to read there. That is expected, not an error.
+In a session AgentBridge did not open, these commands print nothing and exit 0.
+That is expected, not an error.
 
 <!-- @agentbridge-skill-version ${SKILL_VERSION} -->
 `;
@@ -176,7 +173,7 @@ var SKILL_VERSION, SKILL_DIR_NAME;
 var init_skillTemplate = __esm({
   "packages/core/src/skillTemplate.ts"() {
     "use strict";
-    SKILL_VERSION = "0.5.1";
+    SKILL_VERSION = "0.5.2";
     SKILL_DIR_NAME = "agentbridge";
   }
 });
