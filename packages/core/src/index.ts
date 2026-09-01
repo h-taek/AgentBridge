@@ -63,6 +63,10 @@ export * from './contextTag';
 // hook
 export * from './hookInstaller';
 
+// 전역 스킬 (0.5.0 B-5)
+export * from './skillInstaller';
+export * from './skillTemplate';
+
 // refine
 export * from './refineHeadless';
 export * from './refineDispatcher';

@@ -8,6 +8,8 @@ import { homedir } from 'os';
 import type { SpawnOptions } from '../pty/types';
 import type { EnvProbe, ProbeResult } from '../envProbe';
 import type { HookInstaller } from '../hookInstaller';
+import type { SkillInstaller } from '../skillInstaller';
+import type { CliKind } from '../shared/cli';
 import type { HookStatusStore } from '../hookStatusStore';
 import type { Logger } from '../interfaces';
 import { noopLogger } from '../interfaces';
@@ -20,6 +22,8 @@ export type CliAdapterOptions = {
   // 옵셔널 — 미제공 시 buildSpawnOptions가 hook 설치 단계 skip. 데스크탑처럼 자체 hook 시스템을
   // 가진 호스트는 hookInstaller 안 주입하고 spawn 후 별도로 hooks 설치 가능.
   hookInstaller?: HookInstaller;
+  // 옵셔널 — 미제공 시 스킬 설치 단계를 건너뛴다. 훅과 같은 자리에서 같은 시점에 돈다(B-5).
+  skillInstaller?: SkillInstaller;
   hookStatusStore?: HookStatusStore;
   // <storageRoot>/workspaces/<workspaceId> — 그 워크스페이스의 데이터 폴더.
   // 훅이 신원으로 쓰는 AGENTBRIDGE_WS_DIR이자 캡처 파일이 떨어지는 자리다.
@@ -54,7 +58,18 @@ export interface CliAdapterSet {
 
 export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
   const log = opts.logger ?? noopLogger;
-  const { envProbe, hookInstaller, hookStatusStore, workspaceDir } = opts;
+  const { envProbe, hookInstaller, skillInstaller, hookStatusStore, workspaceDir } = opts;
+
+  // 스킬은 발견 가능성을 높이는 수단이지 전제가 아니다(B-5). 실패해도 명령은 그대로 돌므로
+  // 훅과 달리 세션 상태를 내리지 않고 로그만 남긴다.
+  async function installSkill(agent: CliKind): Promise<void> {
+    if (!skillInstaller) return;
+    try {
+      await skillInstaller.install(agent);
+    } catch (err) {
+      log.warn(`skillInstaller: ${agent} 스킬 설치 실패 — ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
 
   async function claudeSessionFileExists(uuid: string): Promise<boolean> {
     const root = join(homedir(), '.claude', 'projects');
@@ -94,6 +109,7 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
           try {
             await hookInstaller.installClaudeHooks();
             await hookInstaller.cleanupLegacyHooks(cwd);
+            await installSkill('claude');
             hookStatusStore?.clearDisabled(workspaceId, 'claude');
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
@@ -153,6 +169,7 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
           try {
             await hookInstaller.installCodexHooks();
             await hookInstaller.cleanupLegacyHooks(cwd);
+            await installSkill('codex');
             hookStatusStore?.clearDisabled(workspaceId, 'codex');
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
@@ -212,6 +229,7 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
           try {
             await hookInstaller.installAgyHooks();
             await hookInstaller.cleanupLegacyHooks(cwd);
+            await installSkill('agy');
             hookStatusStore?.clearDisabled(workspaceId, 'agy');
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);

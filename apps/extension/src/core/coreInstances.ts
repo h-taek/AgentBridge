@@ -9,6 +9,7 @@ import {
   createEnvProbe,
   createHookInstaller,
   getCanonicalBinPath,
+  createSkillInstaller,
   createCliAdapters,
   createCompactionScheduler,
   createQuotaTracker,
@@ -139,9 +140,18 @@ export function initializeCore(
   // attachmentStore에 logger 단방향 주입 (circular dep 제거).
   setAttachmentLogger(logger);
 
+  const skillInstaller = createSkillInstaller({
+    execPath: process.execPath,
+    // 스킬 본문에 박히는 것은 번들 안 경로가 아니라 저장소 canonical 경로다 — 훅과 같은 규칙.
+    cliPath: getCanonicalBinPath(storageRoot, 'cli'),
+    homeDir: testOverrides?.homeDirForTesting,
+    logger,
+  });
+
   _cliAdapters = createCliAdapters({
     envProbe: _envProbe,
     hookInstaller: _hookInstaller,
+    skillInstaller,
     hookStatusStore: _hookStatusStore,
     workspaceDir: (workspaceId) => _workspaceStore!.getWorkspacePath(workspaceId),
     logger,
