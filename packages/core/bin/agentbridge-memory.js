@@ -24,19 +24,20 @@
 
 'use strict'
 
-// @agentbridge-helper-version 0.5.2
+// @agentbridge-helper-version 0.6.0
 // (단일 설치 버전 비교용 — 이 파일을 수정하면 반드시 버전을 올릴 것)
 
 const fs = require('fs')
 const path = require('path')
 
-// §G3 — 검색·주입 로직은 core 단일 소스. esbuild가 빌드 때 이 require를 인라인한다(옵션 나).
-// 런타임 헬퍼 옆엔 node_modules가 없어 require('@agentbridge/core') 불가 → 상대 경로로 엔트리 그래프에 포함.
-const { resolveContext } = require('../src/globalSearch')
-const { resolveQuery, renderGlobalMatches, extractSessionIdFromStdin } = require('../src/globalInject')
+// 코어 단일 소스. esbuild가 빌드 때 이 require를 인라인한다(옵션 나) — 런타임 헬퍼 옆엔
+// node_modules가 없어 require('@agentbridge/core')가 불가하다.
+//
+// 검색·IR 렌더는 더 이상 여기서 안 쓴다(0.5.0 B-4). 그 자리는 에이전트용 CLI로 옮겼다.
+const { extractSessionIdFromStdin } = require('../src/globalInject')
 const { wrapInjectedContext } = require('../src/contextTag')
-// IR 여섯 절 렌더는 코어 단일 소스 — CLI의 `context`가 같은 텍스트를 낸다 (0.5.0 W1).
-const { renderIrSections } = require('../src/agentCli/irRender')
+// 모델에게 가르치는 실행 문자열은 스킬과 같은 출처에서 나온다 — 어긋나면 승인 창이 뜬다.
+const { renderRunPrefix } = require('../src/skillTemplate')
 
 // claude/codex/agy 모두 stdout JSON의 `hookEventName`이 *호출된 hook event 이름과 정확히 일치*
 // 해야 한다. 일치 안 하면 CLI host가 "expected X but got Y" 에러로 hook을 거부 (claude는 warning,
@@ -167,121 +168,46 @@ function readStdin(timeoutMs) {
   })
 }
 
-function readJsonSafe(p) {
-  try {
-    const raw = fs.readFileSync(p, 'utf8')
-    if (!raw.trim()) return null
-    return JSON.parse(raw)
-  } catch {
-    return null
-  }
-}
 
-// turns.jsonl 끝 N record 읽기 — append-only NDJSON. 빈 파일 / 깨진 줄은 silent skip.
-// O 청크 §15.5 — hook 본문에 최근 3개 raw turn을 prepend.
-function readRecentTurns(p, n) {
-  let raw
-  try {
-    raw = fs.readFileSync(p, 'utf8')
-  } catch {
-    return []
-  }
-  const lines = raw.split('\n')
-  const out = []
-  for (const line of lines) {
-    const t = line.trim()
-    if (!t) continue
-    try {
-      const obj = JSON.parse(t)
-      if (obj && typeof obj === 'object' && typeof obj.id === 'string') out.push(obj)
-    } catch {
-      /* skip */
-    }
-  }
-  if (n <= 0 || out.length <= n) return out
-  return out.slice(out.length - n)
-}
-
-// 모델에 inject되는 컨텍스트의 처리 규칙 — 본문 상단에 prepend해 모델 행태 가이드.
-// 과거 IR_SENTINEL_INSTRUCTIONS(legacy argv inject 경로, dead)에 있던 내용을 hook payload로 이전.
-// 모델이 IR을 *별개 산출물*로 다루지 않게(예: "the IR" 호칭, 재요약) 하고 자연스러운 대화 연속성으로
-// 사용하도록 안내한다.
+// 훅이 나르는 것은 지시문 하나다 (0.5.0 B-4). IR도 최근 턴도 사용자 지식도 프로젝트 지식도
+// 모델이 도구를 불러야 온다. 미리 밀어넣는 내용은 없다.
 //
-// 본문은 영어로 작성한다 — LLM 일관성을 위해 모델 prompt language는 English로 통일. 단 응답 자체는
-// (4)항에 따라 사용자가 사용한 언어로 답변해야 한다.
-const HOOK_INSTRUCTIONS = [
-  'The following block is working context maintained and compacted by AgentBridge.',
-  '',
-  'Handling rules:',
-  '1. Do NOT refer to this block as a separate artifact (no "the IR", "you provided", "the context above", etc.). Treat it as natural conversation continuity — the user is already aware of its contents.',
-  '2. Do NOT summarize or re-quote the IR unless the user asks. You may draw on it naturally when needed for accuracy.',
-  '3. Project memory files (AGENTS.md / GEMINI.md / CLAUDE.md) keep their normal authority. On conflict with the IR, prefer the most recent user intent; if unsure, ask the user to confirm.',
-  '4. **Respond in the same language the user uses in their question.** If the user writes Korean, reply in Korean. If English, reply in English. Mixed sessions follow the most recent user turn. This applies to the model reply only — IR data and structural enum values stay as recorded.'
-].join('\n')
-
-function truncate(s, n) {
-  if (typeof s !== 'string') return ''
-  if (s.length <= n) return s
-  return s.slice(0, n) + '…'
-}
-
-function renderRecentTurns(turns) {
-  if (!Array.isArray(turns) || turns.length === 0) return '(no recent turns)'
-  const lines = []
-  for (let i = 0; i < turns.length; i++) {
-    const t = turns[i]
-    const idx = turns.length - turns.length + i + 1 // 1..N
-    lines.push('[Turn ' + idx + ' · ' + (t.model || '?') + ' · ' + (t.completedAt || '') + ']')
-    lines.push('user: ' + truncate(t.user || '', 1200))
-    lines.push('assistant: ' + truncate(t.assistantBody || '', 1200))
-    if (Array.isArray(t.toolCalls) && t.toolCalls.length > 0) {
-      const tc = t.toolCalls
-        .slice(0, 5)
-        .map((c) => '  - ' + (c.tool || '?') + '(' + truncate(c.arg || '', 80) + ')')
-        .join('\n')
-      lines.push('tools:')
-      lines.push(tc)
-    }
-    if (i < turns.length - 1) lines.push('')
-  }
-  return lines.join('\n')
-}
-
-function buildAdditionalContext(ir, recentTurns, workspaceId, globalBlock) {
-  // architecture §15.5 본문 — 글로벌 메모리(장기) + IR 압축 메모리 + 최근 raw turn.
-  const hasTurns = Array.isArray(recentTurns) && recentTurns.length > 0
-  const hasGlobal = !!(globalBlock && globalBlock.trim())
-  // 셋 다 비면 명시적으로 "AgentBridge 컨텍스트(미초기화)"임을 모델이 식별하게 sentinel로 감싼다.
-  if (!ir && !hasTurns && !hasGlobal) {
-    return wrapInjectedContext([
-      HOOK_INSTRUCTIONS,
-      '',
-      '## AgentBridge context (memory uninitialized)',
-      'Workspace ' + workspaceId + ' has no compacted memory (IR) or turn history yet.',
-      'This hook will accumulate from the next turn onward and compact into an IR.'
-    ].join('\n'))
-  }
-  const parts = [HOOK_INSTRUCTIONS, '']
-  // 장기(글로벌) 메모리를 가장 위에 — 안정적 배경 → 세션 작업기억(IR) → 최근 턴 순.
-  if (hasGlobal) {
-    parts.push(globalBlock)
-    parts.push('')
-  }
-  if (ir) {
-    parts.push('## Memory (compacted — IR)')
-    parts.push('')
-    parts.push(renderIrSections(ir))
-    parts.push('')
-  } else if (hasTurns) {
-    parts.push('## Memory (IR uninitialized — only recent turns available)')
-    parts.push('')
-  }
-  if (hasTurns) {
-    // 가장 최근 턴을 맨 위로 — 주입 블록이 한도 초과로 잘려도 최신 턴(연속성)이 살아남게.
-    parts.push('## Recent conversation (raw, last ' + recentTurns.length + ' turns, newest first)')
-    parts.push(renderRecentTurns(recentTurns.slice().reverse()))
-  }
-  return wrapInjectedContext(parts.join('\n'))
+// 왜 우리가 고르지 않는가 — 첫 턴에 무엇이 필요한지는 상황이 아니라 질문이 정한다. 우리가 쓸 수
+// 있는 신호는 마지막 턴으로부터 지난 시간 정도이고, 모델은 질문을 읽는다. 정보가 많은 쪽이
+// 고르는 것이 맞다.
+//
+// 그래서 이 문장들이 제품의 전부가 된다. 매 턴 들어가는 유일한 것이므로 작아야 하고 동시에
+// 언제 무엇을 부를지를 정확히 말해야 한다. "필요하면 불러라"가 아니라 조건을 열거한다.
+//
+// 실행 경로는 훅과 같은 규칙으로 만든다 — 이 헬퍼를 돌린 런타임과 저장소의 canonical CLI.
+// 사용자 PATH의 node에 기대지 않는다(A-3).
+function buildInstructions(storageRoot) {
+  const run = renderRunPrefix({
+    execPath: process.execPath,
+    cliPath: path.join(storageRoot, 'bin', 'agentbridge.js')
+  })
+  return [
+    'AgentBridge carries working context across sessions and across coding agents.',
+    'None of it is in this prompt. Run a command to see it:',
+    '',
+    '    ' + run + ' <command>',
+    '',
+    'Run these when the condition holds, not "if it seems useful":',
+    '',
+    '- Starting work on this project this session — `context`',
+    '- The user refers to something from before ("아까 그거", "what we decided",',
+    '  "continue where we left off") — `turns --last 5`',
+    '- A question about a past decision\'s rationale, or how this user wants things done',
+    '  (style, tooling, workflow, conventions) — `memory search "<query>"`',
+    '- A question about this repository\'s own rules or history — `memory project`',
+    '- The user states something durable (a preference, a convention, a decision that should',
+    '  outlive this session) — read that side in full first, then `memory add` or',
+    '  `memory update <id>`. Both go to a queue the user approves.',
+    '',
+    'Run `status` if a command fails and you need to know whether the wiring is alive.',
+    '',
+    'Respond in the language the user writes in. Mixed sessions follow the most recent turn.'
+  ].join('\n')
 }
 
 async function main() {
@@ -326,11 +252,6 @@ async function main() {
     process.stdout.write(JSON.stringify(buildHookOutput(parsed.agent, parsed.event, '')))
     process.exit(0)
   }
-  const irPath = path.join(wsDir, 'ir.json')
-  const turnsPath = path.join(wsDir, 'turns.jsonl')
-  const ir = readJsonSafe(irPath)
-  const recentTurns = readRecentTurns(turnsPath, 3)
-
   const stdinRaw = await readStdin(200)
 
   // 세션 id 결정적 캡처 — spawn 때 우리가 심은 env 토큰으로 키잉한 파일에 stdin의 native id를
@@ -421,34 +342,10 @@ async function main() {
   }
 
   // §G3 글로벌 메모리 검색 — additive·best-effort. 어떤 실패도 IR/turns 주입을 막지 않는다.
-  let globalBlock = ''
-  try {
-    const lastTurn = recentTurns.length ? recentTurns[recentTurns.length - 1] : null
-    const lastUserTurn = lastTurn && typeof lastTurn.user === 'string' ? lastTurn.user : ''
-    const query = resolveQuery(stdinRaw, lastUserTurn)
-    if (query && query.trim()) {
-      const globalDir = path.join(storageRoot, 'global')
-      const matches = await resolveContext(globalDir, 'default', query, { topN: 5 })
-      globalBlock = renderGlobalMatches(matches)
-    }
-  } catch (e) {
-    process.stderr.write(
-      'agentbridge-memory: global search skipped — ' + String(e && e.message ? e.message : e) + '\n'
-    )
-    globalBlock = ''
-  }
-
-  // 주입 블록을 9KB(UTF-8) 이하로 유지 — 초과하면 가장 오래된 turn부터 빼고 다시 만든다(최신 턴은 보존).
-  // (codex 훅 바인딩 한도 ~10KB·claude ~10,000자 회피. turn만 줄이고 IR/장기메모리는 건드리지 않음.)
-  const INJECT_BYTE_LIMIT = 9 * 1024
-  let injTurns = recentTurns
-  let additionalContext = buildAdditionalContext(ir, injTurns, path.basename(wsDir), globalBlock)
-  while (Buffer.byteLength(additionalContext, 'utf8') > INJECT_BYTE_LIMIT && injTurns.length > 0) {
-    injTurns = injTurns.slice(1) // 배열 앞 = 가장 오래된 턴 → 제거
-    additionalContext = buildAdditionalContext(ir, injTurns, path.basename(wsDir), globalBlock)
-  }
   process.stdout.write(
-    JSON.stringify(buildHookOutput(parsed.agent, parsed.event, additionalContext))
+    JSON.stringify(
+      buildHookOutput(parsed.agent, parsed.event, wrapInjectedContext(buildInstructions(storageRoot)))
+    )
   )
   process.exit(0)
 }

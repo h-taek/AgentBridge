@@ -5,7 +5,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { writeProfileDocs, getGlobalDir } from '@agentbridge/core';
 
-describe('helper inject — 글로벌 메모리 검색 종단(§G3)', () => {
+describe('helper inject — 지시문만 나른다 (0.5.0 B-4)', () => {
   let tmp: string;
   let bundlePath: string;
   let userData: string;
@@ -58,18 +58,33 @@ describe('helper inject — 글로벌 메모리 검색 종단(§G3)', () => {
     return JSON.parse(out);
   }
 
-  it('stdin 프롬프트와 매치되는 글로벌 문서를 주입한다', () => {
+  // 미리 밀어넣는 내용이 없다. 프롬프트가 무엇이든 나가는 것은 같은 지시문이다.
+  it('지식·IR·최근 턴을 밀지 않는다', () => {
     const res = run(JSON.stringify({ prompt: 'how do I handle deployment to production?' }));
     const ctx = res.hookSpecificOutput.additionalContext as string;
-    assert.match(ctx, /Global memory/);
-    assert.match(ctx, /Deployment workflow/);
+    assert.doesNotMatch(ctx, /Global memory/);
+    assert.doesNotMatch(ctx, /Deployment workflow/);
+    assert.doesNotMatch(ctx, /Memory \(compacted/);
+    assert.doesNotMatch(ctx, /Recent conversation/);
     assert.equal(res.hookSpecificOutput.hookEventName, 'UserPromptSubmit');
   });
 
-  it('매치가 없으면 글로벌 섹션을 생략한다(IR/turns 주입은 불변)', () => {
-    const res = run(JSON.stringify({ prompt: 'zzzzz totally unrelated quokka' }));
-    const ctx = res.hookSpecificOutput.additionalContext as string;
-    assert.doesNotMatch(ctx, /Global memory/);
+  it('부를 명령과 조건을 싣는다', () => {
+    const ctx = run(JSON.stringify({ prompt: 'x' })).hookSpecificOutput.additionalContext as string;
+    for (const cmd of ['context', 'turns --last 5', 'memory search', 'memory add', 'status']) {
+      assert.ok(ctx.includes(cmd), `지시문에 ${cmd}가 있어야 한다`);
+    }
+    // 사용자 명령은 싣지 않는다.
+    assert.doesNotMatch(ctx, /uninstall/);
+  });
+
+  it('실행 경로가 박히고 프롬프트가 무엇이든 크기가 같다', () => {
+    const a = run(JSON.stringify({ prompt: '짧은 질문' })).hookSpecificOutput.additionalContext as string;
+    const b = run(JSON.stringify({ prompt: 'a'.repeat(4000) })).hookSpecificOutput.additionalContext as string;
+    assert.equal(a, b, '프롬프트에 따라 달라지는 내용이 없다');
+    assert.ok(a.includes(join(userData, 'bin', 'agentbridge.js')), 'CLI 절대경로가 박혀야 한다');
+    // 지시문 하나뿐이라 어느 하니스 한도(약 9KB)에도 안 걸린다.
+    assert.ok(Buffer.byteLength(a, 'utf8') < 3000, `주입이 너무 크다: ${Buffer.byteLength(a, 'utf8')}`);
   });
 
   // 회귀 방지: esbuild가 주석을 제거해 `@agentbridge-helper-version` 마커가 사라지면
