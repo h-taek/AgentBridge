@@ -7,6 +7,8 @@ import * as workspaceStore from './core/workspaceStore';
 import {
   installBinToCanonicalPath,
   createSessionFileWatcher,
+  startHostRequestHandler,
+  HOST_PING,
   getStorageRoot,
   runProposalTrigger,
   getGlobalDir,
@@ -253,9 +255,21 @@ export function activate(context: vscode.ExtensionContext) {
   // 상태(진행 중/완료/모름)가 이 주기를 탄다. 값이 안 바뀌었으면 refresh하지 않는다 —
   // 4초마다 전체 리렌더하면 선택 상태가 흔들린다.
   const storagePoll = setInterval(() => { void sessionTree.refreshIfChanged(); }, 4000);
+
+  // 에이전트용 CLI가 우리에게 넘기는 요청을 집는다 (0.5.0 B-5). 우리가 소유한 세션의 것만
+  // 집는다. 이 단계의 종류는 배선 확인 하나이고, PTY를 만지는 넷은 4단계에서 붙는다.
+  const hostRequests = startHostRequestHandler({
+    storageRoot: getStorageRoot(),
+    handlers: {
+      [HOST_PING]: () => `호스트 응답 — extension pid ${process.pid}`,
+    },
+    logger: getLogger(),
+  });
+
   context.subscriptions.push({
     dispose: () => {
       storageWatcher.stop();
+      hostRequests.stop();
       clearInterval(storagePoll);
     },
   });

@@ -63,6 +63,10 @@ export * from './contextTag';
 // hook
 export * from './hookInstaller';
 
+// 호스트 핸드셰이크 통로 (0.5.0 B-5)
+export * from './hostRequest';
+export * from './hostRequestHandler';
+
 // 전역 스킬 (0.5.0 B-5)
 export * from './skillInstaller';
 export * from './skillTemplate';
