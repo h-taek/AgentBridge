@@ -87,7 +87,7 @@ describe('status·uninstall — 전역 설치 조회와 제거 (0.5.0 W7)', () =
     await seedSkills();
     const after = await readStatus(storageRoot, wsDir, { homeDir: home });
     assert.doesNotMatch(after, /안 깔림/);
-    assert.match(after, /깔림 0\.5\.0/); // 스킬 버전
+    assert.match(after, /깔림 \d+\.\d+\.\d+/); // 스킬 버전 — 값이 아니라 읽히는지를 본다
   });
 
   it('status — 설치된 CLI가 없으면 없다고 말한다', async () => {

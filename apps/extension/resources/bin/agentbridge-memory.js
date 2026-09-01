@@ -129,15 +129,17 @@ the write path only.
 
 ## Commands
 
-    ${run} context                       compacted state of the current project
-    ${run} turns --last 5                raw recent conversation
-    ${run} memory search "<query>"       search both user and project knowledge
-    ${run} memory user                   the user's durable preferences (summaries)
-    ${run} memory user --full            ... with full bodies
-    ${run} memory project                what is durable about this repository
-    ${run} memory add --scope user|project --category <c> \\
+Each line below is the part after the run command above.
+
+    context                       compacted state of the current project
+    turns --last 5                raw recent conversation
+    memory search "<query>"       search both user and project knowledge
+    memory user                   the user's durable preferences (summaries)
+    memory user --full            ... with full bodies
+    memory project                what is durable about this repository
+    memory add --scope user|project --category <c> \\
         --title "..." --summary "..." --body "..."
-    ${run} memory update <id> [same flags]
+    memory update <id> [same flags]
 
 Categories: role, repos, domain, workflows, conventions, infra, verification.
 
@@ -174,7 +176,7 @@ var SKILL_VERSION, SKILL_DIR_NAME;
 var init_skillTemplate = __esm({
   "packages/core/src/skillTemplate.ts"() {
     "use strict";
-    SKILL_VERSION = "0.5.0";
+    SKILL_VERSION = "0.5.1";
     SKILL_DIR_NAME = "agentbridge";
   }
 });
