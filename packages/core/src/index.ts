@@ -70,6 +70,7 @@ export * from './agentCli/read';
 export * from './agentCli/write';
 export * from './agentCli/status';
 export * from './agentCli/uninstall';
+export * from './agentCli/agent';
 
 // 호스트 핸드셰이크 통로 (0.5.0 B-5)
 export * from './hostRequest';
@@ -102,3 +103,8 @@ export * from './cliAdapter/hookSessionCapture';
 export * from './cliAdapter/turnSignal';
 export * from './cliAdapter/codexSandbox';
 export * from './sessionStatus';
+
+// 서브에이전트 (0.5.0 4단계)
+export * from './agent/reportState';
+export * from './agent/gitWorktree';
+export * from './agent/bridgeNames';

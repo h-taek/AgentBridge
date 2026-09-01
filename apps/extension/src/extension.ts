@@ -16,6 +16,7 @@ import {
   resolveProjectProfileId,
   readIR,
   migrateLegacyGlobalIfNeeded,
+  type SpawnExtras,
 } from '@agentbridge/core';
 import { initializeCore, getBundledHelperPath, getBundledCliPath, getWorkspaceStore, getLogger, getCoreEnvProbe } from './core/coreInstances';
 import * as output from './log/output';
@@ -28,6 +29,7 @@ import { compactionEvents } from './core/compactionScheduler';
 import { registerSession, markSessionClosed, markSessionActive, markSessionOpened, renameSession, deleteSession, reclaimPendingModelSessionId } from './core/sessionRegistry';
 import { registerConfigWatcher, getConfig } from './settings/config';
 import * as notifications from './core/notifications';
+import { initSubagents, subagentHostHandlers } from './core/subagents';
 import { CLI_DISPLAY_NAME, type CliKind } from './shared/types';
 import { getSessions, type SessionMeta } from './core/sessionRegistry';
 
@@ -55,11 +57,12 @@ async function buildOpts(
   workspaceId: string,
   resumeSessionId?: string,
   resumeModelSessionId?: string,
+  extras?: SpawnExtras,
 ): Promise<SpawnOptions> {
   switch (model) {
-    case 'claude': return claudeAdapter.buildSpawnOptions(cwd, workspaceId, resumeSessionId);
-    case 'codex': return codexAdapter.buildSpawnOptions(cwd, workspaceId, resumeSessionId, resumeModelSessionId);
-    case 'agy': return agyAdapter.buildSpawnOptions(cwd, workspaceId, resumeSessionId, resumeModelSessionId);
+    case 'claude': return claudeAdapter.buildSpawnOptions(cwd, workspaceId, resumeSessionId, extras);
+    case 'codex': return codexAdapter.buildSpawnOptions(cwd, workspaceId, resumeSessionId, resumeModelSessionId, extras);
+    case 'agy': return agyAdapter.buildSpawnOptions(cwd, workspaceId, resumeSessionId, resumeModelSessionId, extras);
   }
 }
 
@@ -262,6 +265,8 @@ export function activate(context: vscode.ExtensionContext) {
     storageRoot: getStorageRoot(),
     handlers: {
       [HOST_PING]: () => `호스트 응답 — extension pid ${process.pid}`,
+      // PTY를 만지는 넷 (0.5.0 W3). 본체는 subagents.ts에 있다.
+      ...subagentHostHandlers,
     },
     logger: getLogger(),
   });
@@ -275,13 +280,22 @@ export function activate(context: vscode.ExtensionContext) {
   });
 
   // --- Helper: open chat panel for a session ---
-  function openChatPanel(opts: SpawnOptions, workspaceId: string): void {
-    const chat = ChatPanel.create(context.extensionUri, opts);
+  // preserveFocus는 서브 탭에서만 참이다. 메인이 명령을 부른 결과로 뜨는 탭이라 사용자가 보고
+  // 있던 자리에서 커서를 뺏지 않는다 (0.5.0 B-6).
+  function openChatPanel(opts: SpawnOptions, workspaceId: string, preserveFocus = false): void {
+    const chat = ChatPanel.create(context.extensionUri, opts, preserveFocus);
     chat.onDispose(async () => {
       await markSessionClosed(workspaceId, opts.sessionId!);
       sessionTree.refresh();
     });
   }
+
+  // 서브에이전트 스폰은 위 배선을 그대로 쓴다 — 어느 경로로 뜬 세션이든 닫힘 처리가 같아야 한다.
+  initSubagents({
+    buildOpts,
+    openPanel: (opts, workspaceId, preserveFocus) => openChatPanel(opts, workspaceId, preserveFocus),
+    refreshTree: () => sessionTree.refresh(),
+  });
 
   // --- Commands ---
   const newSession = vscode.commands.registerCommand('agentbridge.newSession', async () => {

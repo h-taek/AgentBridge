@@ -1,5 +1,5 @@
 import type { SpawnOptions } from '../../pty/types';
-import type { ProbeResult } from '@agentbridge/core';
+import type { ProbeResult, SpawnExtras } from '@agentbridge/core';
 import { getCliAdapters } from '../coreInstances';
 
 export function isAvailable(): ProbeResult {
@@ -11,11 +11,13 @@ export async function buildSpawnOptions(
   workspaceId: string,
   resumeSessionId?: string,
   resumeModelSessionId?: string,
+  extras?: SpawnExtras,
 ): Promise<SpawnOptions> {
   return getCliAdapters().agy.buildSpawnOptions(
     cwd,
     workspaceId,
     resumeSessionId,
     resumeModelSessionId,
+    extras,
   );
 }

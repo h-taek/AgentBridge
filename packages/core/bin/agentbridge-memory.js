@@ -30,6 +30,9 @@
 const fs = require('fs')
 const path = require('path')
 
+// 미읽음 판정은 코어 단일 소스를 쓴다. esbuild가 빌드 때 이 require를 인라인한다.
+const { isUnread } = require('../src/agent/reportState')
+
 // 코어 단일 소스. esbuild가 빌드 때 이 require를 인라인한다(옵션 나) — 런타임 헬퍼 옆엔
 // node_modules가 없어 require('@agentbridge/core')가 불가하다.
 //
@@ -181,6 +184,39 @@ function readStdin(timeoutMs) {
 //
 // 실행 경로는 훅과 같은 규칙으로 만든다 — 이 헬퍼를 돌린 런타임과 저장소의 canonical CLI.
 // 사용자 PATH의 node에 기대지 않는다(A-3).
+// 안 읽은 서브 보고 한 줄 (0.5.0 4단계 W5, B-6).
+//
+// 메인이 기다리지 않았거나 대기가 상한에 걸려 돌아왔으면, 다음 턴에 이 줄이 붙는다. 수와 읽는
+// 방법만 적고 보고 본문은 넣지 않는다 — 본문은 `agent read`가 낸다.
+//
+// 우리가 메인의 PTY에 타이핑하지 않는 이유가 이 줄이다. 통로가 이미 있으므로 사용자 입력과
+// 경합하는 타이핑을 붙일 이유가 없다.
+async function buildSubagentLine(wsDir, sessionToken, run) {
+  if (!sessionToken || sessionToken !== path.basename(sessionToken)) return ''
+  let sessions = []
+  try {
+    sessions = JSON.parse(fs.readFileSync(path.join(wsDir, 'workspace.json'), 'utf8')).sessions || []
+  } catch {
+    return ''
+  }
+  const mine = sessions.filter((s) => s.parentSessionId === sessionToken && s.agentName)
+  if (mine.length === 0) return ''
+  const unread = []
+  for (const s of mine) {
+    if (await isUnread(wsDir, s.sessionId)) unread.push(s.agentName)
+  }
+  if (unread.length === 0) return ''
+  return (
+    '\n\n' +
+    unread.length +
+    ' subagent report(s) finished and unread (' +
+    unread.join(', ') +
+    '). Read with `' +
+    run +
+    ' agent read <name>`.'
+  )
+}
+
 function buildInstructions(storageRoot) {
   const run = renderRunPrefix({
     execPath: process.execPath,
@@ -342,9 +378,23 @@ async function main() {
   }
 
   // §G3 글로벌 메모리 검색 — additive·best-effort. 어떤 실패도 IR/turns 주입을 막지 않는다.
+  const run = renderRunPrefix({
+    execPath: process.execPath,
+    cliPath: path.join(storageRoot, 'bin', 'agentbridge.js')
+  })
+  let subagentLine = ''
+  try {
+    subagentLine = await buildSubagentLine(wsDir, process.env.AGENTBRIDGE_WS_SESSION || '', run)
+  } catch {
+    /* best-effort — 이 줄이 없다고 지시문을 막지 않는다 */
+  }
   process.stdout.write(
     JSON.stringify(
-      buildHookOutput(parsed.agent, parsed.event, wrapInjectedContext(buildInstructions(storageRoot)))
+      buildHookOutput(
+        parsed.agent,
+        parsed.event,
+        wrapInjectedContext(buildInstructions(storageRoot) + subagentLine)
+      )
     )
   )
   process.exit(0)

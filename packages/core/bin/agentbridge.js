@@ -19,7 +19,7 @@
 
 'use strict'
 
-// @agentbridge-cli-version 0.5.0
+// @agentbridge-cli-version 0.5.1
 // (단일 설치 버전 비교용 — 이 파일을 수정하면 반드시 버전을 올릴 것)
 
 const fs = require('fs')
@@ -35,6 +35,16 @@ const {
 } = require('../src/agentCli/read')
 const { addMemory, updateMemory, WriteError } = require('../src/agentCli/write')
 const { readStatus } = require('../src/agentCli/status')
+const {
+  agentList,
+  agentRead,
+  agentCheck,
+  agentStart,
+  agentSend,
+  agentStop,
+  agentClose,
+  DEFAULT_WAIT_SEC
+} = require('../src/agentCli/agent')
 const { uninstallGlobal } = require('../src/agentCli/uninstall')
 
 const DEFAULT_TURNS = 3
@@ -47,7 +57,13 @@ const COMMANDS = [
   ['memory search <질의>', '두 지식을 질의로 검색'],
   ['memory add', '새 사실을 제안 큐에 넣는다 (--scope --category --title --summary --body)'],
   ['memory update <식별자>', '이미 있는 항목을 고치는 제안 (같은 인자, 안 준 것은 그대로)'],
-  ['status', '어디에 무엇이 깔려 있는지와 배선 자가 진단']
+  ['status', '어디에 무엇이 깔려 있는지와 배선 자가 진단'],
+  ['agent start', '서브에이전트를 띄운다 (--prompt "..." [--harness claude,codex,agy])'],
+  ['agent list', '띄운 서브의 목록과 상태'],
+  ['agent check', '끝난 서브가 있는지 본다 (--wait면 생길 때까지, --for <초>로 상한 조정)'],
+  ['agent read <이름>', '그 서브의 기록 전문 (--last N으로 자름)'],
+  ['agent send <이름>', '도는 서브에 지침을 더 보낸다 (--prompt "...")'],
+  ['agent stop <이름>', '서브를 끝낸다']
 ]
 
 const USAGE = [
@@ -160,6 +176,53 @@ async function dispatch(cmd, args, wsDir, storageRoot) {
         return updateMemory(storageRoot, profileId, scope, id, writeFields(args))
       }
       return usageAndExit()
+    }
+    case 'agent': {
+      const sub = args[0]
+      const rest = args.slice(1)
+      const caller = process.env.AGENTBRIDGE_WS_SESSION || ''
+      // 서브를 다루는 명령은 부르는 세션이 누구인지 알아야 한다. 자기 자식만 대상이기 때문이다.
+      if (!caller || caller !== path.basename(caller)) fail('이 세션의 신원을 알 수 없다')
+      const nameArg = () => {
+        const v = rest[0]
+        if (!v || v.startsWith('--')) fail('agent ' + sub + '에는 서브 이름이 온다')
+        return v
+      }
+      switch (sub) {
+        case 'list':
+          return agentList(wsDir, caller)
+        case 'read': {
+          const name = nameArg()
+          const i = rest.indexOf('--last')
+          return agentRead(wsDir, caller, name, i === -1 ? undefined : intOption(rest, '--last', 0))
+        }
+        case 'check':
+          return agentCheck(wsDir, caller, {
+            wait: rest.includes('--wait'),
+            forSec: intOption(rest, '--for', DEFAULT_WAIT_SEC)
+          })
+        case 'start': {
+          const prompt = strOption(rest, '--prompt')
+          if (!prompt) fail('agent start에는 --prompt가 온다')
+          const raw = strOption(rest, '--harness')
+          const harnesses = raw ? raw.split(',').map((h) => h.trim()).filter(Boolean) : ['claude']
+          return agentStart(sessionDir(wsDir), prompt, harnesses)
+        }
+        case 'send': {
+          const name = nameArg()
+          const prompt = strOption(rest, '--prompt')
+          if (!prompt) fail('agent send에는 --prompt가 온다')
+          return agentSend(sessionDir(wsDir), name, prompt)
+        }
+        case 'stop':
+          return agentStop(sessionDir(wsDir), nameArg())
+        // close는 아직 stop과 같은 일만 한다. 정리(B-7의 여섯 단계)가 실리는 W7 전까지는 목록에
+        // 내놓지 않는다 — 같은 일을 하는 이름 둘을 모델에게 주면 고르는 데만 턴을 쓴다.
+        case 'close':
+          return agentClose(sessionDir(wsDir), nameArg())
+        default:
+          return usageAndExit()
+      }
     }
     case 'status':
       return readStatus(storageRoot, wsDir, { sessionDir: sessionDir(wsDir) })

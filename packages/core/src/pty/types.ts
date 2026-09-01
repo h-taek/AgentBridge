@@ -17,4 +17,6 @@ export interface SpawnOptions {
   hookCaptureFilePath?: string;
   // 훅이 이 세션의 턴 종료 신호를 쓰는 파일. 셋 다 있다 — 턴 기록의 트리거다 (0.5.0 A-2).
   turnSignalFilePath?: string;
+  // 이 세션이 서브라면 부모의 세션 id (0.5.0 B-6). 호스트가 레코드와 기록의 뿌리를 정할 때 쓴다.
+  parentSessionId?: string;
 }

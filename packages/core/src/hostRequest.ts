@@ -26,9 +26,25 @@ const CLAIMED_FILENAME = 'host-request.claimed.json';
 export const HOST_REQUEST_TIMEOUT_MS = 10_000;
 const POLL_MS = 50;
 
-// 이 단계의 유일한 종류. status가 배선이 실제로 도는지 확인하는 데 쓴다 — 파일이 제자리에
-// 있는 것과 배선이 도는 것은 다른 사실이고, 후자를 확인하는 자리가 거기뿐이다.
+// status가 배선이 실제로 도는지 확인하는 데 쓴다 — 파일이 제자리에 있는 것과 배선이 도는 것은
+// 다른 사실이고, 후자를 확인하는 자리가 거기뿐이다.
 export const HOST_PING = 'status-ping';
+
+// PTY를 만지는 넷 (0.5.0 4단계, B-5). CLI가 혼자 못 하는 일이다 — PTY를 만드는 것과 화면에
+// 그리는 것과 출력을 기록하는 것이 한 객체 안에 묶여 있어, CLI가 따로 띄우면 그리는 주체도
+// 읽는 주체도 없는 자식이 남는다.
+export const HOST_AGENT_START = 'agent-start';
+export const HOST_AGENT_SEND = 'agent-send';
+export const HOST_AGENT_STOP = 'agent-stop';
+export const HOST_AGENT_CLOSE = 'agent-close';
+
+// 종류별 시한. PTY를 만들거나 git을 부르는 것은 다른 것보다 오래 걸린다.
+const LONG_KINDS = new Set<string>([HOST_AGENT_START, HOST_AGENT_CLOSE]);
+const LONG_TIMEOUT_MS = 30_000;
+
+export function timeoutForKind(kind: string): number {
+  return LONG_KINDS.has(kind) ? LONG_TIMEOUT_MS : HOST_REQUEST_TIMEOUT_MS;
+}
 
 export type HostRequest = { id: string; kind: string; at: number; payload?: unknown };
 export type HostResult = { id: string; ok: boolean; output: string; at: number };
@@ -79,7 +95,7 @@ export async function sendHostRequest(
   request: HostRequest,
   opts: SendOptions = {},
 ): Promise<HostResult> {
-  const timeoutMs = opts.timeoutMs ?? HOST_REQUEST_TIMEOUT_MS;
+  const timeoutMs = opts.timeoutMs ?? timeoutForKind(request.kind);
   const now = opts.now ?? Date.now;
   const sleep = opts.sleep ?? defaultSleep;
   const reqPath = hostRequestPath(sessionDir);

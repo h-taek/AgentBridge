@@ -24,6 +24,9 @@ import { createGroupLocker, type GroupLocker } from './groupLock';
 const activePanels = new Map<string, ChatPanel>();
 const MAX_TAB_TITLE_LENGTH = 11;
 
+// 붙여넣기와 제출 사이의 간격(ms). sendPrompt 참조.
+const SUBMIT_DELAY_MS = 300;
+
 function tabTitle(title: string): string {
   return title.length > MAX_TAB_TITLE_LENGTH ? title.substring(0, MAX_TAB_TITLE_LENGTH) + '…' : title;
 }
@@ -67,9 +70,12 @@ export class ChatPanel {
     this.deletedExternally = true;
   }
 
+  // preserveFocus — 서브 탭은 메인이 명령을 부른 결과로 뜨므로 사용자가 보고 있던 자리에서
+  // 커서를 뺏지 않는다 (0.5.0 B-6).
   static create(
     extensionUri: vscode.Uri,
     opts: SpawnOptions,
+    preserveFocus = false,
   ): ChatPanel {
     // 컬럼 선택은 공식 claude-code 익스텐션과 동일한 방식 — "맨 오른쪽" 기하학이 아니라
     // "탭이 전부 AgentBridge 챗 웹뷰인 에디터 그룹"을 찾아 그 컬럼에 새 탭으로 합류한다.
@@ -96,7 +102,7 @@ export class ChatPanel {
     const panel = vscode.window.createWebviewPanel(
       'agentbridge.chat',
       tabTitle(opts.terminalName),
-      { viewColumn: targetColumn, preserveFocus: false },
+      { viewColumn: targetColumn, preserveFocus },
       {
         enableScripts: true,
         retainContextWhenHidden: true,
@@ -250,6 +256,33 @@ export class ChatPanel {
     this.onDisposeCallback = cb;
   }
 
+  // 이 세션의 프로세스가 살아 있는가. `agent check`가 빈손으로 돌아올 때 "아직 일하는 중"과
+  // "신호 없이 끝남"을 가르는 재료다 (0.5.0 B-6).
+  get alive(): boolean {
+    return !!this.ptyProcess;
+  }
+
+  // 도는 세션에 지침을 더 보낸다 (0.5.0 B-6, `agent send`).
+  //
+  // 괄호 붙여넣기로 감싼다. 원문을 그대로 쓰면 agy가 조용히 버린다 — 입력줄이 빈 채로 남고
+  // 오류도 안 나서 화면만 보면 안 보낸 것과 구분되지 않는다(research 10 §2).
+  //
+  // 제출은 붙여넣기가 끝난 뒤에 따로 보낸다. 실측에서는 1초를 뒀는데 그건 사람이 보는 간격이라
+  // 여기서는 짧게 잡고, 게이트 1 라이브에서 이 값으로 세 하니스가 다 받는지 확인한다.
+  sendPrompt(text: string): boolean {
+    const pty = this.ptyProcess;
+    if (!pty || !text) return false;
+    pty.write(`\x1b[200~${text}\x1b[201~`);
+    setTimeout(() => {
+      try {
+        pty.write('\r');
+      } catch {
+        /* 그 사이 죽었다 */
+      }
+    }, SUBMIT_DELAY_MS);
+    return true;
+  }
+
   reveal(): void {
     this.panel.reveal(undefined, false);
   }
@@ -318,6 +351,8 @@ export class ChatPanel {
           model: this.opts.model,
           workspacePath: this.opts.cwd,
           signalFilePath: this.opts.turnSignalFilePath,
+          // 서브의 턴은 워크스페이스 직하가 아니라 그 세션 폴더에 쌓인다 (0.5.0 B-8).
+          subagent: !!this.opts.parentSessionId,
           // 자동 명명이 제목을 정하면 이 패널의 탭 제목을 즉시 갱신(닫았다 열 필요 없이).
           onAutoNamed: (title) => this.setTabTitle(title),
         });

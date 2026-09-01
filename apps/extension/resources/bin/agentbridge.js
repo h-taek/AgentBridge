@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// @agentbridge-cli-version 0.5.0
+// @agentbridge-cli-version 0.5.1
 "use strict";
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -1085,6 +1085,9 @@ var init_skillInstaller = __esm({
 });
 
 // packages/core/src/hostRequest.ts
+function timeoutForKind(kind) {
+  return LONG_KINDS.has(kind) ? LONG_TIMEOUT_MS : HOST_REQUEST_TIMEOUT_MS;
+}
 function hostRequestPath(sessionDir2) {
   return (0, import_path8.join)(sessionDir2, HOST_REQUEST_FILENAME);
 }
@@ -1105,7 +1108,7 @@ async function unlinkQuiet(path2) {
   }
 }
 async function sendHostRequest(sessionDir2, request, opts = {}) {
-  const timeoutMs = opts.timeoutMs ?? HOST_REQUEST_TIMEOUT_MS;
+  const timeoutMs = opts.timeoutMs ?? timeoutForKind(request.kind);
   const now = opts.now ?? Date.now;
   const sleep = opts.sleep ?? defaultSleep;
   const reqPath = hostRequestPath(sessionDir2);
@@ -1139,7 +1142,7 @@ async function sendHostRequest(sessionDir2, request, opts = {}) {
     at: now()
   };
 }
-var import_fs6, import_path8, HOST_REQUEST_FILENAME, HOST_RESULT_FILENAME, HOST_REQUEST_TIMEOUT_MS, POLL_MS, HOST_PING, defaultSleep;
+var import_fs6, import_path8, HOST_REQUEST_FILENAME, HOST_RESULT_FILENAME, HOST_REQUEST_TIMEOUT_MS, POLL_MS, HOST_PING, HOST_AGENT_START, HOST_AGENT_SEND, HOST_AGENT_STOP, HOST_AGENT_CLOSE, LONG_KINDS, LONG_TIMEOUT_MS, defaultSleep;
 var init_hostRequest = __esm({
   "packages/core/src/hostRequest.ts"() {
     "use strict";
@@ -1150,6 +1153,12 @@ var init_hostRequest = __esm({
     HOST_REQUEST_TIMEOUT_MS = 1e4;
     POLL_MS = 50;
     HOST_PING = "status-ping";
+    HOST_AGENT_START = "agent-start";
+    HOST_AGENT_SEND = "agent-send";
+    HOST_AGENT_STOP = "agent-stop";
+    HOST_AGENT_CLOSE = "agent-close";
+    LONG_KINDS = /* @__PURE__ */ new Set([HOST_AGENT_START, HOST_AGENT_CLOSE]);
+    LONG_TIMEOUT_MS = 3e4;
     defaultSleep = (ms) => new Promise((r) => setTimeout(r, ms));
   }
 });
@@ -1230,6 +1239,279 @@ var init_status = __esm({
   }
 });
 
+// packages/core/src/sessionFileWatcher.ts
+var init_sessionFileWatcher = __esm({
+  "packages/core/src/sessionFileWatcher.ts"() {
+    "use strict";
+  }
+});
+
+// packages/core/src/cliAdapter/turnSignal.ts
+function resolveTurnSignalFile(workspaceDir, sessionId) {
+  return (0, import_path10.join)(workspaceDir, "sessions", sessionId, TURN_SIGNAL_FILENAME);
+}
+function str(v) {
+  return typeof v === "string" && v.trim() ? v : "";
+}
+function parseTurnSignal(raw) {
+  let obj;
+  try {
+    obj = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!obj || typeof obj !== "object") return null;
+  const o = obj;
+  const agent = str(o.agent);
+  if (agent !== "claude" && agent !== "codex" && agent !== "agy") return null;
+  const event = str(o.event);
+  if (!event) return null;
+  const agentId = str(o.agentId);
+  if (agentId) return null;
+  const at = typeof o.at === "number" && Number.isFinite(o.at) ? o.at : 0;
+  return {
+    agent,
+    event,
+    sessionId: str(o.sessionId),
+    transcriptPath: str(o.transcriptPath),
+    complete: o.complete === true,
+    terminationReason: str(o.terminationReason) || void 0,
+    error: str(o.error) || void 0,
+    at
+  };
+}
+async function readTurnSignal(signalFilePath) {
+  let raw;
+  try {
+    raw = await import_fs8.promises.readFile(signalFilePath, "utf8");
+  } catch {
+    return null;
+  }
+  return parseTurnSignal(raw);
+}
+var import_fs8, import_path10, TURN_SIGNAL_FILENAME;
+var init_turnSignal = __esm({
+  "packages/core/src/cliAdapter/turnSignal.ts"() {
+    "use strict";
+    import_fs8 = require("fs");
+    import_path10 = require("path");
+    init_interfaces();
+    init_sessionFileWatcher();
+    TURN_SIGNAL_FILENAME = "turn-signal.json";
+  }
+});
+
+// packages/core/src/agent/reportState.ts
+function resolveReportReadFile(workspaceDir, sessionId) {
+  return (0, import_path11.join)(workspaceDir, "sessions", sessionId, REPORT_READ_FILENAME);
+}
+async function readReportReadAt(workspaceDir, sessionId) {
+  let raw;
+  try {
+    raw = await import_fs9.promises.readFile(resolveReportReadFile(workspaceDir, sessionId), "utf8");
+  } catch {
+    return 0;
+  }
+  try {
+    const obj = JSON.parse(raw);
+    return typeof obj.at === "number" && Number.isFinite(obj.at) ? obj.at : 0;
+  } catch {
+    return 0;
+  }
+}
+async function markReported(workspaceDir, sessionId, at = Date.now()) {
+  const target = resolveReportReadFile(workspaceDir, sessionId);
+  const tmp = `${target}.${process.pid}.${Date.now()}.tmp`;
+  await import_fs9.promises.mkdir((0, import_path11.join)(workspaceDir, "sessions", sessionId), { recursive: true });
+  await import_fs9.promises.writeFile(tmp, JSON.stringify({ at }), "utf8");
+  await import_fs9.promises.rename(tmp, target);
+}
+async function isUnread(workspaceDir, sessionId) {
+  const signal = await readTurnSignal(resolveTurnSignalFile(workspaceDir, sessionId));
+  if (!signal || !signal.complete) return false;
+  const readAt = await readReportReadAt(workspaceDir, sessionId);
+  return signal.at > readAt;
+}
+var import_fs9, import_path11, REPORT_READ_FILENAME;
+var init_reportState = __esm({
+  "packages/core/src/agent/reportState.ts"() {
+    "use strict";
+    import_fs9 = require("fs");
+    import_path11 = require("path");
+    init_turnSignal();
+    REPORT_READ_FILENAME = "report-read.json";
+  }
+});
+
+// packages/core/src/agentCli/agent.ts
+var agent_exports = {};
+__export(agent_exports, {
+  DEFAULT_WAIT_SEC: () => DEFAULT_WAIT_SEC,
+  agentCheck: () => agentCheck,
+  agentClose: () => agentClose,
+  agentList: () => agentList,
+  agentRead: () => agentRead,
+  agentSend: () => agentSend,
+  agentStart: () => agentStart,
+  agentStop: () => agentStop,
+  listSubs: () => listSubs
+});
+async function readSessions(wsDir) {
+  try {
+    const raw = await import_fs10.promises.readFile((0, import_path12.join)(wsDir, "workspace.json"), "utf8");
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed.sessions) ? parsed.sessions : [];
+  } catch {
+    return [];
+  }
+}
+async function listSubs(wsDir, callerSessionId) {
+  const sessions = await readSessions(wsDir);
+  const mine = sessions.filter((s) => s.parentSessionId === callerSessionId && s.agentName);
+  return Promise.all(
+    mine.map(async (s) => ({
+      name: s.agentName,
+      sessionId: s.sessionId,
+      model: s.model,
+      title: s.title ?? s.model,
+      closed: s.closedAt !== null,
+      unread: await isUnread(wsDir, s.sessionId)
+    }))
+  );
+}
+async function findSub(wsDir, callerSessionId, name) {
+  const subs = await listSubs(wsDir, callerSessionId);
+  const found = subs.find((s) => s.name === name);
+  if (!found) {
+    const known = subs.map((s) => s.name).join(", ") || "(\uC5C6\uC74C)";
+    throw new Error(`\uADF8\uB7F0 \uC11C\uBE0C\uAC00 \uC5C6\uB2E4: ${name}. \uC9C0\uAE08 \uC788\uB294 \uAC83: ${known}`);
+  }
+  return found;
+}
+function rowLine(s) {
+  const state = s.closed ? "\uB05D\uB0A8" : "\uB3C4\uB294 \uC911";
+  const mark = s.unread ? "  \xB7 \uC548 \uC77D\uC740 \uBCF4\uACE0 \uC788\uC74C" : "";
+  return `  ${s.name}  (${s.model}, ${state})  ${s.title}${mark}`;
+}
+async function agentList(wsDir, callerSessionId) {
+  const subs = await listSubs(wsDir, callerSessionId);
+  if (subs.length === 0) return "\uB744\uC6B4 \uC11C\uBE0C\uAC00 \uC5C6\uB2E4.";
+  return [`## \uC11C\uBE0C ${subs.length}\uAC1C`, "", ...subs.map(rowLine)].join("\n");
+}
+async function agentRead(wsDir, callerSessionId, name, lastN) {
+  const sub = await findSub(wsDir, callerSessionId, name);
+  const sessionDir2 = (0, import_path12.join)(wsDir, "sessions", sub.sessionId);
+  const all = await readAllTurns(sessionDir2);
+  await markReported(wsDir, sub.sessionId);
+  if (all.length === 0) {
+    return `${name}: \uC544\uC9C1 \uAE30\uB85D\uB41C \uD134\uC774 \uC5C6\uB2E4.${sub.closed ? " \uC138\uC158\uC740 \uC774\uBBF8 \uB05D\uB0AC\uB2E4." : ""}`;
+  }
+  const turns = typeof lastN === "number" ? all.slice(-lastN) : all;
+  const lines = [`## ${name} (${sub.model}) \uC758 \uAE30\uB85D \u2014 ${turns.length}\uD134, \uC624\uB798\uB41C \uAC83\uBD80\uD130`, ""];
+  for (const t of turns) {
+    lines.push(`[${t.completedAt || ""}]`);
+    lines.push(`user: ${t.user || ""}`);
+    lines.push(`assistant: ${t.assistantBody || ""}`);
+    lines.push("");
+  }
+  return lines.join("\n");
+}
+async function replayTail(wsDir, sessionId) {
+  const path2 = (0, import_path12.join)(wsDir, "sessions", sessionId, "replay.log");
+  try {
+    const stat = await import_fs10.promises.stat(path2);
+    const start = Math.max(0, stat.size - TAIL_BYTES);
+    const handle = await import_fs10.promises.open(path2, "r");
+    try {
+      const buf = Buffer.alloc(stat.size - start);
+      await handle.read(buf, 0, buf.length, start);
+      return buf.toString("utf8");
+    } finally {
+      await handle.close();
+    }
+  } catch {
+    return "";
+  }
+}
+function renderDone(done) {
+  const lines = [`## \uB05D\uB09C \uC11C\uBE0C ${done.length}\uAC1C`, ""];
+  for (const s of done) lines.push(`  ${s.name}  (${s.model})  ${s.title}`);
+  lines.push("", "`agent read <\uC774\uB984>`\uC73C\uB85C \uBCF4\uACE0\uB97C \uC77D\uB294\uB2E4.");
+  return lines.join("\n");
+}
+async function renderEmpty(wsDir, subs, waited) {
+  if (subs.length === 0) return "\uB744\uC6B4 \uC11C\uBE0C\uAC00 \uC5C6\uB2E4.";
+  const lines = [waited ? "\uAE30\uB2E4\uB9AC\uB294 \uB3D9\uC548 \uB05D\uB09C \uC11C\uBE0C\uAC00 \uC5C6\uB2E4." : "\uB05D\uB0AC\uB294\uB370 \uC548 \uC77D\uC740 \uC11C\uBE0C\uAC00 \uC5C6\uB2E4.", ""];
+  for (const s of subs) {
+    lines.push(`  ${s.name}  (${s.model}, ${s.closed ? "\uB05D\uB0A8" : "\uB3C4\uB294 \uC911"})`);
+    if (s.closed) {
+      const tail = await replayTail(wsDir, s.sessionId);
+      if (tail) {
+        lines.push("    \u2014 \uC644\uB8CC \uC2E0\uD638 \uC5C6\uC774 \uB05D\uB0AC\uB2E4. \uD654\uBA74 \uAE30\uB85D\uC758 \uAF2C\uB9AC:");
+        for (const l of tail.split("\n").slice(-8)) lines.push(`      ${l.replace(/\s+$/, "")}`);
+      } else {
+        lines.push("    \u2014 \uC644\uB8CC \uC2E0\uD638 \uC5C6\uC774 \uB05D\uB0AC\uB2E4. \uD654\uBA74 \uAE30\uB85D\uC774 \uC5C6\uB2E4.");
+      }
+    }
+  }
+  return lines.join("\n");
+}
+async function agentCheck(wsDir, callerSessionId, opts = {}) {
+  const now = opts.now ?? Date.now;
+  const sleep = opts.sleep ?? defaultSleep2;
+  let subs = await listSubs(wsDir, callerSessionId);
+  let done = subs.filter((s) => s.unread);
+  if (done.length > 0) return renderDone(done);
+  if (!opts.wait) return renderEmpty(wsDir, subs, false);
+  const deadline = now() + (opts.forSec ?? DEFAULT_WAIT_SEC) * 1e3;
+  while (now() < deadline) {
+    await sleep(WAIT_POLL_MS);
+    subs = await listSubs(wsDir, callerSessionId);
+    done = subs.filter((s) => s.unread);
+    if (done.length > 0) return renderDone(done);
+  }
+  return renderEmpty(wsDir, subs, true);
+}
+function newRequest(kind, payload) {
+  requestSeq += 1;
+  return { id: `${process.pid}-${Date.now()}-${requestSeq}`, kind, at: Date.now(), payload };
+}
+async function callHost(sessionDir2, kind, payload) {
+  if (!sessionDir2) {
+    return "\uC774 \uC138\uC158\uC758 \uC790\uB9AC\uB97C \uC54C \uC218 \uC5C6\uC5B4 \uD638\uC2A4\uD2B8\uC5D0 \uC694\uCCAD\uC744 \uB118\uAE30\uC9C0 \uBABB\uD588\uB2E4.";
+  }
+  const result = await sendHostRequest(sessionDir2, newRequest(kind, payload));
+  return result.output;
+}
+function agentStart(sessionDir2, prompt, harnesses) {
+  return callHost(sessionDir2, HOST_AGENT_START, { prompt, harnesses });
+}
+function agentSend(sessionDir2, name, prompt) {
+  return callHost(sessionDir2, HOST_AGENT_SEND, { name, prompt });
+}
+function agentStop(sessionDir2, name) {
+  return callHost(sessionDir2, HOST_AGENT_STOP, { name });
+}
+function agentClose(sessionDir2, name) {
+  return callHost(sessionDir2, HOST_AGENT_CLOSE, { name });
+}
+var import_fs10, import_path12, DEFAULT_WAIT_SEC, WAIT_POLL_MS, TAIL_BYTES, defaultSleep2, requestSeq;
+var init_agent = __esm({
+  "packages/core/src/agentCli/agent.ts"() {
+    "use strict";
+    import_fs10 = require("fs");
+    import_path12 = require("path");
+    init_turnsStore();
+    init_reportState();
+    init_hostRequest();
+    DEFAULT_WAIT_SEC = 60;
+    WAIT_POLL_MS = 1e3;
+    TAIL_BYTES = 2e3;
+    defaultSleep2 = (ms) => new Promise((r) => setTimeout(r, ms));
+    requestSeq = 0;
+  }
+});
+
 // packages/core/src/agentCli/uninstall.ts
 var uninstall_exports = {};
 __export(uninstall_exports, {
@@ -1241,13 +1523,13 @@ async function uninstallGlobal(homeDir) {
   for (const agent of AGENTS2) {
     const path2 = skillFilePath(agent, homeDir);
     try {
-      await import_fs8.promises.unlink(path2);
+      await import_fs11.promises.unlink(path2);
       removed.push(path2);
     } catch {
       continue;
     }
     try {
-      await import_fs8.promises.rmdir((0, import_path10.dirname)(path2));
+      await import_fs11.promises.rmdir((0, import_path13.dirname)(path2));
     } catch {
     }
   }
@@ -1262,12 +1544,12 @@ async function uninstallGlobal(homeDir) {
     "\uC800\uC7A5\uC18C(\uB300\uD654 \uAE30\uB85D\uACFC \uC9C0\uC2DD)\uB294 \uADF8\uB300\uB85C \uB454\uB2E4."
   ].join("\n");
 }
-var import_fs8, import_path10, AGENTS2;
+var import_fs11, import_path13, AGENTS2;
 var init_uninstall = __esm({
   "packages/core/src/agentCli/uninstall.ts"() {
     "use strict";
-    import_fs8 = require("fs");
-    import_path10 = require("path");
+    import_fs11 = require("fs");
+    import_path13 = require("path");
     init_hookInstaller();
     init_skillInstaller();
     AGENTS2 = ["claude", "codex", "agy"];
@@ -1275,7 +1557,7 @@ var init_uninstall = __esm({
 });
 
 // packages/core/bin/agentbridge.js
-var fs3 = require("fs");
+var fs5 = require("fs");
 var path = require("path");
 var {
   readContext: readContext2,
@@ -1286,6 +1568,16 @@ var {
 } = (init_read(), __toCommonJS(read_exports));
 var { addMemory: addMemory2, updateMemory: updateMemory2, WriteError: WriteError2 } = (init_write(), __toCommonJS(write_exports));
 var { readStatus: readStatus2 } = (init_status(), __toCommonJS(status_exports));
+var {
+  agentList: agentList2,
+  agentRead: agentRead2,
+  agentCheck: agentCheck2,
+  agentStart: agentStart2,
+  agentSend: agentSend2,
+  agentStop: agentStop2,
+  agentClose: agentClose2,
+  DEFAULT_WAIT_SEC: DEFAULT_WAIT_SEC2
+} = (init_agent(), __toCommonJS(agent_exports));
 var { uninstallGlobal: uninstallGlobal2 } = (init_uninstall(), __toCommonJS(uninstall_exports));
 var DEFAULT_TURNS = 3;
 var COMMANDS = [
@@ -1296,7 +1588,13 @@ var COMMANDS = [
   ["memory search <\uC9C8\uC758>", "\uB450 \uC9C0\uC2DD\uC744 \uC9C8\uC758\uB85C \uAC80\uC0C9"],
   ["memory add", "\uC0C8 \uC0AC\uC2E4\uC744 \uC81C\uC548 \uD050\uC5D0 \uB123\uB294\uB2E4 (--scope --category --title --summary --body)"],
   ["memory update <\uC2DD\uBCC4\uC790>", "\uC774\uBBF8 \uC788\uB294 \uD56D\uBAA9\uC744 \uACE0\uCE58\uB294 \uC81C\uC548 (\uAC19\uC740 \uC778\uC790, \uC548 \uC900 \uAC83\uC740 \uADF8\uB300\uB85C)"],
-  ["status", "\uC5B4\uB514\uC5D0 \uBB34\uC5C7\uC774 \uAE54\uB824 \uC788\uB294\uC9C0\uC640 \uBC30\uC120 \uC790\uAC00 \uC9C4\uB2E8"]
+  ["status", "\uC5B4\uB514\uC5D0 \uBB34\uC5C7\uC774 \uAE54\uB824 \uC788\uB294\uC9C0\uC640 \uBC30\uC120 \uC790\uAC00 \uC9C4\uB2E8"],
+  ["agent start", '\uC11C\uBE0C\uC5D0\uC774\uC804\uD2B8\uB97C \uB744\uC6B4\uB2E4 (--prompt "..." [--harness claude,codex,agy])'],
+  ["agent list", "\uB744\uC6B4 \uC11C\uBE0C\uC758 \uBAA9\uB85D\uACFC \uC0C1\uD0DC"],
+  ["agent check", "\uB05D\uB09C \uC11C\uBE0C\uAC00 \uC788\uB294\uC9C0 \uBCF8\uB2E4 (--wait\uBA74 \uC0DD\uAE38 \uB54C\uAE4C\uC9C0, --for <\uCD08>\uB85C \uC0C1\uD55C \uC870\uC815)"],
+  ["agent read <\uC774\uB984>", "\uADF8 \uC11C\uBE0C\uC758 \uAE30\uB85D \uC804\uBB38 (--last N\uC73C\uB85C \uC790\uB984)"],
+  ["agent send <\uC774\uB984>", '\uB3C4\uB294 \uC11C\uBE0C\uC5D0 \uC9C0\uCE68\uC744 \uB354 \uBCF4\uB0B8\uB2E4 (--prompt "...")'],
+  ["agent stop <\uC774\uB984>", "\uC11C\uBE0C\uB97C \uB05D\uB0B8\uB2E4"]
 ];
 var USAGE = [
   "agentbridge \u2014 AgentBridge \uB9E5\uB77D \uC77D\uAE30",
@@ -1315,7 +1613,7 @@ function fail(msg) {
 }
 function realpath(v) {
   try {
-    return fs3.realpathSync(v);
+    return fs5.realpathSync(v);
   } catch {
     return path.resolve(v);
   }
@@ -1390,6 +1688,52 @@ async function dispatch(cmd, args, wsDir, storageRoot) {
         return updateMemory2(storageRoot, profileId, scope, id, writeFields(args));
       }
       return usageAndExit();
+    }
+    case "agent": {
+      const sub = args[0];
+      const rest = args.slice(1);
+      const caller = process.env.AGENTBRIDGE_WS_SESSION || "";
+      if (!caller || caller !== path.basename(caller)) fail("\uC774 \uC138\uC158\uC758 \uC2E0\uC6D0\uC744 \uC54C \uC218 \uC5C6\uB2E4");
+      const nameArg = () => {
+        const v = rest[0];
+        if (!v || v.startsWith("--")) fail("agent " + sub + "\uC5D0\uB294 \uC11C\uBE0C \uC774\uB984\uC774 \uC628\uB2E4");
+        return v;
+      };
+      switch (sub) {
+        case "list":
+          return agentList2(wsDir, caller);
+        case "read": {
+          const name = nameArg();
+          const i = rest.indexOf("--last");
+          return agentRead2(wsDir, caller, name, i === -1 ? void 0 : intOption(rest, "--last", 0));
+        }
+        case "check":
+          return agentCheck2(wsDir, caller, {
+            wait: rest.includes("--wait"),
+            forSec: intOption(rest, "--for", DEFAULT_WAIT_SEC2)
+          });
+        case "start": {
+          const prompt = strOption(rest, "--prompt");
+          if (!prompt) fail("agent start\uC5D0\uB294 --prompt\uAC00 \uC628\uB2E4");
+          const raw = strOption(rest, "--harness");
+          const harnesses = raw ? raw.split(",").map((h) => h.trim()).filter(Boolean) : ["claude"];
+          return agentStart2(sessionDir(wsDir), prompt, harnesses);
+        }
+        case "send": {
+          const name = nameArg();
+          const prompt = strOption(rest, "--prompt");
+          if (!prompt) fail("agent send\uC5D0\uB294 --prompt\uAC00 \uC628\uB2E4");
+          return agentSend2(sessionDir(wsDir), name, prompt);
+        }
+        case "stop":
+          return agentStop2(sessionDir(wsDir), nameArg());
+        // close는 아직 stop과 같은 일만 한다. 정리(B-7의 여섯 단계)가 실리는 W7 전까지는 목록에
+        // 내놓지 않는다 — 같은 일을 하는 이름 둘을 모델에게 주면 고르는 데만 턴을 쓴다.
+        case "close":
+          return agentClose2(sessionDir(wsDir), nameArg());
+        default:
+          return usageAndExit();
+      }
     }
     case "status":
       return readStatus2(storageRoot, wsDir, { sessionDir: sessionDir(wsDir) });

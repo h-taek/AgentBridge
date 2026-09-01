@@ -39,10 +39,29 @@ export type CliAdapterOptions = {
   logger?: Logger;
 };
 
+// 서브에이전트를 띄울 때 함께 넘기는 값 (0.5.0 B-6·B-8).
+//
+// 첫 프롬프트는 기동 인자로 들어간다. 셋 다 인자로 받고 그대로 대화형에 남는 것을 실측으로
+// 확인했다(research 10 §1). 띄운 뒤 화면에 타이핑해 넣는 경로를 두지 않는 이유는 그쪽이
+// 하니스마다 다르고 조용히 실패하기 때문이다.
+//
+// resume에는 첫 프롬프트를 다시 넣지 않는다. 이어서 여는 세션은 이미 그 말을 들었다.
+export type SpawnExtras = {
+  initialPrompt?: string;
+  // 이 세션이 서브라면 부모의 세션 id. 기록의 뿌리를 세션 폴더로 가르는 것은 호스트 몫이고
+  // 여기서는 SpawnOptions에 실어 나르기만 한다.
+  parentSessionId?: string;
+};
+
 export interface CliAdapterSet {
   claude: {
     isAvailable(): ProbeResult;
-    buildSpawnOptions(cwd: string, workspaceId: string, resumeSessionId?: string): Promise<SpawnOptions>;
+    buildSpawnOptions(
+      cwd: string,
+      workspaceId: string,
+      resumeSessionId?: string,
+      extras?: SpawnExtras,
+    ): Promise<SpawnOptions>;
   };
   codex: {
     isAvailable(): ProbeResult;
@@ -51,6 +70,7 @@ export interface CliAdapterSet {
       workspaceId: string,
       resumeSessionId?: string,
       resumeModelSessionId?: string,
+      extras?: SpawnExtras,
     ): Promise<SpawnOptions>;
   };
   agy: {
@@ -60,6 +80,7 @@ export interface CliAdapterSet {
       workspaceId: string,
       resumeSessionId?: string,
       resumeModelSessionId?: string,
+      extras?: SpawnExtras,
     ): Promise<SpawnOptions>;
   };
 }
@@ -112,7 +133,7 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
     claude: {
       isAvailable: () => envProbe.probe('claude'),
 
-      async buildSpawnOptions(cwd, workspaceId, resumeSessionId) {
+      async buildSpawnOptions(cwd, workspaceId, resumeSessionId, extras) {
         const sessionId = resumeSessionId ?? randomUUID();
         const wsDir = workspaceDir(workspaceId);
         const env = {
@@ -157,7 +178,9 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
                 `claudeAdapter: resume 불가 (jsonl 없음) — 새 세션으로 fallback (sessionId=${sessionId.slice(0, 8)})`,
               ),
               ['--session-id', sessionId]);
-        const args = [...sessionArgs, ...accessArgs];
+        // 첫 프롬프트는 위치 인자다. resume에는 붙이지 않는다 — 이어서 여는 세션은 이미 들었다.
+        const promptArgs = !resumeSessionId && extras?.initialPrompt ? [extras.initialPrompt] : [];
+        const args = [...sessionArgs, ...accessArgs, ...promptArgs];
 
         return {
           command,
@@ -168,6 +191,7 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
           model: 'claude',
           workspaceId,
           sessionId,
+          parentSessionId: extras?.parentSessionId,
           turnSignalFilePath: resolveTurnSignalFile(wsDir, sessionId),
         };
       },
@@ -176,7 +200,7 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
     codex: {
       isAvailable: () => envProbe.probe('codex'),
 
-      async buildSpawnOptions(cwd, workspaceId, resumeSessionId, resumeModelSessionId) {
+      async buildSpawnOptions(cwd, workspaceId, resumeSessionId, resumeModelSessionId, extras) {
         const sessionId = resumeSessionId ?? randomUUID();
         const wsDir = workspaceDir(workspaceId);
         const env = {
@@ -211,8 +235,11 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
         let args: string[];
         let modelSessionId: string | undefined = resumeModelSessionId;
 
+        // 첫 프롬프트는 위치 인자다. 새 세션일 때만 붙는다.
+        const promptArgs = !resumeSessionId && extras?.initialPrompt ? [extras.initialPrompt] : [];
+
         if (!resumeSessionId) {
-          args = [...sandboxArgs];
+          args = [...sandboxArgs, ...promptArgs];
         } else if (resumeModelSessionId) {
           args = [...sandboxArgs, 'resume', resumeModelSessionId];
         } else {
@@ -233,6 +260,7 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
           workspaceId,
           sessionId,
           modelSessionId,
+          parentSessionId: extras?.parentSessionId,
           hookCaptureFilePath,
           turnSignalFilePath,
         };
@@ -242,7 +270,7 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
     agy: {
       isAvailable: () => envProbe.probe('agy'),
 
-      async buildSpawnOptions(cwd, workspaceId, resumeSessionId, resumeModelSessionId) {
+      async buildSpawnOptions(cwd, workspaceId, resumeSessionId, resumeModelSessionId, extras) {
         const sessionId = resumeSessionId ?? randomUUID();
         const wsDir = workspaceDir(workspaceId);
         const env = {
@@ -269,12 +297,14 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
         }
 
         const cwdArgs = cwd ? ['--add-dir', cwd] : [];
+        // agy의 첫 프롬프트는 위치 인자가 아니라 -i다. --print와 달리 답한 뒤에도 대화형으로 남는다.
+        const promptArgs = !resumeSessionId && extras?.initialPrompt ? ['-i', extras.initialPrompt] : [];
 
         let args: string[];
         let modelSessionId: string | undefined = resumeModelSessionId;
 
         if (!resumeSessionId) {
-          args = [...cwdArgs, '--dangerously-skip-permissions'];
+          args = [...cwdArgs, '--dangerously-skip-permissions', ...promptArgs];
         } else if (resumeModelSessionId) {
           try {
             const resumeArgs = await resolveResumeArgs({
@@ -304,6 +334,7 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
           workspaceId,
           sessionId,
           modelSessionId,
+          parentSessionId: extras?.parentSessionId,
           hookCaptureFilePath,
           turnSignalFilePath,
         };

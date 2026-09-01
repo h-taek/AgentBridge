@@ -39,6 +39,10 @@ export interface CaptureSessionOptions {
   getDetail: () => TurnsAssistantDetail;
   scheduler: CaptureSchedulerLike;
   onTurnFlushed?: (info: { workspaceId: string; sessionId: string; flushedAt: string }) => void | Promise<void>;
+  // 서브에이전트 세션인가 (0.5.0 B-8). 서브의 기록은 워크스페이스 직하가 아니라 그 세션 폴더에
+  // 쌓이므로, 그 자리를 워크스페이스로 착각해 압축을 돌리면 서브마다 ir.json이 생긴다. 서브가
+  // 볼 맥락은 어차피 부모의 것이고 이 기록은 정리될 때 통째로 사라지므로 회전도 걸지 않는다.
+  subagent?: boolean;
   logger?: Logger;
 }
 
@@ -191,6 +195,7 @@ export class CaptureSession {
         this.opts.onTurnFlushed({ workspaceId: this.opts.workspaceId, sessionId: this.opts.sessionId, flushedAt }),
       ).catch((err) => this.log.warn(`CaptureSession onTurnFlushed 실패: ${String(err)}`));
     }
+    if (this.opts.subagent) return;
     try {
       await rotateIfNeeded(this.opts.workspaceRoot, { logger: this.log });
     } catch (err) {

@@ -11,7 +11,7 @@
 //
 // `uninstall`은 싣지 않는다. 사용자 명령이지 에이전트 명령이 아니다.
 
-export const SKILL_VERSION = '0.5.3';
+export const SKILL_VERSION = '0.5.4';
 export const SKILL_DIR_NAME = 'agentbridge';
 
 // 셸에서 그대로 쓸 수 있게 공백 있는 경로를 감싼다.
@@ -79,6 +79,26 @@ Each line is the part after the run command.
     memory update <id> [same flags]
 
 Categories: role, repos, domain, workflows, conventions, infra, verification.
+
+## Subagents
+
+You can run other coding agents as subagents. Each gets its own session and
+tab; you give it work, it reports back, you read the report.
+
+    agent start --prompt "..." [--harness claude,codex,agy]
+    agent list                    the subs you started, and their state
+    agent check [--wait] [--for <seconds>]
+    agent read <name> [--last N]  that sub's full conversation
+    agent send <name> --prompt "..."
+    agent stop <name>
+
+\`agent start\` returns the names it issued — that is what the other commands
+take. Default harness is claude; pass several to run the same prompt on each.
+
+A sub does not tell you when it is done. Either \`agent check --wait\`, which
+returns as soon as one finishes (up to a minute, \`--for\` raises it), or go do
+something else — the next turn tells you how many finished subs are unread.
+Reading a report with \`agent read\` is what clears that.
 
 Every read output item starts with its identifier (\`<category>/<slug>\`) —
 that is what \`memory update\` takes.

@@ -22,6 +22,130 @@ var __copyProps = (to, from, except, desc) => {
 };
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
+// packages/core/src/interfaces.ts
+var init_interfaces = __esm({
+  "packages/core/src/interfaces.ts"() {
+    "use strict";
+  }
+});
+
+// packages/core/src/sessionFileWatcher.ts
+var init_sessionFileWatcher = __esm({
+  "packages/core/src/sessionFileWatcher.ts"() {
+    "use strict";
+  }
+});
+
+// packages/core/src/cliAdapter/turnSignal.ts
+function resolveTurnSignalFile(workspaceDir, sessionId) {
+  return (0, import_path.join)(workspaceDir, "sessions", sessionId, TURN_SIGNAL_FILENAME);
+}
+function str(v) {
+  return typeof v === "string" && v.trim() ? v : "";
+}
+function parseTurnSignal(raw) {
+  let obj;
+  try {
+    obj = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!obj || typeof obj !== "object") return null;
+  const o = obj;
+  const agent = str(o.agent);
+  if (agent !== "claude" && agent !== "codex" && agent !== "agy") return null;
+  const event = str(o.event);
+  if (!event) return null;
+  const agentId = str(o.agentId);
+  if (agentId) return null;
+  const at = typeof o.at === "number" && Number.isFinite(o.at) ? o.at : 0;
+  return {
+    agent,
+    event,
+    sessionId: str(o.sessionId),
+    transcriptPath: str(o.transcriptPath),
+    complete: o.complete === true,
+    terminationReason: str(o.terminationReason) || void 0,
+    error: str(o.error) || void 0,
+    at
+  };
+}
+async function readTurnSignal(signalFilePath) {
+  let raw;
+  try {
+    raw = await import_fs.promises.readFile(signalFilePath, "utf8");
+  } catch {
+    return null;
+  }
+  return parseTurnSignal(raw);
+}
+var import_fs, import_path, TURN_SIGNAL_FILENAME;
+var init_turnSignal = __esm({
+  "packages/core/src/cliAdapter/turnSignal.ts"() {
+    "use strict";
+    import_fs = require("fs");
+    import_path = require("path");
+    init_interfaces();
+    init_sessionFileWatcher();
+    TURN_SIGNAL_FILENAME = "turn-signal.json";
+  }
+});
+
+// packages/core/src/agent/reportState.ts
+var reportState_exports = {};
+__export(reportState_exports, {
+  REPORT_READ_FILENAME: () => REPORT_READ_FILENAME,
+  isUnread: () => isUnread,
+  listUnread: () => listUnread,
+  markReported: () => markReported,
+  readReportReadAt: () => readReportReadAt,
+  resolveReportReadFile: () => resolveReportReadFile
+});
+function resolveReportReadFile(workspaceDir, sessionId) {
+  return (0, import_path2.join)(workspaceDir, "sessions", sessionId, REPORT_READ_FILENAME);
+}
+async function readReportReadAt(workspaceDir, sessionId) {
+  let raw;
+  try {
+    raw = await import_fs2.promises.readFile(resolveReportReadFile(workspaceDir, sessionId), "utf8");
+  } catch {
+    return 0;
+  }
+  try {
+    const obj = JSON.parse(raw);
+    return typeof obj.at === "number" && Number.isFinite(obj.at) ? obj.at : 0;
+  } catch {
+    return 0;
+  }
+}
+async function markReported(workspaceDir, sessionId, at = Date.now()) {
+  const target = resolveReportReadFile(workspaceDir, sessionId);
+  const tmp = `${target}.${process.pid}.${Date.now()}.tmp`;
+  await import_fs2.promises.mkdir((0, import_path2.join)(workspaceDir, "sessions", sessionId), { recursive: true });
+  await import_fs2.promises.writeFile(tmp, JSON.stringify({ at }), "utf8");
+  await import_fs2.promises.rename(tmp, target);
+}
+async function isUnread(workspaceDir, sessionId) {
+  const signal = await readTurnSignal(resolveTurnSignalFile(workspaceDir, sessionId));
+  if (!signal || !signal.complete) return false;
+  const readAt = await readReportReadAt(workspaceDir, sessionId);
+  return signal.at > readAt;
+}
+async function listUnread(workspaceDir, sessionIds) {
+  const flags = await Promise.all(sessionIds.map((id) => isUnread(workspaceDir, id)));
+  return sessionIds.filter((_, i) => flags[i]);
+}
+var import_fs2, import_path2, REPORT_READ_FILENAME;
+var init_reportState = __esm({
+  "packages/core/src/agent/reportState.ts"() {
+    "use strict";
+    import_fs2 = require("fs");
+    import_path2 = require("path");
+    init_turnSignal();
+    REPORT_READ_FILENAME = "report-read.json";
+  }
+});
+
 // packages/core/src/globalInject.ts
 var globalInject_exports = {};
 __export(globalInject_exports, {
@@ -140,6 +264,26 @@ Each line is the part after the run command.
 
 Categories: role, repos, domain, workflows, conventions, infra, verification.
 
+## Subagents
+
+You can run other coding agents as subagents. Each gets its own session and
+tab; you give it work, it reports back, you read the report.
+
+    agent start --prompt "..." [--harness claude,codex,agy]
+    agent list                    the subs you started, and their state
+    agent check [--wait] [--for <seconds>]
+    agent read <name> [--last N]  that sub's full conversation
+    agent send <name> --prompt "..."
+    agent stop <name>
+
+\`agent start\` returns the names it issued \u2014 that is what the other commands
+take. Default harness is claude; pass several to run the same prompt on each.
+
+A sub does not tell you when it is done. Either \`agent check --wait\`, which
+returns as soon as one finishes (up to a minute, \`--for\` raises it), or go do
+something else \u2014 the next turn tells you how many finished subs are unread.
+Reading a report with \`agent read\` is what clears that.
+
 Every read output item starts with its identifier (\`<category>/<slug>\`) \u2014
 that is what \`memory update\` takes.
 
@@ -178,14 +322,15 @@ var SKILL_VERSION, SKILL_DIR_NAME;
 var init_skillTemplate = __esm({
   "packages/core/src/skillTemplate.ts"() {
     "use strict";
-    SKILL_VERSION = "0.5.3";
+    SKILL_VERSION = "0.5.4";
     SKILL_DIR_NAME = "agentbridge";
   }
 });
 
 // packages/core/bin/agentbridge-memory.js
-var fs = require("fs");
+var fs3 = require("fs");
 var path = require("path");
+var { isUnread: isUnread2 } = (init_reportState(), __toCommonJS(reportState_exports));
 var { extractSessionIdFromStdin: extractSessionIdFromStdin2 } = (init_globalInject(), __toCommonJS(globalInject_exports));
 var { wrapInjectedContext: wrapInjectedContext2 } = (init_contextTag(), __toCommonJS(contextTag_exports));
 var { renderRunPrefix: renderRunPrefix2 } = (init_skillTemplate(), __toCommonJS(skillTemplate_exports));
@@ -196,40 +341,40 @@ function writeHookError(wsDir, agent, event, message) {
     const token = process.env.AGENTBRIDGE_WS_SESSION || "";
     if (!wsDir || !token || token !== path.basename(token)) return;
     const dir = path.join(wsDir, "sessions", token);
-    fs.mkdirSync(dir, { recursive: true });
+    fs3.mkdirSync(dir, { recursive: true });
     const out = path.join(dir, "hook-error.json");
     const tmp = out + "." + process.pid + ".tmp";
-    fs.writeFileSync(tmp, JSON.stringify({ agent, event, message: String(message), at: Date.now() }));
-    fs.renameSync(tmp, out);
+    fs3.writeFileSync(tmp, JSON.stringify({ agent, event, message: String(message), at: Date.now() }));
+    fs3.renameSync(tmp, out);
   } catch {
   }
 }
 function buildTurnSignal(agent, event, payload) {
   const p = payload && typeof payload === "object" ? payload : {};
-  const str = (v) => typeof v === "string" && v.trim() ? v : "";
+  const str2 = (v) => typeof v === "string" && v.trim() ? v : "";
   if (agent === "agy") {
     return {
       agent,
       event,
-      sessionId: str(p.conversationId) || str(p.conversation_id),
-      transcriptPath: str(p.transcriptPath) || str(p.transcript_path),
+      sessionId: str2(p.conversationId) || str2(p.conversation_id),
+      transcriptPath: str2(p.transcriptPath) || str2(p.transcript_path),
       // 배경 작업이 남아 있으면 턴이 아직 안 끝났다.
       complete: p.fullyIdle === true,
-      terminationReason: str(p.terminationReason),
-      error: str(p.error),
+      terminationReason: str2(p.terminationReason),
+      error: str2(p.error),
       at: Date.now()
     };
   }
   return {
     agent,
     event,
-    sessionId: str(p.session_id),
-    transcriptPath: str(p.transcript_path),
+    sessionId: str2(p.session_id),
+    transcriptPath: str2(p.transcript_path),
     // 자식(서브에이전트) 신호는 부모 턴이 아니다. Stop 스키마엔 원래 없지만 방어로 싣는다.
-    agentId: str(p.agent_id),
+    agentId: str2(p.agent_id),
     // claude는 API·모델 오류로 끊기면 Stop 대신 StopFailure가 온다 (research 04 §1).
     complete: event !== "StopFailure",
-    error: str(p.error),
+    error: str2(p.error),
     at: Date.now()
   };
 }
@@ -296,6 +441,23 @@ function readStdin(timeoutMs) {
     });
   });
 }
+async function buildSubagentLine(wsDir, sessionToken, run) {
+  if (!sessionToken || sessionToken !== path.basename(sessionToken)) return "";
+  let sessions = [];
+  try {
+    sessions = JSON.parse(fs3.readFileSync(path.join(wsDir, "workspace.json"), "utf8")).sessions || [];
+  } catch {
+    return "";
+  }
+  const mine = sessions.filter((s) => s.parentSessionId === sessionToken && s.agentName);
+  if (mine.length === 0) return "";
+  const unread = [];
+  for (const s of mine) {
+    if (await isUnread2(wsDir, s.sessionId)) unread.push(s.agentName);
+  }
+  if (unread.length === 0) return "";
+  return "\n\n" + unread.length + " subagent report(s) finished and unread (" + unread.join(", ") + "). Read with `" + run + " agent read <name>`.";
+}
 function buildInstructions(storageRoot) {
   const run = renderRunPrefix2({
     execPath: process.execPath,
@@ -344,7 +506,7 @@ async function main() {
   }
   const realpath = (v) => {
     try {
-      return fs.realpathSync(v);
+      return fs3.realpathSync(v);
     } catch {
       return path.resolve(v);
     }
@@ -372,10 +534,10 @@ async function main() {
     }
     if (parsed.agent !== "claude" && token && sid && token === path.basename(token)) {
       const dir = path.join(wsDir, "sessions", token);
-      fs.mkdirSync(dir, { recursive: true });
+      fs3.mkdirSync(dir, { recursive: true });
       const out = path.join(dir, "captured.json");
       const tmp = out + "." + process.pid + ".tmp";
-      fs.writeFileSync(
+      fs3.writeFileSync(
         tmp,
         JSON.stringify({
           agent: parsed.agent,
@@ -384,7 +546,7 @@ async function main() {
           capturedAt: Date.now()
         })
       );
-      fs.renameSync(tmp, out);
+      fs3.renameSync(tmp, out);
     }
   } catch (e) {
     const msg = String(e && e.message ? e.message : e);
@@ -397,14 +559,14 @@ async function main() {
       if (token && token === path.basename(token)) {
         const sid = extractSessionIdFromStdin2(stdinRaw, parsed.agent);
         const dir = path.join(wsDir, "sessions", token);
-        fs.mkdirSync(dir, { recursive: true });
+        fs3.mkdirSync(dir, { recursive: true });
         const out = path.join(dir, "turn-start.json");
         const tmp = out + "." + process.pid + ".tmp";
-        fs.writeFileSync(
+        fs3.writeFileSync(
           tmp,
           JSON.stringify({ agent: parsed.agent, event: parsed.event, sessionId: sid, at: Date.now() })
         );
-        fs.renameSync(tmp, out);
+        fs3.renameSync(tmp, out);
       }
     } catch (e) {
       const msg = String(e && e.message ? e.message : e);
@@ -423,11 +585,11 @@ async function main() {
           payload = null;
         }
         const dir = path.join(wsDir, "sessions", token);
-        fs.mkdirSync(dir, { recursive: true });
+        fs3.mkdirSync(dir, { recursive: true });
         const out = path.join(dir, "turn-signal.json");
         const tmp = out + "." + process.pid + ".tmp";
-        fs.writeFileSync(tmp, JSON.stringify(buildTurnSignal(parsed.agent, parsed.event, payload)));
-        fs.renameSync(tmp, out);
+        fs3.writeFileSync(tmp, JSON.stringify(buildTurnSignal(parsed.agent, parsed.event, payload)));
+        fs3.renameSync(tmp, out);
       }
     } catch (e) {
       const msg = String(e && e.message ? e.message : e);
@@ -437,9 +599,22 @@ async function main() {
     process.stdout.write(JSON.stringify(buildTerminationOutput(parsed.agent)));
     process.exit(0);
   }
+  const run = renderRunPrefix2({
+    execPath: process.execPath,
+    cliPath: path.join(storageRoot, "bin", "agentbridge.js")
+  });
+  let subagentLine = "";
+  try {
+    subagentLine = await buildSubagentLine(wsDir, process.env.AGENTBRIDGE_WS_SESSION || "", run);
+  } catch {
+  }
   process.stdout.write(
     JSON.stringify(
-      buildHookOutput(parsed.agent, parsed.event, wrapInjectedContext2(buildInstructions(storageRoot)))
+      buildHookOutput(
+        parsed.agent,
+        parsed.event,
+        wrapInjectedContext2(buildInstructions(storageRoot) + subagentLine)
+      )
     )
   );
   process.exit(0);

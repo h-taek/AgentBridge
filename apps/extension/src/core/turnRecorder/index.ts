@@ -50,17 +50,25 @@ export function registerCapture(args: {
   workspacePath: string;
   // 훅이 이 세션의 종료 신호를 쓰는 파일. 어댑터가 SpawnOptions로 넘긴다.
   signalFilePath: string;
+  // 서브에이전트 세션인가 (0.5.0 B-8). 참이면 기록의 뿌리가 워크스페이스 직하가 아니라 그 세션
+  // 폴더이고, 압축과 아카이브 회전이 걸리지 않는다. 소비자(압축·제안·훅 주입)는 직하만 읽으므로
+  // 서브의 기록이 애초에 보이지 않는다 — 그래서 소비자 쪽에 필터를 달지 않는다.
+  subagent?: boolean;
   // 자동 명명이 실제로 제목을 정했을 때 호출 — 호스트가 열린 탭 제목을 갱신(panel.title은 생성 시 1회성).
   onAutoNamed?: (title: string) => void;
 }): void {
   signalWorkspaceIds.set(args.sessionId, args.workspaceId);
+  const workspaceRoot = args.subagent
+    ? workspaceStore.getSessionDir(args.workspaceId, args.sessionId)
+    : workspaceStore.getWorkspacePath(args.workspaceId);
   manager.register({
     workspaceId: args.workspaceId,
-    workspaceRoot: workspaceStore.getWorkspacePath(args.workspaceId),
+    workspaceRoot,
     workspacePath: args.workspacePath,
     sessionId: args.sessionId,
     model: args.model,
     signalFilePath: args.signalFilePath,
+    subagent: args.subagent,
     getDetail: () => getConfig().assistantDetail as TurnsAssistantDetail,
     scheduler: getCompactionScheduler(),
     onTurnFlushed: async ({ workspaceId, sessionId, flushedAt }) => {

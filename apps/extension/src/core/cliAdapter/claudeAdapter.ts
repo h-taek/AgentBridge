@@ -1,5 +1,5 @@
 import type { SpawnOptions } from '../../pty/types';
-import type { ProbeResult } from '@agentbridge/core';
+import type { ProbeResult, SpawnExtras } from '@agentbridge/core';
 import { getCliAdapters } from '../coreInstances';
 
 export function isAvailable(): ProbeResult {
@@ -10,6 +10,7 @@ export async function buildSpawnOptions(
   cwd: string,
   workspaceId: string,
   resumeSessionId?: string,
+  extras?: SpawnExtras,
 ): Promise<SpawnOptions> {
-  return getCliAdapters().claude.buildSpawnOptions(cwd, workspaceId, resumeSessionId);
+  return getCliAdapters().claude.buildSpawnOptions(cwd, workspaceId, resumeSessionId, extras);
 }

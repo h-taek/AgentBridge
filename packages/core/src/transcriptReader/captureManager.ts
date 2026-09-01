@@ -34,6 +34,8 @@ export interface RegisterSessionOptions {
   signalPollMs?: number;
   // 재시도 간격 override(테스트용).
   retryDelaysMs?: number[];
+  // 서브에이전트 세션인가 (0.5.0 B-8). CaptureSession으로 그대로 내려간다.
+  subagent?: boolean;
 }
 
 export interface CaptureManagerDeps {
@@ -183,6 +185,7 @@ export class CaptureManager {
         getDetail: entry.opts.getDetail,
         scheduler: entry.opts.scheduler,
         onTurnFlushed: entry.opts.onTurnFlushed,
+        subagent: entry.opts.subagent,
         logger: this.log,
       });
     }

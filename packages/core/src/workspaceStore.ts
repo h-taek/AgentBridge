@@ -55,6 +55,9 @@ export interface SessionMeta {
   lastChattedAt?: string;
   // 이 세션을 띄운 부모 세션. 없으면 메인 세션이다 (0.5.0 B-2).
   parentSessionId?: string;
+  // 서브에이전트에 발급한 교량 이름. 폴더(trees/<이름>)와 브랜치(agentbridge/<이름>)와 명령이
+  // 받는 id를 겸한다 (0.5.0 B-7). 메인 세션에는 없다.
+  agentName?: string;
   // 사용자가 이 세션을 마지막으로 연 시각(ISO). 완료 표시를 끄는 기준 (0.5.0 B-2).
   lastOpenedAt?: string;
 }
@@ -87,6 +90,7 @@ export type SessionUpdatePatch = Partial<{
   lastChattedAt: string;
   parentSessionId: string | undefined;
   lastOpenedAt: string;
+  agentName: string | undefined;
 }>;
 
 export type WorkspaceUpdatePatch = Partial<{
@@ -117,11 +121,15 @@ export interface WorkspaceStore {
   // sessionId 생략 시 자체 발급. 호출처가 이미 AgentBridge 세션 ID를 발급한 경우(extension:
   // PTY/패널/webview state 키) 그 id를 넘겨 일관성 유지 — 후속 updateSessionMeta가 같은 id로
   // 매칭되게 한다 (V-04). 제공된 sessionId가 이미 있으면 기존 세션을 반환(중복 추가 방지).
+  // init은 만들 때부터 붙어 있어야 하는 값이다. 서브는 레코드를 먼저 쓰고 그다음에 띄우므로
+  // (0.5.0 B-7 고아 판정의 근거), 부모와 이름이 두 번째 쓰기로 뒤늦게 붙으면 그 사이에 죽은
+  // 레코드가 부모 없는 메인 세션으로 남는다.
   addSession(
     workspaceId: string,
     model: CliKind,
     kind?: SessionKind,
     sessionId?: string,
+    init?: { parentSessionId?: string; agentName?: string },
   ): Promise<SessionMeta>;
   updateSessionMeta(workspaceId: string, sessionId: string, patch: SessionUpdatePatch): Promise<void>;
   loadSession(workspaceId: string, sessionId: string): Promise<SessionMeta>;
@@ -447,7 +455,7 @@ export function createWorkspaceStore(opts: WorkspaceStoreOptions = {}): Workspac
     },
 
     // ── 세션 관리 ──
-    async addSession(workspaceId, model, kind = 'cli', sessionId) {
+    async addSession(workspaceId, model, kind = 'cli', sessionId, init) {
       const sid = sessionId ?? randomUUID();
       // 호출처 제공 id는 sessionDir(path.join)에 그대로 쓰이므로 UUID 형식 강제 — traversal 방어.
       if (!UUID_RE.test(sid)) {
@@ -466,6 +474,8 @@ export function createWorkspaceStore(opts: WorkspaceStoreOptions = {}): Workspac
           createdAt: now,
           closedAt: null,
           kind,
+          ...(init?.parentSessionId ? { parentSessionId: init.parentSessionId } : {}),
+          ...(init?.agentName ? { agentName: init.agentName } : {}),
         };
         await fsp.mkdir(sessionDir(workspaceId, sid), { recursive: true });
         meta.sessions.push(session);
