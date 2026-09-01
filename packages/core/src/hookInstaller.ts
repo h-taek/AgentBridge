@@ -44,6 +44,15 @@ type HookEventName =
 const TOML_MARKER_START = '# AgentBridge BEGIN';
 const TOML_MARKER_END = '# AgentBridge END';
 // 데스크탑 구버전이 남긴 marker — 다음 write 때 흡수·삭제. codex TOML duplicate key 거부 회피.
+// 우리 항목의 표식. 심는 쪽과 걷어내는 쪽(uninstall)이 같은 지식을 쓴다 — 갈리면 둘 중
+// 하나가 먼저 틀린다.
+//
+// claude settings.json의 hooks에는 이름 그룹이 없어서 커맨드 문자열로 가린다.
+const CLAUDE_MARKER = 'agentbridge-memory.js';
+// codex hooks.json 항목과 agy 그룹은 우리가 심은 표시를 직접 단다.
+const MANAGED_FLAG = '_agentbridge_managed';
+const AGY_GROUP = 'agentbridge-memory';
+
 const LEGACY_TOML_MARKER_START = '# AgentBridge:start';
 const LEGACY_TOML_MARKER_END = '# AgentBridge:end';
 
@@ -116,9 +125,6 @@ export function createHookInstaller(opts: HookInstallerOptions): HookInstaller {
     return true;
   }
 
-  // 우리 claude 훅 항목의 표식. settings.json의 hooks에는 이름 그룹이 없어서
-  // 커맨드 문자열로 가린다.
-  const CLAUDE_MARKER = 'agentbridge-memory.js';
 
   // ─── claude ────────────────────────────────────────────────────────────
 
@@ -362,7 +368,6 @@ export function createHookInstaller(opts: HookInstallerOptions): HookInstaller {
     _agentbridge_managed?: true;
   }
   type AgyHooksRoot = Record<string, AgyHookGroup>;
-  const AGY_GROUP = 'agentbridge-memory';
 
   async function installAgyHooks(): Promise<{ hooksJsonPath: string }> {
     const configDir = join(home, '.gemini', 'config');
@@ -595,4 +600,114 @@ export async function installBinToCanonicalPath(
     logger.log(`hookInstaller: ${bin} ${bundledVer} → ${canonical} (이전: ${installedVer ?? '미설치'})`);
   }
   return canonical;
+}
+
+// ─── 전역 훅 조회와 제거 (0.5.0 3단계 W7, B-5) ───────────────────────────
+//
+// 익스텐션을 지워도 전역에 깔린 것은 남는다. 제거 시점에 도는 코드가 없기 때문이다. 그래서
+// 제거 명령을 만든다 — 대상이 여섯이고(훅 셋, 스킬 셋) 그중 절반은 남의 설정 파일 안의 키
+// 하나라, 사용자가 손으로 찾아 지울 수 있는 자리가 아니다.
+//
+// 조회와 제거가 같은 지식을 쓴다. 어디에 무엇이 깔렸는지 아는 자리와 걷어내는 자리가 갈리면
+// 둘 중 하나가 먼저 틀린다.
+//
+// 설치와 달리 execPath·helperPath가 필요 없다. 우리 항목을 알아보는 데 필요한 것은 표식뿐이라
+// 팩토리 밖 함수로 둔다 — CLI가 설치 인자 없이 부를 수 있어야 한다.
+
+export type GlobalHookPresence = {
+  agent: CliKind;
+  path: string;
+  // 우리 항목이 실제로 있는지. 파일이 없거나 우리 것이 없으면 false.
+  installed: boolean;
+};
+
+function isManaged(v: unknown): boolean {
+  return isObject(v) && (v as Record<string, unknown>)[MANAGED_FLAG] === true;
+}
+
+async function readJsonObject(path: string): Promise<Record<string, unknown> | null> {
+  const raw = await readFileSafe(path);
+  if (raw === null) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return isObject(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+export function globalHookPaths(homeDir?: string): Record<CliKind, string> {
+  const home = homeDir ?? homedir();
+  return {
+    claude: join(home, '.claude', 'settings.json'),
+    codex: join(home, '.codex', 'hooks.json'),
+    agy: join(home, '.gemini', 'config', 'hooks.json'),
+  };
+}
+
+// 우리 항목만 걷어낸 사본을 만든다. 남의 키는 그대로 둔다. 바뀐 것이 없으면 null.
+function stripOurHooks(agent: CliKind, root: Record<string, unknown>): Record<string, unknown> | null {
+  const next = { ...root };
+  let changed = false;
+
+  if (agent === 'agy') {
+    if (!isManaged(next[AGY_GROUP]) && !(AGY_GROUP in next)) return null;
+    delete next[AGY_GROUP];
+    return next;
+  }
+
+  // claude·codex 둘 다 hooks 아래 이벤트별 배열이다. 우리 것을 가리는 기준만 다르다.
+  const hooks = isObject(next.hooks) ? { ...(next.hooks as Record<string, unknown>) } : null;
+  if (!hooks) return null;
+  for (const event of Object.keys(hooks)) {
+    const arr = Array.isArray(hooks[event]) ? (hooks[event] as unknown[]) : [];
+    const kept = arr.filter((entry) => {
+      if (agent === 'codex') return !isManaged(entry);
+      const inner = isObject(entry) && Array.isArray(entry.hooks) ? (entry.hooks as unknown[]) : [];
+      return !inner.some(
+        (h) => isObject(h) && typeof h.command === 'string' && h.command.includes(CLAUDE_MARKER),
+      );
+    });
+    if (kept.length === arr.length) continue;
+    changed = true;
+    if (kept.length > 0) hooks[event] = kept;
+    else delete hooks[event];
+  }
+  if (!changed) return null;
+  if (Object.keys(hooks).length > 0) next.hooks = hooks;
+  else delete next.hooks;
+  return next;
+}
+
+export async function inspectGlobalHooks(homeDir?: string): Promise<GlobalHookPresence[]> {
+  const paths = globalHookPaths(homeDir);
+  const out: GlobalHookPresence[] = [];
+  for (const agent of ['claude', 'codex', 'agy'] as CliKind[]) {
+    const path = paths[agent];
+    const root = await readJsonObject(path);
+    out.push({ agent, path, installed: !!root && stripOurHooks(agent, root) !== null });
+  }
+  return out;
+}
+
+// 전역 훅에서 우리 항목을 걷어낸다. 반환값은 실제로 바뀐 파일들.
+export async function removeGlobalHooks(
+  homeDir?: string,
+  logger: Logger = noopLogger,
+): Promise<string[]> {
+  const paths = globalHookPaths(homeDir);
+  const touched: string[] = [];
+  for (const agent of ['claude', 'codex', 'agy'] as CliKind[]) {
+    const path = paths[agent];
+    const root = await readJsonObject(path);
+    if (!root) continue;
+    const next = stripOurHooks(agent, root);
+    if (!next) continue;
+    const tmp = `${path}.${process.pid}.${Date.now()}.tmp`;
+    await fsp.writeFile(tmp, JSON.stringify(next, null, 2), 'utf8');
+    await fsp.rename(tmp, path);
+    touched.push(path);
+    logger.log(`hookInstaller: ${agent} 훅을 걷어냈다 — ${path}`);
+  }
+  return touched;
 }

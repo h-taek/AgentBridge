@@ -937,6 +937,343 @@ var init_write = __esm({
   }
 });
 
+// packages/core/src/shellQuote.ts
+var init_shellQuote = __esm({
+  "packages/core/src/shellQuote.ts"() {
+    "use strict";
+  }
+});
+
+// packages/core/src/cliGlobalDirs.ts
+var init_cliGlobalDirs = __esm({
+  "packages/core/src/cliGlobalDirs.ts"() {
+    "use strict";
+  }
+});
+
+// packages/core/src/hookInstaller.ts
+async function readFileSafe(filePath) {
+  try {
+    return await import_fs5.promises.readFile(filePath, "utf8");
+  } catch {
+    return null;
+  }
+}
+function isObject(v) {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+function isManaged(v) {
+  return isObject(v) && v[MANAGED_FLAG] === true;
+}
+async function readJsonObject(path2) {
+  const raw = await readFileSafe(path2);
+  if (raw === null) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return isObject(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+function globalHookPaths(homeDir) {
+  const home = homeDir ?? (0, import_os2.homedir)();
+  return {
+    claude: (0, import_path6.join)(home, ".claude", "settings.json"),
+    codex: (0, import_path6.join)(home, ".codex", "hooks.json"),
+    agy: (0, import_path6.join)(home, ".gemini", "config", "hooks.json")
+  };
+}
+function stripOurHooks(agent, root) {
+  const next = { ...root };
+  let changed = false;
+  if (agent === "agy") {
+    if (!isManaged(next[AGY_GROUP]) && !(AGY_GROUP in next)) return null;
+    delete next[AGY_GROUP];
+    return next;
+  }
+  const hooks = isObject(next.hooks) ? { ...next.hooks } : null;
+  if (!hooks) return null;
+  for (const event of Object.keys(hooks)) {
+    const arr = Array.isArray(hooks[event]) ? hooks[event] : [];
+    const kept = arr.filter((entry) => {
+      if (agent === "codex") return !isManaged(entry);
+      const inner = isObject(entry) && Array.isArray(entry.hooks) ? entry.hooks : [];
+      return !inner.some(
+        (h) => isObject(h) && typeof h.command === "string" && h.command.includes(CLAUDE_MARKER)
+      );
+    });
+    if (kept.length === arr.length) continue;
+    changed = true;
+    if (kept.length > 0) hooks[event] = kept;
+    else delete hooks[event];
+  }
+  if (!changed) return null;
+  if (Object.keys(hooks).length > 0) next.hooks = hooks;
+  else delete next.hooks;
+  return next;
+}
+async function inspectGlobalHooks(homeDir) {
+  const paths = globalHookPaths(homeDir);
+  const out = [];
+  for (const agent of ["claude", "codex", "agy"]) {
+    const path2 = paths[agent];
+    const root = await readJsonObject(path2);
+    out.push({ agent, path: path2, installed: !!root && stripOurHooks(agent, root) !== null });
+  }
+  return out;
+}
+async function removeGlobalHooks(homeDir, logger = noopLogger) {
+  const paths = globalHookPaths(homeDir);
+  const touched = [];
+  for (const agent of ["claude", "codex", "agy"]) {
+    const path2 = paths[agent];
+    const root = await readJsonObject(path2);
+    if (!root) continue;
+    const next = stripOurHooks(agent, root);
+    if (!next) continue;
+    const tmp = `${path2}.${process.pid}.${Date.now()}.tmp`;
+    await import_fs5.promises.writeFile(tmp, JSON.stringify(next, null, 2), "utf8");
+    await import_fs5.promises.rename(tmp, path2);
+    touched.push(path2);
+    logger.log(`hookInstaller: ${agent} \uD6C5\uC744 \uAC77\uC5B4\uB0C8\uB2E4 \u2014 ${path2}`);
+  }
+  return touched;
+}
+var import_fs5, import_os2, import_path6, CLAUDE_MARKER, MANAGED_FLAG, AGY_GROUP;
+var init_hookInstaller = __esm({
+  "packages/core/src/hookInstaller.ts"() {
+    "use strict";
+    import_fs5 = require("fs");
+    import_os2 = require("os");
+    import_path6 = require("path");
+    init_shellQuote();
+    init_cliGlobalDirs();
+    init_interfaces();
+    CLAUDE_MARKER = "agentbridge-memory.js";
+    MANAGED_FLAG = "_agentbridge_managed";
+    AGY_GROUP = "agentbridge-memory";
+  }
+});
+
+// packages/core/src/skillTemplate.ts
+var SKILL_DIR_NAME;
+var init_skillTemplate = __esm({
+  "packages/core/src/skillTemplate.ts"() {
+    "use strict";
+    SKILL_DIR_NAME = "agentbridge";
+  }
+});
+
+// packages/core/src/skillInstaller.ts
+function skillFilePath(agent, homeDir) {
+  return (0, import_path7.join)(homeDir ?? (0, import_os3.homedir)(), ...SKILL_ROOTS[agent], SKILL_DIR_NAME, "SKILL.md");
+}
+var import_os3, import_path7, SKILL_ROOTS;
+var init_skillInstaller = __esm({
+  "packages/core/src/skillInstaller.ts"() {
+    "use strict";
+    import_os3 = require("os");
+    import_path7 = require("path");
+    init_interfaces();
+    init_skillTemplate();
+    SKILL_ROOTS = {
+      claude: [".claude", "skills"],
+      codex: [".agents", "skills"],
+      agy: [".gemini", "config", "skills"]
+    };
+  }
+});
+
+// packages/core/src/hostRequest.ts
+function hostRequestPath(sessionDir2) {
+  return (0, import_path8.join)(sessionDir2, HOST_REQUEST_FILENAME);
+}
+function hostResultPath(sessionDir2) {
+  return (0, import_path8.join)(sessionDir2, HOST_RESULT_FILENAME);
+}
+async function readJson(path2) {
+  try {
+    return JSON.parse(await import_fs6.promises.readFile(path2, "utf8"));
+  } catch {
+    return null;
+  }
+}
+async function unlinkQuiet(path2) {
+  try {
+    await import_fs6.promises.unlink(path2);
+  } catch {
+  }
+}
+async function sendHostRequest(sessionDir2, request, opts = {}) {
+  const timeoutMs = opts.timeoutMs ?? HOST_REQUEST_TIMEOUT_MS;
+  const now = opts.now ?? Date.now;
+  const sleep = opts.sleep ?? defaultSleep;
+  const reqPath = hostRequestPath(sessionDir2);
+  const resPath = hostResultPath(sessionDir2);
+  await import_fs6.promises.mkdir(sessionDir2, { recursive: true });
+  await unlinkQuiet(resPath);
+  try {
+    await import_fs6.promises.writeFile(reqPath, JSON.stringify(request), { encoding: "utf8", flag: "wx" });
+  } catch {
+    return {
+      id: request.id,
+      ok: false,
+      output: `\uB2E4\uB978 \uC694\uCCAD\uC774 \uCC98\uB9AC \uC911\uC774\uB2E4 (${request.kind}). \uC7A0\uC2DC \uB4A4 \uB2E4\uC2DC \uBD80\uB978\uB2E4.`,
+      at: now()
+    };
+  }
+  const deadline = now() + timeoutMs;
+  while (now() < deadline) {
+    const result = await readJson(resPath);
+    if (result && result.id === request.id) {
+      await unlinkQuiet(resPath);
+      return result;
+    }
+    await sleep(POLL_MS);
+  }
+  await unlinkQuiet(reqPath);
+  return {
+    id: request.id,
+    ok: false,
+    output: `\uD638\uC2A4\uD2B8\uAC00 ${timeoutMs}ms \uC548\uC5D0 \uB2F5\uD558\uC9C0 \uC54A\uC558\uB2E4 (${request.kind}).`,
+    at: now()
+  };
+}
+var import_fs6, import_path8, HOST_REQUEST_FILENAME, HOST_RESULT_FILENAME, HOST_REQUEST_TIMEOUT_MS, POLL_MS, HOST_PING, defaultSleep;
+var init_hostRequest = __esm({
+  "packages/core/src/hostRequest.ts"() {
+    "use strict";
+    import_fs6 = require("fs");
+    import_path8 = require("path");
+    HOST_REQUEST_FILENAME = "host-request.json";
+    HOST_RESULT_FILENAME = "host-result.json";
+    HOST_REQUEST_TIMEOUT_MS = 1e4;
+    POLL_MS = 50;
+    HOST_PING = "status-ping";
+    defaultSleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  }
+});
+
+// packages/core/src/agentCli/status.ts
+var status_exports = {};
+__export(status_exports, {
+  readStatus: () => readStatus
+});
+async function fileVersion(path2) {
+  const name = path2.split("/").pop() ?? "";
+  const re = VERSION_RES[name];
+  try {
+    const raw = await import_fs7.promises.readFile(path2, "utf8");
+    return re ? re.exec(raw)?.[1] ?? "\uC54C \uC218 \uC5C6\uC74C" : "\uC788\uC74C";
+  } catch {
+    return null;
+  }
+}
+async function exists(path2) {
+  try {
+    await import_fs7.promises.access(path2);
+    return true;
+  } catch {
+    return false;
+  }
+}
+async function readStatus(storageRoot, wsDir, opts = {}) {
+  const execPath = opts.execPath ?? process.execPath;
+  const cliPath = (0, import_path9.join)(storageRoot, "bin", "agentbridge.js");
+  const helperPath = (0, import_path9.join)(storageRoot, "bin", "agentbridge-memory.js");
+  const lines = ["## AgentBridge \uBC30\uC120", ""];
+  lines.push(`\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4  ${wsDir}`);
+  lines.push(`\uB7F0\uD0C0\uC784        ${execPath}${await exists(execPath) ? "" : "  (\uC5C6\uC74C)"}`);
+  lines.push(`CLI           ${cliPath}  ${await fileVersion(cliPath) ?? "\uC5C6\uC74C"}`);
+  lines.push(`\uD6C5 \uD5EC\uD37C       ${helperPath}  ${await fileVersion(helperPath) ?? "\uC5C6\uC74C"}`);
+  lines.push("");
+  lines.push("### \uD6C5");
+  for (const h of await inspectGlobalHooks(opts.homeDir)) {
+    lines.push(`- ${h.agent.padEnd(7)}${h.path}  ${h.installed ? "\uAE54\uB9BC" : "\uC548 \uAE54\uB9BC"}`);
+  }
+  lines.push("");
+  lines.push("### \uC2A4\uD0AC");
+  for (const agent of AGENTS) {
+    const path2 = skillFilePath(agent, opts.homeDir);
+    const version = await fileVersion(path2);
+    lines.push(`- ${agent.padEnd(7)}${path2}  ${version ? `\uAE54\uB9BC ${version}` : "\uC548 \uAE54\uB9BC"}`);
+  }
+  lines.push("");
+  lines.push("### \uD638\uC2A4\uD2B8");
+  if (!opts.sessionDir) {
+    lines.push("- \uC138\uC158 \uC2E0\uC6D0\uC774 \uC5C6\uC5B4 \uC655\uBCF5\uC744 \uAC74\uB108\uB6F4\uB2E4.");
+  } else {
+    const res = await sendHostRequest(
+      opts.sessionDir,
+      { id: `status-${process.pid}-${Date.now()}`, kind: HOST_PING, at: Date.now() },
+      { timeoutMs: opts.timeoutMs }
+    );
+    lines.push(res.ok ? `- \uC751\uB2F5\uD568 \u2014 ${res.output}` : `- \uC751\uB2F5 \uC5C6\uC74C \u2014 ${res.output}`);
+  }
+  return lines.join("\n");
+}
+var import_fs7, import_path9, AGENTS, VERSION_RES;
+var init_status = __esm({
+  "packages/core/src/agentCli/status.ts"() {
+    "use strict";
+    import_fs7 = require("fs");
+    import_path9 = require("path");
+    init_hookInstaller();
+    init_skillInstaller();
+    init_hostRequest();
+    AGENTS = ["claude", "codex", "agy"];
+    VERSION_RES = {
+      "agentbridge.js": /@agentbridge-cli-version (\d+\.\d+\.\d+)/,
+      "agentbridge-memory.js": /@agentbridge-helper-version (\d+\.\d+\.\d+)/,
+      "SKILL.md": /@agentbridge-skill-version (\d+\.\d+\.\d+)/
+    };
+  }
+});
+
+// packages/core/src/agentCli/uninstall.ts
+var uninstall_exports = {};
+__export(uninstall_exports, {
+  uninstallGlobal: () => uninstallGlobal
+});
+async function uninstallGlobal(homeDir) {
+  const removed = [];
+  for (const path2 of await removeGlobalHooks(homeDir)) removed.push(path2);
+  for (const agent of AGENTS2) {
+    const path2 = skillFilePath(agent, homeDir);
+    try {
+      await import_fs8.promises.unlink(path2);
+      removed.push(path2);
+    } catch {
+      continue;
+    }
+    try {
+      await import_fs8.promises.rmdir((0, import_path10.dirname)(path2));
+    } catch {
+    }
+  }
+  if (removed.length === 0) {
+    return "\uAC77\uC5B4\uB0BC \uAC83\uC774 \uC5C6\uB2E4. \uC804\uC5ED\uC5D0 \uAE54\uB9B0 \uC6B0\uB9AC \uD56D\uBAA9\uC774 \uC5C6\uB2E4.";
+  }
+  return [
+    `\uC804\uC5ED\uC5D0\uC11C ${removed.length}\uAC1C\uB97C \uAC77\uC5B4\uB0C8\uB2E4.`,
+    "",
+    ...removed.map((p) => `- ${p}`),
+    "",
+    "\uC800\uC7A5\uC18C(\uB300\uD654 \uAE30\uB85D\uACFC \uC9C0\uC2DD)\uB294 \uADF8\uB300\uB85C \uB454\uB2E4."
+  ].join("\n");
+}
+var import_fs8, import_path10, AGENTS2;
+var init_uninstall = __esm({
+  "packages/core/src/agentCli/uninstall.ts"() {
+    "use strict";
+    import_fs8 = require("fs");
+    import_path10 = require("path");
+    init_hookInstaller();
+    init_skillInstaller();
+    AGENTS2 = ["claude", "codex", "agy"];
+  }
+});
+
 // packages/core/bin/agentbridge.js
 var fs3 = require("fs");
 var path = require("path");
@@ -948,6 +1285,8 @@ var {
   resolveProfileIdForScope: resolveProfileIdForScope2
 } = (init_read(), __toCommonJS(read_exports));
 var { addMemory: addMemory2, updateMemory: updateMemory2, WriteError: WriteError2 } = (init_write(), __toCommonJS(write_exports));
+var { readStatus: readStatus2 } = (init_status(), __toCommonJS(status_exports));
+var { uninstallGlobal: uninstallGlobal2 } = (init_uninstall(), __toCommonJS(uninstall_exports));
 var DEFAULT_TURNS = 3;
 var COMMANDS = [
   ["context", "\uD604\uC7AC \uD504\uB85C\uC81D\uD2B8\uC758 \uC555\uCD95\uB41C \uC791\uC5C5 \uC0C1\uD0DC"],
@@ -956,7 +1295,8 @@ var COMMANDS = [
   ["memory project [--full]", "\uC774 \uC800\uC7A5\uC18C\uC758 \uD504\uB85C\uC81D\uD2B8 \uC9C0\uC2DD"],
   ["memory search <\uC9C8\uC758>", "\uB450 \uC9C0\uC2DD\uC744 \uC9C8\uC758\uB85C \uAC80\uC0C9"],
   ["memory add", "\uC0C8 \uC0AC\uC2E4\uC744 \uC81C\uC548 \uD050\uC5D0 \uB123\uB294\uB2E4 (--scope --category --title --summary --body)"],
-  ["memory update <\uC2DD\uBCC4\uC790>", "\uC774\uBBF8 \uC788\uB294 \uD56D\uBAA9\uC744 \uACE0\uCE58\uB294 \uC81C\uC548 (\uAC19\uC740 \uC778\uC790, \uC548 \uC900 \uAC83\uC740 \uADF8\uB300\uB85C)"]
+  ["memory update <\uC2DD\uBCC4\uC790>", "\uC774\uBBF8 \uC788\uB294 \uD56D\uBAA9\uC744 \uACE0\uCE58\uB294 \uC81C\uC548 (\uAC19\uC740 \uC778\uC790, \uC548 \uC900 \uAC83\uC740 \uADF8\uB300\uB85C)"],
+  ["status", "\uC5B4\uB514\uC5D0 \uBB34\uC5C7\uC774 \uAE54\uB824 \uC788\uB294\uC9C0\uC640 \uBC30\uC120 \uC790\uAC00 \uC9C4\uB2E8"]
 ];
 var USAGE = [
   "agentbridge \u2014 AgentBridge \uB9E5\uB77D \uC77D\uAE30",
@@ -1017,6 +1357,11 @@ function writeFields(args) {
     body: strOption(args, "--body")
   };
 }
+function sessionDir(wsDir) {
+  const token = process.env.AGENTBRIDGE_WS_SESSION || "";
+  if (!token || token !== path.basename(token)) return void 0;
+  return path.join(wsDir, "sessions", token);
+}
 async function dispatch(cmd, args, wsDir, storageRoot) {
   switch (cmd) {
     case "context":
@@ -1046,6 +1391,12 @@ async function dispatch(cmd, args, wsDir, storageRoot) {
       }
       return usageAndExit();
     }
+    case "status":
+      return readStatus2(storageRoot, wsDir, { sessionDir: sessionDir(wsDir) });
+    // 사용자 명령이라 사용법과 스킬의 목록에는 없다. 전역 설정을 걷어내는 일을 모델의
+    // 자발적 호출에 열어둘 이유가 없다.
+    case "uninstall":
+      return uninstallGlobal2();
     default:
       return usageAndExit();
   }

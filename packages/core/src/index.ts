@@ -63,6 +63,14 @@ export * from './contextTag';
 // hook
 export * from './hookInstaller';
 
+// 에이전트용 CLI 명령 본체 (0.5.0 B-5). 엔트리(bin/agentbridge.js)는 상대 경로로 부르고,
+// 배럴은 테스트와 호스트가 쓴다.
+export * from './agentCli/irRender';
+export * from './agentCli/read';
+export * from './agentCli/write';
+export * from './agentCli/status';
+export * from './agentCli/uninstall';
+
 // 호스트 핸드셰이크 통로 (0.5.0 B-5)
 export * from './hostRequest';
 export * from './hostRequestHandler';

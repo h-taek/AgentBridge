@@ -34,6 +34,8 @@ const {
   resolveProfileIdForScope
 } = require('../src/agentCli/read')
 const { addMemory, updateMemory, WriteError } = require('../src/agentCli/write')
+const { readStatus } = require('../src/agentCli/status')
+const { uninstallGlobal } = require('../src/agentCli/uninstall')
 
 const DEFAULT_TURNS = 3
 
@@ -44,7 +46,8 @@ const COMMANDS = [
   ['memory project [--full]', '이 저장소의 프로젝트 지식'],
   ['memory search <질의>', '두 지식을 질의로 검색'],
   ['memory add', '새 사실을 제안 큐에 넣는다 (--scope --category --title --summary --body)'],
-  ['memory update <식별자>', '이미 있는 항목을 고치는 제안 (같은 인자, 안 준 것은 그대로)']
+  ['memory update <식별자>', '이미 있는 항목을 고치는 제안 (같은 인자, 안 준 것은 그대로)'],
+  ['status', '어디에 무엇이 깔려 있는지와 배선 자가 진단']
 ]
 
 const USAGE = [
@@ -121,6 +124,14 @@ function writeFields(args) {
   }
 }
 
+// 호스트 왕복은 이 세션 폴더에 요청을 놓는다. 토큰은 세션을 띄울 때 심은 값이고, 폴더 이름이
+// 되므로 단일 세그먼트여야 한다(훅 헬퍼와 같은 가드).
+function sessionDir(wsDir) {
+  const token = process.env.AGENTBRIDGE_WS_SESSION || ''
+  if (!token || token !== path.basename(token)) return undefined
+  return path.join(wsDir, 'sessions', token)
+}
+
 async function dispatch(cmd, args, wsDir, storageRoot) {
   switch (cmd) {
     case 'context':
@@ -150,6 +161,12 @@ async function dispatch(cmd, args, wsDir, storageRoot) {
       }
       return usageAndExit()
     }
+    case 'status':
+      return readStatus(storageRoot, wsDir, { sessionDir: sessionDir(wsDir) })
+    // 사용자 명령이라 사용법과 스킬의 목록에는 없다. 전역 설정을 걷어내는 일을 모델의
+    // 자발적 호출에 열어둘 이유가 없다.
+    case 'uninstall':
+      return uninstallGlobal()
     default:
       return usageAndExit()
   }
