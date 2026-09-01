@@ -36,7 +36,6 @@ const {
 const { addMemory, updateMemory, WriteError } = require('../src/agentCli/write')
 const { readStatus } = require('../src/agentCli/status')
 const { uninstallGlobal } = require('../src/agentCli/uninstall')
-const { recordCall } = require('../src/agentCli/callLog')
 
 const DEFAULT_TURNS = 3
 
@@ -189,12 +188,6 @@ async function main() {
   if (!cmd) usageAndExit()
 
   const storageRoot = realpath(path.dirname(path.dirname(__filename)))
-
-  // 무엇을 불렀는지 남긴다(W9). 사용자 명령은 세지 않는다 — 재려는 것은 모델의 자발적 호출이다.
-  if (cmd !== 'uninstall') {
-    const sub = args[0] && !args[0].startsWith('--') ? ` ${args[0]}` : ''
-    await recordCall(wsDir, cmd + sub, process.env.AGENTBRIDGE_WS_SESSION || '')
-  }
 
   const out = await dispatch(cmd, args, wsDir, storageRoot)
   process.stdout.write(out + '\n')

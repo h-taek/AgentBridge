@@ -12,7 +12,6 @@ import {
   profileIdForPath,
   readProposals,
   approveProposal,
-  readCalls,
 } from '@agentbridge/core';
 
 // 에이전트용 CLI (0.5.0 3단계 W1) — 골격, 신원 해소, 설치 배관.
@@ -266,49 +265,6 @@ describe('agent CLI — 골격과 신원 해소 (0.5.0 W1)', () => {
     const r = run(['memory', 'update', '그냥이름', '--body', 'x']);
     assert.equal(r.status, 2);
     assert.match(r.stderr, /형식/);
-  });
-
-  // ── 호출 계측 (W9) ────────────────────────────────────────────────────
-
-  it('부른 명령이 기록된다 — 이 단계의 산출물이 그 숫자다', async () => {
-    run(['context']);
-    run(['memory', 'user']);
-    const calls = await readCalls(wsDir);
-    const names = calls.map((c) => c.command);
-    assert.ok(names.includes('context'));
-    assert.ok(names.includes('memory user'), `기록: ${JSON.stringify(names)}`);
-  });
-
-  it('기록에 하니스가 함께 남는다 — 산출물이 하니스별 차이라서', async () => {
-    await fsp.writeFile(
-      join(wsDir, 'workspace.json'),
-      JSON.stringify({
-        workspaceId: 'ws-1',
-        workspacePath: join(tmp, 'project'),
-        // 레코드의 키는 sessionId다. id로 찾으면 영영 빈 값이 찍힌다(라이브에서 걸린 것).
-        sessions: [{ sessionId: 'sess-1', model: 'codex' }],
-      }),
-    );
-    const r = spawnSync('node', [cliPath, 'context'], {
-      encoding: 'utf8',
-      env: { ...process.env, AGENTBRIDGE_WS_DIR: wsDir, AGENTBRIDGE_WS_SESSION: 'sess-1' },
-    });
-    assert.equal(r.status, 0);
-    const last = (await readCalls(wsDir)).pop()!;
-    assert.equal(last.agent, 'codex');
-    assert.equal(last.sessionId, 'sess-1');
-  });
-
-  it('사용자 명령은 세지 않는다 — 재려는 것은 모델의 자발적 호출이다', async () => {
-    const before = (await readCalls(wsDir)).length;
-    run(['uninstall']);
-    assert.equal((await readCalls(wsDir)).length, before);
-  });
-
-  it('신원 변수가 없으면 기록도 남지 않는다', async () => {
-    const before = (await readCalls(wsDir)).length;
-    run(['context'], null);
-    assert.equal((await readCalls(wsDir)).length, before);
   });
 
   it('memory update — 안 준 필드는 원래 값을 잇고, 승인이 같은 자리를 덮는다', async () => {

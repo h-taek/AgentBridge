@@ -107,7 +107,7 @@ Every command is:
 
     ${run} <command>
 
-The environment already identifies the session \u2014 do not pass paths or ids.
+The environment identifies the session \u2014 do not pass paths or ids.
 
 ## When to run what
 
@@ -122,12 +122,11 @@ Run these when the condition holds, not "if it seems useful":
   \`memory project\`
 - **Before recording anything** \u2014 read first, see below
 
-\`memory search\` is the normal way to look things up. Reading everything is for
-the write path only.
+\`memory search\` is the normal lookup. Reading everything is for the write path.
 
 ## Commands
 
-Each line below is the part after the run command above.
+Each line is the part after the run command.
 
     context                       compacted state of the current project
     turns --last 5                raw recent conversation
@@ -141,30 +140,36 @@ Each line below is the part after the run command above.
 
 Categories: role, repos, domain, workflows, conventions, infra, verification.
 
-Every item in the read output starts with its identifier
-(\`<category>/<slug>\`). That identifier is what \`memory update\` takes.
+Every read output item starts with its identifier (\`<category>/<slug>\`) \u2014
+that is what \`memory update\` takes.
 
 ## Recording something
 
 When the user states a durable preference, a convention, or a decision that
 should outlive this session:
 
-1. Read that whole side first \u2014 \`memory user --full\` (or
-   \`memory project --full\`). Not a search: you need everything to know whether
-   this is new.
-2. Nothing covers it \u2014 \`memory add\`.
-3. Something covers it \u2014 \`memory update <id>\`, passing only the flags you are
-   changing.
+1. Pick the scope. One test: is this about **how the user works or who they
+   are** (\`--scope user\`), or about **what this repository is** (\`--scope
+   project\`) \u2014 its purpose, domain, architecture decisions, release process,
+   house rules? A user fact must still read correctly inside a completely
+   different project. The same category appears on both sides: a rule this
+   repository enforces is project scope, a rule the user applies everywhere is
+   user scope. When in doubt, prefer \`project\` \u2014 the narrower home.
+2. Read that side in full \u2014 \`memory user --full\` or \`memory project --full\`.
+   Not a search: you need everything to know whether this is new. Read only the
+   side you picked.
+3. Nothing covers it \u2014 \`memory add\`. Something covers it \u2014
+   \`memory update <id>\`, passing only the flags you are changing.
 
 Both go to a queue the user approves. They do not appear in reads until then.
 
-Record what would change how someone works next time. Not what the repository
+Record what would change how someone works next time \u2014 not what the repository
 already says, not what only matters in this conversation.
 
 ## Outside AgentBridge
 
-In a session AgentBridge did not open, these commands print nothing and exit 0.
-That is expected, not an error.
+In a session AgentBridge did not open they print nothing and exit 0. Expected,
+not an error.
 
 <!-- @agentbridge-skill-version ${SKILL_VERSION} -->
 `;
@@ -173,7 +178,7 @@ var SKILL_VERSION, SKILL_DIR_NAME;
 var init_skillTemplate = __esm({
   "packages/core/src/skillTemplate.ts"() {
     "use strict";
-    SKILL_VERSION = "0.5.2";
+    SKILL_VERSION = "0.5.3";
     SKILL_DIR_NAME = "agentbridge";
   }
 });
