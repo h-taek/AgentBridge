@@ -195,7 +195,7 @@ async function dispatch(cmd, args, wsDir, storageRoot) {
         if (!v || v.startsWith('--')) {
           // close만 이름 없이 부를 자리가 있다. 그 자리를 여기서 알린다 — 라운드 정리가 스펙의
           // 기본 정리 시점이라 모델이 이름 없이 부르는 것이 자연스럽다.
-          const alt = sub === 'close' ? '거나 --round가 온다' : '온다'
+          const alt = sub === 'close' ? '오거나 --round가 온다' : '온다'
           fail('agent ' + sub + '에는 서브 이름이 ' + alt)
         }
         return v

@@ -399,9 +399,13 @@ tab; you give it work, it reports back, you read the report.
     agent list                    the subs you started, and their state
     agent check [--wait] [--for <seconds>]
     agent read <name> [--last N]  that sub's full conversation
+    agent diff <name> [--stat]    what that sub actually changed
     agent send <name> --prompt "..."
+    agent merge <name>            put its changes into the real folder
     agent stop <name>             end it
     agent close <name>            end it and clean up what it left
+    agent close --round           clean up the round: everything but the one
+                                  you merged
 
 \`agent start\` returns the names it issued \u2014 that is what the other commands
 take. Default harness is claude; pass several to run the same prompt on each.
@@ -412,6 +416,23 @@ dependencies and no instruction files, and paying that cost buys nothing when
 nothing is edited. Isolated subs must be closed with \`agent close\` when the
 round is over; that removes the worktree and its branch and tells you how to
 recover the work.
+
+When a round is over \u2014 you picked a result, or the work is dropped \u2014 call
+\`agent close --round\`. It removes every sub you started except the most
+recently merged one, which stays because it is the branch you adopted and the
+one you are most likely to keep working with. The next \`--round\` takes that one
+too. Calling it is how the subs from a round stop accumulating.
+
+Reviewing a sub means putting two things side by side: what it says it did
+(\`agent read\`) and what actually changed (\`agent diff\`). One without the other
+is not a review. For a sub that ran without \`--isolate\`, the diff is the whole
+folder as it stands now \u2014 your own edits and the user's are in there too.
+
+\`agent merge\` takes an isolated sub's changes out of its worktree and lays them
+on the real folder. All of them or none \u2014 if it cannot apply cleanly, nothing is
+touched and you get the list of files that clashed. It does not commit, does not
+move history, and does not end the sub. Partial picks are not supported: read
+both diffs and write the combination yourself.
 
 A sub does not tell you when it is done. Either \`agent check --wait\`, which
 returns as soon as one finishes (up to a minute, \`--for\` raises it), or go do

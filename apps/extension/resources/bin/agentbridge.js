@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// @agentbridge-cli-version 0.5.2
+// @agentbridge-cli-version 0.5.3
 "use strict";
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -1142,7 +1142,7 @@ async function sendHostRequest(sessionDir2, request, opts = {}) {
     at: now()
   };
 }
-var import_fs6, import_path8, HOST_REQUEST_FILENAME, HOST_RESULT_FILENAME, HOST_REQUEST_TIMEOUT_MS, POLL_MS, HOST_PING, HOST_AGENT_START, HOST_AGENT_SEND, HOST_AGENT_STOP, HOST_AGENT_CLOSE, LONG_KINDS, LONG_TIMEOUT_MS, defaultSleep;
+var import_fs6, import_path8, HOST_REQUEST_FILENAME, HOST_RESULT_FILENAME, HOST_REQUEST_TIMEOUT_MS, POLL_MS, HOST_PING, HOST_AGENT_START, HOST_AGENT_SEND, HOST_AGENT_STOP, HOST_AGENT_CLOSE, HOST_AGENT_MERGE, LONG_KINDS, LONG_TIMEOUT_MS, defaultSleep;
 var init_hostRequest = __esm({
   "packages/core/src/hostRequest.ts"() {
     "use strict";
@@ -1157,7 +1157,8 @@ var init_hostRequest = __esm({
     HOST_AGENT_SEND = "agent-send";
     HOST_AGENT_STOP = "agent-stop";
     HOST_AGENT_CLOSE = "agent-close";
-    LONG_KINDS = /* @__PURE__ */ new Set([HOST_AGENT_START, HOST_AGENT_CLOSE]);
+    HOST_AGENT_MERGE = "agent-merge";
+    LONG_KINDS = /* @__PURE__ */ new Set([HOST_AGENT_START, HOST_AGENT_CLOSE, HOST_AGENT_MERGE]);
     LONG_TIMEOUT_MS = 3e4;
     defaultSleep = (ms) => new Promise((r) => setTimeout(r, ms));
   }
@@ -1450,13 +1451,144 @@ var init_reportState = __esm({
   }
 });
 
+// packages/core/src/agent/gitWorktree.ts
+var GIT_MAX_BUFFER;
+var init_gitWorktree = __esm({
+  "packages/core/src/agent/gitWorktree.ts"() {
+    "use strict";
+    GIT_MAX_BUFFER = 16 * 1024 * 1024;
+  }
+});
+
+// packages/core/src/agent/cleanup.ts
+async function worktreeExists(treePath) {
+  try {
+    const stat = await import_fs11.promises.stat(treePath);
+    return stat.isDirectory();
+  } catch {
+    return false;
+  }
+}
+function resolveTreePath(workspaceDir, name) {
+  return (0, import_path13.join)(workspaceDir, "trees", name);
+}
+var import_fs11, import_path13;
+var init_cleanup = __esm({
+  "packages/core/src/agent/cleanup.ts"() {
+    "use strict";
+    import_fs11 = require("fs");
+    import_path13 = require("path");
+    init_gitWorktree();
+  }
+});
+
+// packages/core/src/agent/diffMerge.ts
+function runGit(cwd, args, opts = {}) {
+  return new Promise((resolve2, reject) => {
+    (0, import_node_child_process2.execFile)(
+      "git",
+      args,
+      {
+        cwd,
+        timeout: opts.timeout ?? GIT_TIMEOUT_MS2,
+        windowsHide: true,
+        maxBuffer: GIT_MAX_BUFFER2,
+        env: opts.env ? { ...process.env, ...opts.env } : process.env
+      },
+      (err, stdout, stderr) => {
+        if (err) {
+          const detail = String(stderr ?? "").trim() || err.message;
+          reject(new Error(`git ${args.join(" ")} \uC2E4\uD328 \u2014 ${detail}`));
+          return;
+        }
+        resolve2(String(stdout ?? ""));
+      }
+    );
+  });
+}
+async function snapshotAgainst(dir, base) {
+  const scratch = await import_node_fs3.promises.mkdtemp((0, import_node_path4.join)((0, import_node_os.tmpdir)(), "agentbridge-index-"));
+  const env = { GIT_INDEX_FILE: (0, import_node_path4.join)(scratch, "index") };
+  try {
+    await runGit(dir, ["read-tree", "HEAD"], { env });
+    await runGit(dir, ["add", "-A"], { env, timeout: GIT_WRITE_TIMEOUT_MS });
+    const stat = await runGit(dir, ["diff", "--cached", "--stat", base], { env });
+    const names = await runGit(dir, ["diff", "--cached", "--name-only", base], { env });
+    const patch = await runGit(
+      dir,
+      ["diff", "--cached", "--binary", "--no-ext-diff", base],
+      { env, timeout: GIT_WRITE_TIMEOUT_MS }
+    );
+    return {
+      stat: stat.trimEnd(),
+      patch,
+      files: names.split("\n").map((l) => l.trim()).filter(Boolean)
+    };
+  } finally {
+    await import_node_fs3.promises.rm(scratch, { recursive: true, force: true }).catch(() => {
+    });
+  }
+}
+async function forkPoint(treePath, repoPath) {
+  const repoHead = (await runGit(repoPath, ["rev-parse", "HEAD"])).trim();
+  const base = await runGit(treePath, ["merge-base", "HEAD", repoHead]);
+  return base.trim();
+}
+async function subagentDiff(repoPath, treePath) {
+  if (await worktreeExists(treePath)) {
+    const base = await forkPoint(treePath, repoPath);
+    return { isolated: true, base, ...await snapshotAgainst(treePath, base) };
+  }
+  return { isolated: false, ...await snapshotAgainst(repoPath, "HEAD") };
+}
+function truncatePatch(patch, limit = PATCH_LIMIT_BYTES) {
+  if (Buffer.byteLength(patch, "utf8") <= limit) return { patch, omitted: [] };
+  const chunks = [];
+  for (const line of patch.split("\n")) {
+    if (line.startsWith("diff --git ") || chunks.length === 0) chunks.push(line);
+    else chunks[chunks.length - 1] += "\n" + line;
+  }
+  const kept = [];
+  const omitted = [];
+  let size = 0;
+  for (const chunk of chunks) {
+    const bytes = Buffer.byteLength(chunk, "utf8") + 1;
+    if (omitted.length === 0 && size + bytes <= limit) {
+      kept.push(chunk);
+      size += bytes;
+      continue;
+    }
+    const m = /^diff --git a\/.* b\/(.*)$/.exec(chunk.split("\n")[0] ?? "");
+    omitted.push(m ? m[1] : "(\uC774\uB984 \uBD88\uBA85)");
+  }
+  return { patch: kept.join("\n"), omitted };
+}
+var import_node_child_process2, import_node_fs3, import_node_path4, import_node_os, GIT_TIMEOUT_MS2, GIT_WRITE_TIMEOUT_MS, GIT_MAX_BUFFER2, PATCH_LIMIT_BYTES;
+var init_diffMerge = __esm({
+  "packages/core/src/agent/diffMerge.ts"() {
+    "use strict";
+    import_node_child_process2 = require("node:child_process");
+    import_node_fs3 = require("node:fs");
+    import_node_path4 = require("node:path");
+    import_node_os = require("node:os");
+    init_cleanup();
+    GIT_TIMEOUT_MS2 = 1e4;
+    GIT_WRITE_TIMEOUT_MS = 12e4;
+    GIT_MAX_BUFFER2 = 64 * 1024 * 1024;
+    PATCH_LIMIT_BYTES = 5e4;
+  }
+});
+
 // packages/core/src/agentCli/agent.ts
 var agent_exports = {};
 __export(agent_exports, {
   DEFAULT_WAIT_SEC: () => DEFAULT_WAIT_SEC,
   agentCheck: () => agentCheck,
   agentClose: () => agentClose,
+  agentCloseRound: () => agentCloseRound,
+  agentDiff: () => agentDiff,
   agentList: () => agentList,
+  agentMerge: () => agentMerge,
   agentRead: () => agentRead,
   agentSend: () => agentSend,
   agentStart: () => agentStart,
@@ -1465,12 +1597,18 @@ __export(agent_exports, {
 });
 async function readSessions(wsDir) {
   try {
-    const raw = await import_fs11.promises.readFile((0, import_path13.join)(wsDir, "workspace.json"), "utf8");
+    const raw = await import_fs12.promises.readFile((0, import_path14.join)(wsDir, "workspace.json"), "utf8");
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed.sessions) ? parsed.sessions : [];
   } catch {
     return [];
   }
+}
+async function readWorkspacePath(wsDir) {
+  const raw = await import_fs12.promises.readFile((0, import_path14.join)(wsDir, "workspace.json"), "utf8");
+  const parsed = JSON.parse(raw);
+  if (!parsed.workspacePath) throw new Error("\uC774 \uD504\uB85C\uC81D\uD2B8\uC758 \uD3F4\uB354 \uACBD\uB85C\uB97C \uC54C \uC218 \uC5C6\uB2E4");
+  return parsed.workspacePath;
 }
 async function listSubs(wsDir, callerSessionId) {
   const sessions = await readSessions(wsDir);
@@ -1526,7 +1664,7 @@ async function agentList(wsDir, callerSessionId) {
 }
 async function agentRead(wsDir, callerSessionId, name, lastN) {
   const sub = await findSub(wsDir, callerSessionId, name);
-  const sessionDir2 = (0, import_path13.join)(wsDir, "sessions", sub.sessionId);
+  const sessionDir2 = (0, import_path14.join)(wsDir, "sessions", sub.sessionId);
   const all = await readAllTurns(sessionDir2);
   await markReported(wsDir, sub.sessionId);
   if (all.length === 0) {
@@ -1542,12 +1680,32 @@ async function agentRead(wsDir, callerSessionId, name, lastN) {
   }
   return lines.join("\n");
 }
+async function agentDiff(wsDir, callerSessionId, name, opts = {}) {
+  const sub = await findSub(wsDir, callerSessionId, name);
+  const repoPath = await readWorkspacePath(wsDir);
+  const diff = await subagentDiff(repoPath, resolveTreePath(wsDir, name));
+  if (diff.files.length === 0) {
+    return `${name}: \uBC14\uB010 \uD30C\uC77C\uC774 \uC5C6\uB2E4.${diff.isolated ? "" : " \uC6D0\uBCF8 \uD3F4\uB354\uC5D0\uC11C \uB3CC\uC558\uC73C\uBBC0\uB85C \uD30C\uC77C\uC744 \uC548 \uACE0\uCE58\uB294 \uC77C\uC774\uC5C8\uC744 \uC218 \uC788\uB2E4."}`;
+  }
+  const head = diff.isolated ? `## ${name} (${sub.model}) \uC758 \uBCC0\uACBD \u2014 \uACA9\uB9AC worktree, \uBD84\uAE30\uC810 ${(diff.base ?? "").slice(0, 8)} \uC774\uD6C4 \uC804\uCCB4` : `## ${name} (${sub.model}) \uC758 \uBCC0\uACBD \u2014 \uC6D0\uBCF8 \uD3F4\uB354\uC758 \uC9C0\uAE08 \uC0C1\uD0DC. \uC774 \uC11C\uBE0C\uAC00 \uC544\uB2C8\uB77C \uB108\uC640 \uC0AC\uC6A9\uC790\uAC00 \uACE0\uCE5C \uAC83\uB3C4 \uD568\uAED8 \uB4E4\uC5B4 \uC788\uB2E4`;
+  const lines = [head, "", diff.stat];
+  if (opts.statOnly) return lines.join("\n");
+  const cut = truncatePatch(diff.patch);
+  lines.push("", cut.patch);
+  if (cut.omitted.length > 0) {
+    lines.push(
+      "",
+      `\u2014 \uD328\uCE58\uAC00 \uC0C1\uD55C(${PATCH_LIMIT_BYTES}\uBC14\uC774\uD2B8)\uC744 \uB118\uC5B4 \uC5EC\uAE30\uC11C \uC798\uB790\uB2E4. \uC548 \uC2E4\uB9B0 \uD30C\uC77C ${cut.omitted.length}\uAC1C: ${cut.omitted.join(", ")}`
+    );
+  }
+  return lines.join("\n");
+}
 async function replayTail(wsDir, sessionId) {
-  const path2 = (0, import_path13.join)(wsDir, "sessions", sessionId, "replay.log");
+  const path2 = (0, import_path14.join)(wsDir, "sessions", sessionId, "replay.log");
   try {
-    const stat = await import_fs11.promises.stat(path2);
+    const stat = await import_fs12.promises.stat(path2);
     const start = Math.max(0, stat.size - TAIL_BYTES);
-    const handle = await import_fs11.promises.open(path2, "r");
+    const handle = await import_fs12.promises.open(path2, "r");
     try {
       const buf = Buffer.alloc(stat.size - start);
       await handle.read(buf, 0, buf.length, start);
@@ -1641,15 +1799,23 @@ function agentStop(sessionDir2, name) {
 function agentClose(sessionDir2, name) {
   return callHost(sessionDir2, HOST_AGENT_CLOSE, { name });
 }
-var import_fs11, import_path13, DEFAULT_WAIT_SEC, WAIT_POLL_MS, TAIL_BYTES, defaultSleep2, requestSeq;
+function agentCloseRound(sessionDir2) {
+  return callHost(sessionDir2, HOST_AGENT_CLOSE, { round: true });
+}
+function agentMerge(sessionDir2, name) {
+  return callHost(sessionDir2, HOST_AGENT_MERGE, { name });
+}
+var import_fs12, import_path14, DEFAULT_WAIT_SEC, WAIT_POLL_MS, TAIL_BYTES, defaultSleep2, requestSeq;
 var init_agent = __esm({
   "packages/core/src/agentCli/agent.ts"() {
     "use strict";
-    import_fs11 = require("fs");
-    import_path13 = require("path");
+    import_fs12 = require("fs");
+    import_path14 = require("path");
     init_turnsStore();
     init_sessionStatus();
     init_reportState();
+    init_cleanup();
+    init_diffMerge();
     init_hostRequest();
     DEFAULT_WAIT_SEC = 60;
     WAIT_POLL_MS = 1e3;
@@ -1670,13 +1836,13 @@ async function uninstallGlobal(homeDir) {
   for (const agent of AGENTS2) {
     const path2 = skillFilePath(agent, homeDir);
     try {
-      await import_fs12.promises.unlink(path2);
+      await import_fs13.promises.unlink(path2);
       removed.push(path2);
     } catch {
       continue;
     }
     try {
-      await import_fs12.promises.rmdir((0, import_path14.dirname)(path2));
+      await import_fs13.promises.rmdir((0, import_path15.dirname)(path2));
     } catch {
     }
   }
@@ -1691,12 +1857,12 @@ async function uninstallGlobal(homeDir) {
     "\uC800\uC7A5\uC18C(\uB300\uD654 \uAE30\uB85D\uACFC \uC9C0\uC2DD)\uB294 \uADF8\uB300\uB85C \uB454\uB2E4."
   ].join("\n");
 }
-var import_fs12, import_path14, AGENTS2;
+var import_fs13, import_path15, AGENTS2;
 var init_uninstall = __esm({
   "packages/core/src/agentCli/uninstall.ts"() {
     "use strict";
-    import_fs12 = require("fs");
-    import_path14 = require("path");
+    import_fs13 = require("fs");
+    import_path15 = require("path");
     init_hookInstaller();
     init_skillInstaller();
     AGENTS2 = ["claude", "codex", "agy"];
@@ -1718,11 +1884,14 @@ var { readStatus: readStatus2 } = (init_status(), __toCommonJS(status_exports));
 var {
   agentList: agentList2,
   agentRead: agentRead2,
+  agentDiff: agentDiff2,
   agentCheck: agentCheck2,
   agentStart: agentStart2,
   agentSend: agentSend2,
   agentStop: agentStop2,
   agentClose: agentClose2,
+  agentCloseRound: agentCloseRound2,
+  agentMerge: agentMerge2,
   DEFAULT_WAIT_SEC: DEFAULT_WAIT_SEC2
 } = (init_agent(), __toCommonJS(agent_exports));
 var { uninstallGlobal: uninstallGlobal2 } = (init_uninstall(), __toCommonJS(uninstall_exports));
@@ -1740,9 +1909,12 @@ var COMMANDS = [
   ["agent list", "\uB744\uC6B4 \uC11C\uBE0C\uC758 \uBAA9\uB85D\uACFC \uC0C1\uD0DC"],
   ["agent check", "\uB05D\uB09C \uC11C\uBE0C\uAC00 \uC788\uB294\uC9C0 \uBCF8\uB2E4 (--wait\uBA74 \uC0DD\uAE38 \uB54C\uAE4C\uC9C0, --for <\uCD08>\uB85C \uC0C1\uD55C \uC870\uC815)"],
   ["agent read <\uC774\uB984>", "\uADF8 \uC11C\uBE0C\uC758 \uAE30\uB85D \uC804\uBB38 (--last N\uC73C\uB85C \uC790\uB984)"],
+  ["agent diff <\uC774\uB984>", "\uADF8 \uC11C\uBE0C\uAC00 \uC2E4\uC81C\uB85C \uBC14\uAFBC \uAC83 (--stat\uC774\uBA74 \uC694\uC57D\uB9CC)"],
   ["agent send <\uC774\uB984>", '\uB3C4\uB294 \uC11C\uBE0C\uC5D0 \uC9C0\uCE68\uC744 \uB354 \uBCF4\uB0B8\uB2E4 (--prompt "...")'],
+  ["agent merge <\uC774\uB984>", "\uADF8 \uC11C\uBE0C\uC758 \uBCC0\uACBD\uC744 \uC6D0\uBCF8\uC5D0 \uC5B9\uB294\uB2E4 (\uC804\uBD80 \uC544\uB2C8\uBA74 \uC544\uBB34\uAC83\uB3C4)"],
   ["agent stop <\uC774\uB984>", "\uC11C\uBE0C\uB97C \uB05D\uB0B8\uB2E4"],
-  ["agent close <\uC774\uB984>", "\uC11C\uBE0C\uB97C \uC815\uB9AC\uD55C\uB2E4 (\uACA9\uB9AC\uC600\uC73C\uBA74 \uD3F4\uB354\uC640 \uBE0C\uB79C\uCE58\uB3C4 \uC9C0\uC6B4\uB2E4)"]
+  ["agent close <\uC774\uB984>", "\uC11C\uBE0C\uB97C \uC815\uB9AC\uD55C\uB2E4 (\uACA9\uB9AC\uC600\uC73C\uBA74 \uD3F4\uB354\uC640 \uBE0C\uB79C\uCE58\uB3C4 \uC9C0\uC6B4\uB2E4)"],
+  ["agent close --round", "\uB77C\uC6B4\uB4DC\uB97C \uC815\uB9AC\uD55C\uB2E4 (\uBA38\uC9C0\uB41C \uD558\uB098\uB9CC \uB0A8\uAE30\uACE0 \uC804\uBD80)"]
 ];
 var USAGE = [
   "agentbridge \u2014 AgentBridge \uB9E5\uB77D \uC77D\uAE30",
@@ -1844,7 +2016,10 @@ async function dispatch(cmd, args, wsDir, storageRoot) {
       if (!caller || caller !== path.basename(caller)) fail("\uC774 \uC138\uC158\uC758 \uC2E0\uC6D0\uC744 \uC54C \uC218 \uC5C6\uB2E4");
       const nameArg = () => {
         const v = rest[0];
-        if (!v || v.startsWith("--")) fail("agent " + sub + "\uC5D0\uB294 \uC11C\uBE0C \uC774\uB984\uC774 \uC628\uB2E4");
+        if (!v || v.startsWith("--")) {
+          const alt = sub === "close" ? "\uC624\uAC70\uB098 --round\uAC00 \uC628\uB2E4" : "\uC628\uB2E4";
+          fail("agent " + sub + "\uC5D0\uB294 \uC11C\uBE0C \uC774\uB984\uC774 " + alt);
+        }
         return v;
       };
       switch (sub) {
@@ -1855,6 +2030,8 @@ async function dispatch(cmd, args, wsDir, storageRoot) {
           const i = rest.indexOf("--last");
           return agentRead2(wsDir, caller, name, i === -1 ? void 0 : intOption(rest, "--last", 0));
         }
+        case "diff":
+          return agentDiff2(wsDir, caller, nameArg(), { statOnly: rest.includes("--stat") });
         case "check":
           return agentCheck2(wsDir, caller, {
             wait: rest.includes("--wait"),
@@ -1873,10 +2050,12 @@ async function dispatch(cmd, args, wsDir, storageRoot) {
           if (!prompt) fail("agent send\uC5D0\uB294 --prompt\uAC00 \uC628\uB2E4");
           return agentSend2(sessionDir(wsDir), name, prompt);
         }
+        case "merge":
+          return agentMerge2(sessionDir(wsDir), nameArg());
         case "stop":
           return agentStop2(sessionDir(wsDir), nameArg());
         case "close":
-          return agentClose2(sessionDir(wsDir), nameArg());
+          return rest.includes("--round") ? agentCloseRound2(sessionDir(wsDir)) : agentClose2(sessionDir(wsDir), nameArg());
         default:
           return usageAndExit();
       }
