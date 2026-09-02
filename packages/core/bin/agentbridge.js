@@ -44,6 +44,7 @@ const {
   agentSend,
   agentStop,
   agentClose,
+  agentCloseRound,
   agentMerge,
   DEFAULT_WAIT_SEC
 } = require('../src/agentCli/agent')
@@ -68,7 +69,8 @@ const COMMANDS = [
   ['agent send <이름>', '도는 서브에 지침을 더 보낸다 (--prompt "...")'],
   ['agent merge <이름>', '그 서브의 변경을 원본에 얹는다 (전부 아니면 아무것도)'],
   ['agent stop <이름>', '서브를 끝낸다'],
-  ['agent close <이름>', '서브를 정리한다 (격리였으면 폴더와 브랜치도 지운다)']
+  ['agent close <이름>', '서브를 정리한다 (격리였으면 폴더와 브랜치도 지운다)'],
+  ['agent close --round', '라운드를 정리한다 (머지된 하나만 남기고 전부)']
 ]
 
 const USAGE = [
@@ -190,7 +192,12 @@ async function dispatch(cmd, args, wsDir, storageRoot) {
       if (!caller || caller !== path.basename(caller)) fail('이 세션의 신원을 알 수 없다')
       const nameArg = () => {
         const v = rest[0]
-        if (!v || v.startsWith('--')) fail('agent ' + sub + '에는 서브 이름이 온다')
+        if (!v || v.startsWith('--')) {
+          // close만 이름 없이 부를 자리가 있다. 그 자리를 여기서 알린다 — 라운드 정리가 스펙의
+          // 기본 정리 시점이라 모델이 이름 없이 부르는 것이 자연스럽다.
+          const alt = sub === 'close' ? '거나 --round가 온다' : '온다'
+          fail('agent ' + sub + '에는 서브 이름이 ' + alt)
+        }
         return v
       }
       switch (sub) {
@@ -226,7 +233,9 @@ async function dispatch(cmd, args, wsDir, storageRoot) {
         case 'stop':
           return agentStop(sessionDir(wsDir), nameArg())
         case 'close':
-          return agentClose(sessionDir(wsDir), nameArg())
+          return rest.includes('--round')
+            ? agentCloseRound(sessionDir(wsDir))
+            : agentClose(sessionDir(wsDir), nameArg())
         default:
           return usageAndExit()
       }

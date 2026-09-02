@@ -369,6 +369,11 @@ export function agentClose(sessionDir: string | undefined, name: string): Promis
   return callHost(sessionDir, HOST_AGENT_CLOSE, { name });
 }
 
+// 라운드 정리. 이름을 안 받는다 — 무엇을 남길지는 머지 표시가 정한다(B-7).
+export function agentCloseRound(sessionDir: string | undefined): Promise<string> {
+  return callHost(sessionDir, HOST_AGENT_CLOSE, { round: true });
+}
+
 export function agentMerge(sessionDir: string | undefined, name: string): Promise<string> {
   return callHost(sessionDir, HOST_AGENT_MERGE, { name });
 }

@@ -98,6 +98,8 @@ tab; you give it work, it reports back, you read the report.
     agent merge <name>            put its changes into the real folder
     agent stop <name>             end it
     agent close <name>            end it and clean up what it left
+    agent close --round           clean up the round: everything but the one
+                                  you merged
 
 \`agent start\` returns the names it issued — that is what the other commands
 take. Default harness is claude; pass several to run the same prompt on each.
@@ -108,6 +110,12 @@ dependencies and no instruction files, and paying that cost buys nothing when
 nothing is edited. Isolated subs must be closed with \`agent close\` when the
 round is over; that removes the worktree and its branch and tells you how to
 recover the work.
+
+When a round is over — you picked a result, or the work is dropped — call
+\`agent close --round\`. It removes every sub you started except the most
+recently merged one, which stays because it is the branch you adopted and the
+one you are most likely to keep working with. The next \`--round\` takes that one
+too. Calling it is how the subs from a round stop accumulating.
 
 Reviewing a sub means putting two things side by side: what it says it did
 (\`agent read\`) and what actually changed (\`agent diff\`). One without the other

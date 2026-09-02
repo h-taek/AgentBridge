@@ -13,6 +13,8 @@ import {
   resolveTreePath,
   addWorktree,
   listAgentBranches,
+  planRoundCleanup,
+  type RoundCandidate,
 } from '@agentbridge/core';
 
 function git(cwd: string, ...args: string[]): string {
@@ -147,5 +149,63 @@ describe('서브 정리 (0.5.0 W7)', () => {
     const empty = await fsp.mkdtemp(join(tmpdir(), 'ab-empty-'));
     assert.deepEqual(await findOrphanTrees(empty, []), []);
     await fsp.rm(empty, { recursive: true, force: true });
+  });
+});
+
+// ─── 라운드 정리 대상 선정 (5단계 W4) ────────────────────────────────────
+
+describe('planRoundCleanup', () => {
+  const sub = (name: string, mergedAt?: string, cleanedAt?: string): RoundCandidate => ({
+    sessionId: `s-${name}`,
+    name,
+    mergedAt,
+    cleanedAt,
+  });
+
+  it('머지된 하나를 남기고 나머지를 지운다', () => {
+    const plan = planRoundCleanup([
+      sub('golden-gate'),
+      sub('hangang', '2026-09-02T01:00:00.000Z'),
+      sub('ponte-vecchio'),
+    ]);
+
+    assert.equal(plan.keep?.name, 'hangang');
+    assert.deepEqual(plan.remove.map((c) => c.name), ['golden-gate', 'ponte-vecchio']);
+  });
+
+  it('머지가 없으면 전부 지운다', () => {
+    const plan = planRoundCleanup([sub('golden-gate'), sub('hangang')]);
+
+    assert.equal(plan.keep, undefined);
+    assert.deepEqual(plan.remove.map((c) => c.name), ['golden-gate', 'hangang']);
+  });
+
+  it('머지된 것이 둘이면 최근 것만 남는다 — 직전 라운드에서 남겨둔 것이 여기서 간다', () => {
+    const plan = planRoundCleanup([
+      sub('golden-gate', '2026-09-01T00:00:00.000Z'), // 직전 라운드에서 남겨둔 것
+      sub('hangang', '2026-09-02T00:00:00.000Z'),
+    ]);
+
+    assert.equal(plan.keep?.name, 'hangang');
+    assert.deepEqual(plan.remove.map((c) => c.name), ['golden-gate']);
+  });
+
+  it('이미 정리된 서브는 대상에 안 들어간다', () => {
+    const plan = planRoundCleanup([
+      sub('golden-gate', undefined, '2026-09-01T00:00:00.000Z'),
+      sub('hangang'),
+    ]);
+
+    assert.deepEqual(plan.remove.map((c) => c.name), ['hangang']);
+  });
+
+  it('정리된 머지 서브는 남길 것으로도 안 뽑힌다', () => {
+    const plan = planRoundCleanup([
+      sub('golden-gate', '2026-09-02T00:00:00.000Z', '2026-09-02T01:00:00.000Z'),
+      sub('hangang'),
+    ]);
+
+    assert.equal(plan.keep, undefined);
+    assert.deepEqual(plan.remove.map((c) => c.name), ['hangang']);
   });
 });

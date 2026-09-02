@@ -218,3 +218,36 @@ export async function findOrphanTrees(
   }
   return entries.filter((name) => !known.has(name));
 }
+
+// ─── 라운드 정리 (0.5.0 5단계 W4, B-7 정리 시점 첫째) ────────────────────
+
+export interface RoundCandidate {
+  sessionId: string;
+  name: string;
+  // 원본에 얹은 시각. 없으면 안 얹은 서브다.
+  mergedAt?: string;
+  // 이미 정리된 서브. 다시 지우지 않는다.
+  cleanedAt?: string;
+}
+
+export interface RoundPlan {
+  remove: RoundCandidate[];
+  keep?: RoundCandidate;
+}
+
+// 라운드가 끝났을 때 무엇을 지우고 무엇을 남기는가.
+//
+// **가장 최근에 머지된 하나만 남기고 나머지를 전부 지운다.** 스펙의 두 문장이 이 한 규칙으로
+// 동시에 만족된다 — 이번 라운드의 미머지 서브는 표시가 없어 지워지고, 직전 라운드에서 남겨둔
+// 머지 서브는 표시가 더 오래돼 지워진다. 이번에 머지가 없었으면 남는 것 없이 전부 지워진다.
+//
+// 남기는 이유는 머지됐기 때문이 아니라 채택한 줄기라 이어서 시킬 가능성이 높기 때문이다. 그래서
+// 살아 있는 서브는 항상 최대 하나이고, 시간이나 창 닫힘을 안 쓰고도 상한이 생긴다.
+export function planRoundCleanup(children: RoundCandidate[]): RoundPlan {
+  const live = children.filter((c) => !c.cleanedAt);
+  const keep = live
+    .filter((c) => c.mergedAt)
+    .sort((a, b) => (a.mergedAt as string).localeCompare(b.mergedAt as string))
+    .pop();
+  return { keep, remove: live.filter((c) => c !== keep) };
+}

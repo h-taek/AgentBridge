@@ -37,6 +37,7 @@ import {
   findOrphanTrees,
   mergeSubagent,
   renderMerge,
+  planRoundCleanup,
   type NameUsage,
   type SpawnExtras,
   type HostRequest,
@@ -429,6 +430,31 @@ export async function cleanupOne(
   );
 }
 
+// 라운드가 끝났을 때 (B-7 정리 시점 첫째). 가장 최근에 머지된 하나만 남기고 나머지를 지운다.
+// 지우는 일 자체는 4단계의 정리 그대로이고 여기 얹히는 것은 부르는 규칙뿐이다.
+export async function cleanupRound(
+  workspaceId: string,
+  parentSessionId: string,
+): Promise<{ receipts: CleanupReceipt[]; kept?: string }> {
+  const meta = await getWorkspaceStore().loadWorkspace(workspaceId);
+  const plan = planRoundCleanup(
+    meta.sessions
+      .filter((s) => s.parentSessionId === parentSessionId && s.agentName)
+      .map((s) => ({
+        sessionId: s.sessionId,
+        name: s.agentName as string,
+        mergedAt: s.mergedAt,
+        cleanedAt: s.cleanedAt,
+      })),
+  );
+
+  const receipts: CleanupReceipt[] = [];
+  for (const target of plan.remove) {
+    receipts.push(await cleanupOne(workspaceId, target.sessionId, target.name));
+  }
+  return { receipts, kept: plan.keep?.name };
+}
+
 // 메인 세션을 지울 때 그 아래 서브 전부. 레코드를 지우는 것은 되돌릴 수 없는 명시 행위이므로
 // 함께 간다(B-7 정리 시점 둘째).
 export async function cleanupChildrenOf(
@@ -502,6 +528,18 @@ async function handleMerge(req: HostRequest, sessionDir: string): Promise<string
 
 async function handleClose(req: HostRequest, sessionDir: string): Promise<string> {
   const { workspaceId, sessionId } = callerFromSessionDir(sessionDir);
+  if (payloadOf(req).round === true) {
+    const { receipts, kept } = await cleanupRound(workspaceId, sessionId);
+    deps?.refreshTree();
+    if (receipts.length === 0 && !kept) return '지울 서브가 없다.';
+    const lines = receipts.map(renderReceipt);
+    if (kept) {
+      lines.push(
+        `${kept}은 남겼다 — 원본에 얹은 줄기라 이어서 시킬 수 있다. 다음 라운드를 정리할 때 함께 지워진다.`,
+      );
+    }
+    return lines.join('\n\n');
+  }
   const name = str(payloadOf(req).name);
   if (!name) throw new Error('서브 이름이 없다');
   const sub = await findSub(workspaceId, sessionId, name);
