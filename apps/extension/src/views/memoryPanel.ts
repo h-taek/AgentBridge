@@ -8,13 +8,30 @@ import { readAllTurns, listArchives } from '../core/turnsStore';
 import { runManualCompaction, resetMemory } from '../core/compactionScheduler';
 import { getHookDisabledReasons } from '../core/hookStatusStore';
 import type { CliKind, IR } from '../shared/types';
+import { collapseCommand } from './memoryPanelModel';
+
+// 탭 선택과 접힌 섹션 목록이 사는 자리.
+const UI_STATE_KEY = 'memoryPanel.ui';
 
 export class MemoryPanelProvider implements vscode.WebviewViewProvider {
   static readonly viewType = 'agentbridge.memoryPanel';
 
   private view: vscode.WebviewView | undefined;
 
-  constructor() {}
+  // 탭 선택과 섹션 접힘. 레포가 아니라 사람에게 묶이는 값이라 전역 저장소에 둔다 (0.5.0 6단계).
+  private readonly storage: vscode.Memento;
+
+  constructor(storage: vscode.Memento) {
+    this.storage = storage;
+  }
+
+  private readUiState(): { tab: string; collapsed: string[] } {
+    const raw = this.storage.get<{ tab?: string; collapsed?: string[] }>(UI_STATE_KEY);
+    return {
+      tab: raw?.tab === 'turns' ? 'turns' : 'summary',
+      collapsed: Array.isArray(raw?.collapsed) ? raw!.collapsed!.filter((k) => typeof k === 'string') : [],
+    };
+  }
 
   resolveWebviewView(
     webviewView: vscode.WebviewView,
@@ -38,6 +55,9 @@ export class MemoryPanelProvider implements vscode.WebviewViewProvider {
           break;
         case 'hookBadge:show':
           await this.handleHookBadgeShow(msg.items as Array<{ model: CliKind; reason: string }>);
+          break;
+        case 'ui:set':
+          await this.storage.update(UI_STATE_KEY, { tab: msg.tab, collapsed: msg.collapsed });
           break;
       }
     });
@@ -66,7 +86,7 @@ export class MemoryPanelProvider implements vscode.WebviewViewProvider {
   private async sendIR(): Promise<void> {
     const wid = this.getWorkspaceId();
     if (!wid) {
-      this.postMessage({ type: 'ir:data', ir: null, turnCount: 0 });
+      this.postMessage({ type: 'ir:data', ir: null, turns: [], archives: [], ui: this.readUiState() });
       return;
     }
     const [ir, turns, allArchives] = await Promise.all([this.loadIR(wid), readAllTurns(wid), listArchives(wid)]);
@@ -86,7 +106,15 @@ export class MemoryPanelProvider implements vscode.WebviewViewProvider {
 
     const hookDisabled = getHookDisabledReasons(wid);
     output.log(`memoryPanel: sendIR — wid=${wid}, turnCount=${turns.length}, hasIR=${!!displayIR}, archives=${archives.length}, hookDisabled=${hookDisabled.length}, hasView=${!!this.view}`);
-    this.postMessage({ type: 'ir:data', ir: displayIR, turnCount: turns.length, archives, hookDisabled });
+    this.postMessage({
+      type: 'ir:data',
+      ir: displayIR ? withCommandHeads(displayIR) : null,
+      // 개수만 보내던 것을 본문까지 보낸다 (0.5.0 B-10). 최신이 위로 온다.
+      turns: turns.slice().reverse(),
+      archives,
+      hookDisabled,
+      ui: this.readUiState(),
+    });
   }
 
   async runRefine(): Promise<void> {
@@ -328,7 +356,9 @@ export class MemoryPanelProvider implements vscode.WebviewViewProvider {
     .item-row {
       display: flex;
       flex-direction: column;
-      align-items: flex-start;
+      /* 세로 flex에서 flex-start면 자식 폭이 내용만큼 늘어난다 — 폭이 안 묶이면 말줄임이
+         걸릴 자리가 없어 글자가 화면 밖으로 잘린다. */
+      align-items: stretch;
       gap: 2px;
       padding: 3px 6px;
       border-radius: 3px;
@@ -343,25 +373,38 @@ export class MemoryPanelProvider implements vscode.WebviewViewProvider {
     }
     .item-value {
       align-self: stretch;
-      color: var(--vscode-descriptionForeground);
+      color: var(--vscode-foreground);
       word-break: break-word;
     }
-    /* FILES 섹션은 이전처럼 좌우 레이아웃 유지 — 상태 배지 + 경로 */
-    .item-row-h {
-      flex-direction: row;
+    /* 배지 + 값이 한 줄로 서는 자리 (Files·Tests). 세부는 이 줄 아래로 붙는다 */
+    .line {
+      display: flex;
       align-items: baseline;
       gap: 8px;
+      min-width: 0;
     }
-    .item-row-h .item-value {
+    .line .item-value {
       flex: 1;
       align-self: auto;
-      color: var(--vscode-foreground);
     }
+    /* 눌러서 펼친 세부 — 전체 줄과 딸린 설명 */
+    .item-detail {
+      padding-top: 3px;
+      color: var(--vscode-descriptionForeground);
+      font-size: 11.5px;
+      line-height: 1.55;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .item-row[data-item] { cursor: pointer; }
     .badge {
       display: inline-block;
       padding: 1px 6px;
       border-radius: 8px;
       font-size: 10px;
+      /* 줄 높이를 못 박는다 — 물려받으면 기록 탭처럼 줄 간격이 넓은 자리에서 배지만 두꺼워진다 */
+      line-height: 1.4;
+      flex: 0 0 auto;
       font-weight: 500;
       background: var(--vscode-badge-background);
       color: var(--vscode-badge-foreground);
@@ -413,15 +456,6 @@ export class MemoryPanelProvider implements vscode.WebviewViewProvider {
       gap: 8px;
       flex-wrap: wrap;
     }
-    .archive-more {
-      background: transparent;
-      border: none;
-      color: var(--vscode-textLink-foreground, #3794ff);
-      font-size: 11px;
-      cursor: pointer;
-      padding: 4px 0;
-    }
-    .archive-more:hover { text-decoration: underline; }
     @keyframes spin { to { transform: rotate(360deg); } }
     .spin { animation: spin 1s linear infinite; }
     .hook-badge {
@@ -440,196 +474,162 @@ export class MemoryPanelProvider implements vscode.WebviewViewProvider {
     }
     .hook-badge-icon { flex: 0 0 auto; opacity: 0.9; }
     .hook-badge-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    /* ── 0.5.0 6단계: 탭 둘과 접기 ── */
+    .hidden { display: none !important; }
+    .tabs {
+      display: flex;
+      gap: 2px;
+      margin-bottom: 10px;
+      border-bottom: 1px solid var(--vscode-widget-border, #444);
+    }
+    .tab {
+      background: transparent;
+      border: none;
+      border-bottom: 2px solid transparent;
+      margin-bottom: -1px;
+      padding: 5px 10px;
+      font-family: inherit;
+      font-size: 12px;
+      color: var(--vscode-descriptionForeground);
+      cursor: pointer;
+    }
+    .tab:hover { color: var(--vscode-foreground); }
+    .tab.active {
+      color: var(--vscode-foreground);
+      border-bottom-color: var(--vscode-focusBorder, #0078d4);
+    }
+    .tab-count { font-size: 10px; opacity: 0.7; margin-left: 4px; }
+    /* 머리줄은 눌러서 접는다 */
+    .section-header, .goal-row { cursor: pointer; user-select: none; }
+    .chev {
+      flex: 0 0 auto;
+      width: 9px;
+      font-size: 9px;
+      color: var(--vscode-descriptionForeground);
+    }
+    .goal-row { display: flex; gap: 6px; align-items: flex-start; }
+    /* 목표 아래 설명 — 회색으로 내리고 접힌다 */
+    .intent-detail { padding-top: 2px; }
+    .intent-constraint {
+      color: var(--vscode-descriptionForeground);
+      font-size: 11.5px;
+      line-height: 1.5;
+      padding: 1px 0;
+    }
+    /* 한 줄로 자르고 전체는 마우스오버로 */
+    .ellip {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .cmd-row { display: flex; gap: 6px; align-items: baseline; cursor: pointer; }
+    .cmd-full {
+      padding: 2px 0 4px 15px;
+      color: var(--vscode-descriptionForeground);
+      font-family: var(--vscode-editor-font-family, monospace);
+      font-size: 11px;
+      line-height: 1.5;
+      word-break: break-all;
+    }
+    /* ── 기록 탭 ── */
+    .turn {
+      border-left: 2px solid var(--vscode-widget-border, #444);
+      padding-left: 8px;
+      margin-bottom: 12px;
+    }
+    .turn-head {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      font-size: 10.5px;
+      color: var(--vscode-descriptionForeground);
+      margin-bottom: 3px;
+    }
+    .turn-model { font-weight: 600; text-transform: capitalize; color: #7DA1C7; }
+    .turn-user {
+      font-size: 12px;
+      line-height: 1.5;
+      margin-bottom: 4px;
+      word-break: break-word;
+    }
+    .turn-body {
+      font-size: 11.5px;
+      line-height: 1.55;
+      color: var(--vscode-descriptionForeground);
+      margin-bottom: 5px;
+      word-break: break-word;
+      cursor: pointer;
+    }
+    .turn-body.clip {
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .turn-tools { display: flex; flex-direction: column; gap: 6px; }
+    .turn-tool {
+      display: flex;
+      gap: 7px;
+      align-items: baseline;
+      padding: 1px 0;
+      line-height: 1.6;
+      font-size: 11px;
+      color: var(--vscode-descriptionForeground);
+      cursor: pointer;
+    }
+    .turn-tool .turn-tool-arg { min-width: 0; word-break: break-all; }
+    .foot-note {
+      margin-top: 10px;
+      padding-top: 8px;
+      border-top: 1px solid var(--vscode-widget-border, #333);
+      font-size: 10.5px;
+      line-height: 1.5;
+      color: var(--vscode-descriptionForeground);
+      opacity: 0.85;
+    }
   </style>
 </head>
 <body>
   <div class="status" id="status">Loading...</div>
-  <div id="hookBadge" class="hook-badge" style="display:none"></div>
-  <div id="content"></div>
+  <div id="hookBadge" class="hook-badge hidden"></div>
+  <div class="tabs">
+    <button class="tab active" data-tab="summary">Summary</button>
+    <button class="tab" data-tab="turns">Turns <span class="tab-count" id="turnCount"></span></button>
+  </div>
+  <div id="paneSummary"></div>
+  <div id="paneTurns" class="hidden"></div>
 
   <script nonce="${nonce}">
+    // 요약(IR)과 기록(원본 턴)을 탭 둘로 가른다 (0.5.0 B-10). 기본은 제목이고 자세한 것은
+    // 열거나 마우스를 올려서 본다. 접힘과 탭 선택은 호스트가 전역 저장소에 들고 있다.
     const vscode = acquireVsCodeApi();
 
     const statusEl = document.getElementById('status');
-    const contentEl = document.getElementById('content');
     const hookBadge = document.getElementById('hookBadge');
+    const paneSummary = document.getElementById('paneSummary');
+    const paneTurns = document.getElementById('paneTurns');
+    const turnCountEl = document.getElementById('turnCount');
 
-    let lastHookDisabled = [];
-    function renderHookBadge(items) {
-      lastHookDisabled = items || [];
-      if (lastHookDisabled.length === 0) { hookBadge.style.display = 'none'; hookBadge.innerHTML = ''; hookBadge.title = ''; return; }
-      const names = { claude: 'Claude', codex: 'Codex', agy: 'Antigravity' };
-      const labels = lastHookDisabled.map(x => names[x.model] || x.model).join(', ');
-      const icon = '<svg class="hook-badge-icon" width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1.5a.75.75 0 0 1 .67.42l6 12A.75.75 0 0 1 14 15H2a.75.75 0 0 1-.67-1.08l6-12A.75.75 0 0 1 8 1.5zm0 4.5a.75.75 0 0 0-.75.75v3a.75.75 0 0 0 1.5 0v-3A.75.75 0 0 0 8 6zm0 6.5a.875.875 0 1 0 0-1.75.875.875 0 0 0 0 1.75z"/></svg>';
-      hookBadge.innerHTML = icon + '<span class="hook-badge-text">' + ${JSON.stringify(l10nMemDisabled)} + ' · ' + escapeHtml(labels) + '</span>';
-      hookBadge.title = ${JSON.stringify(l10nClickForDetails)};
-      hookBadge.style.display = '';
-    }
-    hookBadge.addEventListener('click', () => {
-      if (lastHookDisabled.length === 0) return;
-      vscode.postMessage({ type: 'hookBadge:show', items: lastHookDisabled });
-    });
+    let data = { ir: null, turns: [], archives: [] };
+    let ui = { tab: 'summary', collapsed: [] };
+    // 펼친 명령과 턴 본문 — 화면 안에서만 사는 값이라 저장하지 않는다.
+    const openCmds = {};
+    const openTurns = {};
+    const openItems = {};
+    const openTools = {};
 
-    function escapeHtml(s) {
+    function esc(s) {
       const d = document.createElement('div');
       d.textContent = s == null ? '' : String(s);
       return d.innerHTML;
     }
 
-    // Refine / Reset 버튼은 view title 메뉴(VS Code 네이티브 아이콘)로 이동 — 이 panel 내부에서
-    // ir:refine, memory:reset 메시지는 더 이상 발송하지 않으며, ir:refining 진행 상태도 표시 안 함.
-
-    window.addEventListener('message', (e) => {
-      const msg = e.data;
-      if (msg.type === 'ir:data') {
-        renderIR(msg.ir, msg.turnCount, msg.archives || []);
-        renderHookBadge(msg.hookDisabled || []);
-      }
-    });
-
-    const ARCHIVE_INITIAL = 5;
-    let showAllArchive = false;
-
-    function renderIR(ir, turnCount, archives) {
-      lastIR = ir;
-      lastTurnCount = turnCount;
-      lastArchives = archives;
-      if (!ir) {
-        statusEl.textContent = turnCount > 0
-          ? turnCount + ' turns recorded (not yet refined)'
-          : 'No memory yet. Start a session to begin.';
-        contentEl.innerHTML = turnCount > 0 ? '' : '<div class="empty">Start a session to begin.</div>';
-        if (archives.length > 0) contentEl.innerHTML += renderArchives(archives);
-        bindArchiveMore();
-        return;
-      }
-
-      const meta = ir.meta || {};
-      const leftSegs = ['<span class="status-turns">' + turnCount + ' turns</span>'];
-      if (meta.updatedAt) leftSegs.push('<span class="status-time">' + esc(timeAgo(meta.updatedAt)) + '</span>');
-      const left = leftSegs.join('<span class="status-sep">·</span>');
-      const right = meta.lastModel ? '<span class="status-model">' + esc(meta.lastModel) + '</span>' : '';
-      statusEl.innerHTML = left + right;
-
-      let html = '';
-
-      if (ir.intent) {
-        html += '<div class="section">';
-        html += '<div class="intent-goal">' + esc(ir.intent.goal) + '</div>';
-        if (ir.intent.role) html += '<div class="intent-role"><span class="intent-role-key">Role</span><span class="intent-role-value">' + esc(ir.intent.role) + '</span></div>';
-        if (ir.intent.constraints && ir.intent.constraints.length) {
-          html += '<div class="items">';
-          ir.intent.constraints.forEach(c => {
-            html += '<div class="item-row"><span class="item-label">' + esc(c) + '</span></div>';
-          });
-          html += '</div>';
-        }
-        html += '</div>';
-      }
-
-      if (ir.decisions && ir.decisions.length) {
-        html += '<div class="section">';
-        html += '<div class="section-header">Decisions <span class="section-count">' + ir.decisions.length + '</span></div>';
-        html += '<div class="items">';
-        ir.decisions.forEach(d => {
-          html += '<div class="item-row"><span class="item-label">' + esc(d.topic) + '</span><span class="item-value">' + esc(d.choice) + '</span></div>';
-        });
-        html += '</div></div>';
-      }
-
-      if (ir.files && ir.files.length) {
-        html += '<div class="section">';
-        html += '<div class="section-header">Files <span class="section-count">' + ir.files.length + '</span></div>';
-        html += '<div class="items">';
-        ir.files.forEach(f => {
-          html += '<div class="item-row item-row-h"><span class="badge status-' + esc(f.status) + '">' + esc(f.status) + '</span><span class="item-value">' + esc(f.path) + '</span></div>';
-        });
-        html += '</div></div>';
-      }
-
-      if (ir.commands && ir.commands.length) {
-        html += '<div class="section">';
-        html += '<div class="section-header">Commands <span class="section-count">' + ir.commands.length + '</span></div>';
-        html += '<div class="items">';
-        ir.commands.forEach(c => {
-          const exit = c.exitCode !== undefined ? ' <span class="exit-code">(exit ' + c.exitCode + ')</span>' : '';
-          html += '<div class="item-row"><span class="item-value">' + esc(c.cmd) + exit + '</span></div>';
-        });
-        html += '</div></div>';
-      }
-
-      if (ir.tests && ir.tests.length) {
-        html += '<div class="section">';
-        html += '<div class="section-header">Tests <span class="section-count">' + ir.tests.length + '</span></div>';
-        html += '<div class="items">';
-        ir.tests.forEach(t => {
-          html += '<div class="item-row"><span class="badge status-' + esc(t.status) + '">' + esc(t.status) + '</span><span class="item-value">' + esc(t.name) + '</span></div>';
-        });
-        html += '</div></div>';
-      }
-
-      if (ir.pending && ir.pending.length) {
-        html += '<div class="section">';
-        html += '<div class="section-header">Pending <span class="section-count">' + ir.pending.length + '</span></div>';
-        html += '<div class="items">';
-        ir.pending.forEach(p => {
-          const next = p.nextStep ? '<span class="intent-meta"> → ' + esc(p.nextStep) + '</span>' : '';
-          html += '<div class="item-row"><span class="item-value">' + esc(p.task) + next + '</span></div>';
-        });
-        html += '</div></div>';
-      }
-
-      if (!html) html = '<div class="empty">IR is empty.</div>';
-      if (archives.length > 0) html += renderArchives(archives);
-      contentEl.innerHTML = html;
-      bindArchiveMore();
-    }
-
-    function renderArchives(archives) {
-      const visible = showAllArchive ? archives : archives.slice(0, ARCHIVE_INITIAL);
-      let html = '<div class="archive-section">';
-      html += '<div class="archive-header">Previous snapshots · ' + archives.length + '</div>';
-      visible.forEach(a => {
-        const goal = a.intentGoal ? esc(a.intentGoal) : '(no goal)';
-        const c = a.counts;
-        const chips = [];
-        if (c.decisions) chips.push(c.decisions + ' decisions');
-        if (c.files) chips.push(c.files + ' files');
-        if (c.commands) chips.push(c.commands + ' cmds');
-        if (c.tests) chips.push(c.tests + ' tests');
-        if (c.pending) chips.push(c.pending + ' pending');
-        const time = a.updatedAt ? timeAgo(a.updatedAt) : '';
-        html += '<div class="archive-card">';
-        html += '<div class="archive-goal">' + goal + '</div>';
-        html += '<div class="archive-meta"><span>' + time + '</span><span>' + chips.join(' · ') + '</span></div>';
-        html += '</div>';
-      });
-      if (archives.length > ARCHIVE_INITIAL) {
-        html += '<button class="archive-more" id="archiveMoreBtn">' +
-          (showAllArchive ? 'Collapse' : '+ ' + (archives.length - ARCHIVE_INITIAL) + ' more') +
-          '</button>';
-      }
-      html += '</div>';
-      return html;
-    }
-
-    let lastIR = null;
-    let lastTurnCount = 0;
-    let lastArchives = [];
-
-    function bindArchiveMore() {
-      const btn = document.getElementById('archiveMoreBtn');
-      if (btn) {
-        btn.addEventListener('click', () => {
-          showAllArchive = !showAllArchive;
-          renderIR(lastIR, lastTurnCount, lastArchives);
-        });
-      }
-    }
-
     function timeAgo(iso) {
-      const diff = Date.now() - new Date(iso).getTime();
-      const mins = Math.floor(diff / 60000);
+      const t = new Date(iso).getTime();
+      if (!t) return '';
+      const mins = Math.floor((Date.now() - t) / 60000);
       if (mins < 1) return 'just now';
       if (mins < 60) return mins + 'm ago';
       const hours = Math.floor(mins / 60);
@@ -637,18 +637,297 @@ export class MemoryPanelProvider implements vscode.WebviewViewProvider {
       return Math.floor(hours / 24) + 'd ago';
     }
 
-    function esc(s) {
-      if (!s) return '';
-      const d = document.createElement('div');
-      d.textContent = s;
-      return d.innerHTML;
+    function isCollapsed(key) { return ui.collapsed.indexOf(key) !== -1; }
+    function bodyCls(key) { return isCollapsed(key) ? ' hidden' : ''; }
+
+    // 눌러서 펼치는 항목. 펼치면 제목 줄의 잘림이 풀리고, 덧붙는 설명만 그 아래로 온다.
+    // 제목을 세부에 한 번 더 찍지 않는다 — 같은 문장이 두 줄로 서면 무엇이 더해졌는지 안 보인다.
+    function isItemOpen(key, i) { return openItems[key + ':' + i] === true; }
+    function ellipCls(open) { return open ? '' : ' ellip'; }
+
+    function itemRow(key, i, line, detail) {
+      const open = isItemOpen(key, i);
+      return '<div class="item-row" data-item="' + key + ':' + i + '">' + line +
+        (detail ? '<div class="item-detail' + (open ? '' : ' hidden') + '">' + detail + '</div>' : '') +
+        '</div>';
     }
+
+    function sectionHeader(key, title, count) {
+      return '<div class="section-header" data-toggle="' + key + '">' + title +
+        (count !== undefined ? ' <span class="section-count">' + count + '</span>' : '') + '</div>';
+    }
+
+    // ── 요약 탭 ──────────────────────────────────────────────────────
+    function renderSummary() {
+      const ir = data.ir;
+      let html = '';
+
+      if (ir && ir.intent) {
+        const det = [];
+        if (ir.intent.role) det.push('<div class="intent-constraint">Role · ' + esc(ir.intent.role) + '</div>');
+        (ir.intent.constraints || []).forEach(function (c) {
+          det.push('<div class="intent-constraint">' + esc(c) + '</div>');
+        });
+        html += '<div class="section">';
+        html += '<div class="goal-row" data-toggle="intent">' +
+          '<span class="intent-goal">' + esc(ir.intent.goal) + '</span></div>';
+        if (det.length) html += '<div class="intent-detail' + bodyCls('intent') + '">' + det.join('') + '</div>';
+        html += '</div>';
+      }
+
+      // 결정은 주제만 선다. 무엇을 골랐는지와 왜는 마우스를 올리면 나온다.
+      if (ir && ir.decisions && ir.decisions.length) {
+        html += '<div class="section">' + sectionHeader('decisions', 'Decisions', ir.decisions.length);
+        html += '<div class="items' + bodyCls('decisions') + '">';
+        ir.decisions.forEach(function (d, i) {
+          const tip = d.choice + (d.rationale ? '\\n\\n' + d.rationale : '');
+          const line = '<span class="item-label' + ellipCls(isItemOpen('decisions', i)) +
+            '" title="' + esc(tip) + '">' + esc(d.topic) + '</span>';
+          const detail = esc(d.choice) + (d.rationale ? '\\n' + esc(d.rationale) : '');
+          html += itemRow('decisions', i, line, detail);
+        });
+        html += '</div></div>';
+      }
+
+      // 명령은 접힌 줄(앞 두 낱말)만. 전문은 눌러서 본다. exit는 인자가 아니라 결말이라 남긴다.
+      if (ir && ir.commands && ir.commands.length) {
+        html += '<div class="section">' + sectionHeader('commands', 'Commands', ir.commands.length);
+        html += '<div class="items' + bodyCls('commands') + '">';
+        ir.commands.forEach(function (c, i) {
+          const open = openCmds[i] === true;
+          const exit = c.exitCode !== undefined ? '<span class="exit-code">(exit ' + esc(c.exitCode) + ')</span>' : '';
+          html += '<div class="item-row"><div class="cmd-row" data-cmd="' + i + '">' +
+            '<span class="chev">' + (open ? '▾' : '▸') + '</span>' +
+            '<span class="item-value ellip">' + esc(c.head || c.cmd) + '</span>' + exit + '</div>' +
+            '<div class="cmd-full' + (open ? '' : ' hidden') + '">' + esc(c.cmd) + '</div></div>';
+        });
+        html += '</div></div>';
+      }
+
+      // 파일은 배지 + 경로 그대로. 넘치는 줄만 자르고 전체는 마우스오버로.
+      if (ir && ir.files && ir.files.length) {
+        html += '<div class="section">' + sectionHeader('files', 'Files', ir.files.length);
+        html += '<div class="items' + bodyCls('files') + '">';
+        ir.files.forEach(function (f, i) {
+          const line = '<div class="line"><span class="badge status-' + esc(f.status) + '">' +
+            esc(f.status) + '</span><span class="item-value' + ellipCls(isItemOpen('files', i)) +
+            '" title="' + esc(f.path) + '">' + esc(f.path) + '</span></div>';
+          // 파일은 경로가 전부다 — 펼치면 잘림만 풀린다. 요약은 안 보여준다.
+          html += itemRow('files', i, line, '');
+        });
+        html += '</div></div>';
+      }
+
+      if (ir && ir.tests && ir.tests.length) {
+        html += '<div class="section">' + sectionHeader('tests', 'Tests', ir.tests.length);
+        html += '<div class="items' + bodyCls('tests') + '">';
+        ir.tests.forEach(function (t, i) {
+          const line = '<div class="line"><span class="badge status-' + esc(t.status) + '">' +
+            esc(t.status) + '</span><span class="item-value' + ellipCls(isItemOpen('tests', i)) +
+            '" title="' + esc(t.failureSummary || t.name) + '">' + esc(t.name) + '</span></div>';
+          html += itemRow('tests', i, line, t.failureSummary ? esc(t.failureSummary) : '');
+        });
+        html += '</div></div>';
+      }
+
+      if (ir && ir.pending && ir.pending.length) {
+        html += '<div class="section">' + sectionHeader('pending', 'Pending', ir.pending.length);
+        html += '<div class="items' + bodyCls('pending') + '">';
+        ir.pending.forEach(function (p) {
+          const next = p.nextStep ? '<div class="item-detail">' + esc(p.nextStep) + '</div>' : '';
+          html += '<div class="item-row"><span class="item-value">' + esc(p.task) + '</span>' + next + '</div>';
+        });
+        html += '</div></div>';
+      }
+
+      if (!html) {
+        html = '<div class="empty">' + (data.turns.length > 0
+          ? 'Not refined yet. The turns are in the Turns tab.'
+          : 'No memory yet. Start a session to begin.') + '</div>';
+      }
+
+      // 이전 스냅샷은 전부 선다. 필요 없으면 머리줄로 통째로 접는다.
+      if (data.archives.length) {
+        html += '<div class="archive-section">' +
+          sectionHeader('archives', 'Previous snapshots', data.archives.length);
+        html += '<div class="' + (isCollapsed('archives') ? 'hidden' : '') + '">';
+        data.archives.forEach(function (a) {
+          const chips = [];
+          const c = a.counts || {};
+          if (c.decisions) chips.push(c.decisions + ' decisions');
+          if (c.files) chips.push(c.files + ' files');
+          if (c.commands) chips.push(c.commands + ' cmds');
+          if (c.tests) chips.push(c.tests + ' tests');
+          if (c.pending) chips.push(c.pending + ' pending');
+          html += '<div class="archive-card"><div class="archive-goal">' +
+            esc(a.intentGoal || '(no goal)') + '</div>' +
+            '<div class="archive-meta"><span>' + esc(timeAgo(a.updatedAt)) + '</span><span>' +
+            esc(chips.join(' · ')) + '</span></div></div>';
+        });
+        html += '</div>';
+        html += '<div class="foot-note">Older snapshots are dropped once the limit is reached. ' +
+          'Conversations before these are no longer kept.</div>';
+        html += '</div>';
+      }
+
+      paneSummary.innerHTML = html;
+    }
+
+    // ── 기록 탭 ──────────────────────────────────────────────────────
+    function renderTurns() {
+      if (!data.turns.length) {
+        paneTurns.innerHTML = '<div class="empty">No turns recorded yet.</div>';
+        return;
+      }
+      let html = '';
+      data.turns.forEach(function (t, i) {
+        const open = openTurns[i] === true;
+        html += '<div class="turn">';
+        html += '<div class="turn-head"><span class="turn-model">' + esc(t.model) + '</span><span>·</span><span>' +
+          esc(timeAgo(t.completedAt || t.startedAt)) + '</span></div>';
+        if (t.user) html += '<div class="turn-user">' + esc(t.user) + '</div>';
+        if (t.assistantBody) {
+          html += '<div class="turn-body' + (open ? '' : ' clip') + '" data-turn="' + i + '">' +
+            esc(t.assistantBody) + '</div>';
+        }
+        if (t.toolCalls && t.toolCalls.length) {
+          html += '<div class="turn-tools">';
+          t.toolCalls.forEach(function (tc, j) {
+            // 요약 탭과 같은 규칙 — 누르면 그 줄의 잘림이 풀린다.
+            const openTool = openTools[i + ':' + j] === true;
+            html += '<div class="turn-tool" data-tool="' + i + ':' + j + '">' +
+              '<span class="badge">' + esc(tc.tool) + '</span>' +
+              '<span class="turn-tool-arg' + (openTool ? '' : ' ellip') + '" title="' + esc(tc.arg) + '">' +
+              esc(tc.arg) + '</span></div>';
+          });
+          html += '</div>';
+        }
+        html += '</div>';
+      });
+      html += '<div class="foot-note">Turns already folded into a summary are under Previous snapshots.</div>';
+      paneTurns.innerHTML = html;
+    }
+
+    function renderStatus() {
+      const meta = (data.ir && data.ir.meta) || {};
+      const segs = ['<span class="status-turns">' + data.turns.length + ' turns</span>'];
+      if (meta.updatedAt) segs.push('<span class="status-time">' + esc(timeAgo(meta.updatedAt)) + '</span>');
+      const right = meta.lastModel ? '<span class="status-model">' + esc(meta.lastModel) + '</span>' : '';
+      statusEl.innerHTML = segs.join('<span class="status-sep">·</span>') + right;
+      turnCountEl.textContent = data.turns.length ? String(data.turns.length) : '';
+    }
+
+    function renderTabs() {
+      document.querySelectorAll('.tab').forEach(function (b) {
+        b.classList.toggle('active', b.dataset.tab === ui.tab);
+      });
+      paneSummary.classList.toggle('hidden', ui.tab !== 'summary');
+      paneTurns.classList.toggle('hidden', ui.tab !== 'turns');
+    }
+
+    function render() {
+      renderStatus();
+      renderTabs();
+      renderSummary();
+      renderTurns();
+    }
+
+    function saveUi() {
+      vscode.postMessage({ type: 'ui:set', tab: ui.tab, collapsed: ui.collapsed });
+    }
+
+    document.addEventListener('click', function (e) {
+      const tab = e.target.closest('.tab');
+      if (tab) {
+        ui.tab = tab.dataset.tab;
+        renderTabs();
+        saveUi();
+        return;
+      }
+      const head = e.target.closest('[data-toggle]');
+      if (head) {
+        const key = head.dataset.toggle;
+        const at = ui.collapsed.indexOf(key);
+        if (at === -1) ui.collapsed.push(key); else ui.collapsed.splice(at, 1);
+        renderSummary();
+        saveUi();
+        return;
+      }
+      const cmd = e.target.closest('[data-cmd]');
+      if (cmd) {
+        const i = cmd.dataset.cmd;
+        openCmds[i] = !openCmds[i];
+        renderSummary();
+        return;
+      }
+      const item = e.target.closest('[data-item]');
+      if (item) {
+        const k = item.dataset.item;
+        openItems[k] = !openItems[k];
+        renderSummary();
+        return;
+      }
+      const tool = e.target.closest('[data-tool]');
+      if (tool) {
+        const k = tool.dataset.tool;
+        openTools[k] = !openTools[k];
+        renderTurns();
+        return;
+      }
+      const turn = e.target.closest('[data-turn]');
+      if (turn) {
+        const i = turn.dataset.turn;
+        openTurns[i] = !openTurns[i];
+        renderTurns();
+      }
+    });
+
+    let lastHookDisabled = [];
+    function renderHookBadge(items) {
+      lastHookDisabled = items || [];
+      if (lastHookDisabled.length === 0) {
+        hookBadge.classList.add('hidden');
+        hookBadge.innerHTML = '';
+        hookBadge.title = '';
+        return;
+      }
+      const names = { claude: 'Claude', codex: 'Codex', agy: 'Antigravity' };
+      const labels = lastHookDisabled.map(function (x) { return names[x.model] || x.model; }).join(', ');
+      const icon = '<svg class="hook-badge-icon" width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1.5a.75.75 0 0 1 .67.42l6 12A.75.75 0 0 1 14 15H2a.75.75 0 0 1-.67-1.08l6-12A.75.75 0 0 1 8 1.5zm0 4.5a.75.75 0 0 0-.75.75v3a.75.75 0 0 0 1.5 0v-3A.75.75 0 0 0 8 6zm0 6.5a.875.875 0 1 0 0-1.75.875.875 0 0 0 0 1.75z"/></svg>';
+      hookBadge.innerHTML = icon + '<span class="hook-badge-text">' + ${JSON.stringify(l10nMemDisabled)} + ' · ' + esc(labels) + '</span>';
+      hookBadge.title = ${JSON.stringify(l10nClickForDetails)};
+      hookBadge.classList.remove('hidden');
+    }
+    hookBadge.addEventListener('click', function () {
+      if (lastHookDisabled.length === 0) return;
+      vscode.postMessage({ type: 'hookBadge:show', items: lastHookDisabled });
+    });
+
+    window.addEventListener('message', function (e) {
+      const msg = e.data;
+      if (msg.type !== 'ir:data') return;
+      data = { ir: msg.ir || null, turns: msg.turns || [], archives: msg.archives || [] };
+      if (msg.ui) ui = { tab: msg.ui.tab || 'summary', collapsed: msg.ui.collapsed || [] };
+      render();
+      renderHookBadge(msg.hookDisabled || []);
+    });
 
     vscode.postMessage({ type: 'ir:load' });
   </script>
 </body>
 </html>`;
   }
+}
+
+// 명령 줄의 접힌 형태를 호스트에서 만들어 붙인다 — 웹뷰가 계산하면 검증할 자리가 없다.
+// IR 자체에는 없는 표시용 필드라 반환 타입을 따로 둔다(디스크의 ir.json은 안 바뀐다).
+type DisplayIR = Omit<IR, 'commands'> & { commands: Array<IR['commands'][number] & { head: string }> };
+
+function withCommandHeads(ir: IR): DisplayIR {
+  return {
+    ...ir,
+    commands: (ir.commands ?? []).map((c) => ({ ...c, head: collapseCommand(c.cmd) })),
+  };
 }
 
 function getNonce(): string {

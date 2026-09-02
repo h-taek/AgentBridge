@@ -111,6 +111,10 @@
         "command": "agentbridge.selectSession",
         "title": "%agentbridge.selectSession.title%",
         "icon": "$(history)"
+      },
+      {
+        "command": "agentbridge.enableCloseConfirm",
+        "title": "%agentbridge.enableCloseConfirm.title%"
       }
     ],
     "menus": {

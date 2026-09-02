@@ -8,6 +8,7 @@
   "agentbridge.deleteSession.title": "세션 삭제",
   "agentbridge.openSession.title": "AgentBridge: 세션 열기",
   "agentbridge.selectSession.title": "AgentBridge: 세션 선택",
+  "agentbridge.enableCloseConfirm.title": "AgentBridge: 작업 중인 세션 닫기 확인 다시 켜기",
   "agentbridge.refine.policy.description": "IR 정제 모델 선택 정책",
   "agentbridge.refine.policy.enumDescription.priority": "우선순위 순서대로 CLI 시도 (무료 등급 우선)",
   "agentbridge.refine.policy.enumDescription.fixed": "항상 지정한 단일 CLI 사용",

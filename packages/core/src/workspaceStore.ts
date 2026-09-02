@@ -84,6 +84,9 @@ export interface WorkspaceMeta {
   // compactionScheduler 락.
   compactionInProgress: { pid: number; startedAt: number } | null;
   codexHookTrust?: 'pending' | 'trusted';
+  // 도는 중인 탭을 닫을 때 확인을 띄우지 않는다 — 사용자가 확인 창에서 고른 값. 레포 하나에만
+  // 걸린다(0.5.0 6단계). 되돌리는 자리는 명령 하나다.
+  closeConfirmDisabled?: boolean;
 }
 
 export interface WorkspaceListEntry {
@@ -112,6 +115,7 @@ export type WorkspaceUpdatePatch = Partial<{
   primarySessionId: string | null;
   compactionInProgress: WorkspaceMeta['compactionInProgress'];
   codexHookTrust: WorkspaceMeta['codexHookTrust'];
+  closeConfirmDisabled: boolean;
 }>;
 
 // ─── WorkspaceStore 인터페이스 ─────────────────────────────────────────
@@ -289,6 +293,7 @@ export function createWorkspaceStore(opts: WorkspaceStoreOptions = {}): Workspac
         primarySessionId: legacySessions.find((s) => s.closedAt === null)?.sessionId ?? legacySessions[0]?.sessionId ?? null,
         compactionInProgress: null,
         codexHookTrust: parsed.codexHookTrust,
+        closeConfirmDisabled: parsed.closeConfirmDisabled,
       };
       // 옛 schema 흡수 시 atomic write — 다음 부팅부터는 fallback 안 탐.
       await writeWorkspaceMetaAtomic(repaired);

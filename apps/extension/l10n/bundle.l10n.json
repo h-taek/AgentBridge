@@ -45,5 +45,10 @@
   "Profile documents": "Profile documents",
   "No documents yet. They fill in automatically as you work.": "No documents yet. They fill in automatically as you work.",
   "User": "User",
-  "Project": "Project"
+  "Project": "Project",
+  "\"{0}\" is still working. Close it anyway?": "\"{0}\" is still working. Close it anyway?",
+  "Closing ends the session and the turn in progress is lost.": "Closing ends the session and the turn in progress is lost.",
+  "Keep running": "Keep running",
+  "Close and stop asking": "Close and stop asking",
+  "AgentBridge: Will ask again before closing a session that is still working.": "AgentBridge: Will ask again before closing a session that is still working."
 }

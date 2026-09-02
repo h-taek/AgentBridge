@@ -132,7 +132,7 @@ export function activate(context: vscode.ExtensionContext) {
   notifications.notifyFirstRun();
 
   // --- Memory Panel (WebviewView) ---
-  const memoryProvider = new MemoryPanelProvider();
+  const memoryProvider = new MemoryPanelProvider(context.globalState);
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(
       MemoryPanelProvider.viewType,
@@ -420,6 +420,21 @@ export function activate(context: vscode.ExtensionContext) {
     await memoryProvider.runReset();
   });
 
+  // 닫기 확인을 껐던 것을 되돌린다 (0.5.0 6단계). 끄는 자리는 확인 창의 버튼이고, 값은 그 레포의
+  // workspace.json에 있다 — 되돌리는 자리가 없으면 한 번 끈 사용자가 다시 켤 방법이 없다.
+  const enableCloseConfirmCmd = vscode.commands.registerCommand('agentbridge.enableCloseConfirm', async () => {
+    const folderUri = vscode.workspace.workspaceFolders?.[0]?.uri;
+    if (!folderUri) {
+      vscode.window.showWarningMessage(vscode.l10n.t('AgentBridge: Open a workspace folder first.'));
+      return;
+    }
+    const workspaceId = workspaceStore.getOrCreateWorkspaceId(folderUri.fsPath);
+    await getWorkspaceStore().updateWorkspaceMeta(workspaceId, { closeConfirmDisabled: false });
+    vscode.window.showInformationMessage(
+      vscode.l10n.t('AgentBridge: Will ask again before closing a session that is still working.'),
+    );
+  });
+
   const renameCmd = vscode.commands.registerCommand('agentbridge.renameSession', async (item?: SessionItem) => {
     const session = (item ?? selectedSessionItem)?.session;
     if (!session) return;
@@ -572,7 +587,7 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(vscode.window.registerWebviewPanelSerializer('agentbridge.chat', serializer));
 
   context.subscriptions.push(
-    newSession, newSessionFromTab, newSessionWithModel, openSessionCmd, selectSessionCmd, refineCmd, resetCmd, renameCmd, deleteCmd,
+    newSession, newSessionFromTab, newSessionWithModel, openSessionCmd, selectSessionCmd, refineCmd, resetCmd, enableCloseConfirmCmd, renameCmd, deleteCmd,
     output.getOutputChannel(),
   );
 }

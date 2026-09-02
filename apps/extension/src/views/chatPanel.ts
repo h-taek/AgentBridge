@@ -22,6 +22,8 @@ import modelColors from '@agentbridge/assets/colors.json';
 import { quoteCommandLine } from '../shared/shellQuote';
 import type { SpawnOptions } from '../pty/types';
 import { createGroupLocker, type GroupLocker } from './groupLock';
+import { decideClose } from './closeConfirm';
+import { getWorkspaceStore } from '../core/coreInstances';
 
 const activePanels = new Map<string, ChatPanel>();
 const MAX_TAB_TITLE_LENGTH = 11;
@@ -283,26 +285,60 @@ export class ChatPanel {
   // 진행 중이 아니면 안 묻는다. 매번 물으면 확인 자체가 무시된다.
   private async onPanelClosed(): Promise<void> {
     if (this.disposed) return;
-    // 창을 닫거나 IDE를 끄는 중이면 되돌릴 자리가 없다. 종료 경로는 지금 동작을 그대로 둔다.
-    if (shuttingDown || this.deletedExternally || !this.ptyProcess) {
+    // 창을 닫거나 IDE를 끄는 중이면 되돌릴 자리가 없다. 그 경로에서는 디스크도 안 읽는다.
+    const dying = shuttingDown || this.deletedExternally || !this.ptyProcess;
+    const turnRunning = !dying && (await this.isTurnRunning());
+    const decision = decideClose({
+      shuttingDown,
+      deletedExternally: this.deletedExternally,
+      hasPty: !!this.ptyProcess,
+      turnRunning,
+      askDisabled: turnRunning && (await this.isCloseConfirmDisabled()),
+    });
+    if (decision === 'close') {
       this.dispose();
       return;
     }
-    const running = await this.isTurnRunning();
-    if (!running) {
-      this.dispose();
-      return;
-    }
-    const keep = await vscode.window.showWarningMessage(
+    const keepLabel = vscode.l10n.t('Keep running');
+    const neverLabel = vscode.l10n.t('Close and stop asking');
+    const answer = await vscode.window.showWarningMessage(
       vscode.l10n.t('"{0}" is still working. Close it anyway?', this.opts.terminalName),
       { modal: true, detail: vscode.l10n.t('Closing ends the session and the turn in progress is lost.') },
-      vscode.l10n.t('Keep running'),
+      keepLabel,
+      neverLabel,
     );
-    if (keep !== vscode.l10n.t('Keep running')) {
+    if (answer === neverLabel) {
+      await this.setCloseConfirmDisabled();
+      this.dispose();
+      return;
+    }
+    if (answer !== keepLabel) {
       this.dispose();
       return;
     }
     this.reattach();
+  }
+
+  // 이 레포에서 확인을 껐는가 (0.5.0 6단계). 값은 workspace.json에 있어 저장소마다 따로 간다.
+  // 못 읽으면 묻는 쪽으로 떨어진다 — 못 묻는 것이 잘못 닫는 것보다 낫다.
+  private async isCloseConfirmDisabled(): Promise<boolean> {
+    const { workspaceId } = this.opts;
+    if (!workspaceId) return false;
+    try {
+      return (await getWorkspaceStore().loadWorkspace(workspaceId)).closeConfirmDisabled === true;
+    } catch {
+      return false;
+    }
+  }
+
+  private async setCloseConfirmDisabled(): Promise<void> {
+    const { workspaceId } = this.opts;
+    if (!workspaceId) return;
+    try {
+      await getWorkspaceStore().updateWorkspaceMeta(workspaceId, { closeConfirmDisabled: true });
+    } catch (err) {
+      output.warn(`닫기 확인 끄기 저장 실패: ${String(err)}`);
+    }
   }
 
   // 상태 표시가 쓰는 판정을 그대로 쓴다 — 우리가 따로 매기는 값이 아니다.

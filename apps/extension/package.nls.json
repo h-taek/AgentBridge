@@ -8,6 +8,7 @@
   "agentbridge.deleteSession.title": "Delete Session",
   "agentbridge.openSession.title": "AgentBridge: Open Session",
   "agentbridge.selectSession.title": "AgentBridge: Select Session",
+  "agentbridge.enableCloseConfirm.title": "AgentBridge: Ask Again Before Closing a Working Session",
   "agentbridge.refine.policy.description": "IR refinement model selection policy",
   "agentbridge.refine.policy.enumDescription.priority": "Try CLIs in priority order (free tier first)",
   "agentbridge.refine.policy.enumDescription.fixed": "Always use a single fixed CLI",

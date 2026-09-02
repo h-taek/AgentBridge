@@ -114,4 +114,46 @@ describe('workspaceStore (V-12 통일 동작)', () => {
     const meta = await store.loadWorkspace(wid);
     assert.equal(meta.sessions.length, 1);
   });
+
+  // ─── 닫기 확인 끄기 (0.5.0 6단계) ────────────────────────────────────
+  //
+  // 도는 중인 탭을 닫을 때 뜨는 확인을 사용자가 끌 수 있다. 그 선택은 레포 하나에만 걸린다 —
+  // 저장 자리가 그 레포의 workspace.json이라서 다른 저장소에는 안 따라간다.
+
+  it('처음에는 닫기 확인 끄기 값이 없다 — 기본은 묻는다', async () => {
+    const store = createWorkspaceStore({ rootPathForTesting: storagePath });
+    const ws = await store.createWorkspace({ workspacePath: '/tmp/agentbridge-unified-project' });
+    assert.equal(ws.closeConfirmDisabled, undefined);
+  });
+
+  it('끄면 다시 읽어도 꺼진 채로 남는다', async () => {
+    const store = createWorkspaceStore({ rootPathForTesting: storagePath });
+    const wid = store.getOrCreateWorkspaceId('/tmp/agentbridge-unified-project');
+    await store.createWorkspace({ workspacePath: '/tmp/agentbridge-unified-project' });
+    await store.updateWorkspaceMeta(wid, { closeConfirmDisabled: true });
+
+    const reopened = createWorkspaceStore({ rootPathForTesting: storagePath });
+    assert.equal((await reopened.loadWorkspace(wid)).closeConfirmDisabled, true);
+  });
+
+  it('되돌리면 다시 묻는 상태가 된다', async () => {
+    const store = createWorkspaceStore({ rootPathForTesting: storagePath });
+    const wid = store.getOrCreateWorkspaceId('/tmp/agentbridge-unified-project');
+    await store.createWorkspace({ workspacePath: '/tmp/agentbridge-unified-project' });
+    await store.updateWorkspaceMeta(wid, { closeConfirmDisabled: true });
+    await store.updateWorkspaceMeta(wid, { closeConfirmDisabled: false });
+    assert.equal((await store.loadWorkspace(wid)).closeConfirmDisabled, false);
+  });
+
+  it('레포가 다르면 따라가지 않는다', async () => {
+    const store = createWorkspaceStore({ rootPathForTesting: storagePath });
+    const a = store.getOrCreateWorkspaceId('/tmp/agentbridge-repo-a');
+    const b = store.getOrCreateWorkspaceId('/tmp/agentbridge-repo-b');
+    await store.createWorkspace({ workspacePath: '/tmp/agentbridge-repo-a' });
+    await store.createWorkspace({ workspacePath: '/tmp/agentbridge-repo-b' });
+    await store.updateWorkspaceMeta(a, { closeConfirmDisabled: true });
+
+    assert.equal((await store.loadWorkspace(a)).closeConfirmDisabled, true);
+    assert.equal((await store.loadWorkspace(b)).closeConfirmDisabled, undefined);
+  });
 });
