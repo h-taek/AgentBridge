@@ -43,6 +43,11 @@ export const Uri = {
   }),
 };
 
+export const extensions = {
+  // 테스트가 갈아 끼운다. 기본은 확장이 없는 상태다.
+  getExtension: (_id: string): unknown => undefined,
+};
+
 export const commands = {
   registerCommand: (_id: string, _cb: unknown) => ({ dispose: () => { /* noop */ } }),
   executeCommand: (..._args: unknown[]) => Promise.resolve(undefined),

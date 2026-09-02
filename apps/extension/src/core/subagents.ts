@@ -49,6 +49,7 @@ import { getActivePanel, updateSessionTabTitle } from '../views/chatPanel';
 import * as workspaceStore from './workspaceStore';
 import { getWorkspaceStore, getCoreEnvProbe, getLogger, resolveRefineDecision } from './coreInstances';
 import * as output from '../log/output';
+import { registerRepo, unregisterRepo } from './scmView';
 
 // 서브 이름을 짓는 헤드리스 호출 상한. 메인 세션의 자동 명명과 같은 값이다 — 첫 프롬프트 하나만
 // 보내는 가벼운 호출이라 짧게 잡는다.
@@ -246,6 +247,9 @@ export async function spawnSubagents(req: SpawnRequest): Promise<SpawnedSub[]> {
         await prepareIsolatedWorkspace(treePath);
         preamble = await buildPreamble(cwd, treePath);
         workDir = treePath;
+        // 사람이 서브의 변경을 보는 자리(B-9). 기다리지 않는다 — 확장이 아직 안 켜졌으면
+        // 안에서 최대 10초를 기다리는데 그동안 스폰을 붙잡아 둘 이유가 없다.
+        void registerRepo(treePath);
       } catch (err) {
         // 폴더를 못 만들었으면 그 서브는 아예 없던 것이다. 레코드를 닫아 두면 트리에 아무것도
         // 아닌 행이 남고 이름도 계속 물고 있게 된다.
@@ -402,6 +406,9 @@ export async function cleanupOne(
   const meta = await store.loadWorkspace(workspaceId);
   const wsDir = workspaceStore.getWorkspacePath(workspaceId);
   const treePath = resolveTreePath(wsDir, agentName);
+
+  // 폴더를 지우기 전에 뷰에서 뗀다. 지운 뒤에 떼면 확장이 없는 경로를 들고 있는 구간이 생긴다.
+  await unregisterRepo(treePath);
 
   return cleanupSubagent(
     { name: agentName, repoPath: meta.workspacePath, treePath },
