@@ -12,6 +12,8 @@ import {
   snapshotAgainst,
   subagentDiff,
   truncatePatch,
+  mergeSubagent,
+  renderMerge,
 } from '@agentbridge/core';
 
 function git(cwd: string, ...args: string[]): string {
@@ -190,5 +192,103 @@ describe('truncatePatch', () => {
 
     assert.equal(cut.patch, '');
     assert.deepEqual(cut.omitted, ['a.txt', 'b.txt']);
+  });
+});
+
+// ─── 머지 (5단계 W2) ─────────────────────────────────────────────────────
+
+describe('mergeSubagent', () => {
+  async function snapshotFiles(dir: string): Promise<Record<string, string>> {
+    const out: Record<string, string> = {};
+    for (const name of await fs.readdir(dir)) {
+      if (name === '.git') continue;
+      const stat = await fs.stat(join(dir, name));
+      if (stat.isFile()) out[name] = await fs.readFile(join(dir, name), 'base64');
+    }
+    return out;
+  }
+
+  it('커밋된 것·미커밋·미추적·바이너리·모드 변경이 전부 얹힌다', async () => {
+    await addWorktree(repo, tree, 'golden-gate');
+    await fs.writeFile(join(tree, 'committed.txt'), 'committed\n');
+    git(tree, 'add', '-A');
+    git(tree, 'commit', '-qm', 'sub commit');
+    await fs.writeFile(join(tree, 'a.txt'), 'hello\nchanged\n');
+    await fs.writeFile(join(tree, 'untracked.txt'), 'new\n');
+    await fs.writeFile(join(tree, 'blob.bin'), Buffer.from([0, 1, 2, 0, 255, 7]));
+    await fs.chmod(join(tree, '.gitignore'), 0o755);
+
+    const r = await mergeSubagent(repo, tree);
+
+    assert.equal(r.applied, true);
+    assert.equal(await fs.readFile(join(repo, 'a.txt'), 'utf8'), 'hello\nchanged\n');
+    assert.equal(await fs.readFile(join(repo, 'committed.txt'), 'utf8'), 'committed\n');
+    assert.equal(await fs.readFile(join(repo, 'untracked.txt'), 'utf8'), 'new\n');
+    assert.deepEqual([...(await fs.readFile(join(repo, 'blob.bin')))], [0, 1, 2, 0, 255, 7]);
+    assert.equal((await fs.stat(join(repo, '.gitignore'))).mode & 0o111, 0o111);
+  });
+
+  it('충돌하면 원본이 한 바이트도 안 바뀌고 걸린 파일을 낸다', async () => {
+    await addWorktree(repo, tree, 'golden-gate');
+    await fs.writeFile(join(tree, 'a.txt'), 'hello\nfrom sub\n');
+    await fs.writeFile(join(tree, 'clean.txt'), 'sub only\n');
+    // 원본에서 같은 줄을 다르게 고쳐 둔다 — 패치가 안 붙는 상태.
+    await fs.writeFile(join(repo, 'a.txt'), 'hello\nfrom main\n');
+    const before = await snapshotFiles(repo);
+
+    const r = await mergeSubagent(repo, tree);
+
+    assert.equal(r.applied, false);
+    assert.equal(r.reason, 'conflict');
+    assert.deepEqual(r.conflicts, ['a.txt']);
+    assert.deepEqual(await snapshotFiles(repo), before);
+  });
+
+  it('원본이 더러워도 성공하면 그 변경이 그대로 남는다', async () => {
+    await addWorktree(repo, tree, 'golden-gate');
+    await fs.writeFile(join(tree, 'sub.txt'), 'sub work\n');
+    await fs.writeFile(join(repo, 'a.txt'), 'hello\nmain wip\n'); // 미커밋
+    await fs.writeFile(join(repo, 'scratch.txt'), 'main scratch\n'); // 미추적
+
+    const r = await mergeSubagent(repo, tree);
+
+    assert.equal(r.applied, true);
+    assert.equal(await fs.readFile(join(repo, 'a.txt'), 'utf8'), 'hello\nmain wip\n');
+    assert.equal(await fs.readFile(join(repo, 'scratch.txt'), 'utf8'), 'main scratch\n');
+    assert.equal(await fs.readFile(join(repo, 'sub.txt'), 'utf8'), 'sub work\n');
+  });
+
+  it('같은 서브를 두 번 얹으면 두 번째는 걸리고 원본은 그대로다', async () => {
+    await addWorktree(repo, tree, 'golden-gate');
+    await fs.writeFile(join(tree, 'sub.txt'), 'sub work\n');
+    assert.equal((await mergeSubagent(repo, tree)).applied, true);
+    const before = await snapshotFiles(repo);
+
+    const second = await mergeSubagent(repo, tree);
+
+    assert.equal(second.applied, false);
+    assert.deepEqual(await snapshotFiles(repo), before);
+  });
+
+  it('머지 뒤에도 worktree와 브랜치와 서브의 변경이 살아 있다', async () => {
+    await addWorktree(repo, tree, 'golden-gate');
+    await fs.writeFile(join(tree, 'sub.txt'), 'sub work\n');
+
+    await mergeSubagent(repo, tree);
+
+    assert.equal(await fs.readFile(join(tree, 'sub.txt'), 'utf8'), 'sub work\n');
+    assert.match(git(repo, 'branch', '--list', 'agentbridge/golden-gate'), /agentbridge\/golden-gate/);
+  });
+
+  it('격리가 아니면 얹지 않고 그 사실을 낸다', async () => {
+    const r = await mergeSubagent(repo, join(root, 'trees', 'nonexistent'));
+    assert.equal(r.reason, 'not-isolated');
+    assert.match(renderMerge('golden-gate', r), /이미 원본에 있으므로/);
+  });
+
+  it('변경이 없으면 얹지 않는다', async () => {
+    await addWorktree(repo, tree, 'golden-gate');
+    const r = await mergeSubagent(repo, tree);
+    assert.equal(r.reason, 'no-changes');
   });
 });

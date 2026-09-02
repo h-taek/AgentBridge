@@ -24,6 +24,7 @@ import {
   HOST_AGENT_SEND,
   HOST_AGENT_STOP,
   HOST_AGENT_CLOSE,
+  HOST_AGENT_MERGE,
   addWorktree,
   isGitRepo,
   trustWorkspace,
@@ -34,6 +35,8 @@ import {
   renderReceipt,
   resolveTreePath,
   findOrphanTrees,
+  mergeSubagent,
+  renderMerge,
   type NameUsage,
   type SpawnExtras,
   type HostRequest,
@@ -470,6 +473,26 @@ async function handleStop(req: HostRequest, sessionDir: string): Promise<string>
   return `${name}을 끝냈다.`;
 }
 
+// 머지가 호스트로 오는 이유는 PTY가 아니라 workspace.json이다 — 머지 표시의 소유자가 여기다.
+// 그 표시를 라운드 정리가 읽어 무엇을 남길지 정한다(B-7 정리 시점 첫째).
+async function handleMerge(req: HostRequest, sessionDir: string): Promise<string> {
+  const { workspaceId, sessionId } = callerFromSessionDir(sessionDir);
+  const name = str(payloadOf(req).name);
+  if (!name) throw new Error('서브 이름이 없다');
+  const sub = await findSub(workspaceId, sessionId, name);
+  const store = getWorkspaceStore();
+  const meta = await store.loadWorkspace(workspaceId);
+  const wsDir = workspaceStore.getWorkspacePath(workspaceId);
+
+  const result = await mergeSubagent(meta.workspacePath, resolveTreePath(wsDir, name));
+  if (result.applied) {
+    await store.updateSessionMeta(workspaceId, sub.sessionId, {
+      mergedAt: new Date().toISOString(),
+    });
+  }
+  return renderMerge(name, result);
+}
+
 async function handleClose(req: HostRequest, sessionDir: string): Promise<string> {
   const { workspaceId, sessionId } = callerFromSessionDir(sessionDir);
   const name = str(payloadOf(req).name);
@@ -485,4 +508,5 @@ export const subagentHostHandlers = {
   [HOST_AGENT_SEND]: handleSend,
   [HOST_AGENT_STOP]: handleStop,
   [HOST_AGENT_CLOSE]: handleClose,
+  [HOST_AGENT_MERGE]: handleMerge,
 };

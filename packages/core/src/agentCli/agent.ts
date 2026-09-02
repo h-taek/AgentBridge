@@ -25,6 +25,7 @@ import {
   HOST_AGENT_SEND,
   HOST_AGENT_STOP,
   HOST_AGENT_CLOSE,
+  HOST_AGENT_MERGE,
   type HostRequest,
 } from '../hostRequest';
 
@@ -366,4 +367,8 @@ export function agentStop(sessionDir: string | undefined, name: string): Promise
 
 export function agentClose(sessionDir: string | undefined, name: string): Promise<string> {
   return callHost(sessionDir, HOST_AGENT_CLOSE, { name });
+}
+
+export function agentMerge(sessionDir: string | undefined, name: string): Promise<string> {
+  return callHost(sessionDir, HOST_AGENT_MERGE, { name });
 }

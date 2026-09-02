@@ -95,6 +95,7 @@ tab; you give it work, it reports back, you read the report.
     agent read <name> [--last N]  that sub's full conversation
     agent diff <name> [--stat]    what that sub actually changed
     agent send <name> --prompt "..."
+    agent merge <name>            put its changes into the real folder
     agent stop <name>             end it
     agent close <name>            end it and clean up what it left
 
@@ -112,6 +113,12 @@ Reviewing a sub means putting two things side by side: what it says it did
 (\`agent read\`) and what actually changed (\`agent diff\`). One without the other
 is not a review. For a sub that ran without \`--isolate\`, the diff is the whole
 folder as it stands now — your own edits and the user's are in there too.
+
+\`agent merge\` takes an isolated sub's changes out of its worktree and lays them
+on the real folder. All of them or none — if it cannot apply cleanly, nothing is
+touched and you get the list of files that clashed. It does not commit, does not
+move history, and does not end the sub. Partial picks are not supported: read
+both diffs and write the combination yourself.
 
 A sub does not tell you when it is done. Either \`agent check --wait\`, which
 returns as soon as one finishes (up to a minute, \`--for\` raises it), or go do

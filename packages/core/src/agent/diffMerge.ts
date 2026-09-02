@@ -149,3 +149,110 @@ export function truncatePatch(
   }
   return { patch: kept.join('\n'), omitted };
 }
+
+// ─── 머지 ───────────────────────────────────────────────────────────────
+
+export interface MergeResult {
+  // 얹혔는가.
+  applied: boolean;
+  // 얹었거나 얹으려던 파일.
+  files: string[];
+  // 실패했을 때 걸린 파일들. 비어 있는데 실패면 error에 원문이 있다.
+  conflicts: string[];
+  // 아무것도 안 한 이유. 격리가 아니거나 변경이 없으면 실패가 아니다.
+  reason?: 'not-isolated' | 'no-changes' | 'conflict';
+  error?: string;
+}
+
+// `git apply --check`가 거절할 때 내는 줄에서 파일 이름을 뽑는다.
+//   error: patch failed: src/a.ts:12
+//   error: src/a.ts: patch does not apply
+//   error: b.txt: already exists
+function conflictFiles(stderr: string): string[] {
+  const found: string[] = [];
+  for (const line of stderr.split('\n')) {
+    const m =
+      /^error: patch failed: (.+?):\d+$/.exec(line.trim()) ??
+      /^error: (.+?): (?:patch does not apply|already exists|No such file or directory|does not exist in index)/.exec(
+        line.trim(),
+      );
+    if (m && !found.includes(m[1])) found.push(m[1]);
+  }
+  return found;
+}
+
+// worktree에서 돈 서브의 변경을 원본 워킹트리에 얹는다 (B-9).
+//
+// 전부 얹히거나 아무것도 안 얹힌다. --check가 먼저 보고, 통과해야 실제로 얹는다. 원본이 더러운
+// 상태에서 부르는 것이 정상 사용법이라(서브를 띄워놓고 메인과 계속 일한다) 반쯤 얹히면 사용자의
+// 미커밋 작업과 서브의 변경이 구분이 안 되고, 사본을 안 만들기로 했으므로 되돌릴 수단도 없다.
+//
+// 이력은 안 옮긴다. 서브 worktree는 브랜치가 분기점 그대로이고 워킹트리만 더러운 채로 끝나는
+// 경우가 대부분이라 옮길 이력이 대개 없다.
+export async function mergeSubagent(repoPath: string, treePath: string): Promise<MergeResult> {
+  if (!(await worktreeExists(treePath))) {
+    return { applied: false, files: [], conflicts: [], reason: 'not-isolated' };
+  }
+
+  const base = await forkPoint(treePath, repoPath);
+  const snap = await snapshotAgainst(treePath, base);
+  if (snap.files.length === 0) {
+    return { applied: false, files: [], conflicts: [], reason: 'no-changes' };
+  }
+
+  // 패치를 파일로 넘긴다. 큰 패치를 stdin으로 밀면 버퍼에서 막히고, 임시 파일은 얹는 동안만 산다.
+  const scratch = await fsp.mkdtemp(join(tmpdir(), 'agentbridge-patch-'));
+  const patchFile = join(scratch, 'merge.patch');
+  // 원본 저장소의 꼭대기. workspacePath가 저장소의 하위 폴더여도 패치 경로는 꼭대기 기준이다.
+  const top = (await runGit(repoPath, ['rev-parse', '--show-toplevel'])).trim();
+  try {
+    await fsp.writeFile(patchFile, snap.patch, 'utf8');
+    try {
+      await runGit(top, ['apply', '--check', patchFile], { timeout: GIT_WRITE_TIMEOUT_MS });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return {
+        applied: false,
+        files: snap.files,
+        conflicts: conflictFiles(message),
+        reason: 'conflict',
+        error: message,
+      };
+    }
+    await runGit(top, ['apply', patchFile], { timeout: GIT_WRITE_TIMEOUT_MS });
+    return { applied: true, files: snap.files, conflicts: [] };
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+// 명령의 출력. 소비자가 모델이라 다음에 무엇을 할 수 있는지까지 문장으로 적는다.
+export function renderMerge(name: string, r: MergeResult): string {
+  if (r.reason === 'not-isolated') {
+    return `${name}은 격리 없이 원본 폴더에서 돌았다. 그 변경은 이미 원본에 있으므로 얹을 것이 없다.`;
+  }
+  if (r.reason === 'no-changes') {
+    return `${name}이 바꾼 파일이 없다. 얹을 것이 없다.`;
+  }
+  if (r.applied) {
+    return [
+      `${name}의 변경 ${r.files.length}개 파일을 원본에 얹었다.`,
+      '',
+      ...r.files.map((f) => `  ${f}`),
+      '',
+      '커밋하지 않았고 이력도 옮기지 않았다. 서브는 그대로 살아 있다 — 정리는 close가 한다.',
+    ].join('\n');
+  }
+  const head = `${name}의 변경을 얹지 못했다. 원본은 전혀 건드리지 않았다.`;
+  if (r.conflicts.length === 0) {
+    return [head, '', r.error ?? ''].join('\n');
+  }
+  return [
+    head,
+    '',
+    '걸린 파일:',
+    ...r.conflicts.map((f) => `  ${f}`),
+    '',
+    `이 서브의 변경 전부는 diff로 볼 수 있다: agentbridge agent diff ${name}`,
+  ].join('\n');
+}

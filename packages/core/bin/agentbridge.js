@@ -44,6 +44,7 @@ const {
   agentSend,
   agentStop,
   agentClose,
+  agentMerge,
   DEFAULT_WAIT_SEC
 } = require('../src/agentCli/agent')
 const { uninstallGlobal } = require('../src/agentCli/uninstall')
@@ -65,6 +66,7 @@ const COMMANDS = [
   ['agent read <이름>', '그 서브의 기록 전문 (--last N으로 자름)'],
   ['agent diff <이름>', '그 서브가 실제로 바꾼 것 (--stat이면 요약만)'],
   ['agent send <이름>', '도는 서브에 지침을 더 보낸다 (--prompt "...")'],
+  ['agent merge <이름>', '그 서브의 변경을 원본에 얹는다 (전부 아니면 아무것도)'],
   ['agent stop <이름>', '서브를 끝낸다'],
   ['agent close <이름>', '서브를 정리한다 (격리였으면 폴더와 브랜치도 지운다)']
 ]
@@ -219,6 +221,8 @@ async function dispatch(cmd, args, wsDir, storageRoot) {
           if (!prompt) fail('agent send에는 --prompt가 온다')
           return agentSend(sessionDir(wsDir), name, prompt)
         }
+        case 'merge':
+          return agentMerge(sessionDir(wsDir), nameArg())
         case 'stop':
           return agentStop(sessionDir(wsDir), nameArg())
         case 'close':

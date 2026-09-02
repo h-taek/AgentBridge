@@ -63,6 +63,9 @@ export interface SessionMeta {
   cleanedAt?: string;
   // 사용자가 이 세션을 마지막으로 연 시각(ISO). 완료 표시를 끄는 기준 (0.5.0 B-2).
   lastOpenedAt?: string;
+  // 이 서브의 변경을 원본에 얹은 시각 (0.5.0 B-9). 라운드 정리가 무엇을 남길지 이 값으로 정한다
+  // — 가장 최근에 머지된 하나만 남는다(B-7 정리 시점 첫째).
+  mergedAt?: string;
 }
 
 export interface WorkspaceMeta {
@@ -95,6 +98,7 @@ export type SessionUpdatePatch = Partial<{
   lastOpenedAt: string;
   agentName: string | undefined;
   cleanedAt: string;
+  mergedAt: string;
 }>;
 
 export type WorkspaceUpdatePatch = Partial<{

@@ -38,8 +38,12 @@ export const HOST_AGENT_SEND = 'agent-send';
 export const HOST_AGENT_STOP = 'agent-stop';
 export const HOST_AGENT_CLOSE = 'agent-close';
 
+// PTY는 안 만지지만 workspace.json을 쓰는 것 (0.5.0 5단계, B-9). 그 파일의 소유자는 익스텐션이라
+// CLI가 직접 쓰면 익스텐션이 들고 있는 값과 덮어쓰기 경합이 난다.
+export const HOST_AGENT_MERGE = 'agent-merge';
+
 // 종류별 시한. PTY를 만들거나 git을 부르는 것은 다른 것보다 오래 걸린다.
-const LONG_KINDS = new Set<string>([HOST_AGENT_START, HOST_AGENT_CLOSE]);
+const LONG_KINDS = new Set<string>([HOST_AGENT_START, HOST_AGENT_CLOSE, HOST_AGENT_MERGE]);
 const LONG_TIMEOUT_MS = 30_000;
 
 export function timeoutForKind(kind: string): number {
