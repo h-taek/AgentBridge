@@ -228,6 +228,8 @@ export interface RoundCandidate {
   mergedAt?: string;
   // 이미 정리된 서브. 다시 지우지 않는다.
   cleanedAt?: string;
+  // 직전 라운드 정리에서 남겨진 서브. 이번에는 지워진다.
+  roundKeptAt?: string;
 }
 
 export interface RoundPlan {
@@ -237,16 +239,20 @@ export interface RoundPlan {
 
 // 라운드가 끝났을 때 무엇을 지우고 무엇을 남기는가.
 //
-// **가장 최근에 머지된 하나만 남기고 나머지를 전부 지운다.** 스펙의 두 문장이 이 한 규칙으로
-// 동시에 만족된다 — 이번 라운드의 미머지 서브는 표시가 없어 지워지고, 직전 라운드에서 남겨둔
-// 머지 서브는 표시가 더 오래돼 지워진다. 이번에 머지가 없었으면 남는 것 없이 전부 지워진다.
+// **아직 안 남겨진 것 중 가장 최근에 머지된 하나만 남기고 나머지를 전부 지운다.**
 //
-// 남기는 이유는 머지됐기 때문이 아니라 채택한 줄기라 이어서 시킬 가능성이 높기 때문이다. 그래서
-// 살아 있는 서브는 항상 최대 하나이고, 시간이나 창 닫힘을 안 쓰고도 상한이 생긴다.
+// 조건이 둘인 이유는 스펙의 문장이 둘이기 때문이다. 머지된 것을 남기는 것이 하나이고, 직전
+// 정리에서 남겨둔 것을 이번에 함께 지우는 것이 다른 하나다. 남겨진 표시를 안 보면 새 머지가
+// 나올 때까지 같은 서브가 매번 '가장 최근에 머지된 것'으로 뽑혀 영원히 안 지워진다 — 상한이
+// 생긴다는 근거가 무너진다.
+//
+// 남기는 이유는 머지됐기 때문이 아니라 채택한 줄기라 이어서 시킬 가능성이 높기 때문이다. 정리를
+// 부르는 시점이 곧 이전 라운드가 끝났다는 선언이므로, 살아 있는 서브는 항상 최대 하나이고
+// 시간이나 창 닫힘을 안 쓰고도 상한이 생긴다.
 export function planRoundCleanup(children: RoundCandidate[]): RoundPlan {
   const live = children.filter((c) => !c.cleanedAt);
   const keep = live
-    .filter((c) => c.mergedAt)
+    .filter((c) => c.mergedAt && !c.roundKeptAt)
     .sort((a, b) => (a.mergedAt as string).localeCompare(b.mergedAt as string))
     .pop();
   return { keep, remove: live.filter((c) => c !== keep) };

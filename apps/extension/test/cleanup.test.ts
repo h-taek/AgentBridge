@@ -155,11 +155,17 @@ describe('서브 정리 (0.5.0 W7)', () => {
 // ─── 라운드 정리 대상 선정 (5단계 W4) ────────────────────────────────────
 
 describe('planRoundCleanup', () => {
-  const sub = (name: string, mergedAt?: string, cleanedAt?: string): RoundCandidate => ({
+  const sub = (
+    name: string,
+    mergedAt?: string,
+    cleanedAt?: string,
+    roundKeptAt?: string,
+  ): RoundCandidate => ({
     sessionId: `s-${name}`,
     name,
     mergedAt,
     cleanedAt,
+    roundKeptAt,
   });
 
   it('머지된 하나를 남기고 나머지를 지운다', () => {
@@ -187,6 +193,35 @@ describe('planRoundCleanup', () => {
     ]);
 
     assert.equal(plan.keep?.name, 'hangang');
+    assert.deepEqual(plan.remove.map((c) => c.name), ['golden-gate']);
+  });
+
+  it('직전 라운드에서 남겨둔 것은 이번에 지운다 — 새 머지가 없어도', () => {
+    const plan = planRoundCleanup([
+      sub('golden-gate', '2026-09-01T00:00:00.000Z', undefined, '2026-09-01T01:00:00.000Z'),
+      sub('hangang'),
+    ]);
+
+    assert.equal(plan.keep, undefined);
+    assert.deepEqual(plan.remove.map((c) => c.name), ['golden-gate', 'hangang']);
+  });
+
+  it('남겨둔 것이 있어도 이번 라운드의 머지가 있으면 그것이 남는다', () => {
+    const plan = planRoundCleanup([
+      sub('golden-gate', '2026-09-01T00:00:00.000Z', undefined, '2026-09-01T01:00:00.000Z'),
+      sub('hangang', '2026-09-02T00:00:00.000Z'),
+    ]);
+
+    assert.equal(plan.keep?.name, 'hangang');
+    assert.deepEqual(plan.remove.map((c) => c.name), ['golden-gate']);
+  });
+
+  it('남겨둔 것 하나만 살아 있으면 그것도 지운다 — 상한이 여기서 생긴다', () => {
+    const plan = planRoundCleanup([
+      sub('golden-gate', '2026-09-01T00:00:00.000Z', undefined, '2026-09-01T01:00:00.000Z'),
+    ]);
+
+    assert.equal(plan.keep, undefined);
     assert.deepEqual(plan.remove.map((c) => c.name), ['golden-gate']);
   });
 

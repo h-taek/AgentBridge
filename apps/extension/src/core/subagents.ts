@@ -445,12 +445,19 @@ export async function cleanupRound(
         name: s.agentName as string,
         mergedAt: s.mergedAt,
         cleanedAt: s.cleanedAt,
+        roundKeptAt: s.roundKeptAt,
       })),
   );
 
   const receipts: CleanupReceipt[] = [];
   for (const target of plan.remove) {
     receipts.push(await cleanupOne(workspaceId, target.sessionId, target.name));
+  }
+  // 남긴 것에 표시를 남긴다. 이 표시가 다음 라운드에서 그것을 지우는 근거다.
+  if (plan.keep) {
+    await getWorkspaceStore().updateSessionMeta(workspaceId, plan.keep.sessionId, {
+      roundKeptAt: new Date().toISOString(),
+    });
   }
   return { receipts, kept: plan.keep?.name };
 }

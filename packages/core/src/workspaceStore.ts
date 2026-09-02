@@ -66,6 +66,10 @@ export interface SessionMeta {
   // 이 서브의 변경을 원본에 얹은 시각 (0.5.0 B-9). 라운드 정리가 무엇을 남길지 이 값으로 정한다
   // — 가장 최근에 머지된 하나만 남는다(B-7 정리 시점 첫째).
   mergedAt?: string;
+  // 라운드 정리에서 남겨진 시각 (0.5.0 B-7). 한 번 남겨진 서브는 다음 라운드 정리에서 지워진다
+  // — 정리를 부르는 시점이 곧 이전 라운드가 끝났다는 선언이라, 이 표시가 없으면 새 머지가 나올
+  // 때까지 그 서브가 계속 남아 상한이 안 생긴다.
+  roundKeptAt?: string;
 }
 
 export interface WorkspaceMeta {
@@ -99,6 +103,7 @@ export type SessionUpdatePatch = Partial<{
   agentName: string | undefined;
   cleanedAt: string;
   mergedAt: string;
+  roundKeptAt: string;
 }>;
 
 export type WorkspaceUpdatePatch = Partial<{
