@@ -253,6 +253,6 @@ export function renderMerge(name: string, r: MergeResult): string {
     '걸린 파일:',
     ...r.conflicts.map((f) => `  ${f}`),
     '',
-    `이 서브의 변경 전부는 diff로 볼 수 있다: agentbridge agent diff ${name}`,
+    `걸린 자리는 이 서브와 원본이 같은 곳을 고친 자리다. 이 서브의 변경 전부는 \`agent diff ${name}\`으로 본다.`,
   ].join('\n');
 }
