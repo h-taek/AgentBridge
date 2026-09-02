@@ -93,6 +93,7 @@ tab; you give it work, it reports back, you read the report.
     agent list                    the subs you started, and their state
     agent check [--wait] [--for <seconds>]
     agent read <name> [--last N]  that sub's full conversation
+    agent diff <name> [--stat]    what that sub actually changed
     agent send <name> --prompt "..."
     agent stop <name>             end it
     agent close <name>            end it and clean up what it left
@@ -106,6 +107,11 @@ dependencies and no instruction files, and paying that cost buys nothing when
 nothing is edited. Isolated subs must be closed with \`agent close\` when the
 round is over; that removes the worktree and its branch and tells you how to
 recover the work.
+
+Reviewing a sub means putting two things side by side: what it says it did
+(\`agent read\`) and what actually changed (\`agent diff\`). One without the other
+is not a review. For a sub that ran without \`--isolate\`, the diff is the whole
+folder as it stands now — your own edits and the user's are in there too.
 
 A sub does not tell you when it is done. Either \`agent check --wait\`, which
 returns as soon as one finishes (up to a minute, \`--for\` raises it), or go do

@@ -109,6 +109,7 @@ export * from './agent/reportState';
 export * from './agent/gitWorktree';
 export * from './agent/bridgeNames';
 export * from './agent/cleanup';
+export * from './agent/diffMerge';
 export * from './agent/subEnvironment';
 export * from './agent/agyTrust';
 export * from './agent/claudeTrust';

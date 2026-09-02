@@ -19,7 +19,7 @@
 
 'use strict'
 
-// @agentbridge-cli-version 0.5.2
+// @agentbridge-cli-version 0.5.3
 // (단일 설치 버전 비교용 — 이 파일을 수정하면 반드시 버전을 올릴 것)
 
 const fs = require('fs')
@@ -38,6 +38,7 @@ const { readStatus } = require('../src/agentCli/status')
 const {
   agentList,
   agentRead,
+  agentDiff,
   agentCheck,
   agentStart,
   agentSend,
@@ -62,6 +63,7 @@ const COMMANDS = [
   ['agent list', '띄운 서브의 목록과 상태'],
   ['agent check', '끝난 서브가 있는지 본다 (--wait면 생길 때까지, --for <초>로 상한 조정)'],
   ['agent read <이름>', '그 서브의 기록 전문 (--last N으로 자름)'],
+  ['agent diff <이름>', '그 서브가 실제로 바꾼 것 (--stat이면 요약만)'],
   ['agent send <이름>', '도는 서브에 지침을 더 보낸다 (--prompt "...")'],
   ['agent stop <이름>', '서브를 끝낸다'],
   ['agent close <이름>', '서브를 정리한다 (격리였으면 폴더와 브랜치도 지운다)']
@@ -197,6 +199,8 @@ async function dispatch(cmd, args, wsDir, storageRoot) {
           const i = rest.indexOf('--last')
           return agentRead(wsDir, caller, name, i === -1 ? undefined : intOption(rest, '--last', 0))
         }
+        case 'diff':
+          return agentDiff(wsDir, caller, nameArg(), { statOnly: rest.includes('--stat') })
         case 'check':
           return agentCheck(wsDir, caller, {
             wait: rest.includes('--wait'),

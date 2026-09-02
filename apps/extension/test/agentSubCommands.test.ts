@@ -1,16 +1,20 @@
-// 서브에이전트 명령 중 혼자 끝내는 셋 (0.5.0 4단계 W4) — list·read·check.
-// 호스트를 부르는 넷(start·send·stop·close)은 통로 왕복이라 hostRequest 테스트가 덮는다.
+// 서브에이전트 명령 중 혼자 끝내는 넷 — list·read·check (4단계 W4)와 diff (5단계 W1).
+// 호스트를 부르는 것들(start·send·stop·close·merge)은 통로 왕복이라 hostRequest 테스트가 덮는다.
 //
-// 근거: docs/0.5.0/spec/01_orca_adoption.md B-6, docs/0.5.0/plan/04_stage4_subagents.md W4.
+// 근거: docs/0.5.0/spec/01_orca_adoption.md B-6·B-9, docs/0.5.0/plan/04_stage4_subagents.md W4,
+// docs/0.5.0/plan/05_stage5_review_merge.md W1.
 import { strict as assert } from 'assert';
 import { promises as fsp } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
+import { execFileSync } from 'child_process';
 import {
   listSubs,
   agentList,
   agentRead,
   agentCheck,
+  agentDiff,
+  addWorktree,
   resolveReportReadFile,
   resolveTurnSignalFile,
 } from '@agentbridge/core';
@@ -32,7 +36,11 @@ interface SessionSeed {
   closedAt?: string | null;
 }
 
-async function writeSessions(ws: string, sessions: SessionSeed[]): Promise<void> {
+async function writeSessions(
+  ws: string,
+  sessions: SessionSeed[],
+  workspacePath?: string,
+): Promise<void> {
   const full = sessions.map((s) => ({
     model: 'codex',
     modelSessionId: null,
@@ -42,7 +50,7 @@ async function writeSessions(ws: string, sessions: SessionSeed[]): Promise<void>
   }));
   await fsp.writeFile(
     join(ws, 'workspace.json'),
-    JSON.stringify({ workspaceId: 'ws', sessions: full }),
+    JSON.stringify({ workspaceId: 'ws', workspacePath, sessions: full }),
     'utf8',
   );
   for (const s of sessions) {
@@ -262,5 +270,81 @@ describe('agent list·read·check (0.5.0 W4)', () => {
       { sessionId: 'sub', parentSessionId: PARENT, agentName: 'golden-gate' },
     ]);
     await assert.rejects(agentRead(ws, PARENT, 'hangang'), /golden-gate/);
+  });
+});
+
+// ─── diff (5단계 W1) ─────────────────────────────────────────────────────
+
+describe('agent diff', () => {
+  let ws = '';
+  let repo = '';
+
+  function git(cwd: string, ...args: string[]): string {
+    return execFileSync('git', args, { cwd, encoding: 'utf8' });
+  }
+
+  beforeEach(async () => {
+    ws = await makeWorkspace();
+    repo = join(ws, 'repo');
+    await fsp.mkdir(repo);
+    git(repo, 'init', '-q', '-b', 'main');
+    git(repo, 'config', 'user.email', 'test@agentbridge.local');
+    git(repo, 'config', 'user.name', 'AgentBridge Test');
+    git(repo, 'config', 'commit.gpgsign', 'false');
+    await fsp.writeFile(join(repo, 'a.txt'), 'hello\n');
+    git(repo, 'add', '-A');
+    git(repo, 'commit', '-qm', 'init');
+    await writeSessions(
+      ws,
+      [
+        { sessionId: PARENT },
+        { sessionId: 'sub', parentSessionId: PARENT, agentName: 'golden-gate' },
+      ],
+      repo,
+    );
+  });
+
+  afterEach(async () => {
+    if (ws) await fsp.rm(ws, { recursive: true, force: true });
+    ws = '';
+  });
+
+  it('격리 서브는 분기점 이후 전체를 낸다', async () => {
+    await addWorktree(repo, join(ws, 'trees', 'golden-gate'), 'golden-gate');
+    await fsp.writeFile(join(ws, 'trees', 'golden-gate', 'sub.txt'), 'sub work\n');
+
+    const out = await agentDiff(ws, PARENT, 'golden-gate');
+
+    assert.match(out, /격리 worktree, 분기점/);
+    assert.match(out, /sub\.txt/);
+    assert.match(out, /\+sub work/);
+  });
+
+  it('--stat은 패치 없이 요약만 낸다', async () => {
+    await addWorktree(repo, join(ws, 'trees', 'golden-gate'), 'golden-gate');
+    await fsp.writeFile(join(ws, 'trees', 'golden-gate', 'sub.txt'), 'sub work\n');
+
+    const out = await agentDiff(ws, PARENT, 'golden-gate', { statOnly: true });
+
+    assert.match(out, /sub\.txt/);
+    assert.doesNotMatch(out, /\+sub work/);
+  });
+
+  it('비격리 서브는 원본 폴더의 변경을 내고 섞여 있음을 알린다', async () => {
+    await fsp.writeFile(join(repo, 'a.txt'), 'hello\nedited\n');
+
+    const out = await agentDiff(ws, PARENT, 'golden-gate');
+
+    assert.match(out, /원본 폴더의 지금 상태/);
+    assert.match(out, /\+edited/);
+  });
+
+  it('변경이 없으면 그렇게 말한다', async () => {
+    await addWorktree(repo, join(ws, 'trees', 'golden-gate'), 'golden-gate');
+    assert.match(await agentDiff(ws, PARENT, 'golden-gate'), /바뀐 파일이 없다/);
+  });
+
+  it('남의 서브는 거절한다', async () => {
+    await assert.rejects(agentDiff(ws, 'other-parent', 'golden-gate'), /그런 서브가 없다/);
   });
 });

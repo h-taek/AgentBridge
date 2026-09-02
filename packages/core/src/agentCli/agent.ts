@@ -17,6 +17,8 @@ import {
   type SessionActivity,
 } from '../sessionStatus';
 import { isUnread, markReported } from '../agent/reportState';
+import { resolveTreePath } from '../agent/cleanup';
+import { subagentDiff, truncatePatch, PATCH_LIMIT_BYTES } from '../agent/diffMerge';
 import {
   sendHostRequest,
   HOST_AGENT_START,
@@ -66,6 +68,14 @@ async function readSessions(wsDir: string): Promise<SessionRecord[]> {
   } catch {
     return [];
   }
+}
+
+// 사용자가 지정한 프로젝트 폴더. 서브가 원본에서 돌았으면 여기가 그 서브의 작업 폴더다.
+async function readWorkspacePath(wsDir: string): Promise<string> {
+  const raw = await fsp.readFile(join(wsDir, 'workspace.json'), 'utf8');
+  const parsed = JSON.parse(raw) as { workspacePath?: string };
+  if (!parsed.workspacePath) throw new Error('이 프로젝트의 폴더 경로를 알 수 없다');
+  return parsed.workspacePath;
 }
 
 // 부르는 세션의 자식만 본다. 남의 서브는 목록에도 안 나오고 만질 수도 없다.
@@ -161,6 +171,47 @@ export async function agentRead(
     lines.push(`user: ${t.user || ''}`);
     lines.push(`assistant: ${t.assistantBody || ''}`);
     lines.push('');
+  }
+  return lines.join('\n');
+}
+
+// ─── diff ───────────────────────────────────────────────────────────────
+
+export interface DiffOptions {
+  // 요약만. 패치 전문이 필요 없을 때 맥락을 아끼는 자리다.
+  statOnly?: boolean;
+}
+
+// 검수는 대조다 — 서브가 무엇을 했다고 말하는지(read)와 무엇이 실제로 바뀌었는지(diff)를
+// 나란히 놓는 것이 그것이다(B-9). 격리 여부는 폴더의 존재로 갈리고 우리가 적어두지 않는다.
+export async function agentDiff(
+  wsDir: string,
+  callerSessionId: string,
+  name: string,
+  opts: DiffOptions = {},
+): Promise<string> {
+  const sub = await findSub(wsDir, callerSessionId, name);
+  const repoPath = await readWorkspacePath(wsDir);
+  const diff = await subagentDiff(repoPath, resolveTreePath(wsDir, name));
+
+  if (diff.files.length === 0) {
+    return `${name}: 바뀐 파일이 없다.${diff.isolated ? '' : ' 원본 폴더에서 돌았으므로 파일을 안 고치는 일이었을 수 있다.'}`;
+  }
+
+  const head = diff.isolated
+    ? `## ${name} (${sub.model}) 의 변경 — 격리 worktree, 분기점 ${(diff.base ?? '').slice(0, 8)} 이후 전체`
+    : `## ${name} (${sub.model}) 의 변경 — 원본 폴더의 지금 상태. 이 서브가 아니라 너와 사용자가 고친 것도 함께 들어 있다`;
+
+  const lines = [head, '', diff.stat];
+  if (opts.statOnly) return lines.join('\n');
+
+  const cut = truncatePatch(diff.patch);
+  lines.push('', cut.patch);
+  if (cut.omitted.length > 0) {
+    lines.push(
+      '',
+      `— 패치가 상한(${PATCH_LIMIT_BYTES}바이트)을 넘어 여기서 잘랐다. 안 실린 파일 ${cut.omitted.length}개: ${cut.omitted.join(', ')}`,
+    );
   }
   return lines.join('\n');
 }
