@@ -31,6 +31,7 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 - **Context missing behind macOS symlinks.** On macOS, when the repository or working path went through a symlink (`/var` and friends), the path mismatch dropped context injection entirely.
 - **Antigravity turns split in two.** In Antigravity sessions, a single turn that ended without a tool call was recorded as two separate turns.
 - **Session identifiers crossing over.** With several sessions of the same model open in one project, one session could reference another's conversation identifier and mix up the turn records.
+- **Summary list wrapping.** In the Context panel summary, a long command name pushed its exit code onto the next line.
 - **Shift-drag path insertion dropped.** When dropping a file on the chat, releasing Shift just before the mouse button made the path insertion silently do nothing.
 - **Background work halted by control characters.** When a NUL or another control character got into a tool argument or conversation body, the process failed to spawn and background summarization stalled permanently while turns kept piling up.
 
