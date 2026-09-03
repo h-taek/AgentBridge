@@ -1,19 +1,264 @@
 {
-  "name": "agentbridge-monorepo",
-  "private": true,
-  "version": "0.0.0",
-  "description": "AgentBridge monorepo — VS Code extension + shared core",
-  "packageManager": "pnpm@9.0.0",
+  "name": "agentbridge",
+  "displayName": "AgentBridge",
+  "description": "%extension.description%",
+  "version": "0.6.0",
+  "publisher": "h-taek",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/h-taek/AgentBridge.git"
+  },
+  "homepage": "https://github.com/h-taek/AgentBridge#readme",
+  "bugs": {
+    "url": "https://github.com/h-taek/AgentBridge/issues"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "claude",
+    "codex",
+    "gemini",
+    "antigravity",
+    "cli",
+    "pty",
+    "terminal",
+    "context",
+    "memory"
+  ],
+  "categories": [
+    "Other"
+  ],
   "engines": {
+    "vscode": "^1.96.0",
     "node": ">=20"
   },
+  "extensionKind": [
+    "workspace"
+  ],
+  "icon": "apps/extension/media/icon.png",
+  "l10n": "./apps/extension/l10n",
+  "main": "./apps/extension/out/extension.js",
+  "activationEvents": [
+    "onWebviewPanel:agentbridge.chat"
+  ],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "agentbridge",
+          "title": "AgentBridge",
+          "icon": "apps/extension/media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "agentbridge": [
+        {
+          "id": "agentbridge.sessions",
+          "name": "Sessions"
+        },
+        {
+          "type": "webview",
+          "id": "agentbridge.memoryPanel",
+          "name": "Context"
+        },
+        {
+          "type": "webview",
+          "id": "agentbridge.proposalPanel",
+          "name": "Long-term Memory"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "agentbridge.newSession",
+        "title": "%agentbridge.newSession.title%",
+        "icon": "$(add)"
+      },
+      {
+        "command": "agentbridge.newSessionFromTab",
+        "title": "%agentbridge.newSessionFromTab.title%",
+        "icon": {
+          "light": "apps/extension/media/icon-light.svg",
+          "dark": "apps/extension/media/icon-dark.svg"
+        }
+      },
+      {
+        "command": "agentbridge.refineMemory",
+        "title": "%agentbridge.refineMemory.title%",
+        "icon": "$(sparkle)"
+      },
+      {
+        "command": "agentbridge.resetMemory",
+        "title": "%agentbridge.resetMemory.title%",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "agentbridge.renameSession",
+        "title": "%agentbridge.renameSession.title%",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "agentbridge.deleteSession",
+        "title": "%agentbridge.deleteSession.title%",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "agentbridge.openSession",
+        "title": "%agentbridge.openSession.title%"
+      },
+      {
+        "command": "agentbridge.selectSession",
+        "title": "%agentbridge.selectSession.title%",
+        "icon": "$(history)"
+      },
+      {
+        "command": "agentbridge.enableCloseConfirm",
+        "title": "%agentbridge.enableCloseConfirm.title%"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "agentbridge.newSessionFromTab",
+          "group": "navigation@1"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "agentbridge.newSession",
+          "when": "view == agentbridge.sessions",
+          "group": "navigation"
+        },
+        {
+          "command": "agentbridge.refineMemory",
+          "when": "view == agentbridge.memoryPanel",
+          "group": "navigation@1"
+        },
+        {
+          "command": "agentbridge.resetMemory",
+          "when": "view == agentbridge.memoryPanel",
+          "group": "navigation@2"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "agentbridge.renameSession",
+          "when": "viewItem =~ /^(session|subsession)-/",
+          "group": "inline@1"
+        },
+        {
+          "command": "agentbridge.deleteSession",
+          "when": "viewItem =~ /^(session|subsession)-/",
+          "group": "inline@2"
+        },
+        {
+          "command": "agentbridge.renameSession",
+          "when": "viewItem =~ /^(session|subsession)-/",
+          "group": "context@1"
+        },
+        {
+          "command": "agentbridge.deleteSession",
+          "when": "viewItem =~ /^(session|subsession)-/",
+          "group": "context@2"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "AgentBridge",
+      "properties": {
+        "agentbridge.refine.policy": {
+          "type": "string",
+          "enum": [
+            "priority",
+            "fixed",
+            "active",
+            "off"
+          ],
+          "default": "active",
+          "enumDescriptions": [
+            "%agentbridge.refine.policy.enumDescription.priority%",
+            "%agentbridge.refine.policy.enumDescription.fixed%",
+            "%agentbridge.refine.policy.enumDescription.active%",
+            "%agentbridge.refine.policy.enumDescription.off%"
+          ],
+          "description": "%agentbridge.refine.policy.description%"
+        },
+        "agentbridge.refine.priorityOrder": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "agy",
+              "codex",
+              "claude"
+            ]
+          },
+          "default": [
+            "agy",
+            "codex",
+            "claude"
+          ],
+          "minItems": 3,
+          "maxItems": 3,
+          "uniqueItems": true,
+          "description": "%agentbridge.refine.priorityOrder.description%"
+        },
+        "agentbridge.refine.fixedCli": {
+          "type": "string",
+          "enum": [
+            "agy",
+            "codex",
+            "claude"
+          ],
+          "default": "agy",
+          "description": "%agentbridge.refine.fixedCli.description%"
+        },
+        "agentbridge.refine.useClaude": {
+          "type": "boolean",
+          "default": true,
+          "description": "%agentbridge.refine.useClaude.description%"
+        },
+        "agentbridge.turns.assistantDetail": {
+          "type": "string",
+          "enum": [
+            "full",
+            "compact",
+            "minimal"
+          ],
+          "default": "compact",
+          "enumDescriptions": [
+            "%agentbridge.turns.assistantDetail.enumDescription.full%",
+            "%agentbridge.turns.assistantDetail.enumDescription.compact%",
+            "%agentbridge.turns.assistantDetail.enumDescription.minimal%"
+          ],
+          "description": "%agentbridge.turns.assistantDetail.description%"
+        },
+        "agentbridge.memory.maxArchiveSnapshots": {
+          "type": "number",
+          "default": 15,
+          "minimum": 5,
+          "maximum": 100,
+          "description": "%agentbridge.memory.maxArchiveSnapshots.description%"
+        }
+      }
+    },
+    "keybindings": []
+  },
+  "private": true,
+  "packageManager": "pnpm@9.0.0",
   "scripts": {
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "lint": "pnpm -r lint",
     "changeset": "changeset",
     "version-packages": "changeset version",
-    "release": "pnpm -r build && changeset publish"
+    "release": "pnpm -r build && changeset publish",
+    "compile": "pnpm --filter agentbridge-ext compile",
+    "test": "pnpm --filter agentbridge-ext test",
+    "vscode:prepublish": "pnpm --filter agentbridge-ext run vscode:prepublish",
+    "package": "npx vsce package --no-dependencies --target darwin-arm64"
   },
   "devDependencies": {
     "@changesets/cli": "^2.27.9",

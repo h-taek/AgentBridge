@@ -1,0 +1,31 @@
+# 패키지 루트가 저장소 루트다. 그래서 목록을 "빼는 방식"으로 쓰지 않는다 — 한 줄 빠뜨리면
+# .env·docs·첨부가 마켓에 올라간다. 기본은 전부 제외고, 실을 것만 아래에서 되돌린다.
+# 새 파일이나 새 폴더가 생겨도 저절로 실리지 않는다.
+**
+
+# ─── 매니페스트와 외부 문서 ──────────────────────────────────────────
+!package.json
+!package.nls.json
+!package.nls.ko.json
+!README.md
+!CHANGELOG.md
+!LICENSE
+!NOTICE
+
+# ─── 런타임 산출물 ───────────────────────────────────────────────────
+# out/       — esbuild 번들 + vendoring(node-pty 네이티브, xterm 웹뷰 에셋)
+# media/     — 아이콘과 로고 (contributes가 가리킨다)
+# resources/ — 훅 헬퍼와 에이전트용 CLI 번들
+# l10n/      — 런타임 번역 (package.nls는 매니페스트용, 이쪽은 코드용)
+!apps/extension/out/**
+!apps/extension/media/**
+!apps/extension/resources/**
+!apps/extension/l10n/**
+
+# ─── 되돌린 자리 안에서도 안 싣는 것 ─────────────────────────────────
+**/*.map
+**/*.pdb
+**/.DS_Store
+# iCloud/Finder 중복본 ("foo 2.svg")
+**/* 2.*
+**/* 2
