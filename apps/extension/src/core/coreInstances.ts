@@ -2,6 +2,7 @@
 // 모든 인스턴스를 셋업한다. 이후 다른 모듈은 이 파일에서 가져다 쓴다.
 
 import * as path from 'path';
+import { assetRootPath } from './assetRoot';
 import * as vscode from 'vscode';
 import {
   createWorkspaceStore,
@@ -79,7 +80,6 @@ export function resolveRefineDecision(activeModel: CliKind): RefineDecision {
       policy: cfg.refinePolicy,
       fixedCli: cfg.refineFixedCli,
       priorityOrder: cfg.refinePriorityOrder,
-      useClaude: cfg.refineUseClaude,
     },
     activeModel,
   );
@@ -120,9 +120,9 @@ export function initializeCore(
   _hookStatusStore = createHookStatusStore();
   _envProbe = createEnvProbe({ logger });
 
-  // resources/bin/ 위치. dev: src/.. 빌드: out/.. 모두에서 동작하게 extensionPath 기준 resolve.
+  // resources/bin/ 위치. 매니페스트가 저장소 루트라 확장 루트에 한 겹 더해야 닿는다(assetRoot).
   // 번들 경로는 activate()의 설치에 쓰려고 보관한다.
-  const binDir = path.join(context.extensionPath, 'resources', 'bin');
+  const binDir = path.join(assetRootPath(context.extensionPath), 'resources', 'bin');
   _bundledHelperPath = path.join(binDir, 'agentbridge-memory.js');
   _bundledCliPath = path.join(binDir, 'agentbridge.js');
   const storageRoot = _workspaceStore.getGlobalStoragePath();

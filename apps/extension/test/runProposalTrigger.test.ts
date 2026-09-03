@@ -20,7 +20,7 @@ async function setup() {
 }
 
 const refineConfig = {
-  policy: 'priority', fixedCli: 'agy', priorityOrder: ['agy'], useClaude: false,
+  policy: 'priority', fixedCli: 'agy', priorityOrder: ['agy'],
 } as any;
 
 describe('runProposalTrigger', () => {

@@ -1,6 +1,7 @@
 // CLI별 refine spawn 인자 조립 — refineDispatcher에서 분리. 두 호스트가 같은 인자를 쓰도록
 // 단일 위치 SSOT. 응답 파싱(onLine 콜백)도 함께 정의해 호스트 간 차이 없게 한다.
 
+import { stripControlChars } from './transcriptReader/util';
 import { tmpdir } from 'os';
 import type { CliKind } from './shared/cli';
 
@@ -92,9 +93,12 @@ export function buildAgyRefineSpawn(prompt: string): CliRefineSpawnArgs {
 
 export function buildRefineSpawnRequest(
   cli: CliKind,
-  prompt: string,
+  rawPrompt: string,
   opts?: { cwd?: string },
 ): CliRefineSpawnArgs {
+  // 이미 기록에 박힌 제어문자가 있어도 여기서 씻는다. NUL이 든 인자는 spawn이 거부하고,
+  // 그러면 그 턴이 압축의 맨 앞에 있는 한 영원히 같은 자리에서 막힌다.
+  const prompt = stripControlChars(rawPrompt);
   switch (cli) {
     case 'claude':
       return buildClaudeRefineSpawn(prompt, opts?.cwd);

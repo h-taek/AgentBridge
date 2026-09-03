@@ -28,6 +28,7 @@ import { compactionEvents } from './core/compactionScheduler';
 import { registerSession, markSessionClosed, markSessionActive, markSessionOpened, renameSession, deleteSession, reclaimPendingModelSessionId } from './core/sessionRegistry';
 import { registerConfigWatcher } from './settings/config';
 import * as notifications from './core/notifications';
+import { assetRootUri } from './core/assetRoot';
 import {
   initSubagents,
   subagentHostHandlers,
@@ -173,7 +174,9 @@ export function activate(context: vscode.ExtensionContext) {
   });
 
   // --- Session TreeView ---
-  const sessionTree = new SessionTreeProvider(context.extensionUri);
+  // 에셋은 확장 루트 한 겹 아래에 있다(assetRoot). 트리 아이콘과 채팅 웹뷰가 그 자리를 쓴다.
+  const assets = assetRootUri(context.extensionUri);
+  const sessionTree = new SessionTreeProvider(assets);
   const treeView = vscode.window.createTreeView('agentbridge.sessions', {
     treeDataProvider: sessionTree,
     showCollapseAll: false,
@@ -253,7 +256,7 @@ export function activate(context: vscode.ExtensionContext) {
   // preserveFocus는 서브 탭에서만 참이다. 메인이 명령을 부른 결과로 뜨는 탭이라 사용자가 보고
   // 있던 자리에서 커서를 뺏지 않는다 (0.5.0 B-6).
   function openChatPanel(opts: SpawnOptions, workspaceId: string, preserveFocus = false): void {
-    const chat = ChatPanel.create(context.extensionUri, opts, preserveFocus);
+    const chat = ChatPanel.create(assets, opts, preserveFocus);
     chat.onDispose(async () => {
       await markSessionClosed(workspaceId, opts.sessionId!);
       sessionTree.refresh();
@@ -540,7 +543,7 @@ export function activate(context: vscode.ExtensionContext) {
       if (pendingResetDone) await pendingResetDone;
       await markSessionActive(s.workspaceId, s.sessionId);
       sessionTree.refresh();
-      const chat = ChatPanel.revive(panel, context.extensionUri, opts);
+      const chat = ChatPanel.revive(panel, assets, opts);
       chat.onDispose(async () => {
         await markSessionClosed(s.workspaceId!, s.sessionId!);
         sessionTree.refresh();

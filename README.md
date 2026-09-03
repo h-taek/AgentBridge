@@ -1,105 +1,176 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="packages/assets/brand/agentbridge-dark.svg" />
-    <img src="packages/assets/brand/agentbridge-light.svg" width="220" alt="AgentBridge logo" />
+    <source media="(prefers-color-scheme: dark)" srcset="packages/assets/brand/agentbridge-dark.png" />
+    <img src="packages/assets/brand/agentbridge-light.png" width="220" alt="AgentBridge logo" />
   </picture>
 </p>
 
-# AgentBridge
-
-> A tool that automatically carries your working context across multiple AI coding agents (Claude · Codex · Antigravity). Available on macOS (Apple Silicon) as an IDE extension.
+<h1 align="center">AgentBridge</h1>
 
 <p align="center">
+  <img alt="version 0.6.0" src="https://img.shields.io/badge/version-0.6.0-orange">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-green.svg"></a>
-  <img alt="Version" src="https://img.shields.io/badge/version-0.5.x-orange.svg">
-  <img alt="Extension" src="https://img.shields.io/badge/extension-Apple%20Silicon-007ACC.svg">
+  <img alt="macOS Apple Silicon" src="https://img.shields.io/badge/macOS-Apple%20Silicon-4493F8">
 </p>
 
-<p align="center"><a href="README.ko.md">한국어</a></p>
+<p align="center"><a href="README.ko.md"><b>한국어</b></a></p>
 
----
+<p align="center">
+  Run Claude · Codex · Antigravity in one workspace on a shared working context.<br />
+  Switch models without explaining where you left off.
+</p>
+
+<p align="center">
+  <a href="https://marketplace.visualstudio.com/items?itemName=h-taek.agentbridge"><b>Marketplace</b></a> ·
+  <a href="https://open-vsx.org/extension/h-taek/agentbridge"><b>OpenVSX</b></a> ·
+  <a href="https://github.com/h-taek/AgentBridge/releases"><b>Release</b></a>
+</p>
+
+<p align="center"><img src="packages/assets/readme/hero.png" alt="AgentBridge at work" width="960" /></p>
 
 ## What it solves
 
-It solves the **context handoff** problem that arises when you use Claude Code CLI, Codex CLI, and Antigravity CLI side by side — the problem where your working context is lost every time you switch models.
+Switching between Claude Code, Codex, and Antigravity means explaining your progress from scratch every time you change models. AgentBridge opens the three CLIs as tabs in one workspace on a shared record of the work: a running summary, the raw turns behind it, and long-term memory about you and the repository.
 
-AgentBridge opens multiple model tabs *simultaneously* within a single workspace, and on every user message it automatically injects the **IR (Intermediate Representation, "shared memory")** through a hook mechanism. Even when you switch models, *how far you've gotten and what you've decided* is never lost.
+That record is never pushed into the prompt. The hook adds a single short instruction, and the agent pulls what it needs through the `agentbridge` command when it decides it needs it.
 
-On top of this short-term memory, AgentBridge also builds a **long-term memory (global context)**: durable facts about you and how you work (your role, conventions, workflows…) are auto-proposed from your conversations, and once you approve them they persist across *all* workspaces and sessions — like ChatGPT/Claude memory, but local and shared across your CLIs.
+## Who it is for
 
-Each CLI's default behavior (permission dialogs, tool approval flow, session management) is preserved as-is. AgentBridge does not limit the CLI's native features.
-
-## Who it's for
-
-- People who alternate between Claude · Codex · Antigravity and are frustrated at having to re-explain their working context every time they switch models
-- People who want to work by placing several AI CLIs on one screen and comparing them
-- People who want to solve only the context handoff problem with their own existing CLIs and subscriptions, without a separate backend or account
+- People who repeat the same explanation while moving between the three CLIs
+- People who want several agents on the same task in one window
+- People who want to use the CLIs and subscriptions they already have, with no new account or server
 
 ## Features
 
-- **Multi-agent workspace** — Open Claude · Codex · Antigravity CLI tabs simultaneously in a single workspace.
-- **Automatic IR handoff** — On every message the shared memory (IR) is injected via a hook, so your working context is never lost when you switch models.
-- **Free/low-cost refine** — The default policy performs memory updates headlessly with the Antigravity free-tier CLI, so it consumes no main-model tokens.
-- **Memory panel** — See the current memory · previous snapshots · turn flow at a glance, and run manual refine and reset.
-- **Long-term memory (global context)** — Durable knowledge (your role · conventions · workflows · …) is auto-proposed from conversations; you approve or dismiss, and approved memory is shared across every workspace. Auto-proposal can be toggled off in settings.
-- **Session persistence + resume** — Even after you quit and relaunch the app, native `--resume` continues your previous conversation as-is.
-- **Automatic session naming** — New chat sessions are named from your first message, so tabs and the sidebar show a short title instead of just the model name; you can rename anytime.
-- **User-asset isolation** — Without modifying global settings, it embeds only the user's own already-authenticated CLIs.
+<table>
+<tr>
+<td width="50%">
+<h3>One workspace, three agents</h3>
+<p>Claude, Codex, and Antigravity tabs run side by side. The session tree shows which sessions are working and which have finished.</p>
+</td>
+<td width="50%"><img src="packages/assets/readme/feature-workspace.gif" alt="Session tree with three model tabs" /></td>
+</tr>
+<tr>
+<td width="50%">
+<h3>Context that survives a model switch</h3>
+<p>The summary, the raw turns, and what you have told the agents live in one record, and a new tab pulls only the part it needs — so you do not restate the situation. The injected block runs about 1KB, small enough that recent turns are not pushed out.</p>
+</td>
+<td width="50%"><img src="packages/assets/readme/feature-context.gif" alt="Continuing the work in another model tab" /></td>
+</tr>
+<tr>
+<td width="50%">
+<h3>Agents that launch agents</h3>
+<p>Ask the agent you are talking to for a helper. The helper opens in its own tab, nested under the parent session, and the parent sends follow-up instructions and reads what the helper recorded.</p>
+</td>
+<td width="50%"><img src="packages/assets/readme/feature-subagents.gif" alt="Launching a subagent and collecting its result" /></td>
+</tr>
+<tr>
+<td width="50%">
+<h3>Isolated worktrees</h3>
+<p>A helper can run in its own git worktree, so two agents editing the same file never collide. While it runs, the worktree appears in the built-in source control view; when it finishes, the changes land in one go — and if a single conflict shows up, nothing lands and your folder is left as it was.</p>
+</td>
+<td width="50%"><img src="packages/assets/readme/feature-worktree.gif" alt="An isolated worktree in the built-in source control view" /></td>
+</tr>
+<tr>
+<td width="50%">
+<h3>Memory that needs your approval</h3>
+<p>Only durable things are kept — your role, how you work, the conventions of the repository. The agent proposes as it works, and nothing becomes memory until you approve it.</p>
+</td>
+<td width="50%"><img src="packages/assets/readme/feature-memory.gif" alt="Long-term memory panel with a pending proposal" /></td>
+</tr>
+</table>
 
-## How it works — three principles
+### Also included
 
-1. **Use the user's own CLIs as-is** — It embeds the *user's already-authenticated CLIs* via PTY. There is no separate AgentBridge backend or account system, and main-model costs are incurred only within the user's own subscription.
-2. **Automatic IR handoff** — The IR is automatically injected via a hook on model switches and on every message. The user updates the IR with an explicit refine action, or it is refined automatically once the compaction threshold is crossed. IR refine is performed by **calling a free/low-cost CLI headlessly**, so it consumes 0 main-model tokens. The refine policy can be set to one of four levels — `priority` / `fixed` / `active model` / `off` — and automatically falls back to the next CLI when a quota is near or exceeded.
-3. **User-asset isolation** — Global settings (`~/.claude` / `~/.codex` / `~/.agents`) are not modified. In the workspace cwd, only CLI native config (`.codex/hooks.json` / `.codex/config.toml` / `.agents/hooks.json`) is added via marker-block merge, while claude operates without touching the cwd (using the `--settings <isolated path>` flag).
+- Your CLIs, your subscriptions — no server of ours, no separate account. Model costs stay inside the CLI subscriptions you already pay for.
+- Your project folder untouched — hooks and skills install into your own agent settings. No AgentBridge file is written to the repository.
+- Cheap background work — summaries and session naming run headless on a CLI you pick. When its quota runs out, the next CLI takes over.
+- Drag paths in — hold Shift and drop a file on the chat, and its path lands in the input line as `@path`. Explorer files, editor tabs, and files from outside the IDE all work.
+- Sessions that reopen — reopen the IDE and each CLI picks up where it left off through its own `--resume`.
+- CLI behavior preserved — permission prompts, tool approval, and session management stay the way each CLI does them.
 
-## Prerequisites
+## Supported agents
 
-Because AgentBridge embeds the CLIs in your environment, the CLI for the model you want to use must be installed separately. At least one is required.
+AgentBridge runs the CLIs installed on your machine. At least one of the three is required.
 
-| Model | Install guide | Authentication |
+| Agent | Command | Install |
 |---|---|---|
-| Claude (`claude`) | [claude.ai/code](https://www.claude.com/product/claude-code) | Follow the prompts after running `claude` |
-| Codex (`codex`) | [openai.com/codex](https://openai.com/codex) | Follow the prompts after running `codex` |
-| Antigravity (`agy`) | [antigravity.google](https://antigravity.google/product/antigravity-cli) | `agy /auth` or an environment variable |
+| Claude Code | `claude` | [claude.com/product/claude-code](https://www.claude.com/product/claude-code) |
+| Codex | `codex` | [openai.com/codex](https://openai.com/codex) |
+| Antigravity | `agy` | [antigravity.google](https://antigravity.google/product/antigravity-cli) |
 
-All three CLIs must be on your PATH. It works even if only some are installed, but to perform IR refine on the free tier, **installing + authenticating Antigravity (`agy`)** is recommended (otherwise it falls back to the active model with a token-cost warning).
+To authenticate, run each CLI once and follow its prompts. Antigravity uses `agy /auth`.
 
-## Available as
+To keep background work on a free quota, install and authenticate Antigravity (`agy`). Without it, background work falls back to the model you are talking to and warns you about the token use.
 
-- macOS (Apple Silicon) IDE extension — Works in VS Code · Cursor · Antigravity IDE and other VS Code-family IDEs. [install & usage](apps/extension/README.md)
+## Install
+
+Search for 'AgentBridge' in the extensions tab. Cursor, Antigravity IDE, and Windsurf use their own extensions tab the same way.
+
+[Marketplace](https://marketplace.visualstudio.com/items?itemName=h-taek.agentbridge) · [OpenVSX](https://open-vsx.org/extension/h-taek/agentbridge) · [Release](https://github.com/h-taek/AgentBridge/releases)
+
+### Getting started
+
+Once installed, an AgentBridge icon appears in the activity bar. Clicking it opens three panels in the sidebar: Sessions, Context, and Long-term Memory.
+
+1. Press the `+` button in the Sessions panel title bar. The AgentBridge icon at the top right of an editor tab does the same thing.
+2. Pick a model from the list, and a chat tab opens with that CLI already running.
+3. Sessions collect in the Sessions panel. Click one to reopen it, or hover a row to rename or delete it.
+4. The Context panel holds the running summary and the raw turns; the Long-term Memory panel holds proposals waiting for approval.
+
+When you need a helper, just say so to the agent in the chat tab. Launching one, checking on it, reading its result, and merging its changes are already in its skills.
+
+## How it works
+
+- Your local CLIs, run directly — AgentBridge starts the CLIs you have already authenticated in a terminal session of its own. No relay server sits in between.
+- Context on demand — the hook carries a short instruction rather than a copy of your memory. The agent pulls the summary or the recent turns it needs, so the prompt stays small and the record stays whole.
+- Your project folder intact — hooks and skills install into a marked block inside your own settings, leaving the rest alone. Everything is stored under `~/agentbridge/`, and `agentbridge uninstall` removes the hooks.
+- Shift-drag to insert paths — the chat intercepts a drag ahead of the IDE only while Shift is held. Paths from the explorer and editor tabs are read as they are; files from outside the IDE are copied into `~/agentbridge/attachments/` and that path is inserted. The notation is `@path`, which all three CLIs understand.
+
+## Settings
+
+VS Code settings (`settings.json` or the settings UI):
+
+| Key | Default | Description |
+|---|---|---|
+| `agentbridge.refine.policy` | `active` | Policy for picking the CLI that handles background work |
+| `agentbridge.refine.priorityOrder` | `[agy, codex, claude]` | CLI try order under the `priority` policy |
+| `agentbridge.refine.fixedCli` | `agy` | CLI pinned under the `fixed` policy |
+| `agentbridge.turns.assistantDetail` | `compact` | How much of each answer to keep in the turn record |
+| `agentbridge.memory.maxArchiveSnapshots` | `15` | How many previous snapshots to keep |
+
+## Where data lives
+
+Everything is stored under `~/agentbridge/`, split per project folder.
+
+```
+~/agentbridge/
+├── workspaces/<folder>-<hash>/
+│   ├── workspace.json      ← sessions and state
+│   ├── ir.json             ← the running summary
+│   ├── turns.jsonl         ← raw turns
+│   ├── archive/            ← previous snapshots
+│   ├── sessions/<id>/      ← per-tab replay buffer, hook signals
+│   └── trees/<name>/       ← isolated subagent worktrees
+├── attachments/            ← files dropped into the chat
+└── global/
+    ├── profiles/default/   ← what is known about you
+    └── projects/<repo>/    ← what is known about this repository
+```
+
+Each agent's global settings file gains one marked block for the hooks and skills, and nothing else changes.
+
+```
+~/.claude/settings.json          ~/.claude/skills/agentbridge/
+~/.codex/hooks.json              ~/.agents/skills/agentbridge/
+~/.gemini/config/hooks.json      ~/.gemini/config/skills/agentbridge/
+```
 
 ## Privacy
 
-AgentBridge has no server or backend of its own; it only mediates the CLIs in the user's own environment. The data flow is limited to the following two paths only.
+AgentBridge runs no server of its own. Your messages go through the CLIs you authenticated, to the backends those CLIs already talk to (Anthropic · OpenAI · Google). Background work such as summaries and session naming runs on the same CLIs, and the results are stored on your machine.
 
-- **Main-model messages** — Sent, through each CLI the user has authenticated (claude / codex / agy), only to the model backend that CLI originally communicates with (Anthropic / OpenAI / Google). AgentBridge does not detour through any separate service in between.
-- **IR refine** — Performed by headlessly calling the user-authenticated CLI selected by the refine policy (Antigravity by default). The refine request is sent only to the backend that CLI originally communicates with, and the resulting IR JSON is stored on the user's machine.
-
-Nothing is sent to any external service (a backend of our own, analytics/telemetry, third-party summarization, etc.) beyond the two paths above. Workspace metadata · conversation history · memory (IR) · turns logs · replay buffers are all stored only on the user's machine.
-
-## Data location
-
-Everything lives under `~/.agentbridge/`, keyed by the project folder (V-12 unified store).
-
-```
-~/.agentbridge/                              ← AgentBridge metadata
-├── workspaces/<workspaceId>/
-│   ├── workspace.json
-│   ├── ir.json                             ← compressed shared memory (short-term)
-│   ├── turns.jsonl                         ← raw turn log
-│   ├── archive/                            ← compaction snapshots
-│   ├── sessions/<sessionId>/replay.log     ← PTY raw bytes (per tab)
-│   └── settings/claude-settings.json       ← target of the claude --settings flag
-└── global/profiles/default/                ← long-term memory (global profile, shared)
-    ├── proposals/                          ← pending auto-proposals (awaiting approval)
-    └── docs/<category>/<slug>.md           ← approved long-term memory
-
-<user workspace cwd>/           ← user project
-├── .codex/hooks.json           ← codex hook (marker-block merge)
-├── .codex/config.toml          ← codex hook enable (marker-block merge)
-├── .agents/hooks.json          ← agy (Antigravity) hook (marker-block merge)
-└── (user files — unrelated to AgentBridge)
-```
+Nothing else leaves your machine. There is no analytics, no telemetry, no third-party service. Session records, turn logs, memory, and terminal replay buffers are all local files.
 
 ## License
 
