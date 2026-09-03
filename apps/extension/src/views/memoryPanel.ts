@@ -412,6 +412,8 @@ export class MemoryPanelProvider implements vscode.WebviewViewProvider {
     .exit-code {
       color: var(--vscode-descriptionForeground);
       font-size: 11px;
+      flex: 0 0 auto;
+      white-space: nowrap;
     }
     /* 상태 배지: 솔리드 박스 유지, 색상은 회색으로 통일하여 헤더 accent와 충돌 방지. */
     .badge.status-passed,
@@ -525,6 +527,7 @@ export class MemoryPanelProvider implements vscode.WebviewViewProvider {
       white-space: nowrap;
     }
     .cmd-row { display: flex; gap: 6px; align-items: baseline; cursor: pointer; }
+    .cmd-row .item-value { flex: 1; align-self: auto; }
     .cmd-full {
       padding: 2px 0 4px 15px;
       color: var(--vscode-descriptionForeground);
