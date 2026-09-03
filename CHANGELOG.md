@@ -8,37 +8,37 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ### Added
 
-- **Subagents.** The agent you are talking to can now spawn helper agents from inside the session. Each one opens in its own tab, nested under the session that started it in the sidebar. The main agent sends follow-up instructions, reads what a helper actually did, and reports back to you — you never have to relay messages between tabs by hand.
-- **Optional isolation for subagents.** A helper can be started in its own git worktree instead of your working folder, so two of them can edit the same file without colliding. While it runs, its worktree is registered in the built-in Source Control view, so you watch its changes live in the editor you already use. When you are ready, the main agent brings the changes back all at once — or not at all, leaving your folder untouched if anything conflicts.
-- **A command-line tool the agents call themselves.** Instead of pushing context into every prompt, AgentBridge now installs a small tool that the agent runs when it needs something: the current working summary, the raw recent turns, your long-term memory, or a search across it. It also writes back — when the agent learns something durable about how you work, it proposes it, and the suggestion badge updates the moment it does. The tool is registered as a skill with all three CLIs, so they find it on their own.
-- **Project knowledge.** Long-term memory now has two shelves. Facts about you (your role, conventions, workflows) stay shared across every project; facts about a repository stay with that repository. The Context panel switches between them.
-- **Turns view.** The Context panel now has a second tab showing the raw conversation turns behind the summary, so you can check what the summary was made from. Sections collapse, item details open on click, and previous snapshots are all listed rather than hidden behind a "more" button.
-- **Session activity at a glance.** Each row in the session tree carries a dot for what that session is doing — running, finished and not yet seen, or unclear.
-- **Close confirmation can be turned off per repository.** Closing a tab while the agent is still working asks first; you can answer "close and stop asking" and it will not ask again in that repository. A command in the palette turns it back on.
+- **Subagents.** The agent you are talking to can launch subagents from inside a session. Each opens in its own editor tab and is nested under the parent session in the sidebar tree. The main agent sends follow-up instructions to a subagent, reads its work record, and reports the result back to you.
+- **Subagent worktree isolation.** A subagent can run in its own git worktree instead of your working folder. While it runs, that worktree appears in the built-in source control view as a separate repository, so you watch the changes accumulate. When it finishes, the main agent applies the changes to the original in one go — and if a conflict comes up, it stops without touching the original at all.
+- **Agent command-line tool.** A global CLI (`agentbridge`) and its skills let an agent look up and search the session summary, recent raw turns, and long-term memory on its own. When an agent learns something durable during a conversation it leaves a proposal directly, and the terminal also gets `status` and `uninstall`.
+- **Project knowledge.** Long-term memory is now split into user knowledge and project knowledge. Facts about you — your role, how you work — are shared across every project, while repository-specific rules and conventions stay with that project. You switch between the two at the top of the Context panel.
+- **Raw turn view.** A Turns tab in the Context panel shows the raw turns a summary was built from. Long user messages and tool calls collapse into single rows so the list stays scannable, and you click an item to expand it. Previous snapshots come as a collapsible list too.
+- **Session status indicators.** Each row in the sidebar session tree shows that session's state as an icon — working, finished but not yet seen, unknown. You can tell whether background work or a subagent has finished without opening every tab.
+- **Turning off the close confirmation.** The dialog that appears when you close a working session tab now offers "close and stop asking". It applies per repository, and you can turn it back on from the command palette (`AgentBridge: Ask Again Before Closing a Working Session`).
 
 ### Changed
 
-- **Nothing is written into your project folder any more.** Hooks now install into your user-level agent settings instead of each repository, and image attachments live in AgentBridge's own storage. The automatic `.gitignore` edit is gone with them.
-- **Storage moved to `~/agentbridge/`** and workspace folders are now named after the project folder instead of a random id, so you can tell them apart. Long-term memory is copied over on first launch and the old folder is left where it is.
-- **Context reaches the agent by pull, not push.** What the hook injects is a short instruction rather than a copy of your memory, and the agent fetches what it needs. The injected block dropped from about 8.9 KB to 1.2 KB, so recent turns stop being squeezed out of it.
-- **Turn recording follows the agent's own stop signal** instead of polling files and guessing where transcripts live. Recording no longer depends on us matching each CLI's internal layout.
-- **Long-term memory suggestions now come from the agent while you work**, at the moment it learns something, instead of a periodic background pass over your conversation.
-- **Background work uses the model you are actually talking to** by default, rather than always starting from the top of the priority list.
-- **The memory panel is now called Context.**
+- **Project folder integrity.** No settings or attachment files are created inside your project folder any more. CLI hooks moved to your global agent settings, attachments are kept in `~/agentbridge/attachments/`, and the automatic `.gitignore` edit is gone.
+- **New storage location.** Storage moved from `~/.agentbridge/` to `~/agentbridge/`, and workspace folders are named after the project folder plus a path hash instead of an opaque identifier. Existing long-term memory is copied to the new location on first run.
+- **Context injection reworked.** Instead of injecting a copy of your memory and the whole conversation into every prompt, the hook now carries only a short instruction and the agent looks up the context it needs. Injection dropped from about 8.9KB to around 1.2KB, so recent turns are no longer pushed out of the input limit.
+- **Automatic session naming.** New sessions used to be named by truncating the first prompt. A model now writes a short title based on the conversation.
+- **When memory proposals appear.** The background job that periodically scanned conversations for memory candidates is gone. The agent you are talking to leaves a proposal the moment it recognizes something worth keeping.
+- **Background model policy.** The default for the background CLI policy (`agentbridge.refine.policy`) is now `active`. Rather than always preferring the first CLI (`agy`), it uses the CLI of the main session you are working in.
+- **Sidebar panel renamed.** The panel that holds the running summary and the raw turn record is now called `Context` instead of `Memory`.
 
 ### Fixed
 
-- Helper and tool updates now install even when their version marker is unchanged but the contents differ. Previously an update could be silently skipped, leaving an old copy running.
-- Context injection could be missing entirely on macOS when the storage path resolved through a symlink.
-- Antigravity conversations no longer get recorded as two turns where one turn ended without a tool call.
-- AgentBridge no longer guesses a session id by scanning folders. It could match a different conversation in the same project; now an unknown session simply stays unknown until the agent tells us.
-- Shift-dragging files into the chat no longer drops the whole gesture when Shift is released just before the drop.
+- **Context missing behind macOS symlinks.** On macOS, when the repository or working path went through a symlink (`/var` and friends), the path mismatch dropped context injection entirely.
+- **Antigravity turns split in two.** In Antigravity sessions, a single turn that ended without a tool call was recorded as two separate turns.
+- **Session identifiers crossing over.** With several sessions of the same model open in one project, one session could reference another's conversation identifier and mix up the turn records.
+- **Shift-drag path insertion dropped.** When dropping a file on the chat, releasing Shift just before the mouse button made the path insertion silently do nothing.
+- **Background work halted by control characters.** When a NUL or another control character got into a tool argument or conversation body, the process failed to spawn and background summarization stalled permanently while turns kept piling up.
 
 ### Removed
 
-- **The desktop app.** The IDE extension is now the only build. The desktop source is preserved on the `archive/desktop` branch.
-- The setting for automatically extracting memory candidates from conversations. The agent proposes them directly now.
-- The setting that kept Claude out of background work (`agentbridge.refine.useClaude`). Headless `claude -p` bills your subscription again, so there is nothing left to opt out of. Claude is now used like any other CLI, according to the policy.
+- **The desktop app.** The standalone desktop application is discontinued; the IDE extension is now the only build. The desktop source is preserved on the `archive/desktop` branch.
+- **Automatic memory extraction setting.** The setting that analyzed conversations in the background to extract memory candidates is gone. The agent in the conversation proposes them directly now.
+- **The setting that kept Claude out of background work.** `agentbridge.refine.useClaude` is removed. Headless `claude -p` bills your regular subscription again, so Claude is used like any other CLI according to the policy.
 
 ## [0.5.2] — 2026-07-18
 
