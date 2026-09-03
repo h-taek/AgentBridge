@@ -19,7 +19,7 @@
 
 'use strict'
 
-// @agentbridge-cli-version 0.5.3
+// @agentbridge-cli-version 0.5.4
 // (단일 설치 버전 비교용 — 이 파일을 수정하면 반드시 버전을 올릴 것)
 
 const fs = require('fs')
@@ -33,7 +33,7 @@ const {
   searchMemory,
   resolveProfileIdForScope
 } = require('../src/agentCli/read')
-const { addMemory, updateMemory, WriteError } = require('../src/agentCli/write')
+const { requestMemoryWrite, WriteError } = require('../src/agentCli/write')
 const { readStatus } = require('../src/agentCli/status')
 const {
   agentList,
@@ -175,12 +175,20 @@ async function dispatch(cmd, args, wsDir, storageRoot) {
         const scope = scopeOption(args)
         const profileId = await resolveProfileIdForScope(wsDir, scope)
         if (!profileId) fail('이 워크스페이스의 프로젝트 지식 자리를 찾을 수 없다')
-        if (sub === 'add') {
-          return addMemory(storageRoot, profileId, scope, strOption(args, '--category'), writeFields(args))
+        let id
+        if (sub === 'update') {
+          id = args[1]
+          if (!id || id.startsWith('--')) fail('memory update에는 식별자가 온다')
         }
-        const id = args[1]
-        if (!id || id.startsWith('--')) fail('memory update에는 식별자가 온다')
-        return updateMemory(storageRoot, profileId, scope, id, writeFields(args))
+        // 쓰기는 호스트가 한다. 그래야 쓴 것이 그 자리에서 화면에 뜬다.
+        return requestMemoryWrite(sessionDir(wsDir), {
+          op: sub,
+          scope,
+          profileId,
+          category: strOption(args, '--category'),
+          id,
+          fields: writeFields(args)
+        })
       }
       return usageAndExit()
     }

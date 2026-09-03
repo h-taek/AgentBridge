@@ -9,17 +9,15 @@ import {
   createSessionFileWatcher,
   startHostRequestHandler,
   HOST_PING,
+  HOST_MEMORY_WRITE,
+  applyMemoryWrite,
+  parseMemoryWriteRequest,
   getStorageRoot,
-  runProposalTrigger,
-  getGlobalDir,
-  resolveProfile,
-  resolveProjectProfileId,
-  readIR,
   migrateLegacyGlobalIfNeeded,
   renderReceipt,
   type SpawnExtras,
 } from '@agentbridge/core';
-import { initializeCore, getBundledHelperPath, getBundledCliPath, getWorkspaceStore, getLogger, getCoreEnvProbe } from './core/coreInstances';
+import { initializeCore, getBundledHelperPath, getBundledCliPath, getWorkspaceStore, getLogger } from './core/coreInstances';
 import * as output from './log/output';
 import { MemoryPanelProvider } from './views/memoryPanel';
 import { ProfilePanelProvider } from './views/profilePanel';
@@ -28,7 +26,7 @@ import { rowKindOf, childSessions, planDeleteConfirm } from './views/sessionTree
 import { ChatPanel, getActivePanel, getAllPanels, chatPanelEvents, updateSessionTabTitle, markShuttingDown } from './views/chatPanel';
 import { compactionEvents } from './core/compactionScheduler';
 import { registerSession, markSessionClosed, markSessionActive, markSessionOpened, renameSession, deleteSession, reclaimPendingModelSessionId } from './core/sessionRegistry';
-import { registerConfigWatcher, getConfig } from './settings/config';
+import { registerConfigWatcher } from './settings/config';
 import * as notifications from './core/notifications';
 import {
   initSubagents,
@@ -158,50 +156,9 @@ export function activate(context: vscode.ExtensionContext) {
     ),
   );
 
-  // gc-tree §E3 — compaction 성공 후 자동제안(장기기억) 패스를 백그라운드로 발사.
-  // 오케스트레이션(카운터·everyN 게이트·in-flight 가드·분석)은 코어 runProposalTrigger가 담당.
-  // 호스트는 자기 설정·activeModel·통지 콜백만 주입. fire-and-forget(compaction 흐름을 막지 않음).
-  async function fireProposalTrigger(workspaceId: string): Promise<void> {
-    try {
-      const workspaceRoot = workspaceStore.getWorkspacePath(workspaceId);
-      // activeModel은 직전 IR의 lastModel 기준(없으면 claude) — memoryPanel 수동정제와 동일.
-      const ir = await readIR(workspaceRoot);
-      const activeModel: CliKind = (ir?.meta.lastModel as CliKind) ?? 'claude';
-      const cfg = getConfig();
-      // 프로젝트 지식 자리는 git remote로, 없으면 폴더 경로로 정해진다. 어느 쪽이든 폴더 경로가
-      // 있어야 구할 수 있다.
-      const folder = vscode.workspace.workspaceFolders?.[0]?.uri;
-      const projectProfileId = folder
-        ? await resolveProjectProfileId(folder.fsPath, { logger: getLogger() })
-        : null;
-      await runProposalTrigger({
-        workspaceId,
-        workspaceRoot,
-        globalDir: getGlobalDir(),
-        profileId: resolveProfile(workspaceId),
-        projectProfileId,
-        activeModel,
-        refineConfig: {
-          policy: cfg.refinePolicy,
-          fixedCli: cfg.refineFixedCli,
-          priorityOrder: cfg.refinePriorityOrder,
-          useClaude: cfg.refineUseClaude,
-        },
-        envProbe: getCoreEnvProbe(),
-        logger: getLogger(),
-        timeoutMs: 60_000,
-        everyN: cfg.proposalEveryN,
-        onUpdated: () => profileProvider.notifyProposalsUpdated(),
-      });
-    } catch (err) {
-      output.warn(`extension: proposal trigger failed — ${err instanceof Error ? err.message : String(err)}`);
-    }
-  }
-
-  compactionEvents.on('ir:updated', (workspaceId: string) => {
+  compactionEvents.on('ir:updated', () => {
     output.log('extension: ir:updated event received');
     memoryProvider.notifyIRUpdated();
-    void fireProposalTrigger(workspaceId);
   });
   compactionEvents.on('turns:updated', () => {
     output.log('extension: turns:updated event received');
@@ -250,7 +207,7 @@ export function activate(context: vscode.ExtensionContext) {
   });
   context.subscriptions.push(treeView);
 
-  // 활성화 시 기존 대기 제안 수로 뱃지 1회 초기화 (이후엔 fireProposalTrigger onUpdated + 승인/버림이 갱신).
+  // 활성화 시 대기 제안 수로 뱃지 1회 초기화 (이후엔 패널을 다시 볼 때와 승인·버림이 갱신한다).
   void profileProvider.notifyProposalsUpdated();
 
   // 공유 저장소 실시간 동기화 — 다른 앱(데스크탑/다른 호스트)이 workspace.json(세션 목록) 또는
@@ -272,6 +229,12 @@ export function activate(context: vscode.ExtensionContext) {
     storageRoot: getStorageRoot(),
     handlers: {
       [HOST_PING]: () => `호스트 응답 — extension pid ${process.pid}`,
+      // 모델이 남기는 지식. 쓰는 주체가 화면을 쥔 쪽이라 쓰는 순간이 곧 갱신하는 순간이다.
+      [HOST_MEMORY_WRITE]: async (req) => {
+        const out = await applyMemoryWrite(getStorageRoot(), parseMemoryWriteRequest(req.payload));
+        profileProvider.notifyProposalsUpdated();
+        return out;
+      },
       // PTY를 만지는 넷 (0.5.0 W3). 본체는 subagents.ts에 있다.
       ...subagentHostHandlers,
     },

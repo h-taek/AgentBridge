@@ -1,5 +1,6 @@
 import { strict as assert } from 'assert';
-import { execFileSync, spawnSync } from 'child_process';
+import { promisify } from 'util';
+import { execFile, execFileSync, spawnSync } from 'child_process';
 import { promises as fsp } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -12,6 +13,10 @@ import {
   profileIdForPath,
   readProposals,
   approveProposal,
+  startHostRequestHandler,
+  applyMemoryWrite,
+  parseMemoryWriteRequest,
+  HOST_MEMORY_WRITE,
 } from '@agentbridge/core';
 
 // 에이전트용 CLI (0.5.0 3단계 W1) — 골격, 신원 해소, 설치 배관.
@@ -38,6 +43,33 @@ describe('agent CLI — 골격과 신원 해소 (0.5.0 W1)', () => {
   after(async () => {
     if (tmp) await fsp.rm(tmp, { recursive: true, force: true });
   });
+
+  // 지식 쓰기는 호스트를 거친다(0.5.0 6단계 후속). 그래서 쓰기 계열은 호스트를 띄운 채 부른다.
+  // spawnSync로는 같은 프로세스의 처리기가 돌 틈이 없어 비동기로 띄운다.
+  const HOST_SESSION = 'sess-host';
+  async function runWithHost(args: string[]) {
+    const watcher = startHostRequestHandler({
+      storageRoot: root,
+      handlers: {
+        [HOST_MEMORY_WRITE]: (req) => applyMemoryWrite(root, parseMemoryWriteRequest(req.payload)),
+      },
+      ownsSession: async () => true,
+    });
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      AGENTBRIDGE_WS_DIR: wsDir,
+      AGENTBRIDGE_WS_SESSION: HOST_SESSION,
+    };
+    try {
+      const { stdout, stderr } = await promisify(execFile)('node', [cliPath, ...args], { env });
+      return { status: 0, stdout, stderr };
+    } catch (e) {
+      const err = e as { code?: number; stdout?: string; stderr?: string };
+      return { status: err.code ?? 1, stdout: err.stdout ?? '', stderr: err.stderr ?? '' };
+    } finally {
+      watcher.stop();
+    }
+  }
 
   function run(args: string[], wsDirOverride?: string | null) {
     const env: NodeJS.ProcessEnv = { ...process.env };
@@ -213,8 +245,8 @@ describe('agent CLI — 골격과 신원 해소 (0.5.0 W1)', () => {
 
   // ── 쓰기 (W3) ─────────────────────────────────────────────────────────
 
-  it('memory add — 제안 큐로 가고 문서는 안 바뀐다', async () => {
-    const r = run([
+  it('memory add — 호스트를 거쳐 제안 큐로 가고 문서는 안 바뀐다', async () => {
+    const r = await runWithHost([
       'memory', 'add',
       '--category', 'conventions',
       '--title', '커밋 트레일러 금지',
@@ -231,6 +263,22 @@ describe('agent CLI — 골격과 신원 해소 (0.5.0 W1)', () => {
     assert.doesNotMatch(run(['memory', 'user']).stdout, /커밋 트레일러 금지/);
   });
 
+  it('memory add — 호스트 자리를 모르면 쓰지 않는다 (앱 밖)', async () => {
+    // 쓰기는 호스트가 한다. 신원이 없으면 넘길 자리가 없고, 몰래 직접 쓰면 화면과 어긋난다.
+    const before = await readProposals(getGlobalDir(root), 'default');
+    const r = run([
+      'memory', 'add',
+      '--category', 'infra',
+      '--title', '앱 밖에서 쓴 것',
+      '--summary', 's',
+      '--body', 'b',
+    ]);
+    assert.equal(r.status, 2);
+    assert.match(r.stderr, /세션의 자리/);
+    const after = await readProposals(getGlobalDir(root), 'default');
+    assert.equal(after.length, before.length);
+  });
+
   it('memory add — 카테고리가 목록 밖이면 거절하고 목록을 낸다', () => {
     const r = run(['memory', 'add', '--category', 'nope', '--title', 'a', '--summary', 'b', '--body', 'c']);
     assert.equal(r.status, 2);
@@ -243,8 +291,8 @@ describe('agent CLI — 골격과 신원 해소 (0.5.0 W1)', () => {
     assert.match(r.stderr, /--body/);
   });
 
-  it('memory add — 이미 있는 제목이면 update로 안내한다', () => {
-    const r = run([
+  it('memory add — 이미 있는 제목이면 update로 안내한다', async () => {
+    const r = await runWithHost([
       'memory', 'add',
       '--category', 'workflows',
       '--title', '격리 환경 디버깅',
@@ -255,8 +303,8 @@ describe('agent CLI — 골격과 신원 해소 (0.5.0 W1)', () => {
     assert.match(r.stdout, /update/);
   });
 
-  it('memory update — 없는 식별자는 거절한다', () => {
-    const r = run(['memory', 'update', 'workflows/없는-것', '--body', 'x']);
+  it('memory update — 없는 식별자는 거절한다', async () => {
+    const r = await runWithHost(['memory', 'update', 'workflows/없는-것', '--body', 'x']);
     assert.equal(r.status, 2);
     assert.match(r.stderr, /없다/);
   });
@@ -273,7 +321,7 @@ describe('agent CLI — 골격과 신원 해소 (0.5.0 W1)', () => {
       (d) => d.slug === 'isolated-debug',
     )!;
 
-    const r = run([
+    const r = await runWithHost([
       'memory', 'update', 'workflows/isolated-debug',
       '--body', '재현 경로만 남기고 나머지는 끈다.',
     ]);

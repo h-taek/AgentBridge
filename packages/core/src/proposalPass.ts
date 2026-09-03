@@ -1,5 +1,10 @@
 // 자동제안 종단 오케스트레이터(§D.1). compaction 후 앱이 호출.
 // runAnalysis 주입 가능 — 기본 = runProposalAnalysis(실제 spawn). 테스트는 가짜 출력 주입.
+//
+// 지금 이 함수를 부르는 호스트가 없다. 지식을 뽑는 입구를 모델의 `memory add` 하나로 줄이면서
+// 익스텐션 쪽 배선과 설정을 뗐다(2026-09-03). 코드와 테스트는 되살릴 수 있게 남겨 둔다.
+// 되살리려면 셋이다 — `extension.ts`의 `ir:updated`에서 이 함수를 fire-and-forget으로 부르고,
+// `settings/config.ts`에 주기(everyN) 값을 되돌리고, `package.json`에 켜고 끄는 설정을 되돌린다.
 import type { EnvProbe } from './envProbe';
 import type { CliKind } from './shared/cli';
 import type { Logger } from './interfaces';

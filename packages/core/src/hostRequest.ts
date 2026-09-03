@@ -42,6 +42,11 @@ export const HOST_AGENT_CLOSE = 'agent-close';
 // CLI가 직접 쓰면 익스텐션이 들고 있는 값과 덮어쓰기 경합이 난다.
 export const HOST_AGENT_MERGE = 'agent-merge';
 
+// PTY도 workspace.json도 안 건드리지만 화면을 갱신해야 하는 것 (0.5.0 6단계 후속).
+// 제안 큐 파일은 CLI도 쓸 수 있다. 호스트를 거치는 이유는 쓴 것이 그 자리에서 보이게 하려는
+// 것이다 — 뱃지와 목록을 쥔 쪽이 곧 쓰는 쪽이 되면 통지가 따로 필요 없다.
+export const HOST_MEMORY_WRITE = 'memory-write';
+
 // 종류별 시한. PTY를 만들거나 git을 부르는 것은 다른 것보다 오래 걸린다.
 const LONG_KINDS = new Set<string>([HOST_AGENT_START, HOST_AGENT_CLOSE, HOST_AGENT_MERGE]);
 const LONG_TIMEOUT_MS = 30_000;

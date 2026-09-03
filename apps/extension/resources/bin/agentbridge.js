@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// @agentbridge-cli-version 0.5.3
+// @agentbridge-cli-version 0.5.4
 "use strict";
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -757,6 +757,87 @@ var init_read = __esm({
   }
 });
 
+// packages/core/src/hostRequest.ts
+function timeoutForKind(kind) {
+  return LONG_KINDS.has(kind) ? LONG_TIMEOUT_MS : HOST_REQUEST_TIMEOUT_MS;
+}
+function hostRequestPath(sessionDir2) {
+  return (0, import_path6.join)(sessionDir2, HOST_REQUEST_FILENAME);
+}
+function hostResultPath(sessionDir2) {
+  return (0, import_path6.join)(sessionDir2, HOST_RESULT_FILENAME);
+}
+async function readJson(path2) {
+  try {
+    return JSON.parse(await import_fs5.promises.readFile(path2, "utf8"));
+  } catch {
+    return null;
+  }
+}
+async function unlinkQuiet(path2) {
+  try {
+    await import_fs5.promises.unlink(path2);
+  } catch {
+  }
+}
+async function sendHostRequest(sessionDir2, request, opts = {}) {
+  const timeoutMs = opts.timeoutMs ?? timeoutForKind(request.kind);
+  const now = opts.now ?? Date.now;
+  const sleep = opts.sleep ?? defaultSleep;
+  const reqPath = hostRequestPath(sessionDir2);
+  const resPath = hostResultPath(sessionDir2);
+  await import_fs5.promises.mkdir(sessionDir2, { recursive: true });
+  await unlinkQuiet(resPath);
+  try {
+    await import_fs5.promises.writeFile(reqPath, JSON.stringify(request), { encoding: "utf8", flag: "wx" });
+  } catch {
+    return {
+      id: request.id,
+      ok: false,
+      output: `\uB2E4\uB978 \uC694\uCCAD\uC774 \uCC98\uB9AC \uC911\uC774\uB2E4 (${request.kind}). \uC7A0\uC2DC \uB4A4 \uB2E4\uC2DC \uBD80\uB978\uB2E4.`,
+      at: now()
+    };
+  }
+  const deadline = now() + timeoutMs;
+  while (now() < deadline) {
+    const result = await readJson(resPath);
+    if (result && result.id === request.id) {
+      await unlinkQuiet(resPath);
+      return result;
+    }
+    await sleep(POLL_MS);
+  }
+  await unlinkQuiet(reqPath);
+  return {
+    id: request.id,
+    ok: false,
+    output: `\uD638\uC2A4\uD2B8\uAC00 ${timeoutMs}ms \uC548\uC5D0 \uB2F5\uD558\uC9C0 \uC54A\uC558\uB2E4 (${request.kind}).`,
+    at: now()
+  };
+}
+var import_fs5, import_path6, HOST_REQUEST_FILENAME, HOST_RESULT_FILENAME, HOST_REQUEST_TIMEOUT_MS, POLL_MS, HOST_PING, HOST_AGENT_START, HOST_AGENT_SEND, HOST_AGENT_STOP, HOST_AGENT_CLOSE, HOST_AGENT_MERGE, HOST_MEMORY_WRITE, LONG_KINDS, LONG_TIMEOUT_MS, defaultSleep;
+var init_hostRequest = __esm({
+  "packages/core/src/hostRequest.ts"() {
+    "use strict";
+    import_fs5 = require("fs");
+    import_path6 = require("path");
+    HOST_REQUEST_FILENAME = "host-request.json";
+    HOST_RESULT_FILENAME = "host-result.json";
+    HOST_REQUEST_TIMEOUT_MS = 1e4;
+    POLL_MS = 50;
+    HOST_PING = "status-ping";
+    HOST_AGENT_START = "agent-start";
+    HOST_AGENT_SEND = "agent-send";
+    HOST_AGENT_STOP = "agent-stop";
+    HOST_AGENT_CLOSE = "agent-close";
+    HOST_AGENT_MERGE = "agent-merge";
+    HOST_MEMORY_WRITE = "memory-write";
+    LONG_KINDS = /* @__PURE__ */ new Set([HOST_AGENT_START, HOST_AGENT_CLOSE, HOST_AGENT_MERGE]);
+    LONG_TIMEOUT_MS = 3e4;
+    defaultSleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  }
+});
+
 // packages/core/src/proposalStore.ts
 function dedupKey(category, title) {
   return `${category}::${title.trim().toLowerCase()}`;
@@ -852,6 +933,9 @@ var write_exports = {};
 __export(write_exports, {
   WriteError: () => WriteError,
   addMemory: () => addMemory,
+  applyMemoryWrite: () => applyMemoryWrite,
+  parseMemoryWriteRequest: () => parseMemoryWriteRequest,
+  requestMemoryWrite: () => requestMemoryWrite,
   updateMemory: () => updateMemory
 });
 function assertCategory(v) {
@@ -860,8 +944,7 @@ function assertCategory(v) {
   }
   return v;
 }
-async function addMemory(storageRoot, profileId, scope, category, fields) {
-  const cat = assertCategory(category);
+function assertFilled(fields) {
   for (const [name, v] of [
     ["--title", fields.title],
     ["--summary", fields.summary],
@@ -869,6 +952,10 @@ async function addMemory(storageRoot, profileId, scope, category, fields) {
   ]) {
     if (!v || !v.trim()) throw new WriteError(`${name}\uC774(\uAC00) \uBE44\uC5B4 \uC788\uB2E4`);
   }
+}
+async function addMemory(storageRoot, profileId, scope, category, fields) {
+  const cat = assertCategory(category);
+  assertFilled(fields);
   const globalDir = getGlobalDir(storageRoot);
   const docs = await readProfileDocs(globalDir, profileId, scope).catch(() => []);
   const { written, skipped } = await writeProposals(
@@ -923,11 +1010,64 @@ async function updateMemory(storageRoot, profileId, scope, id, fields) {
   );
   return `\uACE0\uCE68 \uC81C\uC548\uC744 \uD050\uC5D0 \uB123\uC5C8\uB2E4 (${written[0].id} \u2192 ${id}). \uC0AC\uC6A9\uC790\uAC00 \uC2B9\uC778\uD574\uC57C \uBC18\uC601\uB41C\uB2E4.`;
 }
+function optionalString(v, label) {
+  if (v === void 0 || v === null) return void 0;
+  if (typeof v !== "string") throw new WriteError(`${label}\uC740(\uB294) \uBB38\uC790\uC5F4\uC774\uB2E4`);
+  return v;
+}
+function parseMemoryWriteRequest(payload) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    throw new WriteError("\uC4F0\uAE30 \uC694\uCCAD\uC758 \uBAA8\uC591\uC774 \uC544\uB2C8\uB2E4");
+  }
+  const p = payload;
+  if (p.op !== "add" && p.op !== "update") throw new WriteError(`\uC54C \uC218 \uC5C6\uB294 \uC4F0\uAE30 \uC885\uB958\uB2E4`);
+  if (p.scope !== "user" && p.scope !== "project") throw new WriteError("--scope\uB294 user \uB610\uB294 project\uB2E4");
+  if (typeof p.profileId !== "string" || !p.profileId) throw new WriteError("\uD504\uB85C\uD544 \uC790\uB9AC\uAC00 \uC5C6\uB2E4");
+  const id = optionalString(p.id, "id");
+  if (p.op === "update") {
+    if (!id) throw new WriteError("\uACE0\uCE60 \uD56D\uBAA9\uC758 \uC2DD\uBCC4\uC790\uAC00 \uC5C6\uB2E4");
+    parseDocId(id);
+  }
+  const rawFields = p.fields ?? {};
+  if (typeof rawFields !== "object" || Array.isArray(rawFields)) throw new WriteError("\uD544\uB4DC\uC758 \uBAA8\uC591\uC774 \uC544\uB2C8\uB2E4");
+  const fields = {
+    title: optionalString(rawFields.title, "--title"),
+    summary: optionalString(rawFields.summary, "--summary"),
+    body: optionalString(rawFields.body, "--body")
+  };
+  let category = optionalString(p.category, "--category");
+  if (p.op === "add") {
+    category = assertCategory(category);
+    assertFilled(fields);
+  }
+  return { op: p.op, scope: p.scope, profileId: p.profileId, category, id, fields };
+}
+function applyMemoryWrite(storageRoot, req) {
+  if (req.op === "add") {
+    return addMemory(storageRoot, req.profileId, req.scope, req.category, req.fields);
+  }
+  return updateMemory(storageRoot, req.profileId, req.scope, req.id, req.fields);
+}
+async function requestMemoryWrite(sessionDir2, raw) {
+  const req = parseMemoryWriteRequest(raw);
+  if (!sessionDir2) {
+    throw new WriteError("\uC774 \uC138\uC158\uC758 \uC790\uB9AC\uB97C \uC54C \uC218 \uC5C6\uC5B4 \uC4F0\uAE30\uB97C \uB118\uAE30\uC9C0 \uBABB\uD588\uB2E4. \uC571 \uC548\uC5D0\uC11C \uBD80\uB978\uB2E4.");
+  }
+  const result = await sendHostRequest(sessionDir2, {
+    id: `mem-${process.pid}-${Date.now()}`,
+    kind: HOST_MEMORY_WRITE,
+    at: Date.now(),
+    payload: req
+  });
+  if (!result.ok) throw new WriteError(result.output);
+  return result.output;
+}
 var WriteError, MODEL_WRITE_CONFIDENCE;
 var init_write = __esm({
   "packages/core/src/agentCli/write.ts"() {
     "use strict";
     init_global();
+    init_hostRequest();
     init_globalPaths();
     init_globalStore();
     init_proposalStore();
@@ -954,7 +1094,7 @@ var init_cliGlobalDirs = __esm({
 // packages/core/src/hookInstaller.ts
 async function readFileSafe(filePath) {
   try {
-    return await import_fs5.promises.readFile(filePath, "utf8");
+    return await import_fs6.promises.readFile(filePath, "utf8");
   } catch {
     return null;
   }
@@ -978,9 +1118,9 @@ async function readJsonObject(path2) {
 function globalHookPaths(homeDir) {
   const home = homeDir ?? (0, import_os2.homedir)();
   return {
-    claude: (0, import_path6.join)(home, ".claude", "settings.json"),
-    codex: (0, import_path6.join)(home, ".codex", "hooks.json"),
-    agy: (0, import_path6.join)(home, ".gemini", "config", "hooks.json")
+    claude: (0, import_path7.join)(home, ".claude", "settings.json"),
+    codex: (0, import_path7.join)(home, ".codex", "hooks.json"),
+    agy: (0, import_path7.join)(home, ".gemini", "config", "hooks.json")
   };
 }
 function stripOurHooks(agent, root) {
@@ -1032,20 +1172,20 @@ async function removeGlobalHooks(homeDir, logger = noopLogger) {
     const next = stripOurHooks(agent, root);
     if (!next) continue;
     const tmp = `${path2}.${process.pid}.${Date.now()}.tmp`;
-    await import_fs5.promises.writeFile(tmp, JSON.stringify(next, null, 2), "utf8");
-    await import_fs5.promises.rename(tmp, path2);
+    await import_fs6.promises.writeFile(tmp, JSON.stringify(next, null, 2), "utf8");
+    await import_fs6.promises.rename(tmp, path2);
     touched.push(path2);
     logger.log(`hookInstaller: ${agent} \uD6C5\uC744 \uAC77\uC5B4\uB0C8\uB2E4 \u2014 ${path2}`);
   }
   return touched;
 }
-var import_fs5, import_os2, import_path6, CLAUDE_MARKER, MANAGED_FLAG, AGY_GROUP;
+var import_fs6, import_os2, import_path7, CLAUDE_MARKER, MANAGED_FLAG, AGY_GROUP;
 var init_hookInstaller = __esm({
   "packages/core/src/hookInstaller.ts"() {
     "use strict";
-    import_fs5 = require("fs");
+    import_fs6 = require("fs");
     import_os2 = require("os");
-    import_path6 = require("path");
+    import_path7 = require("path");
     init_shellQuote();
     init_cliGlobalDirs();
     init_interfaces();
@@ -1066,14 +1206,14 @@ var init_skillTemplate = __esm({
 
 // packages/core/src/skillInstaller.ts
 function skillFilePath(agent, homeDir) {
-  return (0, import_path7.join)(homeDir ?? (0, import_os3.homedir)(), ...SKILL_ROOTS[agent], SKILL_DIR_NAME, "SKILL.md");
+  return (0, import_path8.join)(homeDir ?? (0, import_os3.homedir)(), ...SKILL_ROOTS[agent], SKILL_DIR_NAME, "SKILL.md");
 }
-var import_os3, import_path7, SKILL_ROOTS;
+var import_os3, import_path8, SKILL_ROOTS;
 var init_skillInstaller = __esm({
   "packages/core/src/skillInstaller.ts"() {
     "use strict";
     import_os3 = require("os");
-    import_path7 = require("path");
+    import_path8 = require("path");
     init_interfaces();
     init_skillTemplate();
     SKILL_ROOTS = {
@@ -1081,86 +1221,6 @@ var init_skillInstaller = __esm({
       codex: [".agents", "skills"],
       agy: [".gemini", "config", "skills"]
     };
-  }
-});
-
-// packages/core/src/hostRequest.ts
-function timeoutForKind(kind) {
-  return LONG_KINDS.has(kind) ? LONG_TIMEOUT_MS : HOST_REQUEST_TIMEOUT_MS;
-}
-function hostRequestPath(sessionDir2) {
-  return (0, import_path8.join)(sessionDir2, HOST_REQUEST_FILENAME);
-}
-function hostResultPath(sessionDir2) {
-  return (0, import_path8.join)(sessionDir2, HOST_RESULT_FILENAME);
-}
-async function readJson(path2) {
-  try {
-    return JSON.parse(await import_fs6.promises.readFile(path2, "utf8"));
-  } catch {
-    return null;
-  }
-}
-async function unlinkQuiet(path2) {
-  try {
-    await import_fs6.promises.unlink(path2);
-  } catch {
-  }
-}
-async function sendHostRequest(sessionDir2, request, opts = {}) {
-  const timeoutMs = opts.timeoutMs ?? timeoutForKind(request.kind);
-  const now = opts.now ?? Date.now;
-  const sleep = opts.sleep ?? defaultSleep;
-  const reqPath = hostRequestPath(sessionDir2);
-  const resPath = hostResultPath(sessionDir2);
-  await import_fs6.promises.mkdir(sessionDir2, { recursive: true });
-  await unlinkQuiet(resPath);
-  try {
-    await import_fs6.promises.writeFile(reqPath, JSON.stringify(request), { encoding: "utf8", flag: "wx" });
-  } catch {
-    return {
-      id: request.id,
-      ok: false,
-      output: `\uB2E4\uB978 \uC694\uCCAD\uC774 \uCC98\uB9AC \uC911\uC774\uB2E4 (${request.kind}). \uC7A0\uC2DC \uB4A4 \uB2E4\uC2DC \uBD80\uB978\uB2E4.`,
-      at: now()
-    };
-  }
-  const deadline = now() + timeoutMs;
-  while (now() < deadline) {
-    const result = await readJson(resPath);
-    if (result && result.id === request.id) {
-      await unlinkQuiet(resPath);
-      return result;
-    }
-    await sleep(POLL_MS);
-  }
-  await unlinkQuiet(reqPath);
-  return {
-    id: request.id,
-    ok: false,
-    output: `\uD638\uC2A4\uD2B8\uAC00 ${timeoutMs}ms \uC548\uC5D0 \uB2F5\uD558\uC9C0 \uC54A\uC558\uB2E4 (${request.kind}).`,
-    at: now()
-  };
-}
-var import_fs6, import_path8, HOST_REQUEST_FILENAME, HOST_RESULT_FILENAME, HOST_REQUEST_TIMEOUT_MS, POLL_MS, HOST_PING, HOST_AGENT_START, HOST_AGENT_SEND, HOST_AGENT_STOP, HOST_AGENT_CLOSE, HOST_AGENT_MERGE, LONG_KINDS, LONG_TIMEOUT_MS, defaultSleep;
-var init_hostRequest = __esm({
-  "packages/core/src/hostRequest.ts"() {
-    "use strict";
-    import_fs6 = require("fs");
-    import_path8 = require("path");
-    HOST_REQUEST_FILENAME = "host-request.json";
-    HOST_RESULT_FILENAME = "host-result.json";
-    HOST_REQUEST_TIMEOUT_MS = 1e4;
-    POLL_MS = 50;
-    HOST_PING = "status-ping";
-    HOST_AGENT_START = "agent-start";
-    HOST_AGENT_SEND = "agent-send";
-    HOST_AGENT_STOP = "agent-stop";
-    HOST_AGENT_CLOSE = "agent-close";
-    HOST_AGENT_MERGE = "agent-merge";
-    LONG_KINDS = /* @__PURE__ */ new Set([HOST_AGENT_START, HOST_AGENT_CLOSE, HOST_AGENT_MERGE]);
-    LONG_TIMEOUT_MS = 3e4;
-    defaultSleep = (ms) => new Promise((r) => setTimeout(r, ms));
   }
 });
 
@@ -1879,7 +1939,7 @@ var {
   searchMemory: searchMemory2,
   resolveProfileIdForScope: resolveProfileIdForScope2
 } = (init_read(), __toCommonJS(read_exports));
-var { addMemory: addMemory2, updateMemory: updateMemory2, WriteError: WriteError2 } = (init_write(), __toCommonJS(write_exports));
+var { requestMemoryWrite: requestMemoryWrite2, WriteError: WriteError2 } = (init_write(), __toCommonJS(write_exports));
 var { readStatus: readStatus2 } = (init_status(), __toCommonJS(status_exports));
 var {
   agentList: agentList2,
@@ -2000,12 +2060,19 @@ async function dispatch(cmd, args, wsDir, storageRoot) {
         const scope = scopeOption(args);
         const profileId = await resolveProfileIdForScope2(wsDir, scope);
         if (!profileId) fail("\uC774 \uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4\uC758 \uD504\uB85C\uC81D\uD2B8 \uC9C0\uC2DD \uC790\uB9AC\uB97C \uCC3E\uC744 \uC218 \uC5C6\uB2E4");
-        if (sub === "add") {
-          return addMemory2(storageRoot, profileId, scope, strOption(args, "--category"), writeFields(args));
+        let id;
+        if (sub === "update") {
+          id = args[1];
+          if (!id || id.startsWith("--")) fail("memory update\uC5D0\uB294 \uC2DD\uBCC4\uC790\uAC00 \uC628\uB2E4");
         }
-        const id = args[1];
-        if (!id || id.startsWith("--")) fail("memory update\uC5D0\uB294 \uC2DD\uBCC4\uC790\uAC00 \uC628\uB2E4");
-        return updateMemory2(storageRoot, profileId, scope, id, writeFields(args));
+        return requestMemoryWrite2(sessionDir(wsDir), {
+          op: sub,
+          scope,
+          profileId,
+          category: strOption(args, "--category"),
+          id,
+          fields: writeFields(args)
+        });
       }
       return usageAndExit();
     }
