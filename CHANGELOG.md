@@ -38,6 +38,7 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 - **The desktop app.** The IDE extension is now the only build. The desktop source is preserved on the `archive/desktop` branch.
 - The setting for automatically extracting memory candidates from conversations. The agent proposes them directly now.
+- The setting that kept Claude out of background work (`agentbridge.refine.useClaude`). Headless `claude -p` bills your subscription again, so there is nothing left to opt out of. Claude is now used like any other CLI, according to the policy.
 
 ## [0.5.2] — 2026-07-18
 

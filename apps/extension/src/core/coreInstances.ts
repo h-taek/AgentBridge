@@ -80,7 +80,6 @@ export function resolveRefineDecision(activeModel: CliKind): RefineDecision {
       policy: cfg.refinePolicy,
       fixedCli: cfg.refineFixedCli,
       priorityOrder: cfg.refinePriorityOrder,
-      useClaude: cfg.refineUseClaude,
     },
     activeModel,
   );
