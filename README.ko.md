@@ -1,81 +1,131 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="packages/assets/brand/agentbridge-dark.svg" />
-    <img src="packages/assets/brand/agentbridge-light.svg" width="220" alt="AgentBridge 로고" />
+    <source media="(prefers-color-scheme: dark)" srcset="packages/assets/brand/agentbridge-dark.png" />
+    <img src="packages/assets/brand/agentbridge-light.png" width="220" alt="AgentBridge 로고" />
   </picture>
 </p>
 
-# AgentBridge
-
-> 여러 AI 코딩 에이전트(Claude · Codex · Antigravity) 사이로 작업 맥락을 옮기고, 그중 하나가 나머지에게 일을 시키게 하는 도구. macOS(Apple Silicon)에서 IDE 익스텐션으로 쓴다.
+<h1 align="center">AgentBridge</h1>
 
 <p align="center">
+  <img alt="version 0.6.0" src="https://img.shields.io/badge/version-0.6.0-orange">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-green.svg"></a>
-  <img alt="Version" src="https://img.shields.io/badge/version-0.6.x-orange.svg">
-  <img alt="Extension" src="https://img.shields.io/badge/extension-Apple%20Silicon-007ACC.svg">
+  <img alt="macOS Apple Silicon" src="https://img.shields.io/badge/macOS-Apple%20Silicon-4493F8">
 </p>
 
-<p align="center"><a href="README.md">English</a></p>
+<p align="center"><a href="README.md"><b>English</b></a></p>
 
----
+<p align="center">
+  Claude · Codex · Antigravity를 단일 작업 공간에서 실행하고 작업 맥락을 공유한다.<br />
+  모델을 바꿔도 어디까지 작업했는지 다시 설명하지 않는다.
+</p>
+
+<p align="center">
+  <a href="https://marketplace.visualstudio.com/items?itemName=h-taek.agentbridge"><b>Marketplace</b></a> ·
+  <a href="https://open-vsx.org/extension/h-taek/agentbridge"><b>OpenVSX</b></a> ·
+  <a href="https://github.com/h-taek/AgentBridge/releases"><b>Release</b></a>
+</p>
+
+<p align="center"><img src="packages/assets/readme/hero.png" alt="AgentBridge 작업 화면" width="960" /></p>
 
 ## 무엇을 해결하는가
 
-Claude Code CLI · Codex CLI · Antigravity CLI를 번갈아 쓸 때 생기는 **맥락 인계** 문제를 푼다. 모델을 바꿀 때마다 어디까지 했는지가 사라지는 그 문제다.
+Claude Code, Codex, Antigravity를 번갈아 쓰면 모델을 바꿀 때마다 작업 상황을 처음부터 다시 설명해야 한다. AgentBridge는 세 CLI를 단일 작업 공간에 탭으로 띄우고 작업 기록을 공유한다. 지금까지의 진행 요약, 대화 원문, 사용자와 저장소에 관한 장기 기억이 한곳에 남는다.
 
-AgentBridge는 한 작업 공간에 모델 탭을 여럿 띄우고 작업 기록을 공유한다 — 지금까지의 요약, 그 근거인 원문 턴, 사용자와 저장소에 대한 오래 가는 지식이다. 맥락은 **에이전트가 가져간다.** 훅이 매 턴에 짧은 지시문을 얹고, 에이전트가 요약이나 최근 대화나 장기 기억이 필요할 때 AgentBridge의 명령줄 도구를 부른다. 모델을 바꿔도 처음부터 다시 설명하지 않는다.
-
-0.6부터는 같은 배관이 반대 방향으로도 돈다. 대화 중인 에이전트가 **보조 에이전트를 띄우고**, 일을 맡기고, 실제로 무엇을 했는지 읽고, 그 결과를 원본에 얹는다. 사람이 탭 사이에서 말을 옮길 필요가 없다.
-
-각 CLI의 원래 동작(권한 확인, 도구 승인 흐름, 세션 관리)은 그대로 둔다. AgentBridge가 CLI의 기능을 뺏지 않는다.
+기록을 프롬프트에 밀어 넣지는 않는다. 훅은 짧은 지시문 한 줄만 붙이고, 에이전트가 필요하다고 판단했을 때 `agentbridge` 명령으로 직접 가져간다.
 
 ## 누구를 위한 것인가
 
-- Claude · Codex · Antigravity를 번갈아 쓰면서 매번 상황을 다시 설명하는 데 지친 사람
-- AI CLI 여럿을 한 화면에 놓고 같은 일을 시키고 싶은 사람
-- 별도 백엔드나 계정 없이, 쓰던 CLI와 쓰던 구독으로 인계 문제만 풀고 싶은 사람
+- 세 CLI를 오가며 같은 설명을 되풀이하는 사람
+- 여러 에이전트를 한 화면에서 같은 작업에 투입하고 싶은 사람
+- 새 계정이나 별도 서버 없이 기존 CLI와 구독만 쓰고 싶은 사람
 
 ## 기능
 
-- **여러 에이전트를 한 작업 공간에** — Claude · Codex · Antigravity 탭이 동시에 열리고, 세션 트리가 각각 지금 무엇을 하는지 보여준다.
-- **가져가는 맥락** — 훅은 짧은 지시문만 얹고, 요약·원문 턴·장기 기억은 에이전트가 필요할 때 가져간다. 주입되는 양이 1KB 안팎이라 최근 대화가 밀려나지 않는다.
-- **서브에이전트** — 세션 안에서 보조 에이전트를 띄운다. 각각 자기 탭으로 열려 띄운 세션 아래에 붙고, 메인이 지침을 더 보내고 기록을 읽는다.
-- **선택적 격리** — 보조를 자기 git worktree에서 돌릴 수 있다. 둘이 같은 파일을 고쳐도 부딪히지 않는다. 도는 동안 그 worktree가 내장 소스 제어 뷰에 붙고, 다 되면 변경을 한 번에 원본으로 옮긴다 — 하나라도 충돌하면 아무것도 얹지 않는다.
-- **장기 기억** — 사용자에 대한 사실(역할·규칙·작업 방식)과 저장소에 대한 사실. 에이전트가 일하면서 제안하고, 승인하기 전에는 아무것도 기억이 되지 않는다.
-- **Context 패널** — 지금의 요약, 그 근거인 원문 턴, 이전 스냅샷을 한자리에서 본다.
-- **배경 작업은 싸게** — 요약과 세션 이름 짓기는 고른 CLI로 헤드리스로 돈다. 기본은 지금 대화 중인 모델이다.
-- **세션 보존** — IDE를 껐다 켜도 각 CLI의 `--resume`으로 이어진다.
-- **프로젝트 폴더에 아무것도 안 쓴다** — 훅은 사용자 자신의 에이전트 설정에 깔린다. 작업 트리에는 우리 파일이 없다.
+<table>
+<tr>
+<td width="50%">
+<h3>한 작업 공간, 세 에이전트</h3>
+<p>Claude와 Codex, Antigravity 탭을 동시에 띄운다. 세션 트리에서 어느 세션이 돌고 있고 어느 세션이 끝났는지 본다.</p>
+</td>
+<td width="50%"><img src="packages/assets/readme/feature-workspace.gif" alt="세션 트리와 모델 탭 세 개" /></td>
+</tr>
+<tr>
+<td width="50%">
+<h3>모델을 바꿔도 이어지는 맥락</h3>
+<p>요약과 대화 원문, 그리고 알려준 것이 한 벌로 남고, 새로 연 탭이 그중 필요한 만큼만 가져가므로 상황을 다시 설명하지 않아도 된다. 주입되는 블록은 1KB 안팎이라 최근 턴이 밀려 사라지지 않는다.</p>
+</td>
+<td width="50%"><img src="packages/assets/readme/feature-context.gif" alt="모델을 바꿔 작업을 잇는 장면" /></td>
+</tr>
+<tr>
+<td width="50%">
+<h3>에이전트가 띄우는 에이전트</h3>
+<p>지금 대화 중인 에이전트에게 보조 에이전트를 띄우라고 하면 된다. 보조는 자기 탭으로 열려 부모 세션 아래에 묶이고, 부모는 후속 지시를 보내고 보조가 남긴 기록을 읽는다.</p>
+</td>
+<td width="50%"><img src="packages/assets/readme/feature-subagents.gif" alt="보조 에이전트 생성과 결과 회수" /></td>
+</tr>
+<tr>
+<td width="50%">
+<h3>격리 워크트리</h3>
+<p>보조를 자기 git 워크트리에서 돌릴 수 있다. 둘이 같은 파일을 고쳐도 부딪히지 않는다. 도는 동안 내장 소스 컨트롤에 그 워크트리가 뜨고 끝나면 한꺼번에 합치는데, 충돌이 하나라도 있으면 아무것도 합치지 않고 원래 폴더를 그대로 둔다.</p>
+</td>
+<td width="50%"><img src="packages/assets/readme/feature-worktree.gif" alt="내장 소스 컨트롤의 격리 워크트리" /></td>
+</tr>
+<tr>
+<td width="50%">
+<h3>승인해야 남는 기억</h3>
+<p>역할이나 일하는 방식, 저장소의 관례처럼 오래 가는 것만 남긴다. 에이전트가 일하다 제안하고, 승인한 것만 기억이 된다.</p>
+</td>
+<td width="50%"><img src="packages/assets/readme/feature-memory.gif" alt="장기 기억 패널과 승인 대기 제안" /></td>
+</tr>
+</table>
 
-## 동작 방식 — 원칙 셋
+### 그 외 기능
 
-1. **쓰던 CLI를 그대로 쓴다.** 이미 로그인해 둔 CLI를 우리가 띄운 터미널에서 돌린다. AgentBridge 백엔드도 계정도 없고, 모델 비용은 사용자 자신의 구독 안에서만 발생한다.
-2. **맥락은 밀지 않고 가져간다.** 훅이 나르는 것은 기억 사본이 아니라 지시문이다. 무엇이 필요한지는 에이전트가 정해서 가져가고, 그래서 프롬프트는 작고 기록은 온전하다. 요약은 고른 CLI로 헤드리스로 돌아 주 모델 토큰을 쓰지 않는다. 정책은 넷(`priority` / `fixed` / `active` / `off`)이고 한도가 차면 다음 CLI로 넘어간다.
-3. **저장소는 깨끗하게 둔다.** 훅과 에이전트 스킬은 사용자 전역 설정 — `~/.claude/settings.json`, `~/.codex/hooks.json`, `~/.gemini/config/hooks.json` — 에 표식 블록으로 들어가 사용자 설정을 건드리지 않는다. AgentBridge가 쌓는 것은 전부 `~/agentbridge/` 아래에 있다. `agentbridge uninstall`로 훅을 다시 걷어낼 수 있다.
+- 기존 CLI와 구독 사용 — 자체 서버나 별도 계정이 없다. 모델 비용은 기존에 쓰던 CLI 구독 범위 안에서만 발생한다.
+- 프로젝트 폴더 보존 — 훅과 스킬은 사용자 에이전트 설정에 설치한다. 저장소에는 AgentBridge 파일을 쓰지 않는다.
+- 저비용 백그라운드 작업 — 작업 요약과 세션 명명은 지정한 CLI를 헤드리스로 실행해 처리한다. 할당량이 소진되면 다음 CLI로 넘어간다.
+- 파일 경로 끌어다 놓기 — Shift를 누른 채 파일을 채팅 화면에 놓으면 경로가 `@경로`로 입력줄에 들어간다. 탐색기의 파일과 편집기 탭, IDE 바깥의 파일 모두 된다.
+- 세션 복원 — IDE를 다시 열어도 각 CLI의 `--resume` 기능으로 이전 세션이 이어진다.
+- CLI 방식 유지 — 권한 확인과 도구 승인, 세션 관리는 각 CLI의 방식을 따른다.
 
-## 요구 사항
+## 지원 에이전트
 
-AgentBridge는 사용자 환경의 CLI를 그대로 돌린다. 쓰려는 모델의 CLI를 따로 설치해야 하고, 최소 하나는 있어야 한다.
+사용자 환경에 설치된 CLI를 직접 실행한다. 세 가지 가운데 하나 이상이 필요하다.
 
-| 모델 | 설치 안내 | 인증 |
+| 에이전트 | 명령 | 설치 |
 |---|---|---|
-| Claude (`claude`) | [claude.ai/code](https://www.claude.com/product/claude-code) | `claude` 실행 후 안내를 따른다 |
-| Codex (`codex`) | [openai.com/codex](https://openai.com/codex) | `codex` 실행 후 안내를 따른다 |
-| Antigravity (`agy`) | [antigravity.google](https://antigravity.google/product/antigravity-cli) | `agy /auth` 또는 환경 변수 |
+| Claude Code | `claude` | [claude.com/product/claude-code](https://www.claude.com/product/claude-code) |
+| Codex | `codex` | [openai.com/codex](https://openai.com/codex) |
+| Antigravity | `agy` | [antigravity.google](https://antigravity.google/product/antigravity-cli) |
 
-셋 다 PATH에 있어야 한다. 일부만 깔려 있어도 동작하지만, 배경 작업을 무료 한도로 돌리려면 **Antigravity(`agy`) 설치와 인증**을 권한다. 없으면 대화 중인 모델로 떨어지고 토큰 소모 안내가 뜬다.
+인증은 각 CLI를 한 번 실행해 안내를 따르면 된다. Antigravity는 `agy /auth`를 쓴다.
+
+백그라운드 작업을 무료 할당량으로 처리하려면 Antigravity(`agy`)를 설치하고 인증해 둔다. 사용할 수 없으면 현재 대화 중인 모델로 전환하며 토큰 사용을 알린다.
 
 ## 설치
 
-VS Marketplace에서 *AgentBridge*를 검색해 설치한다. Cursor·Antigravity IDE 같은 VS Code 계열 IDE도 각자의 확장 화면에서 같은 방법으로 설치한다.
+확장 탭에서 'AgentBridge'를 검색해 설치한다. Cursor, Antigravity IDE, Windsurf에서도 각 IDE의 확장 탭을 이용한다.
 
-## 사용법
+[Marketplace](https://marketplace.visualstudio.com/items?itemName=h-taek.agentbridge) · [OpenVSX](https://open-vsx.org/extension/h-taek/agentbridge) · [Release](https://github.com/h-taek/AgentBridge/releases)
 
-1. 명령 팔레트(`Cmd+Shift+P`) → **AgentBridge: New Model Session**
-2. 모델을 고르면 채팅 탭이 열린다
-3. 액티비티 바의 AgentBridge 아이콘에서 세션 트리, Context 패널, 승인 대기 중인 기억 제안을 본다
+### 시작하기
 
-보조 에이전트에게 일을 시키려면 탭의 에이전트에게 말하면 된다 — 띄우고, 상태를 보고, 무엇을 했는지 읽고, 원본에 얹는 방법이 그 에이전트에게 이미 실려 있다.
+설치하면 활동 바에 AgentBridge 아이콘이 생긴다. 누르면 사이드바에 Sessions와 Context, Long-term Memory 세 패널이 열린다.
+
+1. Sessions 패널 제목줄의 `+` 버튼을 누른다. 편집기 탭 오른쪽 위의 AgentBridge 아이콘도 같은 일을 한다.
+2. 뜬 목록에서 모델을 고르면 채팅 탭이 열리고 그 CLI가 바로 뜬다.
+3. 연 세션은 Sessions 패널에 쌓인다. 눌러 다시 열고, 행에 마우스를 올려 이름을 바꾸거나 지운다.
+4. Context 패널에서 지금까지의 요약과 대화 원문을, Long-term Memory 패널에서 승인 대기 중인 제안을 본다.
+
+보조 에이전트가 필요하면 채팅 탭의 에이전트에게 말하면 된다. 띄우고, 상태를 보고, 결과를 읽고, 변경을 합치는 방법이 스킬로 이미 등록돼 있다.
+
+## 동작 방식
+
+- 로컬 CLI 직접 실행 — 로컬에 이미 인증된 CLI를 터미널 세션에서 직접 구동한다. 중간에 외부 중계 서버를 두지 않는다.
+- 맥락 조회 — 훅은 기억 사본 대신 짧은 지시문을 보낸다. 에이전트가 필요한 요약이나 최근 턴을 직접 가져가므로 프롬프트 크기를 키우지 않고 기록을 보존한다.
+- 프로젝트 폴더 무결성 — 훅과 스킬은 사용자 설정의 표시된 블록에 설치되어 기존 설정을 건드리지 않는다. 데이터는 모두 `~/agentbridge/` 아래에 저장하며, `agentbridge uninstall`로 훅을 제거할 수 있다.
+- Shift 드래그로 경로 삽입 — 채팅 화면은 Shift가 눌린 드래그만 IDE보다 먼저 가로챈다. 탐색기와 편집기 탭에서 온 것은 경로를 그대로 읽고, IDE 바깥에서 온 파일은 `~/agentbridge/attachments/`로 복사한 뒤 그 경로를 넣는다. 표기는 세 CLI가 모두 아는 `@경로`다.
 
 ## 설정
 
@@ -83,44 +133,32 @@ VS Code 설정(`settings.json` 또는 설정 화면):
 
 | 키 | 기본값 | 설명 |
 |---|---|---|
-| `agentbridge.refine.policy` | `active` | 배경 작업을 어느 CLI로 돌릴지: `priority` / `fixed` / `active` / `off` |
-| `agentbridge.refine.priorityOrder` | `[agy, codex, claude]` | `priority` 정책에서의 시도 순서 |
-| `agentbridge.refine.fixedCli` | `agy` | `fixed` 정책에서 쓸 CLI |
-| `agentbridge.refine.useClaude` | `true` | 배경 작업에 Claude를 쓸지. 헤드리스 `claude -p`는 구독이 아니라 API 크레딧을 쓰므로, 빼려면 끈다 |
-| `agentbridge.turns.assistantDetail` | `compact` | 턴 기록에 답변을 얼마나 남길지: `full` / `compact` / `minimal` |
-| `agentbridge.memory.maxArchiveSnapshots` | `15` | 이전 스냅샷을 몇 개까지 둘지. 넘으면 오래된 것부터 지운다 |
-
-## 프라이버시
-
-AgentBridge에는 자체 서버가 없다. 사용자 환경에 이미 있는 CLI를 중개할 뿐이고, 데이터가 흐르는 길은 아래 둘뿐이다.
-
-- **사용자의 메시지** — 인증해 둔 CLI(claude / codex / agy)를 통해 그 CLI가 원래 통신하는 백엔드(Anthropic / OpenAI / Google)로만 간다. 중간에 우리 쪽을 경유하지 않는다.
-- **배경 작업** — 요약과 세션 이름 짓기 등은 같은 CLI를 헤드리스로 불러 처리한다. 요청은 그 CLI의 원래 백엔드로만 가고, 결과는 사용자 기기에 저장된다.
-
-그 밖으로 나가는 것은 없다. 분석도 원격 측정도 제3의 서비스도 없다. 세션 기록·턴 로그·기억·터미널 재생 버퍼는 전부 로컬 파일이다.
+| `agentbridge.refine.policy` | `active` | 백그라운드 작업 처리 CLI 선택 정책 |
+| `agentbridge.refine.priorityOrder` | `[agy, codex, claude]` | `priority` 정책 CLI 시도 순서 |
+| `agentbridge.refine.fixedCli` | `agy` | `fixed` 정책 고정 CLI |
+| `agentbridge.turns.assistantDetail` | `compact` | 턴 기록에 저장할 답변 양 |
+| `agentbridge.memory.maxArchiveSnapshots` | `15` | 보관할 이전 스냅샷 수 |
 
 ## 데이터 위치
 
-전부 `~/agentbridge/` 아래에 프로젝트 폴더 기준으로 쌓인다.
+모든 데이터는 `~/agentbridge/` 아래에 프로젝트 폴더별로 나누어 저장한다.
 
 ```
 ~/agentbridge/
-├── workspaces/<폴더 이름>-<해시>/
-│   ├── workspace.json                  ← 세션 목록과 상태
-│   ├── ir.json                         ← 작업 요약
-│   ├── turns.jsonl                     ← 원문 턴
-│   ├── archive/                        ← 이전 스냅샷
-│   ├── sessions/<세션 id>/             ← 탭별 재생 버퍼와 훅 신호
-│   └── trees/<이름>/                   ← 격리한 서브에이전트의 worktree
-├── attachments/                        ← 채팅에 붙여넣은 이미지
+├── workspaces/<폴더명>-<해시>/
+│   ├── workspace.json      ← 세션과 상태
+│   ├── ir.json             ← 지금까지의 요약
+│   ├── turns.jsonl         ← 대화 원문
+│   ├── archive/            ← 이전 스냅샷
+│   ├── sessions/<세션id>/  ← 탭별 리플레이 버퍼, 훅 신호
+│   └── trees/<이름>/       ← 격리된 보조 에이전트 워크트리
+├── attachments/            ← 채팅에 붙여 넣은 파일
 └── global/
-    ├── profiles/default/               ← 사용자에 대해 아는 것
-    │   ├── proposals/                  ← 승인 대기 중인 제안
-    │   └── docs/<카테고리>/<slug>.md   ← 승인된 것
-    └── projects/<저장소>-<해시>/       ← 이 저장소에 대해 아는 것
+    ├── profiles/default/   ← 사용자에 대해 아는 것
+    └── projects/<저장소>/  ← 이 저장소에 대해 아는 것
 ```
 
-사용자 자신의 에이전트 설정에는 훅과 스킬을 위한 표식 블록만 생긴다.
+각 에이전트의 전역 설정 파일에는 훅과 스킬 등록을 위한 전용 블록만 추가되며, 기존 설정은 건드리지 않는다.
 
 ```
 ~/.claude/settings.json          ~/.claude/skills/agentbridge/
@@ -128,6 +166,14 @@ AgentBridge에는 자체 서버가 없다. 사용자 환경에 이미 있는 CLI
 ~/.gemini/config/hooks.json      ~/.gemini/config/skills/agentbridge/
 ```
 
+## 프라이버시
+
+AgentBridge는 자체 서버를 운영하지 않는다. 사용자의 메시지는 인증된 CLI를 통해 각 CLI의 기존 백엔드(Anthropic · OpenAI · Google)로만 간다. 요약과 세션 이름 같은 백그라운드 작업도 같은 CLI가 처리하며, 결과는 사용자 기기에 저장한다.
+
+그 밖의 데이터는 기기 밖으로 보내지 않는다. 분석과 원격 측정, 제3자 서비스를 사용하지 않는다. 세션 기록과 턴 로그, 기억, 터미널 재생 버퍼는 모두 로컬 파일로 남는다.
+
 ## 라이선스
 
 [MIT](LICENSE) © h-taek
+
+장기 기억 모듈은 [gc-tree](https://github.com/handsupmin/gc-tree)(MIT)의 코드를 각색했다. [NOTICE](NOTICE) 참고.
