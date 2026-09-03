@@ -553,6 +553,7 @@ export class MemoryPanelProvider implements vscode.WebviewViewProvider {
       line-height: 1.5;
       margin-bottom: 4px;
       word-break: break-word;
+      cursor: pointer;
     }
     .turn-body {
       font-size: 11.5px;
@@ -562,12 +563,23 @@ export class MemoryPanelProvider implements vscode.WebviewViewProvider {
       word-break: break-word;
       cursor: pointer;
     }
-    .turn-body.clip {
+    .turn-body.clip,
+    .turn-user.clip {
       display: -webkit-box;
       -webkit-line-clamp: 2;
       -webkit-box-orient: vertical;
       overflow: hidden;
     }
+    /* 도구 호출이 길어지면 턴 하나가 화면을 다 먹는다 — 두 줄만 두고 나머지는 이 줄로 접는다. */
+    .turn-more {
+      font-size: 11px;
+      line-height: 1.6;
+      color: var(--vscode-descriptionForeground);
+      cursor: pointer;
+      opacity: 0.8;
+      letter-spacing: 0.5px;
+    }
+    .turn-more:hover { opacity: 1; }
     .turn-tools { display: flex; flex-direction: column; gap: 6px; }
     .turn-tool {
       display: flex;
@@ -619,6 +631,8 @@ export class MemoryPanelProvider implements vscode.WebviewViewProvider {
     const openTurns = {};
     const openItems = {};
     const openTools = {};
+    const openUsers = {};
+    const openToolLists = {};
 
     function esc(s) {
       const d = document.createElement('div');
@@ -774,6 +788,7 @@ export class MemoryPanelProvider implements vscode.WebviewViewProvider {
     }
 
     // ── 기록 탭 ──────────────────────────────────────────────────────
+    const TOOL_PREVIEW = 2; // 접었을 때 남기는 도구 호출 줄 수
     function renderTurns() {
       if (!data.turns.length) {
         paneTurns.innerHTML = '<div class="empty">No turns recorded yet.</div>';
@@ -785,14 +800,21 @@ export class MemoryPanelProvider implements vscode.WebviewViewProvider {
         html += '<div class="turn">';
         html += '<div class="turn-head"><span class="turn-model">' + esc(t.model) + '</span><span>·</span><span>' +
           esc(timeAgo(t.completedAt || t.startedAt)) + '</span></div>';
-        if (t.user) html += '<div class="turn-user">' + esc(t.user) + '</div>';
+        // 사용자 메시지도 답변과 같은 규칙 — 두 줄만 보이고 누르면 전문이 열린다.
+        if (t.user) {
+          html += '<div class="turn-user' + (openUsers[i] === true ? '' : ' clip') + '" data-user="' + i + '">' +
+            esc(t.user) + '</div>';
+        }
         if (t.assistantBody) {
           html += '<div class="turn-body' + (open ? '' : ' clip') + '" data-turn="' + i + '">' +
             esc(t.assistantBody) + '</div>';
         }
         if (t.toolCalls && t.toolCalls.length) {
+          const listOpen = openToolLists[i] === true;
+          const hidden = listOpen ? 0 : Math.max(0, t.toolCalls.length - TOOL_PREVIEW);
+          const shown = hidden > 0 ? t.toolCalls.slice(0, TOOL_PREVIEW) : t.toolCalls;
           html += '<div class="turn-tools">';
-          t.toolCalls.forEach(function (tc, j) {
+          shown.forEach(function (tc, j) {
             // 요약 탭과 같은 규칙 — 누르면 그 줄의 잘림이 풀린다.
             const openTool = openTools[i + ':' + j] === true;
             html += '<div class="turn-tool" data-tool="' + i + ':' + j + '">' +
@@ -800,6 +822,11 @@ export class MemoryPanelProvider implements vscode.WebviewViewProvider {
               '<span class="turn-tool-arg' + (openTool ? '' : ' ellip') + '" title="' + esc(tc.arg) + '">' +
               esc(tc.arg) + '</span></div>';
           });
+          if (hidden > 0) {
+            html += '<div class="turn-more" data-toolmore="' + i + '">\u22EF ' + hidden + ' more</div>';
+          } else if (listOpen && t.toolCalls.length > TOOL_PREVIEW) {
+            html += '<div class="turn-more" data-toolmore="' + i + '">\u22EF less</div>';
+          }
           html += '</div>';
         }
         html += '</div>';
@@ -865,6 +892,20 @@ export class MemoryPanelProvider implements vscode.WebviewViewProvider {
         const k = item.dataset.item;
         openItems[k] = !openItems[k];
         renderSummary();
+        return;
+      }
+      const user = e.target.closest('[data-user]');
+      if (user) {
+        const i = user.dataset.user;
+        openUsers[i] = !openUsers[i];
+        renderTurns();
+        return;
+      }
+      const toolMore = e.target.closest('[data-toolmore]');
+      if (toolMore) {
+        const i = toolMore.dataset.toolmore;
+        openToolLists[i] = !openToolLists[i];
+        renderTurns();
         return;
       }
       const tool = e.target.closest('[data-tool]');
