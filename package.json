@@ -62,11 +62,6 @@
           "type": "webview",
           "id": "agentbridge.memoryPanel",
           "name": "Context"
-        },
-        {
-          "type": "webview",
-          "id": "agentbridge.proposalPanel",
-          "name": "Long-term Memory"
         }
       ]
     },

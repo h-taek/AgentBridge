@@ -9,6 +9,7 @@ import { runManualCompaction, resetMemory } from '../core/compactionScheduler';
 import { getHookDisabledReasons } from '../core/hookStatusStore';
 import type { CliKind, IR } from '../shared/types';
 import { collapseCommand } from './memoryPanelModel';
+import type { ProfileSection } from './profilePanel';
 
 // 탭 선택과 접힌 섹션 목록이 사는 자리.
 const UI_STATE_KEY = 'memoryPanel.ui';
@@ -21,15 +22,21 @@ export class MemoryPanelProvider implements vscode.WebviewViewProvider {
   // 탭 선택과 섹션 접힘. 레포가 아니라 사람에게 묶이는 값이라 전역 저장소에 둔다 (0.5.0 6단계).
   private readonly storage: vscode.Memento;
 
-  constructor(storage: vscode.Memento) {
+  // 장기 메모리는 이 뷰 안에 접히는 구역으로 산다 — 사이드바 뷰를 하나만 두고 둘 중 하나만
+  // 열리게 하려면 접기를 우리가 쥐어야 한다. VS Code는 뷰를 접는 API를 주지 않는다.
+  private readonly profile: ProfileSection;
+
+  constructor(storage: vscode.Memento, profile: ProfileSection) {
     this.storage = storage;
+    this.profile = profile;
   }
 
-  private readUiState(): { tab: string; collapsed: string[] } {
-    const raw = this.storage.get<{ tab?: string; collapsed?: string[] }>(UI_STATE_KEY);
+  private readUiState(): { tab: string; collapsed: string[]; ltmOpen: boolean } {
+    const raw = this.storage.get<{ tab?: string; collapsed?: string[]; ltmOpen?: boolean }>(UI_STATE_KEY);
     return {
       tab: raw?.tab === 'turns' ? 'turns' : 'summary',
       collapsed: Array.isArray(raw?.collapsed) ? raw!.collapsed!.filter((k) => typeof k === 'string') : [],
+      ltmOpen: raw?.ltmOpen === true,
     };
   }
 
@@ -39,6 +46,7 @@ export class MemoryPanelProvider implements vscode.WebviewViewProvider {
     _token: vscode.CancellationToken,
   ): void {
     this.view = webviewView;
+    this.profile.attach(webviewView);
     webviewView.webview.options = { enableScripts: true };
     webviewView.webview.html = this.buildHtml(webviewView.webview);
 
@@ -57,7 +65,10 @@ export class MemoryPanelProvider implements vscode.WebviewViewProvider {
           await this.handleHookBadgeShow(msg.items as Array<{ model: CliKind; reason: string }>);
           break;
         case 'ui:set':
-          await this.storage.update(UI_STATE_KEY, { tab: msg.tab, collapsed: msg.collapsed });
+          await this.storage.update(UI_STATE_KEY, { tab: msg.tab, collapsed: msg.collapsed, ltmOpen: msg.ltmOpen });
+          break;
+        default:
+          await this.profile.handleMessage(msg);
           break;
       }
     });
@@ -224,12 +235,18 @@ export class MemoryPanelProvider implements vscode.WebviewViewProvider {
   <style nonce="${nonce}">
     :root { --pad: 10px; --radius: 6px; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
+    /* 여백은 본문 쪽에 준다 — 장기 메모리 머리줄이 패널 폭을 끝에서 끝까지 써야 해서다.
+       본문이 짧아도 머리줄은 패널 맨 아래에 붙는다(접힌 뷰 머리줄이 서는 자리와 같게). */
     body {
-      padding: var(--pad);
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
       font-family: var(--vscode-font-family);
       font-size: var(--vscode-font-size);
       color: var(--vscode-foreground);
     }
+    #ctxBody { padding: var(--pad); flex: 1 0 auto; }
+    #ltmBody { flex: 1 0 auto; }
     .panel-header {
       display: flex;
       align-items: center;
@@ -604,22 +621,69 @@ export class MemoryPanelProvider implements vscode.WebviewViewProvider {
       color: var(--vscode-descriptionForeground);
       opacity: 0.85;
     }
+
+    /* ── 장기 메모리 머리줄 ──────────────────────────────────────────
+       바깥 Context 뷰의 머리줄과 같아 보여야 한다. 색과 테두리는 사이드바 섹션 머리줄
+       토큰을 그대로 쓰고, 치수만 여기서 맞춘다(IDE마다 조금씩 달라 손댈 자리를 한군데로 모음).
+       접혔을 때는 아래에, 펼쳤을 때는 위에 붙어 스크롤을 따라온다. */
+    .ltm-head {
+      position: sticky;
+      bottom: 0;
+      z-index: 2;
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      height: 24px;
+      padding: 0 10px 0 3px;
+      cursor: pointer;
+      user-select: none;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--vscode-sideBarSectionHeader-foreground, var(--vscode-foreground));
+      background-color: var(--vscode-sideBar-background, var(--vscode-editor-background));
+      background-image: linear-gradient(
+        var(--vscode-sideBarSectionHeader-background, transparent),
+        var(--vscode-sideBarSectionHeader-background, transparent));
+      border-top: 1px solid var(--vscode-sideBarSectionHeader-border, var(--vscode-widget-border, transparent));
+    }
+    .ltm-head.open { top: 0; bottom: auto; }
+    .ltm-head:hover { color: var(--vscode-foreground); }
+    .ltm-chev {
+      flex: 0 0 auto;
+      width: 16px;
+      height: 16px;
+      fill: currentColor;
+      transform: rotate(-90deg);
+    }
+    .ltm-head.open .ltm-chev { transform: none; }
+${this.profile.css()}
   </style>
 </head>
 <body>
-  <div class="status" id="status">Loading...</div>
-  <div id="hookBadge" class="hook-badge hidden"></div>
-  <div class="tabs">
-    <button class="tab active" data-tab="summary">Summary</button>
-    <button class="tab" data-tab="turns">Turns <span class="tab-count" id="turnCount"></span></button>
+  <div id="ctxBody">
+    <div class="status" id="status">Loading...</div>
+    <div id="hookBadge" class="hook-badge hidden"></div>
+    <div class="tabs">
+      <button class="tab active" data-tab="summary">Summary</button>
+      <button class="tab" data-tab="turns">Turns <span class="tab-count" id="turnCount"></span></button>
+    </div>
+    <div id="paneSummary"></div>
+    <div id="paneTurns" class="hidden"></div>
   </div>
-  <div id="paneSummary"></div>
-  <div id="paneTurns" class="hidden"></div>
+
+  <div class="ltm-head" id="ltmHead" role="button" tabindex="0" aria-expanded="false" aria-controls="ltmBody">
+    <svg class="ltm-chev" viewBox="0 0 16 16"><path d="M7.976 10.072 4.3 6.396l.708-.708 3.32 3.32 3.317-3.32.707.708-4.376 4.376z"/></svg>
+    <span>Long-term Memory</span>
+  </div>
+  <div id="ltmBody" class="hidden">${this.profile.bodyHtml()}</div>
 
   <script nonce="${nonce}">
     // 요약(IR)과 기록(원본 턴)을 탭 둘로 가른다 (0.5.0 B-10). 기본은 제목이고 자세한 것은
     // 열거나 마우스를 올려서 본다. 접힘과 탭 선택은 호스트가 전역 저장소에 들고 있다.
     const vscode = acquireVsCodeApi();
+    // 장기 메모리 구역 스크립트가 같은 문서에 얹힌다 — API는 한 번만 얻을 수 있어 넘겨준다.
+    window.__abApi = vscode;
 
     const statusEl = document.getElementById('status');
     const hookBadge = document.getElementById('hookBadge');
@@ -628,7 +692,7 @@ export class MemoryPanelProvider implements vscode.WebviewViewProvider {
     const turnCountEl = document.getElementById('turnCount');
 
     let data = { ir: null, turns: [], archives: [] };
-    let ui = { tab: 'summary', collapsed: [] };
+    let ui = { tab: 'summary', collapsed: [], ltmOpen: false };
     // 펼친 명령과 턴 본문 — 화면 안에서만 사는 값이라 저장하지 않는다.
     const openCmds = {};
     const openTurns = {};
@@ -863,8 +927,34 @@ export class MemoryPanelProvider implements vscode.WebviewViewProvider {
     }
 
     function saveUi() {
-      vscode.postMessage({ type: 'ui:set', tab: ui.tab, collapsed: ui.collapsed });
+      vscode.postMessage({ type: 'ui:set', tab: ui.tab, collapsed: ui.collapsed, ltmOpen: ui.ltmOpen });
     }
+
+    // ── 장기 메모리 구역 ────────────────────────────────────────────
+    // 머리줄 하나가 토글이다 — 열면 Context 본문이 자리를 비우고, 닫으면 돌아온다.
+    const ctxBody = document.getElementById('ctxBody');
+    const ltmHead = document.getElementById('ltmHead');
+    const ltmBody = document.getElementById('ltmBody');
+
+    function applyLtm() {
+      ltmHead.classList.toggle('open', ui.ltmOpen);
+      ltmHead.setAttribute('aria-expanded', String(!!ui.ltmOpen));
+      ltmBody.classList.toggle('hidden', !ui.ltmOpen);
+      ctxBody.classList.toggle('hidden', !!ui.ltmOpen);
+    }
+
+    function toggleLtm() {
+      ui.ltmOpen = !ui.ltmOpen;
+      applyLtm();
+      saveUi();
+      // 접혀 있는 동안 쌓인 제안을 펼치는 순간 따라잡는다.
+      if (ui.ltmOpen && window.__abLtmRefresh) window.__abLtmRefresh();
+    }
+
+    ltmHead.addEventListener('click', toggleLtm);
+    ltmHead.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleLtm(); }
+    });
 
     document.addEventListener('click', function (e) {
       const tab = e.target.closest('.tab');
@@ -951,13 +1041,15 @@ export class MemoryPanelProvider implements vscode.WebviewViewProvider {
       const msg = e.data;
       if (msg.type !== 'ir:data') return;
       data = { ir: msg.ir || null, turns: msg.turns || [], archives: msg.archives || [] };
-      if (msg.ui) ui = { tab: msg.ui.tab || 'summary', collapsed: msg.ui.collapsed || [] };
+      if (msg.ui) ui = { tab: msg.ui.tab || 'summary', collapsed: msg.ui.collapsed || [], ltmOpen: msg.ui.ltmOpen === true };
+      applyLtm();
       render();
       renderHookBadge(msg.hookDisabled || []);
     });
 
     vscode.postMessage({ type: 'ir:load' });
   </script>
+  <script nonce="${nonce}">${this.profile.script()}</script>
 </body>
 </html>`;
   }
