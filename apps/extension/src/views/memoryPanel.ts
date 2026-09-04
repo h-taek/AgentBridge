@@ -236,17 +236,19 @@ export class MemoryPanelProvider implements vscode.WebviewViewProvider {
     :root { --pad: 10px; --radius: 6px; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     /* 여백은 본문 쪽에 준다 — 장기 메모리 머리줄이 패널 폭을 끝에서 끝까지 써야 해서다.
-       본문이 짧아도 머리줄은 패널 맨 아래에 붙는다(접힌 뷰 머리줄이 서는 자리와 같게). */
+       화면 높이를 못 박고 스크롤은 본문 안에서 낸다. 그래야 머리줄이 늘 보이는 자리에
+       남고(뷰 머리줄과 같게), 본문이 짧으면 자동 여백이 머리줄을 맨 아래로 민다. */
+    html, body { height: 100%; }
     body {
       display: flex;
       flex-direction: column;
-      min-height: 100vh;
+      overflow: hidden;
       font-family: var(--vscode-font-family);
       font-size: var(--vscode-font-size);
       color: var(--vscode-foreground);
     }
-    #ctxBody { padding: var(--pad); flex: 1 0 auto; }
-    #ltmBody { flex: 1 0 auto; }
+    #ctxBody { padding: var(--pad); flex: 0 1 auto; overflow-y: auto; }
+    #ltmBody { flex: 1 1 auto; overflow-y: auto; }
     .panel-header {
       display: flex;
       align-items: center;
@@ -624,13 +626,10 @@ export class MemoryPanelProvider implements vscode.WebviewViewProvider {
 
     /* ── 장기 메모리 머리줄 ──────────────────────────────────────────
        바깥 Context 뷰의 머리줄과 같아 보여야 한다. 색과 테두리는 사이드바 섹션 머리줄
-       토큰을 그대로 쓰고, 치수만 여기서 맞춘다(IDE마다 조금씩 달라 손댈 자리를 한군데로 모음).
-       접혔을 때는 아래에, 펼쳤을 때는 위에 붙어 스크롤을 따라온다. */
+       토큰을 그대로 쓰고, 치수만 여기서 맞춘다(IDE마다 조금씩 달라 손댈 자리를 한군데로 모음). */
     .ltm-head {
-      position: sticky;
-      bottom: 0;
-      z-index: 2;
       flex: 0 0 auto;
+      margin-top: auto;
       display: flex;
       align-items: center;
       gap: 4px;
@@ -647,7 +646,6 @@ export class MemoryPanelProvider implements vscode.WebviewViewProvider {
         var(--vscode-sideBarSectionHeader-background, transparent));
       border-top: 1px solid var(--vscode-sideBarSectionHeader-border, var(--vscode-widget-border, transparent));
     }
-    .ltm-head.open { top: 0; bottom: auto; }
     .ltm-head:hover { color: var(--vscode-foreground); }
     .ltm-chev {
       flex: 0 0 auto;
@@ -655,8 +653,17 @@ export class MemoryPanelProvider implements vscode.WebviewViewProvider {
       height: 16px;
       fill: currentColor;
       transform: rotate(-90deg);
+      transition: transform 0.15s ease-out;
     }
     .ltm-head.open .ltm-chev { transform: none; }
+    /* 접었다 펴는 동안에는 두 본문의 높이만으로 자리가 정해진다 — 늘어남과 자동 여백을
+       잠시 끄지 않으면 머리줄이 미끄러지지 않고 튄다. */
+    body.animating #ctxBody,
+    body.animating #ltmBody { flex: 0 0 auto; }
+    body.animating .ltm-head { margin-top: 0; }
+    @media (prefers-reduced-motion: reduce) {
+      .ltm-chev { transition: none; }
+    }
 ${this.profile.css()}
   </style>
 </head>
@@ -936,16 +943,69 @@ ${this.profile.css()}
     const ltmHead = document.getElementById('ltmHead');
     const ltmBody = document.getElementById('ltmBody');
 
-    function applyLtm() {
+    // 원본 사이드바 뷰가 접히고 펴지는 값과 같게 맞춘다
+    // (.monaco-pane-view.animated .split-view-view — height 0.15s ease-out).
+    const ANIM_MS = 150;
+    const reduceMotion = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+    let animTimer = null;
+
+    function paintLtmHead() {
       ltmHead.classList.toggle('open', ui.ltmOpen);
       ltmHead.setAttribute('aria-expanded', String(!!ui.ltmOpen));
+    }
+
+    function paintLtmBodies() {
       ltmBody.classList.toggle('hidden', !ui.ltmOpen);
       ctxBody.classList.toggle('hidden', !!ui.ltmOpen);
     }
 
+    function endAnim() {
+      document.body.classList.remove('animating');
+      [ctxBody, ltmBody].forEach(function (el) {
+        el.style.transition = '';
+        el.style.height = '';
+        el.style.overflow = '';
+      });
+    }
+
+    function applyLtm(animate) {
+      if (animTimer) { clearTimeout(animTimer); animTimer = null; endAnim(); }
+      paintLtmHead();
+      if (!animate || reduceMotion) { paintLtmBodies(); return; }
+
+      const opening = ui.ltmOpen ? ltmBody : ctxBody;
+      const closing = ui.ltmOpen ? ctxBody : ltmBody;
+      // Context 본문이 닫힐 때는 자동 여백이 만든 빈자리까지 높이로 잡는다 —
+      // 내용 높이만 잡으면 머리줄이 시작하자마자 위로 튄다.
+      const from = ui.ltmOpen
+        ? ltmHead.getBoundingClientRect().top - ctxBody.getBoundingClientRect().top
+        : ltmBody.getBoundingClientRect().height;
+
+      document.body.classList.add('animating');
+      closing.style.overflow = 'hidden';
+      opening.style.overflow = 'hidden';
+      closing.style.height = from + 'px';
+      opening.classList.remove('hidden');
+      opening.style.height = '0px';
+      // 머리줄이 멈출 자리는 어느 쪽을 펴든 머리줄을 뺀 남은 높이다. 그만큼 늘려두면
+      // 끝나고 제자리를 잡을 때 튀지 않는다(본문이 짧으면 그 아래는 빈자리로 남는다).
+      const to = Math.max(0, window.innerHeight - ltmHead.offsetHeight);
+      void opening.offsetHeight;
+      closing.style.transition = 'height 0.15s ease-out';
+      opening.style.transition = 'height 0.15s ease-out';
+      closing.style.height = '0px';
+      opening.style.height = to + 'px';
+
+      animTimer = setTimeout(function () {
+        animTimer = null;
+        endAnim();
+        paintLtmBodies();
+      }, ANIM_MS);
+    }
+
     function toggleLtm() {
       ui.ltmOpen = !ui.ltmOpen;
-      applyLtm();
+      applyLtm(true);
       saveUi();
       // 접혀 있는 동안 쌓인 제안을 펼치는 순간 따라잡는다.
       if (ui.ltmOpen && window.__abLtmRefresh) window.__abLtmRefresh();
@@ -1042,7 +1102,7 @@ ${this.profile.css()}
       if (msg.type !== 'ir:data') return;
       data = { ir: msg.ir || null, turns: msg.turns || [], archives: msg.archives || [] };
       if (msg.ui) ui = { tab: msg.ui.tab || 'summary', collapsed: msg.ui.collapsed || [], ltmOpen: msg.ui.ltmOpen === true };
-      applyLtm();
+      applyLtm(false);
       render();
       renderHookBadge(msg.hookDisabled || []);
     });
