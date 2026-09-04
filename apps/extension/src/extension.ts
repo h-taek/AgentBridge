@@ -20,7 +20,7 @@ import {
 import { initializeCore, getBundledHelperPath, getBundledCliPath, getWorkspaceStore, getLogger } from './core/coreInstances';
 import * as output from './log/output';
 import { MemoryPanelProvider } from './views/memoryPanel';
-import { ProfilePanelProvider } from './views/profilePanel';
+import { ProfileSection } from './views/profilePanel';
 import { SessionTreeProvider, SessionItem } from './views/sessionTreeView';
 import { rowKindOf, childSessions, planDeleteConfirm } from './views/sessionTreeModel';
 import { ChatPanel, getActivePanel, getAllPanels, chatPanelEvents, updateSessionTabTitle, markShuttingDown } from './views/chatPanel';
@@ -130,29 +130,22 @@ export function activate(context: vscode.ExtensionContext) {
   notifications.init(context.globalState);
   notifications.notifyFirstRun();
 
-  // --- Memory Panel (WebviewView) ---
-  const memoryProvider = new MemoryPanelProvider(context.globalState);
-  context.subscriptions.push(
-    vscode.window.registerWebviewViewProvider(
-      MemoryPanelProvider.viewType,
-      memoryProvider,
-      { webviewOptions: { retainContextWhenHidden: true } },
-    ),
-  );
-
-  // --- Profile Panel (장기 메모리 — 자동제안 승인 큐 + 읽기전용 문서) ---
+  // --- 장기 메모리 구역 (자동제안 승인 큐 + 읽기전용 문서) ---
   // 대기 제안 수를 액티비티 바 뱃지로 — 항상 살아있는 세션 TreeView(treeView, 아래에서 생성)에 건다.
   // (webview view는 펼치기 전엔 resolve 안 돼 뱃지가 안 먹음.) 콜백은 런타임에만 호출되므로
   // 아래에서 선언되는 treeView를 클로저로 참조해도 안전하다.
-  const profileProvider = new ProfilePanelProvider((count) => {
+  const profileProvider = new ProfileSection((count) => {
     treeView.badge = count > 0
       ? { value: count, tooltip: vscode.l10n.t('{0} pending proposals', count) }
       : undefined;
   });
+
+  // --- Memory Panel (WebviewView) — 장기 메모리 구역을 안에 품는다 ---
+  const memoryProvider = new MemoryPanelProvider(context.globalState, profileProvider);
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(
-      ProfilePanelProvider.viewType,
-      profileProvider,
+      MemoryPanelProvider.viewType,
+      memoryProvider,
       { webviewOptions: { retainContextWhenHidden: true } },
     ),
   );

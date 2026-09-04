@@ -1,5 +1,4 @@
 import * as vscode from 'vscode';
-import { randomBytes } from 'crypto';
 import { join } from 'path';
 import * as output from '../log/output';
 import * as workspaceStore from '../core/workspaceStore';
@@ -23,47 +22,38 @@ import {
 // 상단 전환으로 한 번에 한쪽만 보여준다 — 훑는 곳이 아니라 승인하고 버리는 곳이라서다.
 const EMPTY_SIDE = { proposals: [], docs: [], profileDir: '' };
 
-export class ProfilePanelProvider implements vscode.WebviewViewProvider {
-  static readonly viewType = 'agentbridge.proposalPanel';
-
+export class ProfileSection {
   private view: vscode.WebviewView | undefined;
   // git 호출을 매 갱신마다 하지 않도록 폴더별로 기억한다. remote가 없으면 null이 캐시된다.
   private projectProfileCache = new Map<string, string | null>();
 
   // 대기 제안 수가 바뀔 때마다 호출(0 포함). 호스트가 액티비티 바 뱃지를 갱신하는 데 쓴다.
-  // webview view는 사용자가 패널을 펼치기 전엔 resolve되지 않으므로, 뱃지는 항상 살아있는
-  // 세션 TreeView에 건다 — 이 콜백이 그 다리 역할(패널 미오픈에도 카운트 통지).
+  // 섹션이 접혀 있어도 카운트는 나가야 하므로, 뱃지는 항상 살아있는 세션 TreeView에 건다.
   constructor(private readonly onCount?: (count: number) => void) {}
 
-  resolveWebviewView(
-    webviewView: vscode.WebviewView,
-    _context: vscode.WebviewViewResolveContext,
-    _token: vscode.CancellationToken,
-  ): void {
-    this.view = webviewView;
-    webviewView.webview.options = { enableScripts: true };
-    webviewView.webview.html = this.buildHtml(webviewView.webview);
+  // Context 뷰가 이 섹션을 품는다 — 웹뷰는 그쪽이 만들고 여기는 손잡이만 받는다.
+  attach(view: vscode.WebviewView): void {
+    this.view = view;
+  }
 
-    webviewView.webview.onDidReceiveMessage(async (msg) => {
-      switch (msg.type) {
-        case 'proposal:list':
-          await this.sendProposals();
-          break;
-        case 'proposal:approve':
-          await this.handleApprove(msg.id as string, msg.scope as ProposalScope);
-          break;
-        case 'proposal:discard':
-          await this.handleDiscard(msg.id as string, msg.scope as ProposalScope);
-          break;
-        case 'proposal:openFolder':
-          await this.handleOpenFolder(msg.scope as ProposalScope);
-          break;
-      }
-    });
-
-    webviewView.onDidChangeVisibility(() => {
-      if (webviewView.visible) void this.sendProposals();
-    });
+  // 호스트가 못 알아본 메시지를 넘겨받는다. 처리했으면 true.
+  async handleMessage(msg: { type?: string; id?: string; scope?: ProposalScope }): Promise<boolean> {
+    switch (msg.type) {
+      case 'proposal:list':
+        await this.sendProposals();
+        return true;
+      case 'proposal:approve':
+        await this.handleApprove(msg.id as string, msg.scope as ProposalScope);
+        return true;
+      case 'proposal:discard':
+        await this.handleDiscard(msg.id as string, msg.scope as ProposalScope);
+        return true;
+      case 'proposal:openFolder':
+        await this.handleOpenFolder(msg.scope as ProposalScope);
+        return true;
+      default:
+        return false;
+    }
   }
 
   // E3 자동제안 패스 종료 시 extension.ts가 호출 — 목록 재푸시.
@@ -173,10 +163,9 @@ export class ProfilePanelProvider implements vscode.WebviewViewProvider {
     this.view?.webview.postMessage(msg);
   }
 
-  private buildHtml(webview: vscode.Webview): string {
-    const nonce = getNonce();
-    // 라벨은 IDE 언어를 따른다(l10n). 데스크탑 ProfilePanel.tsx와 달리 기존엔 한국어 고정이었음.
-    const L = {
+  // 라벨은 IDE 언어를 따른다(l10n). 데스크탑 ProfilePanel.tsx와 달리 기존엔 한국어 고정이었음.
+  private labels() {
+    return {
       scopeUser: vscode.l10n.t('User'),
       scopeProject: vscode.l10n.t('Project'),
       openFolder: vscode.l10n.t('Open folder'),
@@ -188,23 +177,14 @@ export class ProfilePanelProvider implements vscode.WebviewViewProvider {
       profileDocs: vscode.l10n.t('Profile documents'),
       noDocs: vscode.l10n.t('No documents yet. They fill in automatically as you work.'),
     };
-    return /*html*/ `<!DOCTYPE html>
-<html lang="${vscode.env.language || 'en'}">
-<head>
-  <meta charset="UTF-8"/>
-  <meta http-equiv="Content-Security-Policy"
-    content="default-src 'none'; style-src ${webview.cspSource} 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <style nonce="${nonce}">
-    :root { --pad: 10px; }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      padding: var(--pad);
-      font-family: var(--vscode-font-family);
-      font-size: var(--vscode-font-size);
-      color: var(--vscode-foreground);
-    }
-    .profile-loc {
+  }
+
+  // 아래 셋은 Context 웹뷰 문서에 끼워 넣는 조각이다. 선택자는 모두 #ltmBody 아래로
+  // 묶어 같은 문서에 사는 Context 쪽 규칙(.empty 등)과 안 부딪히게 한다.
+  css(): string {
+    return /*css*/ `
+    #ltmBody { padding: var(--pad); }
+    #ltmBody .profile-loc {
       display: flex;
       align-items: center;
       gap: 6px;
@@ -212,13 +192,13 @@ export class ProfilePanelProvider implements vscode.WebviewViewProvider {
       margin-bottom: 8px;
       border-bottom: 2px solid var(--vscode-widget-border, #444);
     }
-    .profile-loc-name {
+    #ltmBody .profile-loc-name {
       flex: 1;
       font-size: 12px;
       font-weight: 600;
       color: var(--vscode-foreground);
     }
-    .open-folder {
+    #ltmBody .open-folder {
       display: inline-flex;
       align-items: center;
       gap: 4px;
@@ -230,12 +210,12 @@ export class ProfilePanelProvider implements vscode.WebviewViewProvider {
       padding: 3px 8px;
       border-radius: 4px;
     }
-    .open-folder:hover {
+    #ltmBody .open-folder:hover {
       background: var(--vscode-toolbar-hoverBackground, rgba(255,255,255,0.1));
     }
-    .open-folder:disabled { opacity: 0.4; cursor: default; }
-    .open-folder svg { width: 14px; height: 14px; fill: currentColor; }
-    .segmented {
+    #ltmBody .open-folder:disabled { opacity: 0.4; cursor: default; }
+    #ltmBody .open-folder svg { width: 14px; height: 14px; fill: currentColor; }
+    #ltmBody .segmented {
       display: flex;
       gap: 2px;
       padding: 2px;
@@ -243,7 +223,7 @@ export class ProfilePanelProvider implements vscode.WebviewViewProvider {
       background: var(--vscode-button-secondaryBackground, rgba(255,255,255,0.06));
       margin-bottom: 10px;
     }
-    .segmented button {
+    #ltmBody .segmented button {
       flex: 1;
       cursor: pointer;
       font: inherit;
@@ -258,11 +238,11 @@ export class ProfilePanelProvider implements vscode.WebviewViewProvider {
       justify-content: center;
       gap: 5px;
     }
-    .segmented button[aria-pressed="true"] {
+    #ltmBody .segmented button[aria-pressed="true"] {
       background: var(--vscode-editor-background, rgba(0,0,0,0.35));
       color: var(--vscode-foreground);
     }
-    .seg-count {
+    #ltmBody .seg-count {
       font-size: 9.5px;
       padding: 0 4px;
       border-radius: 7px;
@@ -270,11 +250,11 @@ export class ProfilePanelProvider implements vscode.WebviewViewProvider {
       color: var(--vscode-badge-foreground);
     }
     /* 보고 있지 않은 쪽에 새 제안이 있으면 눈에 띄게 — 전환을 안 눌러도 알아야 한다. */
-    .segmented button[aria-pressed="false"] .seg-count {
+    #ltmBody .segmented button[aria-pressed="false"] .seg-count {
       background: var(--vscode-activityBarBadge-background, #0078d4);
       color: var(--vscode-activityBarBadge-foreground, #fff);
     }
-    .sechead {
+    #ltmBody .sechead {
       display: flex;
       align-items: center;
       gap: 6px;
@@ -285,7 +265,7 @@ export class ProfilePanelProvider implements vscode.WebviewViewProvider {
       letter-spacing: 0.5px;
       color: #7DA1C7;
     }
-    .sechead-count {
+    #ltmBody .sechead-count {
       font-size: 10px;
       font-weight: normal;
       padding: 0 5px;
@@ -293,21 +273,21 @@ export class ProfilePanelProvider implements vscode.WebviewViewProvider {
       background: var(--vscode-badge-background);
       color: var(--vscode-badge-foreground);
     }
-    .empty {
+    #ltmBody .empty {
       color: var(--vscode-descriptionForeground);
       font-style: italic;
       font-size: 12px;
       text-align: center;
       padding: 16px 0;
     }
-    .card {
+    #ltmBody .card {
       padding: 8px 10px;
       margin-bottom: 6px;
       border-radius: 6px;
       background: var(--vscode-editor-background, rgba(255,255,255,0.03));
       border: 1px solid var(--vscode-widget-border, rgba(255,255,255,0.08));
     }
-    .card-cat {
+    #ltmBody .card-cat {
       display: inline-block;
       padding: 1px 6px;
       margin-bottom: 4px;
@@ -317,27 +297,27 @@ export class ProfilePanelProvider implements vscode.WebviewViewProvider {
       background: var(--vscode-badge-background);
       color: var(--vscode-badge-foreground);
     }
-    .card-title {
+    #ltmBody .card-title {
       font-weight: 600;
       font-size: 13px;
       line-height: 1.4;
       margin-bottom: 3px;
     }
-    .card-sub {
+    #ltmBody .card-sub {
       font-size: 11px;
       color: var(--vscode-descriptionForeground);
       line-height: 1.4;
       margin-bottom: 4px;
     }
-    .card-body {
+    #ltmBody .card-body {
       font-size: 12px;
       color: var(--vscode-foreground);
       line-height: 1.4;
       margin-bottom: 8px;
       word-break: break-word;
     }
-    .card-acts { display: flex; gap: 6px; }
-    .card-acts button {
+    #ltmBody .card-acts { display: flex; gap: 6px; }
+    #ltmBody .card-acts button {
       flex: 1;
       cursor: pointer;
       font-size: 12px;
@@ -345,22 +325,22 @@ export class ProfilePanelProvider implements vscode.WebviewViewProvider {
       border-radius: 4px;
       border: 1px solid transparent;
     }
-    .card-acts button:disabled { opacity: 0.4; cursor: default; }
-    .act-approve {
+    #ltmBody .card-acts button:disabled { opacity: 0.4; cursor: default; }
+    #ltmBody .act-approve {
       background: var(--vscode-button-background);
       color: var(--vscode-button-foreground);
     }
-    .act-approve:hover:not(:disabled) { background: var(--vscode-button-hoverBackground); }
-    .act-discard {
+    #ltmBody .act-approve:hover:not(:disabled) { background: var(--vscode-button-hoverBackground); }
+    #ltmBody .act-discard {
       background: var(--vscode-button-secondaryBackground, transparent);
       color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
       border-color: var(--vscode-widget-border, #444);
     }
-    .act-discard:hover:not(:disabled) {
+    #ltmBody .act-discard:hover:not(:disabled) {
       background: var(--vscode-toolbar-hoverBackground, rgba(255,255,255,0.1));
     }
-    .doc-group { margin-bottom: 8px; }
-    .doc-cat {
+    #ltmBody .doc-group { margin-bottom: 8px; }
+    #ltmBody .doc-cat {
       font-size: 10px;
       font-weight: 600;
       text-transform: uppercase;
@@ -368,20 +348,23 @@ export class ProfilePanelProvider implements vscode.WebviewViewProvider {
       color: var(--vscode-descriptionForeground);
       margin-bottom: 3px;
     }
-    .doc {
+    #ltmBody .doc {
       padding: 4px 8px;
       border-radius: 4px;
     }
-    .doc:hover { background: var(--vscode-list-hoverBackground, rgba(255,255,255,0.04)); }
-    .doc-title { font-size: 12px; line-height: 1.4; }
-    .doc-summary {
+    #ltmBody .doc:hover { background: var(--vscode-list-hoverBackground, rgba(255,255,255,0.04)); }
+    #ltmBody .doc-title { font-size: 12px; line-height: 1.4; }
+    #ltmBody .doc-summary {
       font-size: 11px;
       color: var(--vscode-descriptionForeground);
       line-height: 1.3;
     }
-  </style>
-</head>
-<body>
+`;
+  }
+
+  bodyHtml(): string {
+    const L = this.labels();
+    return /*html*/ `
   <div class="segmented" id="scopeSwitch">
     <button type="button" data-scope="user" aria-pressed="true">${L.scopeUser}<span class="seg-count" id="userCount" hidden></span></button>
     <button type="button" data-scope="project" aria-pressed="false">${L.scopeProject}<span class="seg-count" id="projectCount" hidden></span></button>
@@ -395,12 +378,18 @@ export class ProfilePanelProvider implements vscode.WebviewViewProvider {
     </button>
   </div>
 
-  <div id="content"></div>
+  <div id="ltmContent"></div>
+`;
+  }
 
-  <script nonce="${nonce}">
-    const vscode = acquireVsCodeApi();
+  // 같은 문서를 Context 쪽 스크립트와 나눠 쓴다 — 이름을 밖으로 흘리지 않게 감싼다.
+  script(): string {
+    const L = this.labels();
+    return /*js*/ `
+  (function () {
+    const vscode = window.__abApi;
     const L = ${JSON.stringify(L)};
-    const contentEl = document.getElementById('content');
+    const contentEl = document.getElementById('ltmContent');
     const openFolderBtn = document.getElementById('openFolderBtn');
 
     let busy = false;
@@ -527,13 +516,11 @@ export class ProfilePanelProvider implements vscode.WebviewViewProvider {
       });
     }
 
-    vscode.postMessage({ type: 'proposal:list' });
-  </script>
-</body>
-</html>`;
-  }
-}
+    // 섹션을 펼칠 때 호스트 쪽 스크립트가 부른다 — 접혀 있는 동안의 변화를 따라잡는다.
+    window.__abLtmRefresh = function () { vscode.postMessage({ type: 'proposal:list' }); };
 
-function getNonce(): string {
-  return randomBytes(16).toString('base64');
+    vscode.postMessage({ type: 'proposal:list' });
+  })();
+`;
+  }
 }
