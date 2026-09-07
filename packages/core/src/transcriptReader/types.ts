@@ -7,6 +7,9 @@ export interface ReaderCtx {
   workspaceId: string;
   sessionId: string;
   detail: TurnsAssistantDetail;
+  // 종료 훅이 "이 턴은 온전히 끝났다"고 알려온 tick인가 (0.5.0 A-2).
+  // claude·codex는 transcript에 완료 태그가 있어 무시한다. agy는 태그가 없어 이 값이 유일한 근거다.
+  turnClosed?: boolean;
 }
 
 // 아직 닫히지 않은(다음 user 미도착) 진행 중 턴. reader 간 공통 형태.

@@ -4,6 +4,7 @@
 import { runRefineSpawn, type SpawnRefineResult } from './refineHeadless';
 import { parseRefineOutput } from './irModule/parse';
 import { parseProposalOutput } from './proposalParse';
+import { parseSessionName } from './sessionNamePrompt';
 import type { CliKind } from './shared/cli';
 import type { EnvProbe } from './envProbe';
 import type { Logger } from './interfaces';
@@ -48,34 +49,26 @@ export type RefinePolicyConfig = {
   policy: 'off' | 'fixed' | 'active' | 'priority';
   fixedCli: CliKind;
   priorityOrder: CliKind[];
-  // false면 백그라운드 정제에서 claude를 절대 쓰지 않는다(헤드리스 `claude -p`는 구독이 아닌
-  // 별도 API 크레딧을 소모하므로). 생략 시 true(claude 허용 = 기존 동작).
-  useClaude?: boolean;
 };
 
 // 설정값 → RefineDecision 변환 — desktop/extension에 중복돼 있던 switch의 단일 구현 (V-11).
 // priority 목록이 비어 있으면 기본 순서로 폴백해 빈 순서로 인한 정제 실패를 막는다.
-// useClaude=false면 어느 정책이든 claude를 정제 후보에서 빼고, 그래서 후보가 없어지면 off로 떨군다.
 export function resolveRefineDecisionFromConfig(
   cfg: RefinePolicyConfig,
   activeModel: CliKind,
 ): RefineDecision {
-  const useClaude = cfg.useClaude !== false; // 생략·true = claude 허용
   switch (cfg.policy) {
     case 'off':
       return { policy: 'off' };
     case 'fixed':
-      if (!useClaude && cfg.fixedCli === 'claude') return { policy: 'off' };
       return { policy: 'fixed', cli: cfg.fixedCli };
     case 'active':
-      if (!useClaude && activeModel === 'claude') return { policy: 'off' };
       return { policy: 'active', cli: activeModel };
     case 'priority': {
       let order =
         cfg.priorityOrder.length > 0
           ? Array.from(new Set(cfg.priorityOrder))
           : (['agy', 'codex', 'claude'] as CliKind[]);
-      if (!useClaude) order = order.filter((c) => c !== 'claude');
       if (order.length === 0) return { policy: 'off' };
       return { policy: 'priority', order };
     }
@@ -238,4 +231,9 @@ export async function runRefine(args: RunRefineArgs): Promise<RefineModelChoice>
 // 자동제안 분석 — 같은 디스패처, proposalParse 게이트.
 export async function runProposalAnalysis(args: RunRefineArgs): Promise<RefineModelChoice> {
   return runHeadlessAnalysis(args, (t) => parseProposalOutput(t), 'proposals');
+}
+
+// 세션 명명 — 같은 디스패처, parseSessionName 게이트(B-2 W7).
+export async function runSessionNaming(args: RunRefineArgs): Promise<RefineModelChoice> {
+  return runHeadlessAnalysis(args, (t) => parseSessionName(t), 'session name');
 }

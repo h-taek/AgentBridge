@@ -9,6 +9,7 @@ export * from './globalPaths';
 export * from './globalMarkdown';
 export * from './globalValidate';
 export * from './globalStore';
+export * from './gitRemote';
 export * from './proposalStore';
 export * from './proposalParse';
 export * from './proposalPrompt';
@@ -30,6 +31,7 @@ export * from './interfaces';
 
 // 저장소
 export * from './storageRoot';
+export * from './legacyMigration';
 export * from './fileLock';
 export * from './workspaceId';
 export * from './turnsStore';
@@ -47,7 +49,6 @@ export * from './transcriptReader/codexReader';
 export * from './transcriptReader/agyReader';
 export * from './transcriptReader/watcher';
 export * from './transcriptReader/manager';
-export * from './transcriptReader/resolvePath';
 export * from './transcriptReader/captureManager';
 export * from './sessionFileWatcher';
 export * from './ownerWatcher';
@@ -62,9 +63,27 @@ export * from './contextTag';
 // hook
 export * from './hookInstaller';
 
+// 에이전트용 CLI 명령 본체 (0.5.0 B-5). 엔트리(bin/agentbridge.js)는 상대 경로로 부르고,
+// 배럴은 테스트와 호스트가 쓴다.
+export * from './agentCli/irRender';
+export * from './agentCli/read';
+export * from './agentCli/write';
+export * from './agentCli/status';
+export * from './agentCli/uninstall';
+export * from './agentCli/agent';
+
+// 호스트 핸드셰이크 통로 (0.5.0 B-5)
+export * from './hostRequest';
+export * from './hostRequestHandler';
+
+// 전역 스킬 (0.5.0 B-5)
+export * from './skillInstaller';
+export * from './skillTemplate';
+
 // refine
 export * from './refineHeadless';
 export * from './refineDispatcher';
+export * from './sessionNamePrompt';
 export * from './refineCliArgs';
 export * from './refineHome';
 
@@ -79,6 +98,18 @@ export * from './pty/types';
 
 // CLI 어댑터
 export * from './cliAdapter/index';
-export * from './cliAdapter/codexSessionWatcher';
 export * from './cliAdapter/agyResume';
 export * from './cliAdapter/hookSessionCapture';
+export * from './cliAdapter/turnSignal';
+export * from './cliAdapter/codexSandbox';
+export * from './sessionStatus';
+
+// 서브에이전트 (0.5.0 4단계)
+export * from './agent/reportState';
+export * from './agent/gitWorktree';
+export * from './agent/bridgeNames';
+export * from './agent/cleanup';
+export * from './agent/diffMerge';
+export * from './agent/subEnvironment';
+export * from './agent/agyTrust';
+export * from './agent/claudeTrust';

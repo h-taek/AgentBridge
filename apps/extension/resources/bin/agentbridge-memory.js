@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// @agentbridge-helper-version 0.4.5
+// @agentbridge-helper-version 0.6.0
 "use strict";
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -22,371 +22,257 @@ var __copyProps = (to, from, except, desc) => {
 };
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
-// packages/core/src/fileLock.ts
-var ACQUIRE_TIMEOUT_MS, STALE_LOCK_MS;
-var init_fileLock = __esm({
-  "packages/core/src/fileLock.ts"() {
-    "use strict";
-    ACQUIRE_TIMEOUT_MS = 5e3;
-    STALE_LOCK_MS = 1e4;
-    if (STALE_LOCK_MS <= ACQUIRE_TIMEOUT_MS) {
-      throw new Error(
-        `fileLock: STALE_LOCK_MS(${STALE_LOCK_MS}) must be > ACQUIRE_TIMEOUT_MS(${ACQUIRE_TIMEOUT_MS})`
-      );
-    }
-  }
-});
-
-// packages/core/src/storageRoot.ts
-var init_storageRoot = __esm({
-  "packages/core/src/storageRoot.ts"() {
+// packages/core/src/interfaces.ts
+var init_interfaces = __esm({
+  "packages/core/src/interfaces.ts"() {
     "use strict";
   }
 });
 
-// packages/core/src/globalPaths.ts
-function profilesRoot(globalDir) {
-  return (0, import_node_path.join)(globalDir, "profiles");
-}
-function profileDir(globalDir, profileId) {
-  return (0, import_node_path.join)(profilesRoot(globalDir), profileId);
-}
-function profileDocsDir(globalDir, profileId) {
-  return (0, import_node_path.join)(profileDir(globalDir, profileId), "docs");
-}
-var import_node_path;
-var init_globalPaths = __esm({
-  "packages/core/src/globalPaths.ts"() {
+// packages/core/src/sessionFileWatcher.ts
+var init_sessionFileWatcher = __esm({
+  "packages/core/src/sessionFileWatcher.ts"() {
     "use strict";
-    import_node_path = require("node:path");
-    init_storageRoot();
   }
 });
 
-// packages/core/src/shared/global.ts
-var GLOBAL_CATEGORIES, DOC_CAPS, PROPOSAL_CAPS;
-var init_global = __esm({
-  "packages/core/src/shared/global.ts"() {
+// packages/core/src/cliAdapter/turnSignal.ts
+function resolveTurnSignalFile(workspaceDir, sessionId) {
+  return (0, import_path.join)(workspaceDir, "sessions", sessionId, TURN_SIGNAL_FILENAME);
+}
+function str(v) {
+  return typeof v === "string" && v.trim() ? v : "";
+}
+function parseTurnSignal(raw) {
+  let obj;
+  try {
+    obj = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!obj || typeof obj !== "object") return null;
+  const o = obj;
+  const agent = str(o.agent);
+  if (agent !== "claude" && agent !== "codex" && agent !== "agy") return null;
+  const event = str(o.event);
+  if (!event) return null;
+  const agentId = str(o.agentId);
+  if (agentId) return null;
+  const at = typeof o.at === "number" && Number.isFinite(o.at) ? o.at : 0;
+  return {
+    agent,
+    event,
+    sessionId: str(o.sessionId),
+    transcriptPath: str(o.transcriptPath),
+    complete: o.complete === true,
+    terminationReason: str(o.terminationReason) || void 0,
+    error: str(o.error) || void 0,
+    at
+  };
+}
+async function readTurnSignal(signalFilePath) {
+  let raw;
+  try {
+    raw = await import_fs.promises.readFile(signalFilePath, "utf8");
+  } catch {
+    return null;
+  }
+  return parseTurnSignal(raw);
+}
+function resolveTurnStartFile(workspaceDir, sessionId) {
+  return (0, import_path.join)(workspaceDir, "sessions", sessionId, TURN_START_FILENAME);
+}
+function parseTurnStart(raw) {
+  let obj;
+  try {
+    obj = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!obj || typeof obj !== "object") return null;
+  const o = obj;
+  const agent = str(o.agent);
+  if (agent !== "claude" && agent !== "codex" && agent !== "agy") return null;
+  const event = str(o.event);
+  if (!event) return null;
+  const at = typeof o.at === "number" && Number.isFinite(o.at) ? o.at : 0;
+  return {
+    agent,
+    event,
+    sessionId: str(o.sessionId),
+    at
+  };
+}
+async function readTurnStart(startFilePath) {
+  let raw;
+  try {
+    raw = await import_fs.promises.readFile(startFilePath, "utf8");
+  } catch {
+    return null;
+  }
+  return parseTurnStart(raw);
+}
+var import_fs, import_path, TURN_SIGNAL_FILENAME, TURN_START_FILENAME;
+var init_turnSignal = __esm({
+  "packages/core/src/cliAdapter/turnSignal.ts"() {
     "use strict";
-    GLOBAL_CATEGORIES = [
-      "role",
-      "repos",
-      "domain",
-      "workflows",
-      "conventions",
-      "infra",
-      "verification"
-    ];
-    DOC_CAPS = {
-      title: 200,
-      summary: 2e3,
-      body: 2e4,
-      indexEntries: 50
+    import_fs = require("fs");
+    import_path = require("path");
+    init_interfaces();
+    init_sessionFileWatcher();
+    TURN_SIGNAL_FILENAME = "turn-signal.json";
+    TURN_START_FILENAME = "turn-start.json";
+  }
+});
+
+// packages/core/src/agent/reportState.ts
+var reportState_exports = {};
+__export(reportState_exports, {
+  REPORT_READ_FILENAME: () => REPORT_READ_FILENAME,
+  isUnread: () => isUnread,
+  listUnread: () => listUnread,
+  markReported: () => markReported,
+  readReportReadAt: () => readReportReadAt,
+  resolveReportReadFile: () => resolveReportReadFile
+});
+function resolveReportReadFile(workspaceDir, sessionId) {
+  return (0, import_path2.join)(workspaceDir, "sessions", sessionId, REPORT_READ_FILENAME);
+}
+async function readReportReadAt(workspaceDir, sessionId) {
+  let raw;
+  try {
+    raw = await import_fs2.promises.readFile(resolveReportReadFile(workspaceDir, sessionId), "utf8");
+  } catch {
+    return 0;
+  }
+  try {
+    const obj = JSON.parse(raw);
+    return typeof obj.at === "number" && Number.isFinite(obj.at) ? obj.at : 0;
+  } catch {
+    return 0;
+  }
+}
+async function markReported(workspaceDir, sessionId, at = Date.now()) {
+  const target = resolveReportReadFile(workspaceDir, sessionId);
+  const tmp = `${target}.${process.pid}.${Date.now()}.tmp`;
+  await import_fs2.promises.mkdir((0, import_path2.join)(workspaceDir, "sessions", sessionId), { recursive: true });
+  await import_fs2.promises.writeFile(tmp, JSON.stringify({ at }), "utf8");
+  await import_fs2.promises.rename(tmp, target);
+}
+async function isUnread(workspaceDir, sessionId) {
+  const signal = await readTurnSignal(resolveTurnSignalFile(workspaceDir, sessionId));
+  if (!signal || !signal.complete) return false;
+  const readAt = await readReportReadAt(workspaceDir, sessionId);
+  return signal.at > readAt;
+}
+async function listUnread(workspaceDir, sessionIds) {
+  const flags = await Promise.all(sessionIds.map((id) => isUnread(workspaceDir, id)));
+  return sessionIds.filter((_, i) => flags[i]);
+}
+var import_fs2, import_path2, REPORT_READ_FILENAME;
+var init_reportState = __esm({
+  "packages/core/src/agent/reportState.ts"() {
+    "use strict";
+    import_fs2 = require("fs");
+    import_path2 = require("path");
+    init_turnSignal();
+    REPORT_READ_FILENAME = "report-read.json";
+  }
+});
+
+// packages/core/src/sessionStatus.ts
+var sessionStatus_exports = {};
+__export(sessionStatus_exports, {
+  SILENCE_MS: () => SILENCE_MS,
+  aggregateActivity: () => aggregateActivity,
+  computeSessionActivity: () => computeSessionActivity,
+  readSessionActivityInputs: () => readSessionActivityInputs
+});
+function computeSessionActivity(input, now) {
+  const { startAt, endAt, lastOutputAt, viewedAt } = input;
+  const running = startAt !== void 0 && (endAt === void 0 || startAt > endAt);
+  if (!running) {
+    if (endAt !== void 0 && (viewedAt === void 0 || endAt > viewedAt)) return "done";
+    return "idle";
+  }
+  const lastOutput = lastOutputAt ?? startAt;
+  return now - lastOutput >= SILENCE_MS ? "unknown" : "running";
+}
+function aggregateActivity(self, children) {
+  let best = self;
+  for (const child of children) {
+    if (PRIORITY.indexOf(child) < PRIORITY.indexOf(best)) best = child;
+  }
+  return best;
+}
+async function cachedRead(cache, path2, stat, read) {
+  let mtimeMs;
+  try {
+    mtimeMs = (await stat(path2)).mtimeMs;
+  } catch {
+    cache.delete(path2);
+    return void 0;
+  }
+  const cached = cache.get(path2);
+  if (cached && cached.mtimeMs === mtimeMs) return cached.value;
+  const value = await read(path2);
+  cache.set(path2, { mtimeMs, value });
+  return value;
+}
+async function cachedLastOutputAt(cache, path2, stat) {
+  let mtimeMs;
+  try {
+    mtimeMs = (await stat(path2)).mtimeMs;
+  } catch {
+    cache.delete(path2);
+    return void 0;
+  }
+  cache.set(path2, { mtimeMs, value: mtimeMs });
+  return mtimeMs;
+}
+function resolveReplayLogFile(workspaceDir, sessionId) {
+  return (0, import_path3.join)(workspaceDir, "sessions", sessionId, "replay.log");
+}
+async function readSessionActivityInputs(workspaceDir, sessionId, io = defaultIo) {
+  const startFile = resolveTurnStartFile(workspaceDir, sessionId);
+  const signalFile = resolveTurnSignalFile(workspaceDir, sessionId);
+  const replayLogFile = resolveReplayLogFile(workspaceDir, sessionId);
+  const [start, signal, lastOutputAt] = await Promise.all([
+    cachedRead(startCache, startFile, io.stat, io.readTurnStart),
+    cachedRead(signalCache, signalFile, io.stat, io.readTurnSignal),
+    cachedLastOutputAt(outputCache, replayLogFile, io.stat)
+  ]);
+  return {
+    startAt: start?.at,
+    endAt: signal?.at,
+    lastOutputAt
+  };
+}
+var import_fs3, import_path3, SILENCE_MS, PRIORITY, defaultIo, startCache, signalCache, outputCache;
+var init_sessionStatus = __esm({
+  "packages/core/src/sessionStatus.ts"() {
+    "use strict";
+    import_fs3 = require("fs");
+    import_path3 = require("path");
+    init_turnSignal();
+    SILENCE_MS = 6e4;
+    PRIORITY = ["unknown", "running", "done", "idle"];
+    defaultIo = {
+      stat: (path2) => import_fs3.promises.stat(path2),
+      readTurnStart,
+      readTurnSignal
     };
-    PROPOSAL_CAPS = {
-      title: DOC_CAPS.title,
-      summary: DOC_CAPS.summary,
-      body: DOC_CAPS.body,
-      maxPerPass: 12
-      // 한 패스가 만들 제안 상한 — 폭주 방지
-    };
-  }
-});
-
-// packages/core/src/globalMarkdown.ts
-function extractTitle(markdown) {
-  return String(markdown || "").match(/^#\s+(.+)$/m)?.[1]?.trim() || "";
-}
-function extractSummary(markdown) {
-  return String(markdown || "").match(/## Summary\s+([\s\S]*?)(?:\n## |$)/)?.[1]?.trim() || "";
-}
-function extractIndexEntries(markdown) {
-  const m = String(markdown || "").match(/## Index Entries\s+([\s\S]*?)(?:\n## |$)/);
-  if (!m?.[1]) return [];
-  return m[1].split(/\r?\n/).map((l) => l.trim()).filter((l) => l.startsWith("- ")).map((l) => l.slice(2).trim()).filter(Boolean);
-}
-var CATEGORY_ORDER;
-var init_globalMarkdown = __esm({
-  "packages/core/src/globalMarkdown.ts"() {
-    "use strict";
-    init_global();
-    CATEGORY_ORDER = [...GLOBAL_CATEGORIES, "general"];
-  }
-});
-
-// packages/core/src/globalValidate.ts
-var CATS;
-var init_globalValidate = __esm({
-  "packages/core/src/globalValidate.ts"() {
-    "use strict";
-    init_global();
-    CATS = new Set(GLOBAL_CATEGORIES);
-  }
-});
-
-// packages/core/src/globalStore.ts
-async function listDocRelPaths(dir, prefix = "") {
-  const entries = await import_node_fs.promises.readdir(dir, { withFileTypes: true }).catch(() => []);
-  const files = [];
-  for (const entry of entries) {
-    const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
-    if (entry.isDirectory()) files.push(...await listDocRelPaths((0, import_node_path2.join)(dir, entry.name), rel));
-    else if (entry.isFile() && entry.name.endsWith(".md")) files.push(rel);
-  }
-  return files.sort();
-}
-async function readProfileDocs(globalDir, profileId) {
-  const docsDir = profileDocsDir(globalDir, profileId);
-  const files = (await listDocRelPaths(docsDir)).filter((f) => !/(^|\/)index\.md$/i.test(f));
-  const recs = [];
-  for (const file of files) {
-    const raw = await import_node_fs.promises.readFile((0, import_node_path2.join)(docsDir, file), "utf8");
-    const category = file.includes("/") ? file.split("/")[0] : "general";
-    const slug = file.replace(/\.md$/i, "").split("/").slice(1).join("/") || file.replace(/\.md$/i, "");
-    const detailsMatch = raw.match(/## Details\s+([\s\S]*?)$/);
-    recs.push({
-      category,
-      slug,
-      title: extractTitle(raw),
-      summary: extractSummary(raw),
-      indexEntries: extractIndexEntries(raw),
-      body: detailsMatch?.[1]?.trim() || ""
-    });
-  }
-  return recs;
-}
-var import_node_fs, import_node_path2;
-var init_globalStore = __esm({
-  "packages/core/src/globalStore.ts"() {
-    "use strict";
-    import_node_fs = require("node:fs");
-    import_node_path2 = require("node:path");
-    init_fileLock();
-    init_globalPaths();
-    init_globalMarkdown();
-    init_globalValidate();
-  }
-});
-
-// packages/core/src/globalSearch.ts
-var globalSearch_exports = {};
-__export(globalSearch_exports, {
-  countTokenMatches: () => countTokenMatches,
-  exactPhraseScore: () => exactPhraseScore,
-  minimumUsefulScore: () => minimumUsefulScore,
-  resolveContext: () => resolveContext,
-  scoreDoc: () => scoreDoc,
-  tokenizeQuery: () => tokenizeQuery,
-  tokenizeRaw: () => tokenizeRaw
-});
-function tokenizeRaw(text) {
-  return String(text || "").toLowerCase().split(/[^\p{L}\p{N}]+/u).flatMap((t) => t.split(/(?<=[a-z0-9])(?=[가-힣])|(?<=[가-힣])(?=[a-z0-9])/u)).map((t) => t.trim()).filter((t) => t.length >= 2 && !STOP_WORDS.has(t));
-}
-function koreanVariant(token) {
-  if (!HANGUL.test(token)) return null;
-  for (const p of KOREAN_PARTICLES) {
-    if (token.length > p.length && token.endsWith(p)) {
-      const stem = token.slice(0, token.length - p.length);
-      if (stem.length >= 2) return stem;
-    }
-  }
-  return null;
-}
-function tokenizeQuery(query) {
-  const out = /* @__PURE__ */ new Set();
-  for (const tok of tokenizeRaw(query)) {
-    const v = koreanVariant(tok);
-    if (v && STOP_WORDS.has(v)) continue;
-    out.add(tok);
-    if (v) out.add(v);
-  }
-  return [...out];
-}
-function countTokenMatches(text, tokens) {
-  const haystack = String(text || "").toLowerCase();
-  let sum = 0;
-  for (const token of tokens) {
-    if (HANGUL.test(token)) {
-      if (token.length >= 2 && haystack.includes(token)) sum += 1;
-      continue;
-    }
-    const re = new RegExp(`(?<![a-z0-9])${escapeRegExp(token)}(?![a-z0-9])`);
-    if (re.test(haystack)) {
-      sum += 1;
-    } else if (token.length >= 9) {
-      const stem = escapeRegExp(token.slice(0, 7));
-      if (new RegExp(`\\b${stem}[a-z]*\\b`).test(haystack)) sum += 1;
-    }
-  }
-  return sum;
-}
-function escapeRegExp(s) {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-function exactPhraseScore(text, query) {
-  const phrase = String(query || "").trim().toLowerCase();
-  if (phrase.length < 3) return 0;
-  return String(text || "").toLowerCase().includes(phrase) ? 1 : 0;
-}
-function scoreDoc(rec, tokens) {
-  const label = rec.indexEntries.join(" ");
-  const path2 = `${rec.category}/${rec.slug}`;
-  let score = 0;
-  score += countTokenMatches(label, tokens) * 10;
-  score += countTokenMatches(rec.title, tokens) * 7;
-  score += countTokenMatches(rec.summary, tokens) * 5;
-  score += countTokenMatches(rec.category, tokens) * 2;
-  score += countTokenMatches(path2, tokens) * 2;
-  score += countTokenMatches(rec.body, tokens) * 1;
-  return score;
-}
-function minimumUsefulScore(tokens) {
-  return tokens.length <= 1 ? 1 : 2;
-}
-async function resolveContext(globalDir, profileId, query, opts) {
-  const tokens = tokenizeQuery(query);
-  if (tokens.length === 0) return [];
-  const minScore = minimumUsefulScore(tokens);
-  const phrase = String(query || "").trim().toLowerCase();
-  const docs = await readProfileDocs(globalDir, profileId);
-  const scored = [];
-  for (const rec of docs) {
-    let score = scoreDoc(rec, tokens);
-    score += exactPhraseScore(`${rec.title} ${rec.summary} ${rec.indexEntries.join(" ")}`, phrase) * 3;
-    if (score < minScore) continue;
-    scored.push({ category: rec.category, slug: rec.slug, title: rec.title, summary: rec.summary, score });
-  }
-  scored.sort((a, b) => b.score - a.score || a.title.localeCompare(b.title));
-  return scored.slice(0, opts?.topN ?? 5);
-}
-var STOP_WORDS, KOREAN_PARTICLES, HANGUL;
-var init_globalSearch = __esm({
-  "packages/core/src/globalSearch.ts"() {
-    "use strict";
-    init_globalStore();
-    STOP_WORDS = /* @__PURE__ */ new Set([
-      // 영어 기능어
-      "the",
-      "a",
-      "an",
-      "of",
-      "to",
-      "in",
-      "on",
-      "for",
-      "and",
-      "or",
-      "is",
-      "are",
-      "be",
-      "this",
-      "that",
-      "it",
-      "as",
-      "at",
-      "by",
-      "with",
-      // 한국어 의문사·지시어 (1글자는 토크나이저가 이미 제거 → 2음절↑만 등록)
-      "\uC5B4\uB5BB\uAC8C",
-      "\uBB34\uC5C7",
-      "\uBB34\uC2A8",
-      "\uC5B4\uB5A4",
-      "\uC5B4\uB290",
-      "\uC5B4\uB514",
-      "\uC5B8\uC81C",
-      "\uB204\uAD6C",
-      "\uC5BC\uB9C8",
-      // 한국어 기능어·형식명사·흔한 동사(보수적: recall 보호 위해 '작업·사용·처리' 등은 제외)
-      "\uBC29\uBC95",
-      "\uACBD\uC6B0",
-      "\uC815\uB3C4",
-      "\uB54C\uBB38",
-      "\uD1B5\uD574",
-      "\uC704\uD574",
-      "\uB300\uD574",
-      "\uAD00\uD574",
-      "\uC790\uCCB4",
-      "\uC9C4\uD589",
-      "\uD655\uC778"
-    ]);
-    KOREAN_PARTICLES = [
-      "\uC73C\uB85C",
-      "\uC5D0\uC11C",
-      "\uAE4C\uC9C0",
-      "\uBD80\uD130",
-      "\uC5D0\uAC8C",
-      "\uD55C\uD14C",
-      "\uCC98\uB7FC",
-      "\uBCF4\uB2E4",
-      "\uB9C8\uB2E4",
-      "\uC870\uCC28",
-      "\uBC16\uC5D0",
-      "\uC744",
-      "\uB97C",
-      "\uC774",
-      "\uAC00",
-      "\uC740",
-      "\uB294",
-      "\uC5D0",
-      "\uC758",
-      "\uB85C",
-      "\uB3C4",
-      "\uB9CC",
-      "\uACFC",
-      "\uC640",
-      "\uB791",
-      "\uBA70",
-      "\uD558\uB2E4",
-      "\uD588\uB2E4",
-      "\uD558\uB294",
-      "\uD558\uACE0"
-    ];
-    HANGUL = /[가-힣]/;
+    startCache = /* @__PURE__ */ new Map();
+    signalCache = /* @__PURE__ */ new Map();
+    outputCache = /* @__PURE__ */ new Map();
   }
 });
 
 // packages/core/src/globalInject.ts
 var globalInject_exports = {};
 __export(globalInject_exports, {
-  extractPromptFromStdin: () => extractPromptFromStdin,
-  extractSessionIdFromStdin: () => extractSessionIdFromStdin,
-  renderGlobalMatches: () => renderGlobalMatches,
-  resolveQuery: () => resolveQuery
+  extractSessionIdFromStdin: () => extractSessionIdFromStdin
 });
-function extractPromptFromStdin(stdinRaw) {
-  if (!stdinRaw || !stdinRaw.trim()) return "";
-  let obj;
-  try {
-    obj = JSON.parse(stdinRaw);
-  } catch {
-    return "";
-  }
-  if (!obj || typeof obj !== "object") return "";
-  const rec = obj;
-  for (const k of PROMPT_FIELDS) {
-    const v = rec[k];
-    if (typeof v === "string" && v.trim()) return v;
-  }
-  return "";
-}
-function resolveQuery(stdinRaw, lastUserTurn) {
-  const fromStdin = extractPromptFromStdin(stdinRaw);
-  if (fromStdin) return fromStdin;
-  return lastUserTurn || "";
-}
-function truncate(s, n) {
-  if (typeof s !== "string") return "";
-  return s.length <= n ? s : s.slice(0, n) + "\u2026";
-}
-function renderGlobalMatches(matches) {
-  if (!Array.isArray(matches) || matches.length === 0) return "";
-  const lines = ["## Global memory (long-term \u2014 relevant to this prompt)", ""];
-  for (const m of matches) {
-    const summary = m.summary ? " \u2014 " + truncate(m.summary, 200) : "";
-    lines.push("- **" + m.title + "** (" + m.category + ")" + summary);
-  }
-  return lines.join("\n");
-}
 function extractSessionIdFromStdin(stdinRaw, agent) {
   if (!stdinRaw || !stdinRaw.trim()) return "";
   let obj;
@@ -404,11 +290,9 @@ function extractSessionIdFromStdin(stdinRaw, agent) {
   }
   return "";
 }
-var PROMPT_FIELDS;
 var init_globalInject = __esm({
   "packages/core/src/globalInject.ts"() {
     "use strict";
-    PROMPT_FIELDS = ["prompt", "user_prompt", "userPrompt", "input", "message", "text"];
   }
 });
 
@@ -433,12 +317,228 @@ var init_contextTag = __esm({
   }
 });
 
+// packages/core/src/skillTemplate.ts
+var skillTemplate_exports = {};
+__export(skillTemplate_exports, {
+  SKILL_DIR_NAME: () => SKILL_DIR_NAME,
+  SKILL_VERSION: () => SKILL_VERSION,
+  renderRunPrefix: () => renderRunPrefix,
+  renderSkillMarkdown: () => renderSkillMarkdown
+});
+function quote(p) {
+  return /[\s'"$`\\]/.test(p) ? `'${p.replace(/'/g, `'\\''`)}'` : p;
+}
+function renderRunPrefix(opts) {
+  return `${quote(opts.execPath)} ${quote(opts.cliPath)}`;
+}
+function renderSkillMarkdown(opts) {
+  const run = renderRunPrefix(opts);
+  return `---
+name: agentbridge
+description: >-
+  Use when the user refers to earlier work or an earlier session ("\uC544\uAE4C \uADF8\uAC70",
+  "what we decided", "continue where we left off"), when starting a task in a
+  project not seen this session, when the answer turns on how this user works
+  (style, tooling, workflow, conventions) or on this repository's own rules,
+  when the user states something durable worth remembering, or when a context
+  or memory command fails and the wiring may be broken. Also use whenever the
+  user asks to run work in another agent session \u2014 "\uC11C\uBE0C\uC5D0\uC774\uC804\uD2B8 \uB744\uC6CC", "\uC11C\uBE0C
+  \uB744\uC6CC\uC11C ~\uD558\uAC8C \uD574", "spawn a subagent", "run this in codex/claude/agy", "get a
+  second opinion from another model", "run these in parallel" \u2014 or asks about
+  subagents already started ("\uC11C\uBE0C \uB05D\uB0AC\uC5B4?", "\uBCF4\uACE0 \uC77D\uC5B4\uC918", "what did it say").
+---
+
+# AgentBridge
+
+AgentBridge keeps working context across sessions and across coding agents.
+None of it is in your prompt. If you do not run a command, you do not have it.
+
+Every command is:
+
+    ${run} <command>
+
+The environment identifies the session \u2014 do not pass paths or ids.
+
+## When to run what
+
+Run these when the condition holds, not "if it seems useful":
+
+- **Starting work on this project this session** \u2014 \`context\`
+- **The user refers to something from before** ("\uC544\uAE4C \uADF8\uAC70", "what we decided",
+  "continue where we left off") \u2014 \`turns --last 5\`
+- **A question about a past decision's rationale, or how this user wants things
+  done** (style, tooling, workflow, conventions) \u2014 \`memory search "<query>"\`
+- **A question about this repository's own rules or history** \u2014
+  \`memory project\`
+- **Before recording anything** \u2014 read first, see below
+
+\`memory search\` is the normal lookup. Reading everything is for the write path.
+
+## Commands
+
+Each line is the part after the run command.
+
+    context                       compacted state of the current project
+    turns --last 5                raw recent conversation
+    memory search "<query>"       search both user and project knowledge
+    memory user                   the user's durable preferences (summaries)
+    memory user --full            ... with full bodies
+    memory project                what is durable about this repository
+    memory add --scope user|project --category <c> \\
+        --title "..." --summary "..." --body "..."
+    memory update <id> [same flags]
+
+Categories: role, repos, domain, workflows, conventions, infra, verification.
+
+## Subagents
+
+You can run other coding agents as subagents. Each gets its own session and
+tab; you give it work, it reports back, you read the report.
+
+    agent start --prompt "..." [--harness claude,codex,agy] [--isolate]
+    agent list                    the subs you started, and their state
+    agent check [--wait] [--for <seconds>]
+    agent read <name> [--last N]  that sub's full conversation
+    agent diff <name> [--stat]    what that sub actually changed
+    agent send <name> --prompt "..."
+    agent merge <name>            put its changes into the real folder
+    agent stop <name>             end it
+    agent close <name>            end it and clean up what it left
+    agent close --round           clean up the round: everything but the one
+                                  you merged
+
+\`agent start\` returns the names it issued \u2014 that is what the other commands
+take. Default harness is claude; pass several to run the same prompt on each.
+
+\`--isolate\` gives the sub its own git worktree, so several subs can edit files
+without colliding. Skip it for research or review \u2014 a fresh checkout has no
+dependencies and no instruction files, and paying that cost buys nothing when
+nothing is edited. Isolated subs must be closed with \`agent close\` when the
+round is over; that removes the worktree and its branch and tells you how to
+recover the work.
+
+When a round is over \u2014 you picked a result, or the work is dropped \u2014 call
+\`agent close --round\`. It removes every sub you started except the most
+recently merged one, which stays because it is the branch you adopted and the
+one you are most likely to keep working with. The next \`--round\` takes that one
+too. Calling it is how the subs from a round stop accumulating.
+
+Reviewing a sub means putting two things side by side: what it says it did
+(\`agent read\`) and what actually changed (\`agent diff\`). One without the other
+is not a review. For a sub that ran without \`--isolate\`, the diff is the whole
+folder as it stands now \u2014 your own edits and the user's are in there too.
+
+\`agent merge\` takes an isolated sub's changes out of its worktree and lays them
+on the real folder. All of them or none \u2014 if it cannot apply cleanly, nothing is
+touched and you get the list of files that clashed. It does not commit, does not
+move history, and does not end the sub. Partial picks are not supported: read
+both diffs and write the combination yourself.
+
+A sub does not tell you when it is done. Either \`agent check --wait\`, which
+returns as soon as one finishes (up to a minute, \`--for\` raises it), or go do
+something else \u2014 the next turn tells you how many finished subs are unread.
+Reading a report with \`agent read\` is what clears that.
+
+A sub can also go quiet without finishing: the user interrupted its turn, or it
+is stuck waiting on something. \`check\` and the next-turn line both report those
+separately from finished ones. That state is what we observed, not a verdict \u2014
+read the sub to see how far it got, then send it more instructions or close it.
+
+Every read output item starts with its identifier (\`<category>/<slug>\`) \u2014
+that is what \`memory update\` takes.
+
+## Recording something
+
+When the user states a durable preference, a convention, or a decision that
+should outlive this session:
+
+1. Pick the scope. One test: is this about **how the user works or who they
+   are** (\`--scope user\`), or about **what this repository is** (\`--scope
+   project\`) \u2014 its purpose, domain, architecture decisions, release process,
+   house rules? A user fact must still read correctly inside a completely
+   different project. The same category appears on both sides: a rule this
+   repository enforces is project scope, a rule the user applies everywhere is
+   user scope. When in doubt, prefer \`project\` \u2014 the narrower home.
+2. Read that side in full \u2014 \`memory user --full\` or \`memory project --full\`.
+   Not a search: you need everything to know whether this is new. Read only the
+   side you picked.
+3. Nothing covers it \u2014 \`memory add\`. Something covers it \u2014
+   \`memory update <id>\`, passing only the flags you are changing.
+
+Both go to a queue the user approves. They do not appear in reads until then.
+
+Record what would change how someone works next time \u2014 not what the repository
+already says, not what only matters in this conversation.
+
+## Outside AgentBridge
+
+In a session AgentBridge did not open they print nothing and exit 0. Expected,
+not an error.
+
+<!-- @agentbridge-skill-version ${SKILL_VERSION} -->
+`;
+}
+var SKILL_VERSION, SKILL_DIR_NAME;
+var init_skillTemplate = __esm({
+  "packages/core/src/skillTemplate.ts"() {
+    "use strict";
+    SKILL_VERSION = "0.5.7";
+    SKILL_DIR_NAME = "agentbridge";
+  }
+});
+
 // packages/core/bin/agentbridge-memory.js
-var fs = require("fs");
+var fs4 = require("fs");
 var path = require("path");
-var { resolveContext: resolveContext2 } = (init_globalSearch(), __toCommonJS(globalSearch_exports));
-var { resolveQuery: resolveQuery2, renderGlobalMatches: renderGlobalMatches2, extractSessionIdFromStdin: extractSessionIdFromStdin2 } = (init_globalInject(), __toCommonJS(globalInject_exports));
+var { isUnread: isUnread2 } = (init_reportState(), __toCommonJS(reportState_exports));
+var { computeSessionActivity: computeSessionActivity2, readSessionActivityInputs: readSessionActivityInputs2 } = (init_sessionStatus(), __toCommonJS(sessionStatus_exports));
+var { extractSessionIdFromStdin: extractSessionIdFromStdin2 } = (init_globalInject(), __toCommonJS(globalInject_exports));
 var { wrapInjectedContext: wrapInjectedContext2 } = (init_contextTag(), __toCommonJS(contextTag_exports));
+var { renderRunPrefix: renderRunPrefix2 } = (init_skillTemplate(), __toCommonJS(skillTemplate_exports));
+var TERMINATION_EVENTS = /* @__PURE__ */ new Set(["Stop", "StopFailure"]);
+var INJECTION_EVENTS = /* @__PURE__ */ new Set(["UserPromptSubmit", "PreInvocation"]);
+function writeHookError(wsDir, agent, event, message) {
+  try {
+    const token = process.env.AGENTBRIDGE_WS_SESSION || "";
+    if (!wsDir || !token || token !== path.basename(token)) return;
+    const dir = path.join(wsDir, "sessions", token);
+    fs4.mkdirSync(dir, { recursive: true });
+    const out = path.join(dir, "hook-error.json");
+    const tmp = out + "." + process.pid + ".tmp";
+    fs4.writeFileSync(tmp, JSON.stringify({ agent, event, message: String(message), at: Date.now() }));
+    fs4.renameSync(tmp, out);
+  } catch {
+  }
+}
+function buildTurnSignal(agent, event, payload) {
+  const p = payload && typeof payload === "object" ? payload : {};
+  const str2 = (v) => typeof v === "string" && v.trim() ? v : "";
+  if (agent === "agy") {
+    return {
+      agent,
+      event,
+      sessionId: str2(p.conversationId) || str2(p.conversation_id),
+      transcriptPath: str2(p.transcriptPath) || str2(p.transcript_path),
+      // 배경 작업이 남아 있으면 턴이 아직 안 끝났다.
+      complete: p.fullyIdle === true,
+      terminationReason: str2(p.terminationReason),
+      error: str2(p.error),
+      at: Date.now()
+    };
+  }
+  return {
+    agent,
+    event,
+    sessionId: str2(p.session_id),
+    transcriptPath: str2(p.transcript_path),
+    // 자식(서브에이전트) 신호는 부모 턴이 아니다. Stop 스키마엔 원래 없지만 방어로 싣는다.
+    agentId: str2(p.agent_id),
+    // claude는 API·모델 오류로 끊기면 Stop 대신 StopFailure가 온다 (research 04 §1).
+    complete: event !== "StopFailure",
+    error: str2(p.error),
+    at: Date.now()
+  };
+}
 var ALLOWED_EVENTS = /* @__PURE__ */ new Set([
   "SessionStart",
   "UserPromptSubmit",
@@ -446,6 +546,7 @@ var ALLOWED_EVENTS = /* @__PURE__ */ new Set([
   "PreToolUse",
   "PostToolUse",
   "Stop",
+  "StopFailure",
   "PreInvocation",
   "PostInvocation"
 ]);
@@ -453,8 +554,6 @@ function parseArgs(argv) {
   const out = {
     cmd: argv[0] || null,
     agent: null,
-    workspace: null,
-    userData: null,
     event: null
   };
   for (let i = 1; i < argv.length; i++) {
@@ -462,12 +561,6 @@ function parseArgs(argv) {
     const next = argv[i + 1];
     if (a === "--agent" && next) {
       out.agent = next;
-      i++;
-    } else if (a === "--workspace" && next) {
-      out.workspace = next;
-      i++;
-    } else if (a === "--user-data" && next) {
-      out.userData = next;
       i++;
     } else if (a === "--event" && next) {
       out.event = next;
@@ -509,189 +602,89 @@ function readStdin(timeoutMs) {
     });
   });
 }
-function readJsonSafe(p) {
+async function buildSubagentLine(wsDir, sessionToken, run) {
+  if (!sessionToken || sessionToken !== path.basename(sessionToken)) return "";
+  let sessions = [];
   try {
-    const raw = fs.readFileSync(p, "utf8");
-    if (!raw.trim()) return null;
-    return JSON.parse(raw);
+    sessions = JSON.parse(fs4.readFileSync(path.join(wsDir, "workspace.json"), "utf8")).sessions || [];
   } catch {
-    return null;
+    return "";
   }
-}
-function readRecentTurns(p, n) {
-  let raw;
-  try {
-    raw = fs.readFileSync(p, "utf8");
-  } catch {
-    return [];
-  }
-  const lines = raw.split("\n");
-  const out = [];
-  for (const line of lines) {
-    const t = line.trim();
-    if (!t) continue;
+  const mine = sessions.filter(
+    (s) => s.parentSessionId === sessionToken && s.agentName && !s.cleanedAt
+  );
+  if (mine.length === 0) return "";
+  const unread = [];
+  const stuck = [];
+  for (const s of mine) {
+    if (await isUnread2(wsDir, s.sessionId)) {
+      unread.push(s.agentName);
+      continue;
+    }
+    if (s.closedAt !== null) continue;
     try {
-      const obj = JSON.parse(t);
-      if (obj && typeof obj === "object" && typeof obj.id === "string") out.push(obj);
+      const inputs = await readSessionActivityInputs2(wsDir, s.sessionId);
+      if (computeSessionActivity2(inputs, Date.now()) === "unknown") stuck.push(s.agentName);
     } catch {
     }
   }
-  if (n <= 0 || out.length <= n) return out;
-  return out.slice(out.length - n);
-}
-function fmtList(items, indent) {
-  indent = indent || "";
-  if (!Array.isArray(items) || items.length === 0) return indent + "(none)";
-  return items.map((s) => indent + "- " + s).join("\n");
-}
-function renderIntent(ir) {
-  const intent = ir && ir.intent || {};
-  const lines = ["goal: " + (intent.goal || "(unset)")];
-  if (intent.role) lines.push("role: " + intent.role);
-  if (Array.isArray(intent.constraints) && intent.constraints.length > 0) {
-    lines.push("constraints:");
-    lines.push(fmtList(intent.constraints, "  "));
+  if (unread.length === 0 && stuck.length === 0) return "";
+  const parts = [];
+  if (unread.length > 0) {
+    parts.push(
+      unread.length + " subagent report(s) finished and unread (" + unread.join(", ") + "). Read with `" + run + " agent read <name>`."
+    );
   }
-  return lines.join("\n");
-}
-function renderDecisions(ir) {
-  const ds = ir && ir.decisions || [];
-  if (ds.length === 0) return "(no decisions)";
-  return ds.slice(-10).map((d) => {
-    const head = d.topic ? d.topic + " \u2192 " + d.choice : d.choice;
-    const lines = ["- " + head];
-    if (d.rationale) lines.push("  rationale: " + d.rationale);
-    return lines.join("\n");
-  }).join("\n");
-}
-function renderFiles(ir) {
-  const fs2 = ir && ir.files || [];
-  if (fs2.length === 0) return "(no file changes)";
-  return fs2.slice(-15).map((f) => "- [" + f.status + "] " + f.path + (f.summary ? " \u2014 " + f.summary : "")).join("\n");
-}
-function renderCommands(ir) {
-  const cs = ir && ir.commands || [];
-  if (cs.length === 0) return "(no commands run)";
-  return cs.slice(-10).map((c) => {
-    const head = "- `" + c.cmd + "`";
-    const ec = c.exitCode != null ? " (exit " + c.exitCode + ")" : "";
-    const sum = c.summary ? " \u2014 " + c.summary : "";
-    return head + ec + sum;
-  }).join("\n");
-}
-function renderTests(ir) {
-  const ts = ir && ir.tests || [];
-  if (ts.length === 0) return "(no test results)";
-  return ts.slice(-5).map(
-    (t) => "- [" + t.status + "] " + t.name + (t.failureSummary ? " \u2014 " + t.failureSummary : "")
-  ).join("\n");
-}
-function renderPending(ir) {
-  const ps = ir && ir.pending || [];
-  if (ps.length === 0) return "(no pending items)";
-  return ps.slice(-5).map((p) => {
-    const lines = ["- " + p.task];
-    if (Array.isArray(p.blockers) && p.blockers.length > 0) {
-      lines.push("  blockers: " + p.blockers.join(", "));
-    }
-    if (p.nextStep) lines.push("  next: " + p.nextStep);
-    return lines.join("\n");
-  }).join("\n");
-}
-var HOOK_INSTRUCTIONS = [
-  "The following block is working context maintained and compacted by AgentBridge.",
-  "",
-  "Handling rules:",
-  '1. Do NOT refer to this block as a separate artifact (no "the IR", "you provided", "the context above", etc.). Treat it as natural conversation continuity \u2014 the user is already aware of its contents.',
-  "2. Do NOT summarize or re-quote the IR unless the user asks. You may draw on it naturally when needed for accuracy.",
-  "3. Project memory files (AGENTS.md / GEMINI.md / CLAUDE.md) keep their normal authority. On conflict with the IR, prefer the most recent user intent; if unsure, ask the user to confirm.",
-  "4. **Respond in the same language the user uses in their question.** If the user writes Korean, reply in Korean. If English, reply in English. Mixed sessions follow the most recent user turn. This applies to the model reply only \u2014 IR data and structural enum values stay as recorded."
-].join("\n");
-function truncate2(s, n) {
-  if (typeof s !== "string") return "";
-  if (s.length <= n) return s;
-  return s.slice(0, n) + "\u2026";
-}
-function renderRecentTurns(turns) {
-  if (!Array.isArray(turns) || turns.length === 0) return "(no recent turns)";
-  const lines = [];
-  for (let i = 0; i < turns.length; i++) {
-    const t = turns[i];
-    const idx = turns.length - turns.length + i + 1;
-    lines.push("[Turn " + idx + " \xB7 " + (t.model || "?") + " \xB7 " + (t.completedAt || "") + "]");
-    lines.push("user: " + truncate2(t.user || "", 1200));
-    lines.push("assistant: " + truncate2(t.assistantBody || "", 1200));
-    if (Array.isArray(t.toolCalls) && t.toolCalls.length > 0) {
-      const tc = t.toolCalls.slice(0, 5).map((c) => "  - " + (c.tool || "?") + "(" + truncate2(c.arg || "", 80) + ")").join("\n");
-      lines.push("tools:");
-      lines.push(tc);
-    }
-    if (i < turns.length - 1) lines.push("");
+  if (stuck.length > 0) {
+    parts.push(
+      stuck.length + " subagent(s) went quiet without finishing (" + stuck.join(", ") + ") \u2014 the user may have interrupted them, or they may be stuck. Check with `" + run + " agent read <name>`, then send more instructions or close them."
+    );
   }
-  return lines.join("\n");
+  return "\n\n" + parts.join("\n");
 }
-function buildAdditionalContext(ir, recentTurns, workspaceId, globalBlock) {
-  const hasTurns = Array.isArray(recentTurns) && recentTurns.length > 0;
-  const hasGlobal = !!(globalBlock && globalBlock.trim());
-  if (!ir && !hasTurns && !hasGlobal) {
-    return wrapInjectedContext2([
-      HOOK_INSTRUCTIONS,
-      "",
-      "## AgentBridge context (memory uninitialized)",
-      "Workspace " + workspaceId + " has no compacted memory (IR) or turn history yet.",
-      "This hook will accumulate from the next turn onward and compact into an IR."
-    ].join("\n"));
-  }
-  const parts = [HOOK_INSTRUCTIONS, ""];
-  if (hasGlobal) {
-    parts.push(globalBlock);
-    parts.push("");
-  }
-  if (ir) {
-    parts.push("## Memory (compacted \u2014 IR)");
-    parts.push("");
-    parts.push("### Intent");
-    parts.push(renderIntent(ir));
-    parts.push("");
-    parts.push("### Decisions");
-    parts.push(renderDecisions(ir));
-    parts.push("");
-    parts.push("### Files");
-    parts.push(renderFiles(ir));
-    parts.push("");
-    parts.push("### Commands");
-    parts.push(renderCommands(ir));
-    parts.push("");
-    parts.push("### Tests");
-    parts.push(renderTests(ir));
-    parts.push("");
-    parts.push("### Pending");
-    parts.push(renderPending(ir));
-    parts.push("");
-  } else if (hasTurns) {
-    parts.push("## Memory (IR uninitialized \u2014 only recent turns available)");
-    parts.push("");
-  }
-  if (hasTurns) {
-    parts.push("## Recent conversation (raw, last " + recentTurns.length + " turns, newest first)");
-    parts.push(renderRecentTurns(recentTurns.slice().reverse()));
-  }
-  return wrapInjectedContext2(parts.join("\n"));
+function buildInstructions(storageRoot) {
+  const run = renderRunPrefix2({
+    execPath: process.execPath,
+    cliPath: path.join(storageRoot, "bin", "agentbridge.js")
+  });
+  return [
+    "AgentBridge carries working context across sessions and across coding agents.",
+    "None of it is in this prompt. Run a command to see it:",
+    "",
+    "    " + run + " <command>",
+    "",
+    'Run these when the condition holds, not "if it seems useful":',
+    "",
+    "- Starting work on this project this session \u2014 `context`",
+    '- The user refers to something from before ("\uC544\uAE4C \uADF8\uAC70", "what we decided",',
+    '  "continue where we left off") \u2014 `turns --last 5`',
+    "- A question about a past decision's rationale, or how this user wants things done",
+    '  (style, tooling, workflow, conventions) \u2014 `memory search "<query>"`',
+    "- A question about this repository's own rules or history \u2014 `memory project`",
+    "- The user states something durable (a preference, a convention, a decision that should",
+    "  outlive this session) \u2014 read that side in full first, then `memory add` or",
+    "  `memory update <id>`. Both go to a queue the user approves.",
+    '- The user asks for work to run in another agent session \u2014 "\uC11C\uBE0C\uC5D0\uC774\uC804\uD2B8 \uB744\uC6CC", spawn a',
+    "  subagent, run it in another harness, a second opinion, several in parallel \u2014",
+    '  `agent start --prompt "..." [--harness claude,codex,agy]`. These are AgentBridge',
+    "  sessions with their own tabs, not your own built-in subagent tool. Follow up with",
+    '  `agent check`, `agent read <name>`, `agent send <name> --prompt "..."`.',
+    "",
+    "Run `status` if a command fails and you need to know whether the wiring is alive.",
+    "",
+    "Respond in the language the user writes in. Mixed sessions follow the most recent turn."
+  ].join("\n");
 }
 async function main() {
   const parsed = parseArgs(process.argv.slice(2));
   if (parsed.cmd !== "inject") {
     process.stderr.write(
-      "agentbridge-memory: usage: inject --agent <kind> --workspace <id> --user-data <path> --event <name>\n"
+      "agentbridge-memory: usage: inject --agent <claude|codex|agy> --event <name>\n"
     );
     process.exit(2);
   }
   if (parsed.agent !== "claude" && parsed.agent !== "codex" && parsed.agent !== "agy") {
     process.stderr.write("agentbridge-memory: --agent must be claude|codex|agy\n");
-    process.exit(2);
-  }
-  if (!parsed.workspace) {
-    process.stderr.write("agentbridge-memory: --workspace required\n");
     process.exit(2);
   }
   if (!parsed.event || !ALLOWED_EVENTS.has(parsed.event)) {
@@ -700,24 +693,26 @@ async function main() {
     );
     process.exit(2);
   }
-  if (!parsed.userData) {
-    process.stderr.write(
-      "agentbridge-memory: --user-data required (stale or broken hook command \u2014 reopen the session in the app to reinstall hooks)\n"
-    );
+  const realpath = (v) => {
+    try {
+      return fs4.realpathSync(v);
+    } catch {
+      return path.resolve(v);
+    }
+  };
+  const storageRoot = realpath(path.dirname(path.dirname(__filename)));
+  const wsDir = process.env.AGENTBRIDGE_WS_DIR ? realpath(process.env.AGENTBRIDGE_WS_DIR) : "";
+  if (!wsDir) {
     process.stdout.write(JSON.stringify(buildHookOutput(parsed.agent, parsed.event, "")));
     process.exit(0);
   }
-  const userData = parsed.userData;
-  if (parsed.workspace !== path.basename(parsed.workspace) || parsed.workspace === "..") {
-    process.stderr.write("agentbridge-memory: --workspace must be a single path segment\n");
+  const rel = path.relative(storageRoot, wsDir);
+  if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) {
+    process.stderr.write("agentbridge-memory: AGENTBRIDGE_WS_DIR must live under the storage root\n");
+    writeHookError(wsDir, parsed.agent, parsed.event, "AGENTBRIDGE_WS_DIR\uAC00 \uC800\uC7A5\uC18C \uB8E8\uD2B8 \uBC16\uC744 \uAC00\uB9AC\uD0A8\uB2E4");
     process.stdout.write(JSON.stringify(buildHookOutput(parsed.agent, parsed.event, "")));
     process.exit(0);
   }
-  const wsDir = path.join(userData, "workspaces", parsed.workspace);
-  const irPath = path.join(wsDir, "ir.json");
-  const turnsPath = path.join(wsDir, "turns.jsonl");
-  const ir = readJsonSafe(irPath);
-  const recentTurns = readRecentTurns(turnsPath, 3);
   const stdinRaw = await readStdin(200);
   try {
     const token = process.env.AGENTBRIDGE_WS_SESSION || "";
@@ -727,9 +722,11 @@ async function main() {
       else if (parsed.agent === "codex") sid = process.env.CODEX_THREAD_ID || "";
     }
     if (parsed.agent !== "claude" && token && sid && token === path.basename(token)) {
-      const out = path.join(wsDir, "sessions", token, "captured.json");
+      const dir = path.join(wsDir, "sessions", token);
+      fs4.mkdirSync(dir, { recursive: true });
+      const out = path.join(dir, "captured.json");
       const tmp = out + "." + process.pid + ".tmp";
-      fs.writeFileSync(
+      fs4.writeFileSync(
         tmp,
         JSON.stringify({
           agent: parsed.agent,
@@ -738,40 +735,82 @@ async function main() {
           capturedAt: Date.now()
         })
       );
-      fs.renameSync(tmp, out);
+      fs4.renameSync(tmp, out);
     }
   } catch (e) {
-    process.stderr.write(
-      "agentbridge-memory: capture write skipped \u2014 " + String(e && e.message ? e.message : e) + "\n"
-    );
+    const msg = String(e && e.message ? e.message : e);
+    process.stderr.write("agentbridge-memory: capture write skipped \u2014 " + msg + "\n");
+    writeHookError(wsDir, parsed.agent, parsed.event, "\uC138\uC158 id \uCEA1\uCC98 \uC2E4\uD328 \u2014 " + msg);
   }
-  let globalBlock = "";
+  if (INJECTION_EVENTS.has(parsed.event)) {
+    try {
+      const token = process.env.AGENTBRIDGE_WS_SESSION || "";
+      if (token && token === path.basename(token)) {
+        const sid = extractSessionIdFromStdin2(stdinRaw, parsed.agent);
+        const dir = path.join(wsDir, "sessions", token);
+        fs4.mkdirSync(dir, { recursive: true });
+        const out = path.join(dir, "turn-start.json");
+        const tmp = out + "." + process.pid + ".tmp";
+        fs4.writeFileSync(
+          tmp,
+          JSON.stringify({ agent: parsed.agent, event: parsed.event, sessionId: sid, at: Date.now() })
+        );
+        fs4.renameSync(tmp, out);
+      }
+    } catch (e) {
+      const msg = String(e && e.message ? e.message : e);
+      process.stderr.write("agentbridge-memory: turn start write skipped \u2014 " + msg + "\n");
+      writeHookError(wsDir, parsed.agent, parsed.event, "\uD134 \uC2DC\uC791 \uC2E0\uD638 \uC4F0\uAE30 \uC2E4\uD328 \u2014 " + msg);
+    }
+  }
+  if (TERMINATION_EVENTS.has(parsed.event)) {
+    try {
+      const token = process.env.AGENTBRIDGE_WS_SESSION || "";
+      if (token && token === path.basename(token)) {
+        let payload = null;
+        try {
+          payload = JSON.parse(stdinRaw);
+        } catch {
+          payload = null;
+        }
+        const dir = path.join(wsDir, "sessions", token);
+        fs4.mkdirSync(dir, { recursive: true });
+        const out = path.join(dir, "turn-signal.json");
+        const tmp = out + "." + process.pid + ".tmp";
+        fs4.writeFileSync(tmp, JSON.stringify(buildTurnSignal(parsed.agent, parsed.event, payload)));
+        fs4.renameSync(tmp, out);
+      }
+    } catch (e) {
+      const msg = String(e && e.message ? e.message : e);
+      process.stderr.write("agentbridge-memory: turn signal write skipped \u2014 " + msg + "\n");
+      writeHookError(wsDir, parsed.agent, parsed.event, "\uD134 \uC885\uB8CC \uC2E0\uD638 \uC4F0\uAE30 \uC2E4\uD328 \u2014 " + msg);
+    }
+    process.stdout.write(JSON.stringify(buildTerminationOutput(parsed.agent)));
+    process.exit(0);
+  }
+  const run = renderRunPrefix2({
+    execPath: process.execPath,
+    cliPath: path.join(storageRoot, "bin", "agentbridge.js")
+  });
+  let subagentLine = "";
   try {
-    const lastTurn = recentTurns.length ? recentTurns[recentTurns.length - 1] : null;
-    const lastUserTurn = lastTurn && typeof lastTurn.user === "string" ? lastTurn.user : "";
-    const query = resolveQuery2(stdinRaw, lastUserTurn);
-    if (query && query.trim()) {
-      const globalDir = path.join(userData, "global");
-      const matches = await resolveContext2(globalDir, "default", query, { topN: 5 });
-      globalBlock = renderGlobalMatches2(matches);
-    }
-  } catch (e) {
-    process.stderr.write(
-      "agentbridge-memory: global search skipped \u2014 " + String(e && e.message ? e.message : e) + "\n"
-    );
-    globalBlock = "";
-  }
-  const INJECT_BYTE_LIMIT = 9 * 1024;
-  let injTurns = recentTurns;
-  let additionalContext = buildAdditionalContext(ir, injTurns, parsed.workspace, globalBlock);
-  while (Buffer.byteLength(additionalContext, "utf8") > INJECT_BYTE_LIMIT && injTurns.length > 0) {
-    injTurns = injTurns.slice(1);
-    additionalContext = buildAdditionalContext(ir, injTurns, parsed.workspace, globalBlock);
+    subagentLine = await buildSubagentLine(wsDir, process.env.AGENTBRIDGE_WS_SESSION || "", run);
+  } catch {
   }
   process.stdout.write(
-    JSON.stringify(buildHookOutput(parsed.agent, parsed.event, additionalContext))
+    JSON.stringify(
+      buildHookOutput(
+        parsed.agent,
+        parsed.event,
+        wrapInjectedContext2(buildInstructions(storageRoot) + subagentLine)
+      )
+    )
   );
   process.exit(0);
+}
+function buildTerminationOutput(agent) {
+  if (agent === "agy") return { decision: "stop" };
+  return { suppressOutput: true };
 }
 function buildHookOutput(agent, event, additionalContext) {
   if (agent === "agy") {

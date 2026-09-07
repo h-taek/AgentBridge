@@ -4,13 +4,14 @@ import { randomBytes } from 'crypto';
 import { chmodSync, createWriteStream, type WriteStream } from 'fs';
 import { join } from 'path';
 import * as output from '../log/output';
-import { registerCapture, setCaptureModelSessionId, unregisterCapture } from '../core/turnRecorder';
+import { registerCapture, unregisterCapture } from '../core/turnRecorder';
+import { setHookDisabled } from '../core/hookStatusStore';
 import { getSessions, renameSession, deleteSession, setModelSessionId, type SessionMeta } from '../core/sessionRegistry';
-import { captureNewThreadId } from '../core/cliAdapter/codexSessionWatcher';
-import { watchForNewConversationUuid } from '../core/cliAdapter/agyResume';
-import { captureSessionIdFromHook, coordinateCapture } from '@agentbridge/core';
+import { captureSessionIdFromHook, watchHookErrors, resolveHookErrorFile } from '@agentbridge/core';
 import * as workspaceStore from '../core/workspaceStore';
 import {
+  computeSessionActivity,
+  readSessionActivityInputs,
   acquireOwnership,
   updateOwnerSize,
   releaseOwnership,
@@ -21,9 +22,20 @@ import modelColors from '@agentbridge/assets/colors.json';
 import { quoteCommandLine } from '../shared/shellQuote';
 import type { SpawnOptions } from '../pty/types';
 import { createGroupLocker, type GroupLocker } from './groupLock';
+import { decideClose } from './closeConfirm';
+import { getWorkspaceStore } from '../core/coreInstances';
 
 const activePanels = new Map<string, ChatPanel>();
 const MAX_TAB_TITLE_LENGTH = 11;
+
+// 붙여넣기와 제출 사이의 간격(ms). sendPrompt 참조.
+const SUBMIT_DELAY_MS = 300;
+
+// 익스텐션이 내려가는 중인가. 그때는 패널이 통째로 사라지는 중이라 닫기 확인을 띄우지 않는다.
+let shuttingDown = false;
+export function markShuttingDown(): void {
+  shuttingDown = true;
+}
 
 function tabTitle(title: string): string {
   return title.length > MAX_TAB_TITLE_LENGTH ? title.substring(0, MAX_TAB_TITLE_LENGTH) + '…' : title;
@@ -55,6 +67,7 @@ export class ChatPanel {
   private ownerDir: string | null = null;
   private deletedExternally = false;
   private modelSessionWatchAbort: AbortController | null = null;
+  private hookErrorWatchAbort: AbortController | null = null;
   private readonly opts: SpawnOptions;
   private readonly extensionUri: vscode.Uri;
   private onDisposeCallback: (() => void) | null = null;
@@ -67,14 +80,37 @@ export class ChatPanel {
     this.deletedExternally = true;
   }
 
+  // preserveFocus — 서브 탭은 메인이 명령을 부른 결과로 뜨므로 사용자가 보고 있던 자리에서
+  // 커서를 뺏지 않는다 (0.5.0 B-6).
   static create(
     extensionUri: vscode.Uri,
     opts: SpawnOptions,
+    preserveFocus = false,
   ): ChatPanel {
     // 컬럼 선택은 공식 claude-code 익스텐션과 동일한 방식 — "맨 오른쪽" 기하학이 아니라
     // "탭이 전부 AgentBridge 챗 웹뷰인 에디터 그룹"을 찾아 그 컬럼에 새 탭으로 합류한다.
     // 그런 그룹이 없으면 빈 컬럼에 새로 만들고(startedInNewColumn=true), 그때만 그룹을 잠근다.
     // 배치/포커스에 좌우되지 않으므로 "잠긴 오른쪽 대신 왼쪽에 스폰" 현상이 사라진다.
+    const { column: targetColumn, startedInNewColumn } = ChatPanel.pickColumn();
+
+    const panel = vscode.window.createWebviewPanel(
+      'agentbridge.chat',
+      tabTitle(opts.terminalName),
+      { viewColumn: targetColumn, preserveFocus },
+      {
+        enableScripts: true,
+        retainContextWhenHidden: true,
+        localResourceRoots: ChatPanel.localRoots(extensionUri),
+      },
+    );
+
+    return new ChatPanel(panel, extensionUri, opts, startedInNewColumn);
+  }
+
+  // 붙을 컬럼을 고른다. 탭이 전부 AgentBridge 챗인 그룹이 있으면 그 컬럼에 합류하고, 없으면
+  // 빈 컬럼을 새로 잡는다. 새 탭을 만드는 자리(생성·재부착)가 같은 규칙을 써야 재부착된 탭이
+  // 엉뚱한 자리에 스플릿으로 열리지 않는다 (0.5.0 W8).
+  private static pickColumn(): { column: vscode.ViewColumn; startedInNewColumn: boolean } {
     const abGroup = vscode.window.tabGroups.all.find(
       (g) =>
         g.tabs.length > 0 &&
@@ -84,27 +120,8 @@ export class ChatPanel {
             t.input.viewType.includes('agentbridge.chat'),
         ),
     );
-    let startedInNewColumn = false;
-    let targetColumn: vscode.ViewColumn;
-    if (abGroup && abGroup.viewColumn) {
-      targetColumn = abGroup.viewColumn;
-    } else {
-      targetColumn = ChatPanel.findUnusedColumn();
-      startedInNewColumn = true;
-    }
-
-    const panel = vscode.window.createWebviewPanel(
-      'agentbridge.chat',
-      tabTitle(opts.terminalName),
-      { viewColumn: targetColumn, preserveFocus: false },
-      {
-        enableScripts: true,
-        retainContextWhenHidden: true,
-        localResourceRoots: ChatPanel.localRoots(extensionUri),
-      },
-    );
-
-    return new ChatPanel(panel, extensionUri, opts, startedInNewColumn);
+    if (abGroup && abGroup.viewColumn) return { column: abGroup.viewColumn, startedInNewColumn: false };
+    return { column: ChatPanel.findUnusedColumn(), startedInNewColumn: true };
   }
 
   // 안 쓰는 에디터 컬럼(One..Nine 중 첫 빈 칸, 없으면 Beside). 공식 claude-code 익스텐션과 동일.
@@ -151,18 +168,23 @@ export class ChatPanel {
     this.extensionUri = extensionUri;
     this.opts = opts;
     this.shouldLock = shouldLock;
+    this.groupLocker = createGroupLocker({
+      executeCommand: (cmd) => vscode.commands.executeCommand(cmd),
+      warn: (msg) => output.warn(msg),
+    });
+    if (opts.sessionId) activePanels.set(opts.sessionId, this);
+    this.wirePanel();
+  }
+
+  // 패널 하나에 붙는 배선 전부. 생성자와 재부착(W8)이 같은 것을 쓴다 — 둘이 갈리면 다시 연
+  // 탭에서만 입력이나 리사이즈가 안 먹는 상태가 생긴다.
+  private wirePanel(): void {
+    const { extensionUri, opts } = this;
     // revive(reload 복원) 경로도 media 리소스 루트를 갖도록 보장 — 로딩 화면 로고 차단 방지.
     this.panel.webview.options = {
       enableScripts: true,
       localResourceRoots: ChatPanel.localRoots(extensionUri),
     };
-    this.groupLocker = createGroupLocker({
-      executeCommand: (cmd) => vscode.commands.executeCommand(cmd),
-      warn: (msg) => output.warn(msg),
-    });
-
-    if (opts.sessionId) activePanels.set(opts.sessionId, this);
-
     const modelLogo = vscode.Uri.joinPath(extensionUri, 'media', 'logos', `${opts.model ?? 'claude'}.svg`);
     this.panel.iconPath = { light: modelLogo, dark: modelLogo };
 
@@ -171,7 +193,11 @@ export class ChatPanel {
     this.panel.webview.onDidReceiveMessage((msg) => {
       switch (msg.type) {
         case 'ready':
-          void this.spawnPty(msg.cols ?? 120, msg.rows ?? 30);
+          // 재부착이면 PTY가 이미 살아 있다. 새로 띄우는 대신 크기만 넘긴다 — 세 하니스 모두
+          // 크기 변경 신호를 받으면 화면 전체를 스스로 다시 그린다(research 10 §3). 우리가
+          // 화면 기록을 재생하지 않는 근거다.
+          if (this.ptyProcess) this.repaint(msg.cols ?? 120, msg.rows ?? 30);
+          else void this.spawnPty(msg.cols ?? 120, msg.rows ?? 30);
           break;
         case 'log':
           output.log(`[webview] ${msg.data}`);
@@ -215,7 +241,7 @@ export class ChatPanel {
     });
 
     this.panel.onDidDispose(() => {
-      this.dispose();
+      void this.onPanelClosed();
     });
 
     this.panel.onDidChangeViewState((e) => {
@@ -250,8 +276,151 @@ export class ChatPanel {
     this.onDisposeCallback = cb;
   }
 
-  reveal(): void {
-    this.panel.reveal(undefined, false);
+  // ─── 닫기 전 확인 (0.5.0 W8, B-2) ────────────────────────────────────
+  //
+  // 웹뷰 탭의 닫기는 가로챌 수 없다. VS Code가 주는 것은 닫힌 뒤에 오는 onDidDispose 하나뿐이고
+  // 취소할 수 있는 이벤트가 없다. 그래서 순서를 뒤집는다 — 닫힌 직후에 묻고, 계속을 고르면
+  // 탭을 다시 연다. 죽이는 시점이 우리 손에 있어서 성립한다.
+  //
+  // 진행 중이 아니면 안 묻는다. 매번 물으면 확인 자체가 무시된다.
+  private async onPanelClosed(): Promise<void> {
+    if (this.disposed) return;
+    // 창을 닫거나 IDE를 끄는 중이면 되돌릴 자리가 없다. 그 경로에서는 디스크도 안 읽는다.
+    const dying = shuttingDown || this.deletedExternally || !this.ptyProcess;
+    const turnRunning = !dying && (await this.isTurnRunning());
+    const decision = decideClose({
+      shuttingDown,
+      deletedExternally: this.deletedExternally,
+      hasPty: !!this.ptyProcess,
+      turnRunning,
+      askDisabled: turnRunning && (await this.isCloseConfirmDisabled()),
+    });
+    if (decision === 'close') {
+      this.dispose();
+      return;
+    }
+    const keepLabel = vscode.l10n.t('Keep running');
+    const neverLabel = vscode.l10n.t('Close and stop asking');
+    const answer = await vscode.window.showWarningMessage(
+      vscode.l10n.t('"{0}" is still working. Close it anyway?', this.opts.terminalName),
+      { modal: true, detail: vscode.l10n.t('Closing ends the session and the turn in progress is lost.') },
+      keepLabel,
+      neverLabel,
+    );
+    if (answer === neverLabel) {
+      await this.setCloseConfirmDisabled();
+      this.dispose();
+      return;
+    }
+    if (answer !== keepLabel) {
+      this.dispose();
+      return;
+    }
+    this.reattach();
+  }
+
+  // 이 레포에서 확인을 껐는가 (0.5.0 6단계). 값은 workspace.json에 있어 저장소마다 따로 간다.
+  // 못 읽으면 묻는 쪽으로 떨어진다 — 못 묻는 것이 잘못 닫는 것보다 낫다.
+  private async isCloseConfirmDisabled(): Promise<boolean> {
+    const { workspaceId } = this.opts;
+    if (!workspaceId) return false;
+    try {
+      return (await getWorkspaceStore().loadWorkspace(workspaceId)).closeConfirmDisabled === true;
+    } catch {
+      return false;
+    }
+  }
+
+  private async setCloseConfirmDisabled(): Promise<void> {
+    const { workspaceId } = this.opts;
+    if (!workspaceId) return;
+    try {
+      await getWorkspaceStore().updateWorkspaceMeta(workspaceId, { closeConfirmDisabled: true });
+    } catch (err) {
+      output.warn(`닫기 확인 끄기 저장 실패: ${String(err)}`);
+    }
+  }
+
+  // 상태 표시가 쓰는 판정을 그대로 쓴다 — 우리가 따로 매기는 값이 아니다.
+  private async isTurnRunning(): Promise<boolean> {
+    const { workspaceId, sessionId } = this.opts;
+    if (!workspaceId || !sessionId) return false;
+    try {
+      const wsDir = workspaceStore.getWorkspacePath(workspaceId);
+      const inputs = await readSessionActivityInputs(wsDir, sessionId);
+      return computeSessionActivity(inputs, Date.now()) === 'running';
+    } catch {
+      return false; // 판정할 수 없으면 묻지 않는다. 못 묻는 것이 잘못 막는 것보다 낫다
+    }
+  }
+
+  // 계속을 고른 경우. PTY는 아직 살아 있으므로 새 탭을 만들어 다시 붙인다. 화면은 웹뷰가
+  // 준비되면 크기 신호로 하니스가 스스로 다시 그린다.
+  private reattach(): void {
+    this.panel = vscode.window.createWebviewPanel(
+      'agentbridge.chat',
+      tabTitle(this.opts.terminalName),
+      { viewColumn: ChatPanel.pickColumn().column, preserveFocus: false },
+      {
+        enableScripts: true,
+        retainContextWhenHidden: true,
+        localResourceRoots: ChatPanel.localRoots(this.extensionUri),
+      },
+    );
+    this.wirePanel();
+    output.log(`ChatPanel 재부착: ${this.opts.sessionId?.slice(0, 8)}`);
+  }
+
+  // 크기 신호로 하니스가 화면 전체를 다시 그리게 한다. 같은 크기를 그대로 주면 신호가 안 가는
+  // 터미널이 있어 한 줄 줄였다가 되돌린다.
+  private repaint(cols: number, rows: number): void {
+    const pty = this.ptyProcess;
+    if (!pty) return;
+    try {
+      pty.resize(cols, Math.max(1, rows - 1));
+      setTimeout(() => {
+        try {
+          pty.resize(cols, rows);
+        } catch {
+          /* 그 사이 죽었다 */
+        }
+      }, 50);
+    } catch {
+      /* 그 사이 죽었다 */
+    }
+  }
+
+  // 이 세션의 프로세스가 살아 있는가. `agent check`가 빈손으로 돌아올 때 "아직 일하는 중"과
+  // "신호 없이 끝남"을 가르는 재료다 (0.5.0 B-6).
+  get alive(): boolean {
+    return !!this.ptyProcess;
+  }
+
+  // 도는 세션에 지침을 더 보낸다 (0.5.0 B-6, `agent send`).
+  //
+  // 괄호 붙여넣기로 감싼다. 원문을 그대로 쓰면 agy가 조용히 버린다 — 입력줄이 빈 채로 남고
+  // 오류도 안 나서 화면만 보면 안 보낸 것과 구분되지 않는다(research 10 §2).
+  //
+  // 제출은 붙여넣기가 끝난 뒤에 따로 보낸다. 실측에서는 1초를 뒀는데 그건 사람이 보는 간격이라
+  // 여기서는 짧게 잡고, 게이트 1 라이브에서 이 값으로 세 하니스가 다 받는지 확인한다.
+  sendPrompt(text: string): boolean {
+    const pty = this.ptyProcess;
+    if (!pty || !text) return false;
+    pty.write(`\x1b[200~${text}\x1b[201~`);
+    setTimeout(() => {
+      try {
+        pty.write('\r');
+      } catch {
+        /* 그 사이 죽었다 */
+      }
+    }, SUBMIT_DELAY_MS);
+    return true;
+  }
+
+  // preserveFocus를 켜면 이 탭이 자기 그룹에서 앞으로 나오되 키보드 포커스는 있던 자리에
+  // 남는다. 서브가 뜬 뒤 메인을 다시 앞으로 보낼 때 쓴다 (0.5.0 B-6).
+  reveal(preserveFocus = false): void {
+    this.panel.reveal(undefined, preserveFocus);
   }
 
   // 탭 제목 갱신 — 패널 생성 후 세션 이름이 바뀌면 호출(자기 세션 자동명명 또는 updateSessionTabTitle 경유).
@@ -309,19 +478,17 @@ export class ChatPanel {
 
       output.log(`ChatPanel PTY pid=${this.ptyProcess.pid}`);
 
-      if (this.opts.model && this.opts.workspaceId && this.opts.sessionId) {
-        // claude는 sessionId가 곧 jsonl 파일명(통일 규약). codex/agy는 native id를 비동기 캡처
-        // (startModelSessionIdWatcher → setCaptureModelSessionId) — 여기선 modelSessionId가 있으면(resume) 전달.
-        const captureModelSessionId =
-          this.opts.model === 'claude'
-            ? (this.opts.modelSessionId ?? this.opts.sessionId)
-            : (this.opts.modelSessionId ?? null);
+      if (this.opts.model && this.opts.workspaceId && this.opts.sessionId && this.opts.turnSignalFilePath) {
+        // 턴 기록은 종료 훅 신호가 트리거다. 신호가 transcript 경로까지 실어 오므로 여기서
+        // modelSessionId를 넘길 필요가 없다 (0.5.0 A-2).
         registerCapture({
           workspaceId: this.opts.workspaceId,
           sessionId: this.opts.sessionId,
           model: this.opts.model,
           workspacePath: this.opts.cwd,
-          modelSessionId: captureModelSessionId,
+          signalFilePath: this.opts.turnSignalFilePath,
+          // 서브의 턴은 워크스페이스 직하가 아니라 그 세션 폴더에 쌓인다 (0.5.0 B-8).
+          subagent: !!this.opts.parentSessionId,
           // 자동 명명이 제목을 정하면 이 패널의 탭 제목을 즉시 갱신(닫았다 열 필요 없이).
           onAutoNamed: (title) => this.setTabTitle(title),
         });
@@ -353,10 +520,12 @@ export class ChatPanel {
       });
 
       this.startModelSessionIdWatcher();
+      this.startHookErrorWatcher();
 
       this.ptyProcess.onExit(({ exitCode, signal }) => {
         output.log(`ChatPanel PTY exited: code=${exitCode} signal=${signal ?? 'none'}`);
         this.modelSessionWatchAbort?.abort();
+        this.hookErrorWatchAbort?.abort();
         if (this.replayStream && !this.replayStream.destroyed) {
           this.replayStream.end();
           this.replayStream = null;
@@ -387,55 +556,46 @@ export class ChatPanel {
     }
   }
 
-  // codex/agy modelSessionId 후처리 캡처 — spawn 직후 fire-and-forget.
-  // codex: ~/.codex/sessions 스냅샷 diff로 thread_id 파일명 추출.
-  // agy:   ~/.gemini/antigravity-cli/cache/last_conversations.json polling으로 cwd→UUID 매핑 캡처.
+  // codex/agy 세션 id 캡처 — spawn 직후 fire-and-forget.
+  // 훅이 <워크스페이스>/sessions/<세션 id>/captured.json에 native id를 쓰면 그것만 읽는다.
+  // 폴더를 뒤져 알아맞히는 경로는 두지 않는다 — 틀린 id는 없는 id보다 나쁘다 (spec A-1).
   // 캡처되면 sessionRegistry.setModelSessionId로 영속화 → 다음 reopen에서 resume 인자 생성.
-  private startModelSessionIdWatcher(): void {
-    const { workspaceId, sessionId, codexSessionSnapshot, agyWatchUuid, cwd, model, hookCaptureFilePath } =
-      this.opts;
-    if (!workspaceId || !sessionId) return;
+  // 훅이 제 일을 못 했다는 사실을 드러낸다 (0.5.0 A-2). 폴백을 걷어낸 뒤로 이 상태를 덮어 줄
+  // 것이 없으므로, 조용히 절름발이로 도는 대신 UI에 띄운다.
+  private startHookErrorWatcher(): void {
+    const { workspaceId, sessionId, model } = this.opts;
+    if (!workspaceId || !sessionId || !model) return;
+    const ctrl = new AbortController();
+    this.hookErrorWatchAbort = ctrl;
+    const errorFilePath = resolveHookErrorFile(
+      workspaceStore.getWorkspacePath(workspaceId),
+      sessionId,
+    );
+    const watcher = watchHookErrors({
+      errorFilePath,
+      signal: ctrl.signal,
+      logger: { log: (m) => output.log(m), warn: (m) => output.warn(m) },
+      onError: (err) => setHookDisabled(workspaceId, model, err.message, 'runtime'),
+    });
+    ctrl.signal.addEventListener('abort', () => watcher.stop(), { once: true });
+  }
 
-    const persist = (modelSessionId: string): void => {
-      void setModelSessionId(workspaceId, sessionId, modelSessionId).catch((err) => {
-        output.warn(`ChatPanel: setModelSessionId 실패 — ${String(err)}`);
-      });
-      if (cwd) setCaptureModelSessionId(sessionId, modelSessionId, cwd);
-    };
+  private startModelSessionIdWatcher(): void {
+    const { workspaceId, sessionId, model, hookCaptureFilePath } = this.opts;
+    if (!workspaceId || !sessionId || !hookCaptureFilePath) return;
+    if (model !== 'codex' && model !== 'agy') return;
 
     const ctrl = new AbortController();
     this.modelSessionWatchAbort = ctrl;
-    const hookCapture = hookCaptureFilePath
-      ? captureSessionIdFromHook({ captureFilePath: hookCaptureFilePath, signal: ctrl.signal })
-      : Promise.resolve<string | null>(null);
 
-    if (model === 'codex' && codexSessionSnapshot) {
-      void coordinateCapture({
-        hookCapture,
-        fallbackCapture: captureNewThreadId(codexSessionSnapshot, { signal: ctrl.signal }),
-        signal: ctrl.signal,
+    void captureSessionIdFromHook({ captureFilePath: hookCaptureFilePath, signal: ctrl.signal })
+      .then((modelSessionId) => {
+        if (!modelSessionId) return;
+        void setModelSessionId(workspaceId, sessionId, modelSessionId).catch((err) => {
+          output.warn(`ChatPanel: setModelSessionId 실패 — ${String(err)}`);
+        });
       })
-        .then((r) => {
-          if (r) persist(r.id);
-        })
-        .catch((err) => output.warn(`ChatPanel: codex 캡처 실패 — ${String(err)}`));
-    } else if (model === 'agy' && agyWatchUuid && cwd) {
-      const fallbackCapture = new Promise<string | null>((res) => {
-        void watchForNewConversationUuid({
-          cwd,
-          excludeUuids: agyWatchUuid.excludeUuids,
-          abortSignal: ctrl.signal,
-          onCaptured: (uuid) => res(uuid),
-        })
-          .then(() => res(null))
-          .catch(() => res(null));
-      });
-      void coordinateCapture({ hookCapture, fallbackCapture, signal: ctrl.signal })
-        .then((r) => {
-          if (r) persist(r.id);
-        })
-        .catch((err) => output.warn(`ChatPanel: agy 캡처 실패 — ${String(err)}`));
-    }
+      .catch((err) => output.warn(`ChatPanel: ${model} 캡처 실패 — ${String(err)}`));
   }
 
   private ensureSpawnHelperExecutable(): void {
@@ -458,14 +618,11 @@ export class ChatPanel {
     try {
       const { attachmentPathFor, writeAttachment } = await import('../core/attachmentStore');
       const path = await import('path');
-      const safeName = (name || 'file').replace(/[\\/]/g, '_').slice(-150);
-      const ts = Date.now();
-      const filename = `${ts}-${safeName}`;
-      const wid = this.opts.workspaceId ?? 'no-workspace';
-      const sid = this.opts.sessionId ?? 'no-session';
-      const absPath = attachmentPathFor(wid, sid, filename);
+      // 자리는 저장소 루트의 attachments/ 하나. 파일명 정리와 프로젝트 구분(경로 다이제스트)은
+      // attachmentPathFor가 맡는다.
+      const absPath = attachmentPathFor(this.opts.cwd, name);
       await writeAttachment(absPath, base64);
-      // cwd 기준 relative — @ mention 단축용. 외부 cwd이면 절대경로 fallback.
+      // cwd 기준 relative — @ mention 단축용. 저장소가 프로젝트 밖이라 사실상 절대경로가 나간다.
       const rel = path.relative(this.opts.cwd, absPath);
       const useRel = rel && !rel.startsWith('..') && !path.isAbsolute(rel);
       const insertPath = useRel ? rel : absPath;
@@ -545,6 +702,7 @@ export class ChatPanel {
     if (this.opts.sessionId) activePanels.delete(this.opts.sessionId);
 
     this.modelSessionWatchAbort?.abort();
+    this.hookErrorWatchAbort?.abort();
     void this.flushCapture(); // fire-and-forget finalize (마지막 턴 flush 보장은 disposeAndFlush).
 
     if (this.replayStream && !this.replayStream.destroyed) {
@@ -845,7 +1003,8 @@ export class ChatPanel {
       background: var(--vscode-panel-background, var(--vscode-editor-background, #1e1e1e));
       position: relative;
     }
-    #terminal-container.drop-active::after {
+    #terminal-container.drop-active::after,
+    #terminal-container.drop-report::after {
       content: 'Drop with Shift to insert paths';
       position: absolute;
       inset: 8px;
@@ -858,6 +1017,11 @@ export class ChatPanel {
       pointer-events: none;
       z-index: 50;
       font-size: 13px;
+    }
+    /* 드롭 결과를 잠깐 띄운다 — 실패가 조용히 지나가지 않게. */
+    #terminal-container.drop-report::after {
+      content: attr(data-drop-msg);
+      border-style: solid;
     }
     .xterm { height: 100%; }
     .xterm-viewport { background-color: inherit !important; }
@@ -1079,6 +1243,7 @@ export class ChatPanel {
     let pendingShiftEnter = false;
     let lastShiftEnterAt = 0;
     let pendingFallbackTimer = null;
+
     const emitShiftEnterNewline = () => {
       if (pendingFallbackTimer) {
         clearTimeout(pendingFallbackTimer);
@@ -1145,50 +1310,87 @@ export class ChatPanel {
       }
       return t.startsWith('/') ? t : '';
     }
-    function quoteShellArg(p) {
-      return /[\\s'"]/.test(p) ? "'" + p.replace(/'/g, "'\\\\''") + "'" : p;
+    // @ 멘션 표기 — 공백이 있는 경로만 큰따옴표로 감싸고, 없으면 그대로 쓴다.
+    function quoteMentionPath(p) {
+      return /\s/.test(p) ? '"' + p.replace(/"/g, '\\"') + '"' : p;
     }
     function hasFileLikeType(types) {
       if (!types) return false;
       for (let i = 0; i < types.length; i++) {
         const t = types[i];
-        if (t === 'Files' || t === 'text/uri-list' || t.includes('resource-urls') || t.includes('codeeditors')) return true;
+        if (t === 'Files' || t === 'text/uri-list' || t === 'text/plain') return true;
+        // VS Code 내부 드래그 — 탐색기·편집기 탭이 저마다 다른 이름을 싣는다.
+        if (t.includes('resource-urls') || t.includes('codeeditors') || t.indexOf('application/vnd.code') === 0) return true;
       }
       return false;
     }
-    function isShiftActive(e) {
-      return !!(e && e.shiftKey);
+
+    // Shift 래치 — 커서가 이 화면 안에 있는 동안 Shift가 한 번이라도 눌리면 그 드래그를 우리 것으로
+    // 잡고, 화면을 벗어나거나 드래그가 끝날 때까지 유지한다.
+    //
+    // 매 이벤트마다 shiftKey를 다시 보면 마우스를 놓기 직전에 Shift가 떨어진 드롭이 씹힌다.
+    // 리스너가 웹뷰 document에 있어 커서가 이 화면 위일 때만 이벤트가 오므로, 래치의 유효 범위는
+    // 자연히 이 패널로 한정된다 — 편집기나 탐색기 위의 드래그는 애초에 우리에게 오지 않는다.
+    let dragLatched = false;
+    let dragDepth = 0;
+    let dropReportTimer = null;
+
+    function releaseDrag() {
+      dragLatched = false;
+      dragDepth = 0;
+      container.classList.remove('drop-active');
+    }
+    // 이미 잡은 드래그면 Shift와 타입을 다시 묻지 않는다.
+    function latchDrag(e) {
+      if (!dragLatched && e.shiftKey && hasFileLikeType(e.dataTransfer && e.dataTransfer.types)) {
+        dragLatched = true;
+      }
+      return dragLatched;
+    }
+    // 드롭 결과를 잠깐 띄운다. 실패가 로그에만 남고 화면은 조용한 상태를 없앤다.
+    function reportDrop(msg) {
+      container.dataset.dropMsg = msg;
+      container.classList.add('drop-report');
+      if (dropReportTimer) clearTimeout(dropReportTimer);
+      dropReportTimer = setTimeout(() => container.classList.remove('drop-report'), 2600);
     }
 
     document.addEventListener('dragenter', (e) => {
-      if (!isShiftActive(e) || !hasFileLikeType(e.dataTransfer && e.dataTransfer.types)) return;
+      dragDepth++;
+      if (!latchDrag(e)) return;
       e.preventDefault();
       e.stopPropagation();
       container.classList.add('drop-active');
     }, true);
     document.addEventListener('dragover', (e) => {
-      if (!isShiftActive(e) || !hasFileLikeType(e.dataTransfer && e.dataTransfer.types)) return;
+      if (!latchDrag(e)) return;
       e.preventDefault();
       e.stopPropagation();
       if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
       container.classList.add('drop-active');
     }, true);
-    document.addEventListener('dragleave', (e) => {
-      // 드래그가 윈도우 밖으로 나가면 (relatedTarget=null) 오버레이 제거.
-      if (!e.relatedTarget) container.classList.remove('drop-active');
+    document.addEventListener('dragleave', () => {
+      // 진입·이탈 깊이로 판단한다. relatedTarget은 웹뷰 안에서 요소를 넘나들 때도 null로 와서,
+      // 그것만 보면 드래그 중에 표시가 깜빡이고 래치가 엉뚱하게 풀린다.
+      dragDepth = Math.max(0, dragDepth - 1);
+      if (dragDepth === 0) releaseDrag();
     }, true);
+    document.addEventListener('dragend', releaseDrag, true);
+    window.addEventListener('blur', releaseDrag);
+
     document.addEventListener('drop', (e) => {
-      container.classList.remove('drop-active');
-      if (!isShiftActive(e)) return;
+      const latched = dragLatched;
+      releaseDrag();
+      if (!latched) return;
       const dt = e.dataTransfer;
       if (!dt) return;
       const types = Array.from(dt.types || []);
-      if (!hasFileLikeType(types)) return;
       e.preventDefault();
       e.stopPropagation();
 
       const paths = new Set();
       const pending = [];
+      let failed = 0;
 
       // 1a. File.path가 있으면 직접 사용 (Electron 일부 환경에서만 노출)
       if (dt.files) {
@@ -1205,24 +1407,31 @@ export class ChatPanel {
             const reader = new FileReader();
             reader.onload = () => {
               const result = reader.result;
-              if (typeof result !== 'string') { resolve(); return; }
+              if (typeof result !== 'string') { failed++; resolve(); return; }
               const comma = result.indexOf(',');
               const base64 = comma >= 0 ? result.slice(comma + 1) : '';
-              if (!base64) { resolve(); return; }
+              if (!base64) { failed++; resolve(); return; }
               const reqId = 'attach-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+              let settled = false;
+              const finish = (ok) => {
+                if (settled) return;
+                settled = true;
+                window.removeEventListener('message', handler);
+                if (!ok) failed++;
+                resolve();
+              };
               const handler = (ev) => {
                 const m = ev.data;
                 if (m && m.type === 'attachSaved' && m.reqId === reqId) {
-                  window.removeEventListener('message', handler);
                   if (m.path) paths.add(m.path);
-                  resolve();
+                  finish(!!m.path);
                 }
               };
               window.addEventListener('message', handler);
               vscode.postMessage({ type: 'attachSave', reqId, name: f.name, base64 });
-              setTimeout(() => { window.removeEventListener('message', handler); resolve(); }, 10_000);
+              setTimeout(() => finish(false), 10_000);
             };
-            reader.onerror = () => resolve();
+            reader.onerror = () => { failed++; resolve(); };
             reader.readAsDataURL(f);
           }));
         }
@@ -1271,11 +1480,16 @@ export class ChatPanel {
 
       Promise.all(pending).then(() => {
         if (paths.size === 0) {
-          vscode.postMessage({ type: 'log', data: 'DnD: no paths extracted — types=' + JSON.stringify(types) });
+          reportDrop(failed > 0 ? 'Could not read the dropped file' : 'No file path found in this drop');
+          vscode.postMessage({ type: 'log', data: 'DnD: no paths extracted — failed=' + failed + ' types=' + JSON.stringify(types) });
           return;
         }
+        if (failed > 0) {
+          reportDrop('Skipped ' + failed + ' file' + (failed > 1 ? 's' : '') + ' that could not be read');
+          vscode.postMessage({ type: 'log', data: 'DnD: ' + failed + ' file(s) failed, ' + paths.size + ' inserted' });
+        }
         // @<path> mention 형식 — claude/codex/agy 모두 지원.
-        const insertion = Array.from(paths).map(p => '@' + quoteShellArg(p)).join(' ') + ' ';
+        const insertion = Array.from(paths).map(p => '@' + quoteMentionPath(p)).join(' ') + ' ';
         vscode.postMessage({ type: 'input', data: insertion });
       });
     }, true);

@@ -1,11 +1,15 @@
 import { strict as assert } from 'assert';
 import { homedir } from 'os';
 import { join } from 'path';
-import { getStorageRoot, createWorkspaceStore } from '@agentbridge/core';
+import { getStorageRoot, getLegacyStorageRoot, createWorkspaceStore } from '@agentbridge/core';
 
 describe('storageRoot', () => {
-  it('~/.agentbridge를 반환한다', () => {
-    assert.equal(getStorageRoot(), join(homedir(), '.agentbridge'));
+  it('~/agentbridge를 반환한다 (0.5.0에서 숨김 해제)', () => {
+    assert.equal(getStorageRoot(), join(homedir(), 'agentbridge'));
+  });
+
+  it('옛 루트는 ~/.agentbridge로 남는다 (장기 메모리 이전용)', () => {
+    assert.equal(getLegacyStorageRoot(), join(homedir(), '.agentbridge'));
   });
 
   it('createWorkspaceStore는 기본적으로 getStorageRoot()를 사용한다', () => {

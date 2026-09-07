@@ -1,36 +1,53 @@
 import { strict as assert } from 'assert';
-import { parseConversationFilename } from '../src/core/cliAdapter/agyResume';
+import { promises as fs } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
+import { resolveResumeArgs } from '@agentbridge/core';
 
-// agy CLI 2026-06-02 업데이트로 conversation 저장 포맷이 .pb(protobuf) → .db(SQLite)로 변경됨.
-// 구버전 .pb만 인식하던 정규식이 캡처/resume/청소를 전부 놓치던 회귀(V-17 실기 검증 발견)의 재발 방지.
-describe('agyResume', () => {
-  describe('parseConversationFilename', () => {
-    it('recognizes new .db conversation files (agy CLI 2026-06-02+)', () => {
-      assert.equal(
-        parseConversationFilename('8a82d55e-6ab2-4338-9430-e08224f02216.db'),
-        '8a82d55e-6ab2-4338-9430-e08224f02216',
-      );
-    });
+// agy는 없는 conversation id를 줘도 거부하지 않고 경고만 찍은 뒤 자기 id로 새 대화를 만든다
+// (research 06 §6). 그래서 resume 전에 대화 파일이 실재하는지 우리가 확인해야 한다.
+// 포맷은 둘이다 — agy CLI 2026-06-02 업데이트로 .pb(protobuf) → .db(SQLite)로 바뀌었고,
+// .db만/.pb만 인식하면 resume이 통째로 깨진다(V-17 실기 검증 발견).
+describe('agyResume — resume 대상 실재 확인', () => {
+  const UUID = 'a247c86e-e5fb-420c-b4ff-1596b7bf367e';
+  let dir: string;
 
-    it('recognizes legacy .pb conversation files', () => {
-      assert.equal(
-        parseConversationFilename('a247c86e-e5fb-420c-b4ff-1596b7bf367e.pb'),
-        'a247c86e-e5fb-420c-b4ff-1596b7bf367e',
-      );
-    });
+  beforeEach(async () => {
+    dir = await fs.mkdtemp(join(tmpdir(), 'ab-agy-conv-'));
+  });
+  afterEach(async () => {
+    await fs.rm(dir, { recursive: true, force: true });
+  });
 
-    it('normalizes uppercase UUID/extension to lowercase', () => {
-      assert.equal(
-        parseConversationFilename('A247C86E-E5FB-420C-B4FF-1596B7BF367E.DB'),
-        'a247c86e-e5fb-420c-b4ff-1596b7bf367e',
-      );
-    });
+  it('.db 대화 파일이 있으면 resume 인자를 만든다', async () => {
+    await fs.writeFile(join(dir, `${UUID}.db`), 'x');
+    assert.deepEqual(await resolveResumeArgs({ sessionId: UUID, conversationsDir: dir }), [
+      '--conversation',
+      UUID,
+    ]);
+  });
 
-    it('rejects non-UUID filenames and unknown extensions', () => {
-      assert.equal(parseConversationFilename('not-a-uuid.db'), null);
-      assert.equal(parseConversationFilename('a247c86e-e5fb-420c-b4ff-1596b7bf367e.txt'), null);
-      assert.equal(parseConversationFilename('a247c86e-e5fb-420c-b4ff-1596b7bf367e.db.bak'), null);
-      assert.equal(parseConversationFilename(''), null);
-    });
+  it('구버전 .pb 대화 파일도 인식한다', async () => {
+    await fs.writeFile(join(dir, `${UUID}.pb`), 'x');
+    assert.deepEqual(await resolveResumeArgs({ sessionId: UUID, conversationsDir: dir }), [
+      '--conversation',
+      UUID,
+    ]);
+  });
+
+  it('대화 파일이 없으면 거절한다 — 조용히 새 대화가 되는 것을 막는다', async () => {
+    await assert.rejects(
+      () => resolveResumeArgs({ sessionId: UUID, conversationsDir: dir }),
+      /찾을 수 없습니다/,
+    );
+  });
+
+  it('빈 파일은 대화로 치지 않는다', async () => {
+    await fs.writeFile(join(dir, `${UUID}.db`), '');
+    await assert.rejects(() => resolveResumeArgs({ sessionId: UUID, conversationsDir: dir }));
+  });
+
+  it('id가 비어 있으면 거절한다', async () => {
+    await assert.rejects(() => resolveResumeArgs({ sessionId: null, conversationsDir: dir }));
   });
 });

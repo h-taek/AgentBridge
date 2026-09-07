@@ -7,8 +7,8 @@ import {
 } from '@agentbridge/core';
 
 describe('globalPaths', () => {
-  it('getGlobalDir는 ~/.agentbridge/global (오버라이드 없을 때)', () => {
-    assert.equal(getGlobalDir(), join(homedir(), '.agentbridge', 'global'));
+  it('getGlobalDir는 ~/agentbridge/global (오버라이드 없을 때)', () => {
+    assert.equal(getGlobalDir(), join(homedir(), 'agentbridge', 'global'));
   });
   it('rootOverride로 임시 루트를 주입할 수 있다', () => {
     assert.equal(getGlobalDir('/tmp/x'), join('/tmp/x', 'global'));

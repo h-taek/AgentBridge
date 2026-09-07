@@ -1,0 +1,15 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      // 매니페스트가 저장소 루트에 있다(마켓에 올라가는 것과 같은 자리).
+      // 개발 경로도 루트다 — out/은 apps/extension 아래에 그대로 남는다.
+      "name": "Run Extension",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": ["--extensionDevelopmentPath=${workspaceFolder}"],
+      "outFiles": ["${workspaceFolder}/apps/extension/out/**/*.js"],
+      "preLaunchTask": "compile extension"
+    }
+  ]
+}

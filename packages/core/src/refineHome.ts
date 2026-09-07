@@ -5,9 +5,10 @@ import { mkdirSync, symlinkSync, lstatSync, writeFileSync, existsSync, statSync,
 import { homedir } from 'os';
 import { join, dirname } from 'path';
 import type { CliKind } from './shared/cli';
+import { getStorageRoot } from './storageRoot';
 
 export type EnsureRefineHomeOptions = {
-  rootDir?: string;            // 박스 루트; 기본값 ~/.agentbridge/cli-homes
+  rootDir?: string;            // 박스 루트; 기본값 <저장소 루트>/cli-homes
   realHome?: string;           // 심볼릭 링크 소스 HOME; 기본값 homedir()
   binPath?: string;            // CLI 바이너리 경로 (버전 토큰용); 없으면 버전 확인 생략
 };
@@ -16,7 +17,7 @@ export type RefineHomeResult = { env: Record<string, string> };
 
 export function ensureRefineHome(cli: CliKind, opts: EnsureRefineHomeOptions = {}): RefineHomeResult {
   if (cli === 'claude') return { env: {} };        // claude는 격리 미지원 (deferred)
-  const rootDir = opts.rootDir ?? join(homedir(), '.agentbridge', 'cli-homes');
+  const rootDir = opts.rootDir ?? join(getStorageRoot(), 'cli-homes');
   const realHome = opts.realHome ?? homedir();
   const box = join(rootDir, cli);
   bootstrapIfNeeded(cli, box, realHome, opts.binPath);  // 격리 박스 부팅: 버전 토큰 확인 후 재사용 또는 rm -rf 재생성 + 심링크/최소config

@@ -3,8 +3,9 @@
 // 덮어쓸 위험이 있어 차단한다. 홈 디렉토리 자체도 차단 — `~/.codex/hooks.json`이 이미
 // codex의 글로벌 hook 경로이기 때문.
 //
-// 두 호스트(데스크탑/익스텐션)가 공유하는 단일 진실 공급원 — 데스크탑은 워크스페이스 생성
-// 시점에, 코어 hookInstaller는 hook 설치 시점에 이 함수로 검증한다.
+// 0.5.0부터 설치는 전역 경로를 우리가 직접 조립하므로 이 가드를 지나가지 않는다. 남는 자리는
+// 구버전 잔재 정리다 — 사용자 프로젝트 폴더로 받은 cwd가 실은 하니스의 전역 설정 폴더인 경우를
+// 막는다.
 
 import { homedir } from 'os';
 import { normalize, relative, isAbsolute, sep } from 'path';
@@ -21,8 +22,8 @@ const BLOCKED_GLOBAL_DIRS = [
 
 // 매칭 규칙: 홈 디렉토리 자체 + 위 디렉토리들 *자체와 그 하위 모든 경로*.
 // 반환: 차단 사유 토큰(`~` 또는 `~/.codex` 등) / 허용 시 null.
-export function findBlockedGlobalCliConfigDir(p: string): string | null {
-  const home = normalize(homedir());
+export function findBlockedGlobalCliConfigDir(p: string, homeDir?: string): string | null {
+  const home = normalize(homeDir ?? homedir());
   const target = normalize(p);
   if (target === home) return '~';
   const rel = relative(home, target);

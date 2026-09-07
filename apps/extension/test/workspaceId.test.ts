@@ -4,7 +4,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { deterministicWorkspaceId } from '@agentbridge/core';
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const ID_RE = /^[^/\\\u0000]+-[0-9a-f]{4}$/;
 
 describe('deterministicWorkspaceId', () => {
   it('같은 경로는 항상 같은 ID를 반환한다', () => {
@@ -19,20 +19,28 @@ describe('deterministicWorkspaceId', () => {
     assert.notEqual(a, b);
   });
 
-  it('표준 UUID 형식이다 (기존 경로 탈출 방어 검증 통과)', () => {
+  it('폴더 이름 + 다이제스트 네 자 형식이다', () => {
     const id = deterministicWorkspaceId('/tmp/agentbridge-id-test');
-    assert.match(id, UUID_RE);
+    assert.match(id, ID_RE);
+    assert.equal(id.startsWith('agentbridge-id-test-'), true);
   });
 
-  it('UUID 버전 비트가 5다', () => {
-    const id = deterministicWorkspaceId('/tmp/agentbridge-id-test');
-    // xxxxxxxx-xxxx-5xxx-... 세 번째 그룹 첫 글자
-    assert.equal(id.split('-')[2][0], '5');
+  it('접미사는 항상 붙는다 (충돌할 때만이 아니라)', () => {
+    const id = deterministicWorkspaceId('/tmp/agentbridge-solo-folder');
+    assert.match(id.slice(-5), /^-[0-9a-f]{4}$/);
+  });
+
+  it('단일 경로 세그먼트다 (경로 탈출 방어)', () => {
+    for (const p of ['/tmp/a/../b', '/tmp/.hidden', '/tmp/has space']) {
+      const id = deterministicWorkspaceId(p);
+      assert.equal(id.includes('/'), false);
+      assert.equal(id.startsWith('.'), false);
+    }
   });
 
   it('존재하지 않는 경로도 동작한다 (realpath 불가 시 절대경로 정규화 폴백)', () => {
     const id = deterministicWorkspaceId('/no/such/dir/agentbridge-test');
-    assert.match(id, UUID_RE);
+    assert.match(id, ID_RE);
   });
 
   it('심볼릭 링크와 원본 경로가 같은 ID를 반환한다 (realpath 정규화)', async () => {

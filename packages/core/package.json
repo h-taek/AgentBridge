@@ -2,7 +2,7 @@
   "name": "@agentbridge/core",
   "version": "0.0.0",
   "private": true,
-  "description": "Shared core logic for AgentBridge desktop app and VS Code extension",
+  "description": "Shared core logic for the AgentBridge VS Code extension",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "files": [

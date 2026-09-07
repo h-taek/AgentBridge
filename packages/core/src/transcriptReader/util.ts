@@ -4,6 +4,16 @@ import type { TurnRecord, TurnsAssistantDetail } from '../shared/turns';
 import { TURN_CAP, TURNS_ASSISTANT_DETAIL_CAP } from '../shared/turns';
 import type { Carry, OpenTurn, ReaderCtx } from './types';
 
+// 기록에 남기면 안 되는 제어문자를 지운다. 줄바꿈과 탭은 본문의 모양이라 남긴다.
+//
+// NUL이 특히 위험하다. 기록에 한 번 박히면 그 턴이 정제 프롬프트에 실리고, Node의 spawn은
+// NUL이 든 인자를 거부한다. 압축은 가장 오래된 덩어리부터 처리하므로 그 턴에서 매번 걸리고,
+// 실패하면 아무것도 안 지워져 그 뒤 기록이 통째로 밀린다 (2026-09-03 실사용에서 147턴).
+export function stripControlChars(s: string): string {
+  // eslint-disable-next-line no-control-regex
+  return s.replace(/[\u0000-\u0008\u000B-\u001F\u007F]/g, '');
+}
+
 // 플랫폼 중립 UTF-8 byte length (Buffer/TextEncoder 비의존).
 export function utf8ByteLength(s: string): number {
   let n = 0;
@@ -34,7 +44,7 @@ export function deterministicTurnId(model: CliKind, sourceKey: string): string {
 
 // tool 인자를 표시용 문자열로. 객체면 JSON, 길면 cap.
 export function toolArgString(input: unknown): string {
-  let s = typeof input === 'string' ? input : JSON.stringify(input ?? '');
+  let s = stripControlChars(typeof input === 'string' ? input : JSON.stringify(input ?? ''));
   if (s.length > TURN_CAP.toolCallArgChars) s = s.slice(0, TURN_CAP.toolCallArgChars) + '…';
   return s;
 }
@@ -49,8 +59,11 @@ function applyUserCap(text: string): string {
 
 // 진행 중 OpenTurn을 완성된 TurnRecord로. 모든 reader 공통 마무리.
 export function finalizeTurn(open: OpenTurn, model: CliKind, ctx: ReaderCtx): TurnRecord {
-  const user = applyUserCap(open.user);
-  const assistantBody = applyDetailCap(open.assistantParts.join('\n').trim(), ctx.detail);
+  const user = applyUserCap(stripControlChars(open.user));
+  const assistantBody = applyDetailCap(
+    stripControlChars(open.assistantParts.join('\n').trim()),
+    ctx.detail,
+  );
   return {
     id: deterministicTurnId(model, open.sourceKey),
     workspaceId: ctx.workspaceId,

@@ -15,6 +15,7 @@ import { randomUUID } from 'crypto';
 import {
   existsSync,
   mkdirSync,
+  readFileSync,
   renameSync,
   writeFileSync,
   promises as fsp,
@@ -22,11 +23,17 @@ import {
 import { join } from 'path';
 import { CLI_DISPLAY_NAME, type CliKind } from './shared/cli';
 import { type Logger, noopLogger } from './interfaces';
-import { deterministicWorkspaceId } from './workspaceId';
+import { deterministicWorkspaceId, canonicalWorkspacePath } from './workspaceId';
 import { withFileLock } from './fileLock';
 import { getStorageRoot } from './storageRoot';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// 폴더 이름으로 쓰이는 문자열이 경로를 벗어나지 않는지 본다. 0.5.0 전에는 workspaceId의
+// UUID 형식 검사가 이 역할을 겸했는데, 이름이 UUID가 아니게 되면서 명시적 검사로 갈라졌다.
+function isSafeSegment(v: string): boolean {
+  return v.length > 0 && v !== '.' && v !== '..' && !/[\\/\u0000]/.test(v);
+}
 
 // ─── Schema (데스크탑 패턴 차용) ──────────────────────────────────────
 
@@ -46,6 +53,23 @@ export interface SessionMeta {
   kind?: SessionKind;
   // 가장 최근 채팅 시점. 탭 정렬용.
   lastChattedAt?: string;
+  // 이 세션을 띄운 부모 세션. 없으면 메인 세션이다 (0.5.0 B-2).
+  parentSessionId?: string;
+  // 서브에이전트에 발급한 교량 이름. 폴더(trees/<이름>)와 브랜치(agentbridge/<이름>)와 명령이
+  // 받는 id를 겸한다 (0.5.0 B-7). 메인 세션에는 없다.
+  agentName?: string;
+  // 정리된 시각 (0.5.0 B-7). 레코드를 보존하는 이유는 이름 재사용의 마지막 사용 시각 하나뿐이라,
+  // 정리된 서브는 트리와 목록에서 빠진다 — 화면에는 열 수도 이어갈 수도 없는 행이 남지 않는다.
+  cleanedAt?: string;
+  // 사용자가 이 세션을 마지막으로 연 시각(ISO). 완료 표시를 끄는 기준 (0.5.0 B-2).
+  lastOpenedAt?: string;
+  // 이 서브의 변경을 원본에 얹은 시각 (0.5.0 B-9). 라운드 정리가 무엇을 남길지 이 값으로 정한다
+  // — 가장 최근에 머지된 하나만 남는다(B-7 정리 시점 첫째).
+  mergedAt?: string;
+  // 라운드 정리에서 남겨진 시각 (0.5.0 B-7). 한 번 남겨진 서브는 다음 라운드 정리에서 지워진다
+  // — 정리를 부르는 시점이 곧 이전 라운드가 끝났다는 선언이라, 이 표시가 없으면 새 머지가 나올
+  // 때까지 그 서브가 계속 남아 상한이 안 생긴다.
+  roundKeptAt?: string;
 }
 
 export interface WorkspaceMeta {
@@ -60,6 +84,9 @@ export interface WorkspaceMeta {
   // compactionScheduler 락.
   compactionInProgress: { pid: number; startedAt: number } | null;
   codexHookTrust?: 'pending' | 'trusted';
+  // 도는 중인 탭을 닫을 때 확인을 띄우지 않는다 — 사용자가 확인 창에서 고른 값. 레포 하나에만
+  // 걸린다(0.5.0 6단계). 되돌리는 자리는 명령 하나다.
+  closeConfirmDisabled?: boolean;
 }
 
 export interface WorkspaceListEntry {
@@ -74,6 +101,12 @@ export type SessionUpdatePatch = Partial<{
   closedAt: string | null;
   title: string | undefined;
   lastChattedAt: string;
+  parentSessionId: string | undefined;
+  lastOpenedAt: string;
+  agentName: string | undefined;
+  cleanedAt: string;
+  mergedAt: string;
+  roundKeptAt: string;
 }>;
 
 export type WorkspaceUpdatePatch = Partial<{
@@ -82,6 +115,7 @@ export type WorkspaceUpdatePatch = Partial<{
   primarySessionId: string | null;
   compactionInProgress: WorkspaceMeta['compactionInProgress'];
   codexHookTrust: WorkspaceMeta['codexHookTrust'];
+  closeConfirmDisabled: boolean;
 }>;
 
 // ─── WorkspaceStore 인터페이스 ─────────────────────────────────────────
@@ -104,11 +138,15 @@ export interface WorkspaceStore {
   // sessionId 생략 시 자체 발급. 호출처가 이미 AgentBridge 세션 ID를 발급한 경우(extension:
   // PTY/패널/webview state 키) 그 id를 넘겨 일관성 유지 — 후속 updateSessionMeta가 같은 id로
   // 매칭되게 한다 (V-04). 제공된 sessionId가 이미 있으면 기존 세션을 반환(중복 추가 방지).
+  // init은 만들 때부터 붙어 있어야 하는 값이다. 서브는 레코드를 먼저 쓰고 그다음에 띄우므로
+  // (0.5.0 B-7 고아 판정의 근거), 부모와 이름이 두 번째 쓰기로 뒤늦게 붙으면 그 사이에 죽은
+  // 레코드가 부모 없는 메인 세션으로 남는다.
   addSession(
     workspaceId: string,
     model: CliKind,
     kind?: SessionKind,
     sessionId?: string,
+    init?: { parentSessionId?: string; agentName?: string },
   ): Promise<SessionMeta>;
   updateSessionMeta(workspaceId: string, sessionId: string, patch: SessionUpdatePatch): Promise<void>;
   loadSession(workspaceId: string, sessionId: string): Promise<SessionMeta>;
@@ -155,13 +193,33 @@ export function createWorkspaceStore(opts: WorkspaceStoreOptions = {}): Workspac
 
   // ── workspace.json (메타 + sessions[]) ──
   function workspaceDir(workspaceId: string): string {
-    if (!UUID_RE.test(workspaceId)) {
+    if (!isSafeSegment(workspaceId)) {
       throw new Error(`workspaceStore: invalid workspaceId "${workspaceId}"`);
     }
     return join(globalStoragePath, 'workspaces', workspaceId);
   }
   function workspaceMetaPath(workspaceId: string): string {
     return join(workspaceDir(workspaceId), 'workspace.json');
+  }
+
+  // 폴더 이름의 다이제스트는 네 자라 같은 basename을 가진 두 저장소가 부딪힐 수 있다.
+  // 부딪히면 조용히 같은 폴더를 쓰는 대신 거절한다 — 데이터 혼입이 눈에 보이는 오류가 된다.
+  function assertNoDigestCollision(workspaceId: string, folderFsPath: string): void {
+    let recorded: unknown;
+    try {
+      recorded = (JSON.parse(readFileSync(workspaceMetaPath(workspaceId), 'utf8')) as { workspacePath?: unknown })
+        .workspacePath;
+    } catch {
+      return; // 메타를 못 읽으면 판단 근거가 없다. 기존 폴백 경로가 처리한다.
+    }
+    if (typeof recorded !== 'string' || recorded.length === 0) return;
+    const mine = canonicalWorkspacePath(folderFsPath);
+    const theirs = canonicalWorkspacePath(recorded);
+    if (mine === theirs) return;
+    throw new Error(
+      `workspaceStore: workspace folder "${workspaceId}" already belongs to ${theirs}. ` +
+        `Refusing to share it with ${mine}. Rename either project folder to get a different digest.`,
+    );
   }
   function sessionsDir(workspaceId: string): string {
     return join(workspaceDir(workspaceId), 'sessions');
@@ -235,6 +293,7 @@ export function createWorkspaceStore(opts: WorkspaceStoreOptions = {}): Workspac
         primarySessionId: legacySessions.find((s) => s.closedAt === null)?.sessionId ?? legacySessions[0]?.sessionId ?? null,
         compactionInProgress: null,
         codexHookTrust: parsed.codexHookTrust,
+        closeConfirmDisabled: parsed.closeConfirmDisabled,
       };
       // 옛 schema 흡수 시 atomic write — 다음 부팅부터는 fallback 안 탐.
       await writeWorkspaceMetaAtomic(repaired);
@@ -267,7 +326,10 @@ export function createWorkspaceStore(opts: WorkspaceStoreOptions = {}): Workspac
       const id = deterministicWorkspaceId(folderFsPath);
       const metaPath = workspaceMetaPath(id);
       // 이미 초기화된 워크스페이스면 그대로 반환.
-      if (existsSync(metaPath)) return id;
+      if (existsSync(metaPath)) {
+        assertNoDigestCollision(id, folderFsPath);
+        return id;
+      }
 
       // workspace.json 초기화 — 호스트가 별도 createWorkspace를 호출하지 않아도(예: 익스텐션)
       // 다음 readWorkspaceMeta가 빈 객체를 보지 않게 함.
@@ -280,7 +342,7 @@ export function createWorkspaceStore(opts: WorkspaceStoreOptions = {}): Workspac
       const now = new Date().toISOString();
       const meta: WorkspaceMeta = {
         workspaceId: id,
-        title: folderFsPath.split('/').pop() ?? `Workspace ${id.slice(0, 8)}`,
+        title: folderFsPath.split('/').pop() || id,
         createdAt: now,
         updatedAt: now,
         workspacePath: folderFsPath,
@@ -311,6 +373,9 @@ export function createWorkspaceStore(opts: WorkspaceStoreOptions = {}): Workspac
     // ── workspace 메타 ──
     async createWorkspace(args) {
       const workspaceId = deterministicWorkspaceId(args.workspacePath);
+      if (existsSync(workspaceMetaPath(workspaceId))) {
+        assertNoDigestCollision(workspaceId, args.workspacePath);
+      }
       return withWorkspaceLock(workspaceId, async () => {
         // 결정적 ID — 같은 폴더로 재호출되면 기존 워크스페이스에 세션만 추가.
         // (데스크탑 V-23 중복 가드가 코어로 흡수됨)
@@ -391,7 +456,7 @@ export function createWorkspaceStore(opts: WorkspaceStoreOptions = {}): Workspac
       }
       const out: WorkspaceListEntry[] = [];
       for (const id of ids) {
-        if (!UUID_RE.test(id)) continue;
+        if (!isSafeSegment(id) || id.startsWith('.')) continue;
         try {
           const m = await readWorkspaceMeta(id);
           out.push({
@@ -408,7 +473,7 @@ export function createWorkspaceStore(opts: WorkspaceStoreOptions = {}): Workspac
     },
 
     // ── 세션 관리 ──
-    async addSession(workspaceId, model, kind = 'cli', sessionId) {
+    async addSession(workspaceId, model, kind = 'cli', sessionId, init) {
       const sid = sessionId ?? randomUUID();
       // 호출처 제공 id는 sessionDir(path.join)에 그대로 쓰이므로 UUID 형식 강제 — traversal 방어.
       if (!UUID_RE.test(sid)) {
@@ -427,6 +492,8 @@ export function createWorkspaceStore(opts: WorkspaceStoreOptions = {}): Workspac
           createdAt: now,
           closedAt: null,
           kind,
+          ...(init?.parentSessionId ? { parentSessionId: init.parentSessionId } : {}),
+          ...(init?.agentName ? { agentName: init.agentName } : {}),
         };
         await fsp.mkdir(sessionDir(workspaceId, sid), { recursive: true });
         meta.sessions.push(session);
@@ -455,23 +522,39 @@ export function createWorkspaceStore(opts: WorkspaceStoreOptions = {}): Workspac
     },
 
     async deleteSession(workspaceId, sessionId) {
-      let deletedSession: SessionMeta | null = null;
+      let deletedSessions: SessionMeta[] = [];
       await withWorkspaceLock(workspaceId, async () => {
         const meta = await readWorkspaceMeta(workspaceId);
         const target = meta.sessions.find((s) => s.sessionId === sessionId);
         if (!target) return;
-        deletedSession = target;
-        meta.sessions = meta.sessions.filter((s) => s.sessionId !== sessionId);
-        if (meta.primarySessionId === sessionId) meta.primarySessionId = null;
+        // 자식·손자까지 재귀로 모은다 — 부모만 지우면 부모 없는 레코드가 남는다 (0.5.0 B-2).
+        const toDelete = new Set<string>([sessionId]);
+        let grew = true;
+        while (grew) {
+          grew = false;
+          for (const s of meta.sessions) {
+            if (s.parentSessionId && toDelete.has(s.parentSessionId) && !toDelete.has(s.sessionId)) {
+              toDelete.add(s.sessionId);
+              grew = true;
+            }
+          }
+        }
+        deletedSessions = meta.sessions.filter((s) => toDelete.has(s.sessionId));
+        meta.sessions = meta.sessions.filter((s) => !toDelete.has(s.sessionId));
+        if (meta.primarySessionId && toDelete.has(meta.primarySessionId)) meta.primarySessionId = null;
         meta.updatedAt = new Date().toISOString();
         await writeWorkspaceMetaAtomic(meta);
-        await fsp.rm(sessionDir(workspaceId, sessionId), { recursive: true, force: true });
+        for (const sid of toDelete) {
+          await fsp.rm(sessionDir(workspaceId, sid), { recursive: true, force: true });
+        }
       });
-      if (deletedSession && onAfterDeleteSession) {
-        try {
-          await onAfterDeleteSession(workspaceId, deletedSession);
-        } catch (err) {
-          log.warn(`workspaceStore: onAfterDeleteSession failed — ${err instanceof Error ? err.message : String(err)}`);
+      if (onAfterDeleteSession) {
+        for (const deleted of deletedSessions) {
+          try {
+            await onAfterDeleteSession(workspaceId, deleted);
+          } catch (err) {
+            log.warn(`workspaceStore: onAfterDeleteSession failed — ${err instanceof Error ? err.message : String(err)}`);
+          }
         }
       }
     },

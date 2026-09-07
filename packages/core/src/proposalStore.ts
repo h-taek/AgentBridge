@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { proposalsDir } from './globalPaths';
 import { slugify } from './globalMarkdown';
 import { writeProfileDocs } from './globalStore';
-import { DOC_CAPS, PROPOSAL_CAPS, type ProposalInput, type StoredProposal } from './shared/global';
+import { DOC_CAPS, PROPOSAL_CAPS, type ProposalInput, type ProposalScope, type StoredProposal } from './shared/global';
 
 // (카테고리, 제목) 정규화 키 — 중복 판정 단일 규칙.
 function dedupKey(category: string, title: string): string {
@@ -38,8 +38,12 @@ function clampLen(s: string, cap: number): string {
   return typeof s === 'string' && s.length > cap ? s.slice(0, cap) : (s || '');
 }
 
-export async function readProposals(globalDir: string, profileId: string): Promise<StoredProposal[]> {
-  const dir = proposalsDir(globalDir, profileId);
+export async function readProposals(
+  globalDir: string,
+  profileId: string,
+  scope: ProposalScope = 'user',
+): Promise<StoredProposal[]> {
+  const dir = proposalsDir(globalDir, profileId, scope);
   let files: string[];
   try {
     files = await fsp.readdir(dir);
@@ -67,12 +71,15 @@ export async function writeProposals(
   profileId: string,
   inputs: ProposalInput[],
   opts: { existingDocTitles: { category: string; title: string }[] },
+  scope: ProposalScope = 'user',
 ): Promise<WriteProposalsResult> {
-  const dir = proposalsDir(globalDir, profileId);
+  const dir = proposalsDir(globalDir, profileId, scope);
   await fsp.mkdir(dir, { recursive: true });
 
   const seen = new Set<string>();
-  for (const p of await readProposals(globalDir, profileId)) seen.add(dedupKey(p.category, p.title));
+  // 같은 scope의 대기 제안만 본다. 자리가 갈려 있는데 남의 큐와 비교하면 프로젝트 지식이
+  // 사용자 지식의 같은 제목에 막힌다.
+  for (const p of await readProposals(globalDir, profileId, scope)) seen.add(dedupKey(p.category, p.title));
   for (const d of opts.existingDocTitles) seen.add(dedupKey(d.category, d.title));
 
   const written: StoredProposal[] = [];
@@ -81,17 +88,23 @@ export async function writeProposals(
   for (const inp of inputs) {
     if (n >= PROPOSAL_CAPS.maxPerPass) { skipped.push(inp); continue; }
     const key = dedupKey(inp.category, inp.title);
-    if (seen.has(key)) { skipped.push(inp); continue; }
+    // 대상을 지목한 제안은 이미 있는 문서를 고치는 것이므로 중복이 아니다. 대기 큐의 같은
+    // 제목과는 여전히 겹치면 안 되는데, 그때는 id가 같아 최신 제안이 앞의 것을 덮는다.
+    if (seen.has(key) && !inp.targetSlug) { skipped.push(inp); continue; }
     seen.add(key);
     const rec: StoredProposal = {
       id: proposalId(inp.category, inp.title),
       createdAt: new Date().toISOString(),
       category: inp.category,
+      // 어느 프로필로 갈지는 이미 정해졌지만, 무엇으로 판단해 여기 왔는지를 함께 남긴다 —
+      // 패널이 표시하고, 나중에 재분류가 필요할 때 근거가 된다.
+      ...(inp.scope ? { scope: inp.scope } : {}),
       title: clampLen(inp.title, PROPOSAL_CAPS.title),
       summary: clampLen(inp.summary, PROPOSAL_CAPS.summary),
       body: clampLen(inp.body, PROPOSAL_CAPS.body),
       confidence: typeof inp.confidence === 'number' ? Math.max(0, Math.min(1, inp.confidence)) : 0.5,
       ...(inp.indexEntries?.length ? { indexEntries: inp.indexEntries.slice(0, DOC_CAPS.indexEntries) } : {}),
+      ...(inp.targetSlug ? { targetSlug: inp.targetSlug } : {}),
     };
     await fsp.writeFile(join(dir, `${rec.id}.json`), JSON.stringify(rec, null, 2) + '\n', 'utf8');
     written.push(rec);
@@ -108,21 +121,24 @@ export async function approveProposal(
   globalDir: string,
   profileId: string,
   proposalId: string,
+  scope: ProposalScope = 'user',
 ): Promise<{ written: string[] } | null> {
-  const all = await readProposals(globalDir, profileId);
+  const all = await readProposals(globalDir, profileId, scope);
   const p = all.find((x) => x.id === proposalId);
   if (!p) return null;
   const res = await writeProfileDocs(globalDir, profileId, {
     docs: [{
       category: p.category,
-      slug: docSlug(p.category, p.title),
+      // 대상을 지목한 제안(memory update)은 그 자리를 덮는다. 제목에서 slug를 새로 뽑으면
+      // 제목이 바뀐 순간 같은 항목이 둘이 된다.
+      slug: p.targetSlug || docSlug(p.category, p.title),
       title: p.title,
       summary: p.summary,
       body: p.body,
       indexEntries: p.indexEntries?.length ? p.indexEntries : [p.title],
     }],
-  });
-  await discardProposal(globalDir, profileId, proposalId);
+  }, scope);
+  await discardProposal(globalDir, profileId, proposalId, scope);
   return { written: res.written };
 }
 
@@ -131,8 +147,9 @@ export async function discardProposal(
   globalDir: string,
   profileId: string,
   proposalId: string,
+  scope: ProposalScope = 'user',
 ): Promise<boolean> {
-  const file = join(proposalsDir(globalDir, profileId), `${proposalId}.json`);
+  const file = join(proposalsDir(globalDir, profileId, scope), `${proposalId}.json`);
   try {
     await fsp.unlink(file);
     return true;

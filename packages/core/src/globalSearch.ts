@@ -1,5 +1,6 @@
 // gc-tree resolve.ts 토큰 스코어러 이식 + 한국어 비파괴 처리(§C.2).
 // 핵심: 파괴하지 말고 추가하라 — 조사 제거는 변이형으로만, 원형 보존.
+import type { ProposalScope } from './shared/global';
 import { readProfileDocs } from './globalStore';
 
 const STOP_WORDS = new Set([
@@ -124,13 +125,13 @@ export async function resolveContext(
   globalDir: string,
   profileId: string,
   query: string,
-  opts?: { topN?: number },
+  opts?: { topN?: number; scope?: ProposalScope },
 ): Promise<SearchMatch[]> {
   const tokens = tokenizeQuery(query);
   if (tokens.length === 0) return [];
   const minScore = minimumUsefulScore(tokens);
   const phrase = String(query || '').trim().toLowerCase();
-  const docs = await readProfileDocs(globalDir, profileId);
+  const docs = await readProfileDocs(globalDir, profileId, opts?.scope ?? 'user');
   const scored: SearchMatch[] = [];
   for (const rec of docs) {
     let score = scoreDoc(rec, tokens);

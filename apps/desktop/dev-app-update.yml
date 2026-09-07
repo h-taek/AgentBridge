@@ -1,6 +1,0 @@
-# electron-updater의 dev 모드 update 흐름 테스트용 메타. production 빌드는 electron-builder가
-# `app-update.yml`을 별도 생성하므로 본 파일은 dev 전용. `npm run dev` 실행 시 autoUpdater가
-# 이 파일을 읽어 GitHub Releases를 polling. 빌드 산출물 publish 후 update 흐름 dry-run 가능.
-provider: github
-owner: h-taek
-repo: AgentBridge

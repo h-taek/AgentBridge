@@ -88,14 +88,65 @@ function vendorAssets() {
   cpSync(join(A, 'brand', 'agentbridge-light.svg'), 'media/icon-light.svg', { dereference: true });
   cpSync(join(A, 'brand', 'agentbridge-dark.svg'), 'media/icon-dark.svg', { dereference: true });
 
-  // dot — colors.json 색을 박아 모델 3종 × 정상/닫힘 6개 생성. 단일 출처=colors.json.
+  // dot — colors.json 색을 박아 모델 3종 × 닫힘 2종 × 상태 4종 생성. 단일 출처=colors.json.
   // VS Code TreeItem.iconPath가 파일 Uri만 받아 인라인 색을 못 줘서 파일로 굽는다.
+  // 파일명 규칙(sessionTreeModel.ts의 iconKey와 맞춘다): <model>[-closed][-<activity>].svg
+  // idle은 접미사 없음(기존 파일명 유지, 상태 표시 자체가 없는 것이 노는 상태라는 스펙과 일치).
   const colors = JSON.parse(readFileSync(join(A, 'colors.json'), 'utf8'));
+  rmSync('media/dots', { recursive: true, force: true });
   mkdirSync('media/dots', { recursive: true });
-  const dot = (color, opacity) =>
-    `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><circle cx="8" cy="8" r="3.5" fill="${color}" opacity="${opacity}"/></svg>`;
+
+  // 도형은 16×16 캔버스 가운데를 기준으로 75%로 줄여 그린다(선 굵기도 같은 비율로 얇아진다).
+  // 네 상태의 바깥 원 반지름이 6으로 같아서 행이 바뀌어도 아이콘 크기가 흔들리지 않는다.
+  const SCALE = 0.75;
+  const R = 6;
+  const svg = (body, opacity) =>
+    `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">` +
+    `<g transform="translate(8,8) scale(${SCALE}) translate(-8,-8)" opacity="${opacity}">${body}</g></svg>`;
+  // 완료·모름이 공유하는 링. 스피너와 같은 반지름이라 상태가 바뀌어도 크기가 흔들리지 않는다.
+  const ring = (color) =>
+    `<circle cx="8" cy="8" r="${R}" fill="none" stroke="${color}" stroke-width="1.3"/>`;
+
+  // idle — 채운 원.
+  const dot = (color, opacity) => svg(`<circle cx="8" cy="8" r="${R}" fill="${color}"/>`, opacity);
+  // running — 3/4 호가 도는 스피너. VS Code가 SMIL을 안 돌리면 정지한 호로 보인다.
+  const spinner = (color, opacity) =>
+    svg(
+      `<g><animateTransform attributeName="transform" attributeType="XML" type="rotate"` +
+        ` from="0 8 8" to="360 8 8" dur="0.9s" repeatCount="indefinite"/>` +
+        `<path d="M8 ${8 - R} A${R} ${R} 0 1 1 ${8 - R} 8" fill="none" stroke="${color}"` +
+        ` stroke-width="2" stroke-linecap="round"/></g>`,
+      opacity,
+    );
+  // done — 옅은 링 안에 체크.
+  const check = (color, opacity) =>
+    svg(
+      ring(color) +
+        `<path d="M5.0 8.3 L6.9 10.2 L11.0 6.0" fill="none" stroke="${color}"` +
+        ` stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/>`,
+      opacity,
+    );
+  // unknown — 옅은 링 안에 물음표(글리프가 아니라 선으로 그린다. 폰트에 안 기댄다).
+  const unknown = (color, opacity) =>
+    svg(
+      ring(color) +
+        `<path d="M6.0 6.3 a2.05 2.05 0 1 1 2.0 2.05 v1.0" fill="none" stroke="${color}"` +
+        ` stroke-width="1.9" stroke-linecap="round"/>` +
+        `<circle cx="8" cy="11.4" r="1" fill="${color}"/>`,
+      opacity,
+    );
+
+  const STATES = [
+    ['', dot],
+    ['-running', spinner],
+    ['-done', check],
+    ['-unknown', unknown],
+  ];
+  // 닫힌 세션은 상태를 안 그린다(sessionTreeModel.visibleActivity) — 기본 원 하나면 된다.
   for (const [model, color] of Object.entries(colors)) {
-    writeFileSync(join('media', 'dots', `${model}.svg`), dot(color, 1));
+    for (const [stateSuffix, draw] of STATES) {
+      writeFileSync(join('media', 'dots', `${model}${stateSuffix}.svg`), draw(color, 1));
+    }
     writeFileSync(join('media', 'dots', `${model}-closed.svg`), dot(color, 0.4));
   }
 }

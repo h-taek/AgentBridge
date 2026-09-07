@@ -8,31 +8,61 @@ import { homedir } from 'os';
 import type { SpawnOptions } from '../pty/types';
 import type { EnvProbe, ProbeResult } from '../envProbe';
 import type { HookInstaller } from '../hookInstaller';
+import type { SkillInstaller } from '../skillInstaller';
+import type { CliKind } from '../shared/cli';
 import type { HookStatusStore } from '../hookStatusStore';
 import type { Logger } from '../interfaces';
 import { noopLogger } from '../interfaces';
-import { snapshotCodexSessions } from './codexSessionWatcher';
-import { snapshotAgyConversations, resolveResumeArgs } from './agyResume';
+import { resolveResumeArgs } from './agyResume';
+import { resolveHookCaptureFile } from './hookSessionCapture';
+import { resolveTurnSignalFile } from './turnSignal';
+import { parseWritableRoots, buildWritableRootsArgs } from './codexSandbox';
 
 export type CliAdapterOptions = {
   envProbe: EnvProbe;
   // 옵셔널 — 미제공 시 buildSpawnOptions가 hook 설치 단계 skip. 데스크탑처럼 자체 hook 시스템을
   // 가진 호스트는 hookInstaller 안 주입하고 spawn 후 별도로 hooks 설치 가능.
   hookInstaller?: HookInstaller;
+  // 옵셔널 — 미제공 시 스킬 설치 단계를 건너뛴다. 훅과 같은 자리에서 같은 시점에 돈다(B-5).
+  skillInstaller?: SkillInstaller;
   hookStatusStore?: HookStatusStore;
-  // claude 어댑터가 hookInstaller.installClaudeHooks(workspaceClaudeDir, …)에 전달할 디렉토리.
-  // 호스트가 workspace 단위 storage 경로를 안다 — workspaceId로 매핑.
-  workspaceClaudeDir: (workspaceId: string) => string;
-  // <storageRoot>/workspaces/<workspaceId> — 훅이 captured-<token>.json을 쓰는 디렉토리.
-  // 미제공 시 hookCaptureFilePath 미반환(토큰 캡처 비활성, 파일와치만).
-  hookCaptureDir?: (workspaceId: string) => string;
+  // <storageRoot>/workspaces/<workspaceId> — 그 워크스페이스의 데이터 폴더.
+  // 훅이 신원으로 쓰는 AGENTBRIDGE_WS_DIR이자 캡처 파일이 떨어지는 자리다.
+  workspaceDir: (workspaceId: string) => string;
+  // 저장소 루트. codex 샌드박스에 쓰기 허용으로 더할 폴더다(B-5). 없으면 그 인자를 붙이지 않는다.
+  storageRoot?: string;
+  // 테스트만 오버라이드 — codex 설정을 읽을 홈.
+  homeDir?: string;
   logger?: Logger;
+};
+
+// 서브에이전트를 띄울 때 함께 넘기는 값 (0.5.0 B-6·B-8).
+//
+// 첫 프롬프트는 기동 인자로 들어간다. 셋 다 인자로 받고 그대로 대화형에 남는 것을 실측으로
+// 확인했다(research 10 §1). 띄운 뒤 화면에 타이핑해 넣는 경로를 두지 않는 이유는 그쪽이
+// 하니스마다 다르고 조용히 실패하기 때문이다.
+//
+// resume에는 첫 프롬프트를 다시 넣지 않는다. 이어서 여는 세션은 이미 그 말을 들었다.
+export type SpawnExtras = {
+  initialPrompt?: string;
+  // 이 세션이 서브라면 부모의 세션 id. 기록의 뿌리를 세션 폴더로 가르는 것은 호스트 몫이고
+  // 여기서는 SpawnOptions에 실어 나르기만 한다.
+  parentSessionId?: string;
+  // 넘긴 세션 id가 '이어서 여는 것'이 아니라 '방금 발급한 것'임을 알린다. 서브 스폰은 레코드를
+  // 먼저 쓰기 위해 id를 밖에서 발급하는데(B-7), 그 값을 resume 자리로 받으면 어댑터가 이어서
+  // 여는 세션으로 보고 첫 프롬프트를 빼 버린다.
+  freshSession?: boolean;
 };
 
 export interface CliAdapterSet {
   claude: {
     isAvailable(): ProbeResult;
-    buildSpawnOptions(cwd: string, workspaceId: string, resumeSessionId?: string): Promise<SpawnOptions>;
+    buildSpawnOptions(
+      cwd: string,
+      workspaceId: string,
+      resumeSessionId?: string,
+      extras?: SpawnExtras,
+    ): Promise<SpawnOptions>;
   };
   codex: {
     isAvailable(): ProbeResult;
@@ -41,7 +71,7 @@ export interface CliAdapterSet {
       workspaceId: string,
       resumeSessionId?: string,
       resumeModelSessionId?: string,
-      captureToken?: string,
+      extras?: SpawnExtras,
     ): Promise<SpawnOptions>;
   };
   agy: {
@@ -51,14 +81,35 @@ export interface CliAdapterSet {
       workspaceId: string,
       resumeSessionId?: string,
       resumeModelSessionId?: string,
-      captureToken?: string,
+      extras?: SpawnExtras,
     ): Promise<SpawnOptions>;
   };
 }
 
 export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
   const log = opts.logger ?? noopLogger;
-  const { envProbe, hookInstaller, hookStatusStore, hookCaptureDir } = opts;
+  const { envProbe, hookInstaller, skillInstaller, hookStatusStore, workspaceDir } = opts;
+  const home = opts.homeDir ?? homedir();
+
+  // codex 설정의 쓰기 허용 폴더. 못 읽으면 빈 목록으로 본다 — 그 경우 우리 폴더만 열린다.
+  async function readCodexWritableRoots(): Promise<string[]> {
+    try {
+      return parseWritableRoots(await fs.readFile(join(home, '.codex', 'config.toml'), 'utf8'));
+    } catch {
+      return [];
+    }
+  }
+
+  // 스킬은 발견 가능성을 높이는 수단이지 전제가 아니다(B-5). 실패해도 명령은 그대로 돌므로
+  // 훅과 달리 세션 상태를 내리지 않고 로그만 남긴다.
+  async function installSkill(agent: CliKind): Promise<void> {
+    if (!skillInstaller) return;
+    try {
+      await skillInstaller.install(agent);
+    } catch (err) {
+      log.warn(`skillInstaller: ${agent} 스킬 설치 실패 — ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
 
   async function claudeSessionFileExists(uuid: string): Promise<boolean> {
     const root = join(homedir(), '.claude', 'projects');
@@ -83,19 +134,24 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
     claude: {
       isAvailable: () => envProbe.probe('claude'),
 
-      async buildSpawnOptions(cwd, workspaceId, resumeSessionId) {
+      async buildSpawnOptions(cwd, workspaceId, resumeSessionId, extras) {
         const sessionId = resumeSessionId ?? randomUUID();
-        const env = envProbe.getShellEnv();
+        // 방금 발급한 id면 이어서 여는 것이 아니다.
+        const resuming = !!resumeSessionId && !extras?.freshSession;
+        const wsDir = workspaceDir(workspaceId);
+        const env = {
+          ...envProbe.getShellEnv(),
+          AGENTBRIDGE_WS_SESSION: sessionId,
+          AGENTBRIDGE_WS_DIR: wsDir,
+        };
         const probe = envProbe.probe('claude');
         const command = probe.resolvedPath ?? 'claude';
 
-        let settingsFile = '';
         if (hookInstaller) {
           try {
-            settingsFile = await hookInstaller.installClaudeHooks(
-              opts.workspaceClaudeDir(workspaceId),
-              workspaceId,
-            );
+            await hookInstaller.installClaudeHooks();
+            await hookInstaller.cleanupLegacyHooks(cwd);
+            await installSkill('claude');
             hookStatusStore?.clearDisabled(workspaceId, 'claude');
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
@@ -104,20 +160,31 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
           }
         }
 
-        let args: string[];
-        if (!resumeSessionId) {
-          args = ['--session-id', sessionId, '--settings', settingsFile];
-        } else {
-          const exists = await claudeSessionFileExists(sessionId);
-          if (exists) {
-            args = ['--resume', sessionId, '--settings', settingsFile];
-          } else {
-            log.log(
-              `claudeAdapter: resume 불가 (jsonl 없음) — 새 세션으로 fallback (sessionId=${sessionId.slice(0, 8)})`,
-            );
-            args = ['--session-id', sessionId, '--settings', settingsFile];
-          }
-        }
+        // 우리 워크스페이스 폴더는 작업 폴더 밖이라 claude가 읽기 전에 승인을 요구한다.
+        // 세션 인자라 우리가 띄운 세션에만 걸린다.
+        //
+        // 첨부 폴더(저장소 루트의 attachments/)는 열지 않는다. 프로젝트 공용이라 열면 이 세션이
+        // 다른 프로젝트의 첨부까지 읽게 된다. 첨부는 대화형 승인 한 번으로 읽힌다.
+        //
+        // 우리 CLI 하나만 승인 없이 열어준다(B-5). 호출마다 승인 창이 뜨면 맥락을 모델의
+        // 자발적 호출에 건 것이 성립하지 않는다. 여는 것은 이 명령 하나이고 세션에만 걸린다.
+        // 승인 개방은 기동 인자가 아니라 전역 설정의 permissions.allow에 있다(hookInstaller).
+        // `--allowedTools`는 값을 공백으로 쪼개므로 우리 규칙처럼 공백이 든 것은 통째로 버려진다.
+        const accessArgs = ['--add-dir', wsDir];
+        const sessionArgs = !resuming
+          ? ['--session-id', sessionId]
+          : (await claudeSessionFileExists(sessionId))
+            ? ['--resume', sessionId]
+            : (log.log(
+                `claudeAdapter: resume 불가 (jsonl 없음) — 새 세션으로 fallback (sessionId=${sessionId.slice(0, 8)})`,
+              ),
+              ['--session-id', sessionId]);
+        // 첫 프롬프트 앞에는 `--`가 필요하다. `--add-dir`와 `--allowedTools`가 값을 여러 개 받는
+        // 옵션이라, 구분자 없이 뒤에 붙이면 프롬프트가 그 옵션의 값으로 먹힌다(라이브에서 확인:
+        // "Input must be provided ... when using --print"). resume에는 붙이지 않는다 — 이어서
+        // 여는 세션은 이미 그 말을 들었다.
+        const promptArgs = !resuming && extras?.initialPrompt ? ['--', extras.initialPrompt] : [];
+        const args = [...sessionArgs, ...accessArgs, ...promptArgs];
 
         return {
           command,
@@ -128,6 +195,8 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
           model: 'claude',
           workspaceId,
           sessionId,
+          parentSessionId: extras?.parentSessionId,
+          turnSignalFilePath: resolveTurnSignalFile(wsDir, sessionId),
         };
       },
     },
@@ -135,24 +204,25 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
     codex: {
       isAvailable: () => envProbe.probe('codex'),
 
-      async buildSpawnOptions(cwd, workspaceId, resumeSessionId, resumeModelSessionId, captureToken) {
+      async buildSpawnOptions(cwd, workspaceId, resumeSessionId, resumeModelSessionId, extras) {
         const sessionId = resumeSessionId ?? randomUUID();
-        // 캡처 토큰: 호스트가 명시(captureToken, 데스크탑)하면 그걸, 아니면 내부 sessionId
-        // (extension — opts.sessionId == chatPanel 세션 identity). hookCaptureDir 제공 시에만 활성.
-        const captureFileToken = captureToken ?? sessionId;
+        const resuming = !!resumeSessionId && !extras?.freshSession;
+        const wsDir = workspaceDir(workspaceId);
         const env = {
           ...envProbe.getShellEnv(),
-          ...(hookCaptureDir ? { AGENTBRIDGE_WS_SESSION: captureFileToken } : {}),
+          AGENTBRIDGE_WS_SESSION: sessionId,
+          AGENTBRIDGE_WS_DIR: wsDir,
         };
-        const hookCaptureFilePath = hookCaptureDir
-          ? join(hookCaptureDir(workspaceId), 'sessions', captureFileToken, 'captured.json')
-          : undefined;
+        const hookCaptureFilePath = resolveHookCaptureFile(wsDir, sessionId);
+        const turnSignalFilePath = resolveTurnSignalFile(wsDir, sessionId);
         const probe = envProbe.probe('codex');
         const command = probe.resolvedPath ?? 'codex';
 
         if (hookInstaller) {
           try {
-            await hookInstaller.installCodexHooks(cwd, workspaceId);
+            await hookInstaller.installCodexHooks();
+            await hookInstaller.cleanupLegacyHooks(cwd);
+            await installSkill('codex');
             hookStatusStore?.clearDisabled(workspaceId, 'codex');
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
@@ -161,23 +231,27 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
           }
         }
 
-        const isNewSession = !resumeSessionId;
+        // 우리 저장소 한 폴더만 쓰기 허용으로 더한다. 샌드박스 모드는 건드리지 않는다 —
+        // 사용자가 read-only로 두었으면 그 결정이 유지된다.
+        const sandboxArgs = opts.storageRoot
+          ? buildWritableRootsArgs(opts.storageRoot, await readCodexWritableRoots())
+          : [];
 
         let args: string[];
         let modelSessionId: string | undefined = resumeModelSessionId;
-        let codexSessionSnapshot: SpawnOptions['codexSessionSnapshot'] | undefined;
 
-        if (isNewSession) {
-          args = [];
-          codexSessionSnapshot = await snapshotCodexSessions();
+        // 첫 프롬프트는 위치 인자다. 새 세션일 때만 붙는다.
+        const promptArgs = !resuming && extras?.initialPrompt ? [extras.initialPrompt] : [];
+
+        if (!resuming) {
+          args = [...sandboxArgs, ...promptArgs];
         } else if (resumeModelSessionId) {
-          args = ['resume', resumeModelSessionId];
+          args = [...sandboxArgs, 'resume', resumeModelSessionId];
         } else {
           log.warn(
             `codexAdapter: resume 요청이지만 thread_id 없음 — 새 세션으로 fallback (sessionId=${sessionId.slice(0, 8)})`,
           );
-          args = [];
-          codexSessionSnapshot = await snapshotCodexSessions();
+          args = [...sandboxArgs];
           modelSessionId = undefined;
         }
 
@@ -191,8 +265,9 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
           workspaceId,
           sessionId,
           modelSessionId,
-          codexSessionSnapshot,
+          parentSessionId: extras?.parentSessionId,
           hookCaptureFilePath,
+          turnSignalFilePath,
         };
       },
     },
@@ -200,24 +275,25 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
     agy: {
       isAvailable: () => envProbe.probe('agy'),
 
-      async buildSpawnOptions(cwd, workspaceId, resumeSessionId, resumeModelSessionId, captureToken) {
+      async buildSpawnOptions(cwd, workspaceId, resumeSessionId, resumeModelSessionId, extras) {
         const sessionId = resumeSessionId ?? randomUUID();
-        // 캡처 토큰: 호스트가 명시(captureToken, 데스크탑)하면 그걸, 아니면 내부 sessionId
-        // (extension — opts.sessionId == chatPanel 세션 identity). hookCaptureDir 제공 시에만 활성.
-        const captureFileToken = captureToken ?? sessionId;
+        const resuming = !!resumeSessionId && !extras?.freshSession;
+        const wsDir = workspaceDir(workspaceId);
         const env = {
           ...envProbe.getShellEnv(),
-          ...(hookCaptureDir ? { AGENTBRIDGE_WS_SESSION: captureFileToken } : {}),
+          AGENTBRIDGE_WS_SESSION: sessionId,
+          AGENTBRIDGE_WS_DIR: wsDir,
         };
-        const hookCaptureFilePath = hookCaptureDir
-          ? join(hookCaptureDir(workspaceId), 'sessions', captureFileToken, 'captured.json')
-          : undefined;
+        const hookCaptureFilePath = resolveHookCaptureFile(wsDir, sessionId);
+        const turnSignalFilePath = resolveTurnSignalFile(wsDir, sessionId);
         const probe = envProbe.probe('agy');
         const command = probe.resolvedPath ?? 'agy';
 
         if (hookInstaller) {
           try {
-            await hookInstaller.installAgyHooks(cwd, workspaceId);
+            await hookInstaller.installAgyHooks();
+            await hookInstaller.cleanupLegacyHooks(cwd);
+            await installSkill('agy');
             hookStatusStore?.clearDisabled(workspaceId, 'agy');
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
@@ -227,16 +303,14 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
         }
 
         const cwdArgs = cwd ? ['--add-dir', cwd] : [];
-
-        const isNewSession = !resumeSessionId;
+        // agy의 첫 프롬프트는 위치 인자가 아니라 -i다. --print와 달리 답한 뒤에도 대화형으로 남는다.
+        const promptArgs = !resuming && extras?.initialPrompt ? ['-i', extras.initialPrompt] : [];
 
         let args: string[];
         let modelSessionId: string | undefined = resumeModelSessionId;
-        let needsWatch = false;
 
-        if (isNewSession) {
-          args = [...cwdArgs, '--dangerously-skip-permissions'];
-          needsWatch = true;
+        if (!resuming) {
+          args = [...cwdArgs, '--dangerously-skip-permissions', ...promptArgs];
         } else if (resumeModelSessionId) {
           try {
             const resumeArgs = await resolveResumeArgs({
@@ -248,20 +322,12 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
             log.warn(`agyAdapter: resume 불가 — 새 세션으로 fallback (${String(err)})`);
             args = [...cwdArgs, '--dangerously-skip-permissions'];
             modelSessionId = undefined;
-            needsWatch = true;
           }
         } else {
           log.warn(
             `agyAdapter: resume 요청이지만 conversation UUID 없음 — 새 세션으로 fallback (sessionId=${sessionId.slice(0, 8)})`,
           );
           args = [...cwdArgs, '--dangerously-skip-permissions'];
-          needsWatch = true;
-        }
-
-        let agyWatchUuid: SpawnOptions['agyWatchUuid'] | undefined;
-        if (needsWatch) {
-          const existing = await snapshotAgyConversations();
-          agyWatchUuid = { excludeUuids: existing };
         }
 
         return {
@@ -274,8 +340,9 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
           workspaceId,
           sessionId,
           modelSessionId,
-          agyWatchUuid,
+          parentSessionId: extras?.parentSessionId,
           hookCaptureFilePath,
+          turnSignalFilePath,
         };
       },
     },

@@ -5,40 +5,46 @@ import { promises as fsp } from 'node:fs';
 import { join } from 'node:path';
 
 import { withFileLock } from './fileLock';
-import { DEFAULT_PROFILE_ID, profileDir, profilesRoot, profileDocsDir, profileIndexPath } from './globalPaths';
+import { DEFAULT_PROFILE_ID, profileDir, profilesRoot, projectsRoot, profileDocsDir, profileIndexPath } from './globalPaths';
 import { renderIndexMarkdown, renderDocMarkdown, extractTitle, extractSummary, extractIndexEntries } from './globalMarkdown';
 import { validateGlobalUpdateInput } from './globalValidate';
-import type { GlobalUpdateInput } from './shared/global';
+import type { GlobalUpdateInput, ProposalScope } from './shared/global';
 import type { SearchDocRecord } from './globalSearch';
 
-// v1: 항상 default (vNext에서 workspace→profile 매핑 도입 — §F).
+// 사용자 프로필은 계속 하나다(default). 그 옆에 서는 프로젝트 프로필은 git remote로 정해지므로
+// 워크스페이스 id가 아니라 폴더 경로가 필요하다 — resolveProjectProfileId(gitRemote.ts)가 맡는다.
 export function resolveProfile(_workspaceId: string): string {
   return DEFAULT_PROFILE_ID;
 }
 
-// profiles/default 골격을 만든다. 이미 있으면 무손상 반환(멱등).
+// 프로필 골격을 만든다. 이미 있으면 무손상 반환(멱등).
 // tmp 디렉토리에 완성 후 atomic rename publish(§A.3) — hook이 반쯤 만들어진 프로필을 읽는 일 방지.
-export async function ensureDefaultProfile(globalDir: string): Promise<void> {
+export async function ensureProfile(
+  globalDir: string,
+  profileId: string,
+  scope: ProposalScope = 'user',
+): Promise<void> {
   await withFileLock(globalDir, async () => {
-    const dir = profileDir(globalDir, DEFAULT_PROFILE_ID);
+    const dir = profileDir(globalDir, profileId, scope); // 단일 세그먼트 검증 포함
     try {
       await fsp.stat(dir);
       return; // 이미 존재
     } catch {
       /* 없음 → 생성 */
     }
-    await fsp.mkdir(profilesRoot(globalDir), { recursive: true });
-    const tmp = join(profilesRoot(globalDir), `.tmp-default-${process.pid}-${Date.now()}`);
+    const root = scope === 'project' ? projectsRoot(globalDir) : profilesRoot(globalDir);
+    await fsp.mkdir(root, { recursive: true });
+    const tmp = join(root, `.tmp-${profileId}-${process.pid}-${Date.now()}`);
     await fsp.rm(tmp, { recursive: true, force: true });
     await fsp.mkdir(join(tmp, 'docs'), { recursive: true });
     await fsp.mkdir(join(tmp, 'proposals'), { recursive: true });
     const now = new Date().toISOString();
     await fsp.writeFile(
       join(tmp, 'profile.json'),
-      JSON.stringify({ version: 1, name: DEFAULT_PROFILE_ID, summary: '', createdAt: now, updatedAt: now }, null, 2) + '\n',
+      JSON.stringify({ version: 1, name: profileId, summary: '', createdAt: now, updatedAt: now }, null, 2) + '\n',
       'utf8',
     );
-    await fsp.writeFile(join(tmp, 'index.md'), renderIndexMarkdown({ profileId: DEFAULT_PROFILE_ID, docs: [] }), 'utf8');
+    await fsp.writeFile(join(tmp, 'index.md'), renderIndexMarkdown({ profileId, docs: [] }), 'utf8');
     try {
       await fsp.rename(tmp, dir);
     } catch {
@@ -46,6 +52,10 @@ export async function ensureDefaultProfile(globalDir: string): Promise<void> {
       await fsp.rm(tmp, { recursive: true, force: true });
     }
   });
+}
+
+export function ensureDefaultProfile(globalDir: string): Promise<void> {
+  return ensureProfile(globalDir, DEFAULT_PROFILE_ID);
 }
 
 // docs/ 하위 .md를 재귀 나열 (상대 경로). gc-tree store.ts listDocRelativePaths 이식.
@@ -61,8 +71,12 @@ async function listDocRelPaths(dir: string, prefix = ''): Promise<string[]> {
 }
 
 // docs/를 스캔해 index.md 재생성. ⚠️ 락 없음 — 호출자가 withFileLock(globalDir)를 쥔 상태에서만 호출.
-export async function writeIndexFromDocs(globalDir: string, profileId: string): Promise<{ indexPath: string; docCount: number }> {
-  const docsDir = profileDocsDir(globalDir, profileId);
+export async function writeIndexFromDocs(
+  globalDir: string,
+  profileId: string,
+  scope: ProposalScope = 'user',
+): Promise<{ indexPath: string; docCount: number }> {
+  const docsDir = profileDocsDir(globalDir, profileId, scope);
   await fsp.mkdir(docsDir, { recursive: true });
   const files = (await listDocRelPaths(docsDir)).filter((f) => !/(^|\/)index\.md$/i.test(f));
   const docs: Array<{ category: string; label: string; path: string }> = [];
@@ -75,14 +89,18 @@ export async function writeIndexFromDocs(globalDir: string, profileId: string): 
     for (const label of [...new Set(labels)]) docs.push({ category, label, path: `docs/${file}` });
   }
   docs.sort((a, b) => a.label.localeCompare(b.label));
-  const indexPath = profileIndexPath(globalDir, profileId);
+  const indexPath = profileIndexPath(globalDir, profileId, scope);
   await fsp.writeFile(indexPath, renderIndexMarkdown({ profileId, docs }), 'utf8');
   return { indexPath, docCount: files.length };
 }
 
 // 프로필 docs/를 읽어 검색용 레코드로. 락 불요(읽기 전용).
-export async function readProfileDocs(globalDir: string, profileId: string): Promise<SearchDocRecord[]> {
-  const docsDir = profileDocsDir(globalDir, profileId);
+export async function readProfileDocs(
+  globalDir: string,
+  profileId: string,
+  scope: ProposalScope = 'user',
+): Promise<SearchDocRecord[]> {
+  const docsDir = profileDocsDir(globalDir, profileId, scope);
   const files = (await listDocRelPaths(docsDir)).filter((f) => !/(^|\/)index\.md$/i.test(f));
   const recs: SearchDocRecord[] = [];
   for (const file of files) {
@@ -107,11 +125,12 @@ export async function writeProfileDocs(
   globalDir: string,
   profileId: string,
   input: GlobalUpdateInput,
+  scope: ProposalScope = 'user',
 ): Promise<{ written: string[]; indexPath: string }> {
   validateGlobalUpdateInput(input);                 // 락 밖: 잘못된 입력이면 아무것도 안 만짐
-  await ensureDefaultProfile(globalDir);            // 자기 락 (해제됨) — 아래 락과 중첩 아님
+  await ensureProfile(globalDir, profileId, scope); // 자기 락 (해제됨) — 아래 락과 중첩 아님
   return withFileLock(globalDir, async () => {
-    const docsDir = profileDocsDir(globalDir, profileId);
+    const docsDir = profileDocsDir(globalDir, profileId, scope);
     const written: string[] = [];
     for (const doc of input.docs) {
       await fsp.mkdir(join(docsDir, doc.category), { recursive: true });
@@ -119,7 +138,7 @@ export async function writeProfileDocs(
       await fsp.writeFile(full, renderDocMarkdown(doc), 'utf8');
       written.push(full);
     }
-    const { indexPath } = await writeIndexFromDocs(globalDir, profileId); // 락 보유 중 — OK
+    const { indexPath } = await writeIndexFromDocs(globalDir, profileId, scope); // 락 보유 중 — OK
     return { written, indexPath };
   });
 }
