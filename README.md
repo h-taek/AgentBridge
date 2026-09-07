@@ -1,6 +1,6 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="packages/assets/brand/agentbridge-dark.png" />
+    <source media="(prefers-color-scheme: dark)" srcset="https://github.com/h-taek/AgentBridge/raw/main/packages/assets/brand/agentbridge-dark.png" />
     <img src="packages/assets/brand/agentbridge-light.png" width="220" alt="AgentBridge logo" />
   </picture>
 </p>
