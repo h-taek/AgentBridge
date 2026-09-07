@@ -2,7 +2,7 @@
 
 This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 1.1.0 format and uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-<p align="center"><a href="CHANGELOG.ko.md">한국어</a></p>
+<p align="center"><a href="https://github.com/h-taek/AgentBridge/blob/main/CHANGELOG.ko.md">한국어</a></p>
 
 ## [0.6.0] — 2026-09-07
 
