@@ -21,7 +21,11 @@ import { initializeCore, getBundledHelperPath, getBundledCliPath, getWorkspaceSt
 import * as output from './log/output';
 import { MemoryPanelProvider } from './views/memoryPanel';
 import { ProfileSection } from './views/profilePanel';
-import { SessionTreeProvider, SessionItem } from './views/sessionTreeView';
+import { SessionsViewProvider } from './views/sessionsView';
+import { createUsageStore } from './core/usage/usageStore';
+import { fetchUsage, systemFetch } from './core/usage/fetchUsage';
+import { systemCredentialIO } from './core/usage/credentials';
+import { createTokenRefresher, systemRefreshRunner } from './core/usage/refreshToken';
 import { rowKindOf, childSessions, planDeleteConfirm } from './views/sessionTreeModel';
 import { ChatPanel, getActivePanel, getAllPanels, chatPanelEvents, updateSessionTabTitle, markShuttingDown } from './views/chatPanel';
 import { compactionEvents } from './core/compactionScheduler';
@@ -107,7 +111,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   // activate 시점엔 어떤 panel도 안 열려있음 — 모든 세션 active 플래그 초기화.
   // 이후 ChatPanel.create가 markSessionActive로 갱신.
-  // (sessionTree는 아래에서 생성되므로, reset 완료 후 closure 통해 refresh.)
+  // (세션 목록 뷰는 아래에서 생성되므로, reset 완료 후 closure 통해 refresh.)
   let pendingResetDone: Promise<void> | null = null;
   const folderUri = vscode.workspace.workspaceFolders?.[0]?.uri;
   if (folderUri) {
@@ -131,14 +135,10 @@ export function activate(context: vscode.ExtensionContext) {
   notifications.notifyFirstRun();
 
   // --- 장기 메모리 구역 (자동제안 승인 큐 + 읽기전용 문서) ---
-  // 대기 제안 수를 액티비티 바 뱃지로 — 항상 살아있는 세션 TreeView(treeView, 아래에서 생성)에 건다.
-  // (webview view는 펼치기 전엔 resolve 안 돼 뱃지가 안 먹음.) 콜백은 런타임에만 호출되므로
-  // 아래에서 선언되는 treeView를 클로저로 참조해도 안전하다.
-  const profileProvider = new ProfileSection((count) => {
-    treeView.badge = count > 0
-      ? { value: count, tooltip: vscode.l10n.t('{0} pending proposals', count) }
-      : undefined;
-  });
+  // 대기 제안 수를 액티비티 바 뱃지로. 장기 메모리는 Context 패널 안에 사니 뱃지도 그 뷰에 건다.
+  // 웹뷰 뷰는 펼치기 전엔 resolve가 안 되므로, 그 전에 들어온 값은 provider가 들고 있다가
+  // 뷰가 살아나는 순간 올린다(MemoryPanelProvider.setBadge). 콜백은 런타임에만 불린다.
+  const profileProvider = new ProfileSection((count) => memoryProvider.setBadge(count));
 
   // --- Memory Panel (WebviewView) — 장기 메모리 구역을 안에 품는다 ---
   const memoryProvider = new MemoryPanelProvider(context.globalState, profileProvider);
@@ -166,42 +166,63 @@ export function activate(context: vscode.ExtensionContext) {
     });
   });
 
-  // --- Session TreeView ---
-  // 에셋은 확장 루트 한 겹 아래에 있다(assetRoot). 트리 아이콘과 채팅 웹뷰가 그 자리를 쓴다.
+  // --- 사용량 줄 (WebviewView) — Sessions 위에 한 줄 ---
+  // 스냅샷은 이 프로세스 메모리에만 산다. 디스크에 쓰지 않고 응답 원문을 남기지 않는다.
+  const tokenRefresher = createTokenRefresher(systemRefreshRunner());
+  const usageStore = createUsageStore({
+    now: () => Date.now(),
+    fetchOne: (cli) =>
+      fetchUsage(cli, {
+        io: systemCredentialIO(),
+        fetchFn: systemFetch,
+        refresh: (target) => tokenRefresher.refresh(target),
+        now: () => Date.now(),
+      }),
+    schedule: (fn, ms) => {
+      const timer = setInterval(fn, ms);
+      return () => clearInterval(timer);
+    },
+  });
+  // --- Sessions (WebviewView) — 사용량 줄을 헤더 바로 아래 한 줄로 품는다 ---
+  // 에셋은 확장 루트 한 겹 아래에 있다(assetRoot). 세션 아이콘과 채팅 웹뷰가 그 자리를 쓴다.
   const assets = assetRootUri(context.extensionUri);
-  const sessionTree = new SessionTreeProvider(assets);
-  const treeView = vscode.window.createTreeView('agentbridge.sessions', {
-    treeDataProvider: sessionTree,
-    showCollapseAll: false,
+  const sessionsView = new SessionsViewProvider(assets, usageStore, context.workspaceState, {
+    open: (session) => { void vscode.commands.executeCommand('agentbridge.openSession', session); },
+    rename: (session) => { void vscode.commands.executeCommand('agentbridge.renameSession', session); },
+    delete: (session) => { void vscode.commands.executeCommand('agentbridge.deleteSession', session); },
   });
-  // reset이 비동기로 끝나면 tree 다시 그리기 — race 회피.
+  usageStore.onChange(() => sessionsView.renderUsage());
+  usageStore.start();
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider(SessionsViewProvider.viewType, sessionsView, {
+      webviewOptions: { retainContextWhenHidden: true },
+    }),
+    vscode.commands.registerCommand('agentbridge.refresh', async () => {
+      await Promise.all([usageStore.refresh({ force: true }), sessionsView.refresh()]);
+    }),
+    new vscode.Disposable(() => usageStore.dispose()),
+  );
+
+  // reset이 비동기로 끝나면 목록 다시 그리기 — race 회피.
   if (pendingResetDone) {
-    void pendingResetDone.then(() => sessionTree.refresh());
+    void pendingResetDone.then(() => sessionsView.refresh());
   }
-  let selectedSessionItem: SessionItem | undefined;
-  treeView.onDidChangeSelection(e => {
-    selectedSessionItem = e.selection[0];
-  });
-  // 채팅 탭이 활성화되면 사이드 패널 selection 동기화. 단, AgentBridge 사이드바가 이미
-  // 보이는 상태일 때만 reveal — 다른 사이드바(Explorer 등)를 사용 중인 사용자의 화면을
-  // 우리 패널로 강제 전환시키지 않기 위함.
+
+  // 채팅 탭이 활성화되면 사이드 패널 선택 동기화. 단, AgentBridge 사이드바가 이미 보이는
+  // 상태일 때만 — 다른 사이드바(Explorer 등)를 쓰는 사용자의 화면을 뺏지 않기 위함이다.
   chatPanelEvents.event(async ({ sessionId }) => {
     // 완료 표시는 여기서 끈다 — 탭을 열어봤다는 사실이 곧 "확인했다"는 사실이다(B-2).
-    // 사이드바가 안 보이는 상태에서도 열람 시각은 남겨야 다음에 트리를 볼 때 정정돼 있다.
+    // 사이드바가 안 보이는 상태에서도 열람 시각은 남겨야 다음에 볼 때 정정돼 있다.
     const folderUri = vscode.workspace.workspaceFolders?.[0]?.uri;
     if (folderUri) {
       const wid = workspaceStore.getOrCreateWorkspaceId(folderUri.fsPath);
       await markSessionOpened(wid, sessionId);
     }
 
-    if (!treeView.visible) return;
-    await sessionTree.getChildren();
-    const item = sessionTree.findItemBySessionId(sessionId);
-    if (item) {
-      try { await treeView.reveal(item, { select: true, focus: false }); } catch { /* race */ }
-    }
+    if (!sessionsView.visible) return;
+    await sessionsView.refresh();
+    sessionsView.select(sessionId);
   });
-  context.subscriptions.push(treeView);
 
   // 활성화 시 대기 제안 수로 뱃지 1회 초기화 (이후엔 패널을 다시 볼 때와 승인·버림이 갱신한다).
   void profileProvider.notifyProposalsUpdated();
@@ -212,12 +233,12 @@ export function activate(context: vscode.ExtensionContext) {
   const storageWatcher = createSessionFileWatcher({
     root: getStorageRoot(),
     filenames: ['workspace.json', 'owner.json'],
-    onChange: () => sessionTree.refresh(),
+    onChange: () => { void sessionsView.refresh(); },
     logger: { warn: (m, e) => output.warn(`${m} ${e ? String(e) : ''}`) },
   });
   // 상태(진행 중/완료/모름)가 이 주기를 탄다. 값이 안 바뀌었으면 refresh하지 않는다 —
   // 4초마다 전체 리렌더하면 선택 상태가 흔들린다.
-  const storagePoll = setInterval(() => { void sessionTree.refreshIfChanged(); }, 4000);
+  const storagePoll = setInterval(() => { void sessionsView.refreshIfChanged(); }, 4000);
 
   // 에이전트용 CLI가 우리에게 넘기는 요청을 집는다 (0.5.0 B-5). 우리가 소유한 세션의 것만
   // 집는다. 이 단계의 종류는 배선 확인 하나이고, PTY를 만지는 넷은 4단계에서 붙는다.
@@ -252,7 +273,7 @@ export function activate(context: vscode.ExtensionContext) {
     const chat = ChatPanel.create(assets, opts, preserveFocus);
     chat.onDispose(async () => {
       await markSessionClosed(workspaceId, opts.sessionId!);
-      sessionTree.refresh();
+      void sessionsView.refresh();
     });
   }
 
@@ -280,7 +301,7 @@ export function activate(context: vscode.ExtensionContext) {
   initSubagents({
     buildOpts,
     openPanel: (opts, workspaceId, preserveFocus) => openChatPanel(opts, workspaceId, preserveFocus),
-    refreshTree: () => sessionTree.refresh(),
+    refreshTree: () => { void sessionsView.refresh(); },
   });
 
   // --- Commands ---
@@ -310,7 +331,7 @@ export function activate(context: vscode.ExtensionContext) {
     output.log(`New session [${model}]: ${opts.terminalName} cwd=${cwd} workspaceId=${workspaceId}`);
 
     await registerSession(workspaceId, opts.sessionId!, model);
-    sessionTree.refresh();
+    void sessionsView.refresh();
 
     if (model === 'codex') notifications.notifyCodexHooksTrust();
 
@@ -341,7 +362,7 @@ export function activate(context: vscode.ExtensionContext) {
     const opts = await buildOpts(session.model, cwd, session.workspaceId, session.sessionId, modelSessionId);
     opts.terminalName = session.name; // 탭 제목 = 세션 이름(트리와 일치; 이름 없으면 모델명)
     await markSessionActive(session.workspaceId, session.sessionId);
-    sessionTree.refresh();
+    void sessionsView.refresh();
     openChatPanel(opts, session.workspaceId);
   });
 
@@ -394,8 +415,7 @@ export function activate(context: vscode.ExtensionContext) {
     );
   });
 
-  const renameCmd = vscode.commands.registerCommand('agentbridge.renameSession', async (item?: SessionItem) => {
-    const session = (item ?? selectedSessionItem)?.session;
+  const renameCmd = vscode.commands.registerCommand('agentbridge.renameSession', async (session?: SessionMeta) => {
     if (!session) return;
     const newName = await vscode.window.showInputBox({
       prompt: vscode.l10n.t('Session name'),
@@ -404,11 +424,10 @@ export function activate(context: vscode.ExtensionContext) {
     if (newName === undefined) return;
     await renameSession(session.workspaceId, session.sessionId, newName);
     updateSessionTabTitle(session.sessionId, newName);
-    sessionTree.refresh();
+    void sessionsView.refresh();
   });
 
-  const deleteCmd = vscode.commands.registerCommand('agentbridge.deleteSession', async (item?: SessionItem) => {
-    const session = (item ?? selectedSessionItem)?.session;
+  const deleteCmd = vscode.commands.registerCommand('agentbridge.deleteSession', async (session?: SessionMeta) => {
     if (!session) return;
 
     // 확인 문구를 행 종류에 맞춘다(0.5.0 W5, B-3) — 메인 행은 아래 서브 개수·이름을 함께 낸다.
@@ -459,7 +478,7 @@ export function activate(context: vscode.ExtensionContext) {
       activePanel.dispose();
     }
     await deleteSession(session.workspaceId, session.sessionId);
-    sessionTree.refresh();
+    void sessionsView.refresh();
 
     // 영수증은 무엇이 사라졌고 어떻게 되살리는지를 담는다. 강제로 지워도 커밋은 남으므로
     // 사용자가 되살릴 수 있어야 한다.
@@ -492,7 +511,7 @@ export function activate(context: vscode.ExtensionContext) {
     output.log(`New session [${model}]: ${opts.terminalName} cwd=${cwd} workspaceId=${workspaceId}`);
 
     await registerSession(workspaceId, opts.sessionId!, model);
-    sessionTree.refresh();
+    void sessionsView.refresh();
 
     if (model === 'codex') notifications.notifyCodexHooksTrust();
 
@@ -535,11 +554,11 @@ export function activate(context: vscode.ExtensionContext) {
       // 안 기다리면 reset이 이 복구된 세션의 active 플래그를 덮어써 비활성으로 남을 수 있음 (V-21).
       if (pendingResetDone) await pendingResetDone;
       await markSessionActive(s.workspaceId, s.sessionId);
-      sessionTree.refresh();
+      void sessionsView.refresh();
       const chat = ChatPanel.revive(panel, assets, opts);
       chat.onDispose(async () => {
         await markSessionClosed(s.workspaceId!, s.sessionId!);
-        sessionTree.refresh();
+        void sessionsView.refresh();
       });
     },
   };

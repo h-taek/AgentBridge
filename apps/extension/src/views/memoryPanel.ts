@@ -40,6 +40,18 @@ export class MemoryPanelProvider implements vscode.WebviewViewProvider {
     };
   }
 
+  // 대기 제안 수 뱃지. 웹뷰 뷰는 펼치기 전엔 resolve가 안 돼 view가 없다. 그동안 들어온 값을
+  // 들고 있다가 뷰가 살아나는 순간 올린다.
+  private pendingBadge = 0;
+
+  setBadge(count: number): void {
+    this.pendingBadge = count;
+    if (!this.view) return;
+    this.view.badge = count > 0
+      ? { value: count, tooltip: vscode.l10n.t('{0} pending proposals', count) }
+      : undefined;
+  }
+
   resolveWebviewView(
     webviewView: vscode.WebviewView,
     _context: vscode.WebviewViewResolveContext,
@@ -47,6 +59,7 @@ export class MemoryPanelProvider implements vscode.WebviewViewProvider {
   ): void {
     this.view = webviewView;
     this.profile.attach(webviewView);
+    this.setBadge(this.pendingBadge);
     webviewView.webview.options = { enableScripts: true };
     webviewView.webview.html = this.buildHtml(webviewView.webview);
 

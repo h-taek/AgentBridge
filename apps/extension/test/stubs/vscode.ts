@@ -52,3 +52,9 @@ export const commands = {
   registerCommand: (_id: string, _cb: unknown) => ({ dispose: () => { /* noop */ } }),
   executeCommand: (..._args: unknown[]) => Promise.resolve(undefined),
 };
+
+// l10n — 인자 자리만 채운다. 실제 번들은 런타임이 고른다.
+export const l10n = {
+  t: (message: string, ...args: unknown[]): string =>
+    message.replace(/\{(\d+)\}/g, (_m, i: string) => String(args[Number(i)])),
+};
