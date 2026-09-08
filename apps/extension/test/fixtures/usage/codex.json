@@ -1,0 +1,21 @@
+{
+  "plan_type": "plus",
+  "rate_limit": {
+    "allowed": true,
+    "limit_reached": false,
+    "primary_window":   { "used_percent": 4, "limit_window_seconds": 18000,  "reset_after_seconds": 7830,   "reset_at": 1788781052 },
+    "secondary_window": { "used_percent": 1, "limit_window_seconds": 604800, "reset_after_seconds": 594630, "reset_at": 1789367852 }
+  },
+  "code_review_rate_limit": null,
+  "additional_rate_limits": [
+    {
+      "limit_name": "gpt-reserve",
+      "rate_limit": {
+        "primary_window": { "used_percent": 0, "limit_window_seconds": 604800, "reset_at": 1789378023 },
+        "secondary_window": null
+      }
+    }
+  ],
+  "credits": { "has_credits": false, "balance": "0" },
+  "rate_limit_reset_credits": { "available_count": 3, "applicable_available_count": 0 }
+}
