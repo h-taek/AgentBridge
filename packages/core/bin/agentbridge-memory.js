@@ -24,7 +24,7 @@
 
 'use strict'
 
-// @agentbridge-helper-version 0.6.0
+// @agentbridge-helper-version 0.6.1
 // (단일 설치 버전 비교용 — 이 파일을 수정하면 반드시 버전을 올릴 것)
 
 const fs = require('fs')
@@ -38,7 +38,19 @@ const { computeSessionActivity, readSessionActivityInputs } = require('../src/se
 // node_modules가 없어 require('@agentbridge/core')가 불가하다.
 //
 // 검색·IR 렌더는 더 이상 여기서 안 쓴다(0.5.0 B-4). 그 자리는 에이전트용 CLI로 옮겼다.
-const { extractSessionIdFromStdin } = require('../src/globalInject')
+const {
+  extractSessionIdFromStdin,
+  extractPromptFromStdin,
+  extractInvocationNum,
+  extractLastUserInput
+} = require('../src/globalInject')
+// 장기 기억 매칭 (0.6.0 spec/03 §1). 훅이 매 턴 프롬프트를 쿼리로 점수화한다.
+const { resolveInjection } = require('../src/globalSearch')
+const { getGlobalDir } = require('../src/globalPaths')
+const { resolveProfile } = require('../src/globalStore')
+const { resolveProjectProfileId } = require('../src/gitRemote')
+// 다섯 턴 제안 (§2). 카운터는 세션 폴더에 있다 — 병렬 세션이 서로 턴을 훔치지 않게.
+const { bumpTurnCount, readTurnCount, isProposalTurn } = require('../src/turnCounter')
 const { wrapInjectedContext } = require('../src/contextTag')
 // 모델에게 가르치는 실행 문자열은 스킬과 같은 출처에서 나온다 — 어긋나면 승인 창이 뜬다.
 const { renderRunPrefix } = require('../src/skillTemplate')
@@ -82,6 +94,13 @@ function writeHookError(wsDir, agent, event, message) {
   } catch {
     /* 여기서 더 할 수 있는 게 없다 */
   }
+}
+
+// 이 세션의 폴더. 토큰이 없거나 단일 세그먼트가 아니면 자리를 못 정한다(다른 쓰기와 같은 가드).
+function sessionDirOf(wsDir) {
+  const token = process.env.AGENTBRIDGE_WS_SESSION || ''
+  if (!wsDir || !token || token !== path.basename(token)) return ''
+  return path.join(wsDir, 'sessions', token)
 }
 
 function buildTurnSignal(agent, event, payload) {
@@ -173,37 +192,35 @@ function readStdin(timeoutMs) {
 }
 
 
-// 훅이 나르는 것은 지시문 하나다 (0.5.0 B-4). IR도 최근 턴도 사용자 지식도 프로젝트 지식도
-// 모델이 도구를 불러야 온다. 미리 밀어넣는 내용은 없다.
+// 훅이 나르는 것 (0.5.0 B-4, 0.6.0 spec/03).
 //
-// 왜 우리가 고르지 않는가 — 첫 턴에 무엇이 필요한지는 상황이 아니라 질문이 정한다. 우리가 쓸 수
-// 있는 신호는 마지막 턴으로부터 지난 시간 정도이고, 모델은 질문을 읽는다. 정보가 많은 쪽이
-// 고르는 것이 맞다.
+// 0.5.0에서 훅은 지시문 하나로 줄었다. 조건 목록을 주고 모델이 부르게 하는 방식인데, 조건에
+// 안 걸리면 아무것도 안 불렀다 — 장기 기억이 거의 안 읽혔다. 그래서 이 사이클에서 훅이 매 턴
+// 프롬프트를 쿼리로 매칭해 "무엇이 있는지"를 알리고, 다섯 턴마다 기록을 명령한다.
 //
-// 그래서 이 문장들이 제품의 전부가 된다. 매 턴 들어가는 유일한 것이므로 작아야 하고 동시에
-// 언제 무엇을 부를지를 정확히 말해야 한다. "필요하면 불러라"가 아니라 조건을 열거한다.
+// 그래도 본문은 밀지 않는다. 나가는 것은 식별자와 제목이고 본문은 `memory read`가 낸다.
+// 매 턴 들어가는 유일한 것이라 작아야 하고, 무엇이 걸렸는지는 제목만으로 충분하다.
 //
 // 실행 경로는 훅과 같은 규칙으로 만든다 — 이 헬퍼를 돌린 런타임과 저장소의 canonical CLI.
 // 사용자 PATH의 node에 기대지 않는다(A-3).
-// 안 읽은 서브 보고 한 줄 (0.5.0 4단계 W5, B-6).
+
+// 안 읽은·멈춘 서브 (0.5.0 4단계 W5, B-6). 수와 읽는 방법만 적고 보고 본문은 넣지 않는다.
 //
-// 메인이 기다리지 않았거나 대기가 상한에 걸려 돌아왔으면, 다음 턴에 이 줄이 붙는다. 수와 읽는
-// 방법만 적고 보고 본문은 넣지 않는다 — 본문은 `agent read`가 낸다.
-//
-// 우리가 메인의 PTY에 타이핑하지 않는 이유가 이 줄이다. 통로가 이미 있으므로 사용자 입력과
+// 우리가 메인의 PTY에 타이핑하지 않는 이유가 이 블록이다. 통로가 이미 있으므로 사용자 입력과
 // 경합하는 타이핑을 붙일 이유가 없다.
-async function buildSubagentLine(wsDir, sessionToken, run) {
-  if (!sessionToken || sessionToken !== path.basename(sessionToken)) return ''
+async function buildSubagentBlocks(wsDir, sessionToken) {
+  const none = { unread: '', stuck: '' }
+  if (!sessionToken || sessionToken !== path.basename(sessionToken)) return none
   let sessions = []
   try {
     sessions = JSON.parse(fs.readFileSync(path.join(wsDir, 'workspace.json'), 'utf8')).sessions || []
   } catch {
-    return ''
+    return none
   }
   const mine = sessions.filter(
     (s) => s.parentSessionId === sessionToken && s.agentName && !s.cleanedAt
   )
-  if (mine.length === 0) return ''
+  if (mine.length === 0) return none
 
   const unread = []
   const stuck = []
@@ -222,64 +239,269 @@ async function buildSubagentLine(wsDir, sessionToken, run) {
       /* 판정할 수 없으면 세지 않는다 */
     }
   }
-  if (unread.length === 0 && stuck.length === 0) return ''
 
-  const parts = []
-  if (unread.length > 0) {
-    parts.push(
-      unread.length +
-        ' subagent report(s) finished and unread (' +
-        unread.join(', ') +
-        '). Read with `' +
-        run +
-        ' agent read <name>`.'
-    )
+  return {
+    unread:
+      unread.length === 0
+        ? ''
+        : 'Read the subagent reports with `agent read <name>`. ' +
+          unread.length +
+          ' finished and ' +
+          (unread.length === 1 ? 'is' : 'are') +
+          ' unread (' +
+          unread.join(', ') +
+          ').',
+    stuck:
+      stuck.length === 0
+        ? ''
+        : 'Check the stalled subagents with `agent read <name>`, then send more instructions ' +
+          '(`agent send <name> --prompt "..."`) ' +
+          'or close them (`agent close <name>`). ' +
+          stuck.length +
+          ' went quiet without finishing (' +
+          stuck.join(', ') +
+          '). The user may have interrupted them, or they may be stuck.'
   }
-  if (stuck.length > 0) {
-    parts.push(
-      stuck.length +
-        ' subagent(s) went quiet without finishing (' +
-        stuck.join(', ') +
-        ') — the user may have interrupted them, or they may be stuck. Check with `' +
-        run +
-        ' agent read <name>`, then send more instructions or close them.'
-    )
-  }
-  return '\n\n' + parts.join('\n')
 }
 
-function buildInstructions(storageRoot) {
+// 이번 턴 프롬프트에 걸린 장기 기억 (spec §1). 식별자와 제목만 싣는다.
+function buildMatchBlock(matches) {
+  if (!matches || matches.length === 0) return ''
+  const one = matches.length === 1
+  const lines = [
+    'Read these before you answer, with `memory read <id>`. ' +
+      matches.length +
+      (one ? ' piece of long-term memory overlaps' : ' pieces of long-term memory overlap') +
+      ' this prompt. Only the titles are here — the bodies are not.',
+    ''
+  ]
+  for (const m of matches) lines.push('- ' + m.category + '/' + m.slug + ' — ' + m.title)
+  return lines.join('\n')
+}
+
+// 다섯 턴마다 기록을 명령한다 (spec §2-2). 조건이 걸리기를 기다리지 않는다.
+function buildProposalBlock() {
+  return [
+    'Look back over the last five turns. If something came up that outlives this session,',
+    'do these three in order.',
+    '',
+    '1. Is it worth recording? Would writing it down make whoever works here next do',
+    '   better? If not, do nothing. In particular, do not record options that were not',
+    '   adopted, or proposals you made yourself — only what the user accepted.',
+    '',
+    '2. What counts as signal? What the user repeated, what they corrected (scope, order,',
+    '   wording), what they interrupted, what they told you to redo. Read preferences far',
+    '   more from what the user said than from what you said. Your own turns are a record',
+    '   of what you tried, not evidence of what the user wants.',
+    '',
+    '3. Record it. Check with `memory search "<query>"` first, and only when nothing covers',
+    '   it, `memory add`.'
+  ].join('\n')
+}
+
+// 절 조립. 이번 턴 소절은 붙일 블록이 없으면 제목째 빠진다 (spec §4).
+function buildInstructions(storageRoot, blocks) {
   const run = renderRunPrefix({
     execPath: process.execPath,
     cliPath: path.join(storageRoot, 'bin', 'agentbridge.js')
   })
-  return [
-    'AgentBridge carries working context across sessions and across coding agents.',
-    'None of it is in this prompt. Run a command to see it:',
+  const b = blocks || {}
+  const out = []
+  const push = (...lines) => out.push(...lines)
+
+  push(
+    'AgentBridge does two things: it carries working context across sessions and across',
+    'coding agents, and it runs other coding agents as subagents for you. Neither is in this',
+    'prompt. You have to run a command.',
     '',
     '    ' + run + ' <command>',
     '',
-    'Run these when the condition holds, not "if it seems useful":',
+    'The commands are in section 3.',
     '',
-    '- Starting work on this project this session — `context`',
-    '- The user refers to something from before ("아까 그거", "what we decided",',
+    '',
+    '## 1. Context — `context` and `memory`',
+    ''
+  )
+
+  const thisTurn = [b.matchBlock, b.proposalBlock].filter(Boolean)
+  if (thisTurn.length > 0) {
+    push('### 1-1. Do this turn', '')
+    push(thisTurn.join('\n\n'), '')
+  }
+
+  push(
+    '### 1-2. When to look',
+    '',
+    'Look by default. Skip only these three:',
+    '',
+    '- Questions needing no fact from outside this conversation, like the current time or date',
+    '- A one-line translation, a wording fix, a one-line shell command, plain reformatting',
+    '- Questions fully answered by what was already said in this conversation',
+    '',
+    'Everything else, look. In particular, always look when:',
+    '',
+    '- You are starting work on this project this session — `context`',
+    '- The user asks about the IR, the working state, or the compacted context — `context`',
+    '- The user points at something from before ("아까 그거", "what we decided",',
     '  "continue where we left off") — `turns --last 5`',
-    '- A question about a past decision\'s rationale, or how this user wants things done',
-    '  (style, tooling, workflow, conventions) — `memory search "<query>"`',
-    '- A question about this repository\'s own rules or history — `memory project`',
-    '- The user states something durable (a preference, a convention, a decision that should',
-    '  outlive this session) — read that side in full first, then `memory add` or',
-    '  `memory update <id>`. Both go to a queue the user approves.',
-    '- The user asks for work to run in another agent session — "서브에이전트 띄워", spawn a',
-    '  subagent, run it in another harness, a second opinion, several in parallel —',
-    '  `agent start --prompt "..." [--harness claude,codex,agy]`. These are AgentBridge',
-    '  sessions with their own tabs, not your own built-in subagent tool. Follow up with',
-    '  `agent check`, `agent read <name>`, `agent send <name> --prompt "..."`.',
+    '- The user tells you to check what was said in another session, another tab, or another',
+    '  agent ("agy에서 뭐라고 했어", "아까 그 세션", "코덱스 쪽 확인해") — `turns --last <N>`,',
+    '  with N generous',
+    '- The answer turns on the rationale of a past decision, or on how this user wants things',
+    '  done (style, tooling, workflow, conventions) — `memory search "<query>"`',
+    '- The question is about this repository\'s own rules or history — `memory project`',
+    '- It is ambiguous and might depend on an earlier decision — look once, cheaply',
     '',
-    'Run `status` if a command fails and you need to know whether the wiring is alive.',
+    'When the user tells you to check the conversation record, run the command first. Do not',
+    'answer from a guess, do not work around it, do not ask back which one to look at.',
     '',
-    'Respond in the language the user writes in. Mixed sessions follow the most recent turn.'
-  ].join('\n')
+    'Once at the start of the turn is not the rule. If the same error keeps coming back',
+    'mid-task, or the direction feels wrong, look again then.',
+    '',
+    '### 1-3. What you are looking at',
+    '',
+    'Every conversation in this project lands in one place. Not just the window you are in:',
+    'other tabs, other CLIs (claude, codex, agy) and earlier sessions all go into the same',
+    'record, in time order. `turns` is that raw record; `context` is the compacted working',
+    'state (the IR) built from it.',
+    '',
+    'So `turns` is not you re-reading your own context. Conversations you have never seen are',
+    'in there. Each turn is labeled with the CLI it came from.',
+    '',
+    '',
+    '## 2. Other agent sessions',
+    ''
+  )
+
+  const subTurn = [b.subUnread, b.subStuck].filter(Boolean)
+  if (subTurn.length > 0) {
+    push('### 2-1. Do this turn', '')
+    push(subTurn.join('\n\n'), '')
+  }
+
+  push(
+    '### 2-2. What they are',
+    '',
+    'You can run other coding agents as subagents. Each gets its own session and tab, takes',
+    'the work you give it, and leaves a report. You pick the harness — claude, codex, agy.',
+    '',
+    '**These are not your own built-in subagent tool. Do not use that tool.**',
+    '',
+    'This is what the user means by: "서브에이전트 띄워", run it in another harness, a second',
+    'opinion, run several in parallel, ask another model too.',
+    '',
+    'A subagent does not tell you when it is done. Ask with `agent check`, or the next turn\'s',
+    '2-1 says how many are unread. Reading one with `agent read` is what clears it.',
+    '',
+    '### 2-3. After a report',
+    '',
+    'A review is the report and the actual changes side by side. One without the other is not',
+    'a review. How to see the changes, how to take them, how to run several in isolation, and',
+    'how to clean up a round are in the `agentbridge` skill.',
+    '',
+    '',
+    '## 3. Commands',
+    '',
+    'Reading and recording.',
+    '',
+    '    context                    the working state (IR) — every session, compacted',
+    '    turns --last <N>           the raw conversation, every session and CLI, in order',
+    '    memory search "<query>"    search user knowledge and project knowledge together',
+    '    memory read <id>           one entry in full. The id is <category>/<slug>',
+    '    memory project             what is durable about this repository',
+    '    memory add                 propose a new fact',
+    '    memory update <id>         propose a change to an entry that already exists',
+    '    status                     whether the wiring is alive, when a command fails',
+    '',
+    '`memory add` and `memory update` go to a queue the user approves.',
+    '',
+    'Subagents.',
+    '',
+    '    agent start --prompt "..." [--harness claude,codex,agy]',
+    '    agent check                how they are doing',
+    '    agent read <name>          that subagent\'s conversation',
+    '    agent send <name> --prompt "..."',
+    '    agent close <name>         end it and clean up what it left',
+    '',
+    '`turns` and `agent read` are not the same. `turns` is every conversation in this project;',
+    '`agent read <name>` is one subagent you started. When the user says to check the session',
+    'conversation, that is `turns`.',
+    '',
+    'This is not the whole list. Arguments and procedures are in the `agentbridge` skill. Open',
+    'it when you pick a scope to record into, when you check for duplicates, and for anything',
+    'in 2-3.',
+    '',
+    '',
+    '## 4. When you answer',
+    '',
+    'When a fact comes from long-term memory and you did not verify it this turn, say so. It',
+    'is a record from an earlier time — do not state it as though it is still true today.',
+    '',
+    'Answer in the language the user writes in. Mixed sessions follow the most recent turn.'
+  )
+
+  return out.join('\n')
+}
+
+// 이번 턴의 쿼리 (spec §1-1). claude·codex는 stdin의 prompt, agy는 transcript의 마지막 발화다.
+// agy stdin에는 사용자 발화가 없다 (research 03 §1-2).
+const TRANSCRIPT_TAIL_BYTES = 256 * 1024
+
+function readTranscriptTail(filePath) {
+  if (!filePath) return ''
+  let fd = null
+  try {
+    const size = fs.statSync(filePath).size
+    const start = Math.max(0, size - TRANSCRIPT_TAIL_BYTES)
+    const len = size - start
+    if (len <= 0) return ''
+    const buf = Buffer.alloc(len)
+    fd = fs.openSync(filePath, 'r')
+    fs.readSync(fd, buf, 0, len, start)
+    return buf.toString('utf8')
+  } catch {
+    return ''
+  } finally {
+    if (fd !== null) {
+      try { fs.closeSync(fd) } catch { /* noop */ }
+    }
+  }
+}
+
+function resolveQuery(agent, stdinRaw) {
+  if (agent !== 'agy') return extractPromptFromStdin(stdinRaw, agent)
+  let transcriptPath = ''
+  try {
+    const p = JSON.parse(stdinRaw)
+    transcriptPath = (p && (p.transcriptPath || p.transcript_path)) || ''
+  } catch {
+    return ''
+  }
+  return extractLastUserInput(readTranscriptTail(transcriptPath))
+}
+
+// 이번 턴 프롬프트에 걸리는 장기 기억. 사용자 지식과 프로젝트 지식을 함께 돌린다.
+//
+// 프로젝트 지식의 자리는 정규화한 git remote로 정해지므로 매 턴 `git`을 한 번 부른다. 캐시를
+// 두면 remote가 바뀌었을 때의 무효화가 새 문제가 되므로, 실측에서 훅 소요가 눈에 띌 때 다시 본다.
+async function matchesForQuery(storageRoot, wsDir, query) {
+  if (!query || !query.trim()) return []
+  let projectId = null
+  try {
+    const workspacePath = JSON.parse(
+      fs.readFileSync(path.join(wsDir, 'workspace.json'), 'utf8')
+    ).workspacePath
+    if (typeof workspacePath === 'string' && workspacePath) {
+      projectId = await resolveProjectProfileId(workspacePath)
+    }
+  } catch {
+    /* 프로젝트 지식 자리를 모르면 사용자 지식만 돌린다 */
+  }
+  return resolveInjection(
+    getGlobalDir(storageRoot),
+    { user: resolveProfile(path.basename(wsDir)), project: projectId },
+    query
+  )
 }
 
 async function main() {
@@ -409,27 +631,69 @@ async function main() {
       process.stderr.write('agentbridge-memory: turn signal write skipped — ' + msg + '\n')
       writeHookError(wsDir, parsed.agent, parsed.event, '턴 종료 신호 쓰기 실패 — ' + msg)
     }
+    // 턴 수를 여기서 센다 (0.6.0 spec/03 §2-1). 주입 이벤트에서 세지 않는 이유는 agy의
+    // PreInvocation이 한 턴에 모델 호출 수만큼 뜨기 때문이다. StopFailure는 세지 않는다 —
+    // 모델·API 오류로 끊긴 턴에는 돌아볼 것이 없다.
+    if (parsed.event === 'Stop') {
+      try {
+        await bumpTurnCount(sessionDirOf(wsDir))
+      } catch {
+        /* best-effort — 카운터 때문에 종료 응답을 미루지 않는다 */
+      }
+    }
     process.stdout.write(JSON.stringify(buildTerminationOutput(parsed.agent)))
     process.exit(0)
   }
 
-  // §G3 글로벌 메모리 검색 — additive·best-effort. 어떤 실패도 IR/turns 주입을 막지 않는다.
-  const run = renderRunPrefix({
-    execPath: process.execPath,
-    cliPath: path.join(storageRoot, 'bin', 'agentbridge.js')
-  })
-  let subagentLine = ''
-  try {
-    subagentLine = await buildSubagentLine(wsDir, process.env.AGENTBRIDGE_WS_SESSION || '', run)
-  } catch {
-    /* best-effort — 이 줄이 없다고 지시문을 막지 않는다 */
+  // agy는 PreInvocation이 모델 호출마다 뜬다 — 도구를 n번 쓰면 한 턴에 n+1번이다
+  // (research 03 §1-3). 사용자 입력 한 번에 주입 한 번이 되도록 첫 호출에서만 낸다.
+  // 주입한 ephemeralMessage가 그 턴 내내 스텝으로 남으므로 되풀이할 이유도 없다.
+  // 값을 못 읽으면(null) 게이트를 걸지 않는다 — 판정 불가로 맥락을 통째로 버리지 않는다.
+  if (parsed.agent === 'agy') {
+    const n = extractInvocationNum(stdinRaw)
+    if (n !== null && n !== 0) {
+      process.stdout.write(JSON.stringify(buildHookOutput(parsed.agent, parsed.event, '')))
+      process.exit(0)
+    }
   }
+
+  // 이하 전부 best-effort다. 어떤 실패도 지시문 주입을 막지 않는다.
+  let matchBlock = ''
+  try {
+    matchBlock = buildMatchBlock(
+      await matchesForQuery(storageRoot, wsDir, resolveQuery(parsed.agent, stdinRaw))
+    )
+  } catch (e) {
+    process.stderr.write('agentbridge-memory: match skipped — ' + String(e && e.message ? e.message : e) + '\n')
+  }
+
+  let proposalBlock = ''
+  try {
+    if (isProposalTurn(await readTurnCount(sessionDirOf(wsDir)))) proposalBlock = buildProposalBlock()
+  } catch {
+    /* 카운터를 못 읽으면 제안 블록만 빠진다 */
+  }
+
+  let subs = { unread: '', stuck: '' }
+  try {
+    subs = await buildSubagentBlocks(wsDir, process.env.AGENTBRIDGE_WS_SESSION || '')
+  } catch {
+    /* best-effort — 이 블록이 없다고 지시문을 막지 않는다 */
+  }
+
   process.stdout.write(
     JSON.stringify(
       buildHookOutput(
         parsed.agent,
         parsed.event,
-        wrapInjectedContext(buildInstructions(storageRoot) + subagentLine)
+        wrapInjectedContext(
+          buildInstructions(storageRoot, {
+            matchBlock,
+            proposalBlock,
+            subUnread: subs.unread,
+            subStuck: subs.stuck
+          })
+        )
       )
     )
   )
@@ -446,6 +710,8 @@ function buildTerminationOutput(agent) {
 
 function buildHookOutput(agent, event, additionalContext) {
   if (agent === 'agy') {
+    // 낼 것이 없으면 스텝을 만들지 않는다. 빈 ephemeralMessage도 transcript에 한 줄로 남는다.
+    if (!additionalContext) return {}
     // protojson: HookInjectedStep.ephemeral_message는 string field (object 아님).
     // 라이브 검증: agy 1.0.0이 `invalid value for string field ephemeralMessage: {` 에러를 던짐.
     // 같은 binary에 CortexStepEphemeralMessage.content가 있지만 그건 별개 컨텍스트의 동명 타입 —

@@ -142,3 +142,78 @@ export async function resolveContext(
   scored.sort((a, b) => b.score - a.score || a.title.localeCompare(b.title));
   return scored.slice(0, opts?.topN ?? 5);
 }
+
+// ─── 훅 주입 게이트 (0.6.0 spec/03 §1-3) ─────────────────────────────────
+//
+// 훅이 매 턴 프롬프트를 쿼리로 삼아 점수를 매기고, 통과한 것의 식별자와 제목만 주입한다.
+// 본문은 모델이 `memory read`로 가져간다.
+//
+// 임계를 `memory search`와 따로 두는 이유는 부르는 주체가 다르기 때문이다. 검색은 모델이
+// 필요하다고 판단해 부른 것이라 관대해도 되지만, 주입은 아무도 안 물었는데 매 턴 들어간다.
+// 그래서 minimumUsefulScore(1~2점)보다 훨씬 높게 잡고 건수도 3건에서 끊는다.
+//
+// exactPhraseScore 가산은 쓰지 않는다. 프롬프트 전문이 문서에 통째로 들어 있을 일이 없다 —
+// 짧은 질의를 손으로 넣는 `memory search`에서만 뜻이 있는 가산이다.
+
+export type InjectionMatch = {
+  scope: ProposalScope;
+  category: string;
+  slug: string;
+  title: string;
+  score: number;
+};
+
+// 절대 임계. 토큰이 많은 긴 프롬프트일수록 우연히 몇 개 겹치기 쉬우므로 같이 올린다.
+// 선형이 아니라 제곱근인 것은, 토큰 수에 비례해 올리면 긴 프롬프트에서 아무것도 안 걸리기 때문이다.
+export function injectionFloor(tokenCount: number): number {
+  return 4 * Math.sqrt(tokenCount);
+}
+
+// 상대 임계: 최고점의 이 비율 미만은 버린다. 1등이 확실할 때 곁다리를 안 붙이는 장치다.
+const RELATIVE_FLOOR = 0.6;
+const MAX_MATCHES = 3;
+
+// 세 조건을 차례로 건다. 순수 함수 — 파일을 안 읽는다.
+export function gateInjectionMatches(
+  candidates: InjectionMatch[],
+  tokenCount: number,
+): InjectionMatch[] {
+  const floor = injectionFloor(tokenCount);
+  const passed = candidates.filter((c) => c.score >= floor && c.score > 0);
+  if (passed.length === 0) return [];
+  const top = Math.max(...passed.map((c) => c.score));
+  return passed
+    .filter((c) => c.score >= top * RELATIVE_FLOOR)
+    .sort((a, b) => b.score - a.score || a.title.localeCompare(b.title))
+    .slice(0, MAX_MATCHES);
+}
+
+// 사용자 지식과 프로젝트 지식을 함께 돌린다. 어느 쪽 것인지는 붙여서 낸다 — 식별자
+// (<카테고리>/<슬러그>)가 양쪽에서 겹칠 수 있어 그것만으로는 자리를 못 가리기 때문이다.
+export async function resolveInjection(
+  globalDir: string,
+  ids: { user: string | null; project: string | null },
+  query: string,
+): Promise<InjectionMatch[]> {
+  const tokens = tokenizeQuery(query);
+  if (tokens.length === 0) return [];
+
+  const candidates: InjectionMatch[] = [];
+  for (const [scope, profileId] of [
+    ['user', ids.user],
+    ['project', ids.project],
+  ] as const) {
+    if (!profileId) continue;
+    const docs = await readProfileDocs(globalDir, profileId, scope).catch(() => []);
+    for (const rec of docs) {
+      candidates.push({
+        scope,
+        category: rec.category,
+        slug: rec.slug,
+        title: rec.title,
+        score: scoreDoc(rec, tokens),
+      });
+    }
+  }
+  return gateInjectionMatches(candidates, tokens.length);
+}

@@ -5,6 +5,7 @@ import { tokenizeQuery } from '@agentbridge/core';
 import { countTokenMatches } from '@agentbridge/core';
 import { scoreDoc, minimumUsefulScore } from '@agentbridge/core';
 import { getGlobalDir, writeProfileDocs, resolveContext } from '@agentbridge/core';
+import { injectionFloor, gateInjectionMatches, resolveInjection } from '@agentbridge/core';
 
 describe('globalSearch.tokenize', () => {
   it('영문: 소문자화 + 불용어/1글자 제거', () => {
@@ -107,5 +108,92 @@ describe('globalSearch.resolveContext', () => {
     const g = await tmpGlobal();
     await writeProfileDocs(g, 'default', { docs: [{ category: 'role', slug: 'solo', title: '1인', summary: 's', body: '', indexEntries: ['solo'] }] });
     assert.deepEqual(await resolveContext(g, 'default', 'xyz레디스큐브', { topN: 5 }), []);
+  });
+});
+
+// ─── 훅 주입 게이트 (0.6.0 spec/03 §1-3) ─────────────────────────────────
+//
+// `memory search`와 다른 임계를 쓴다. 모델이 스스로 부른 검색은 관대해도 되지만, 훅 주입은
+// 안 물었는데 매 턴 들어가는 것이라 좁게 잡는다.
+
+describe('globalSearch.injectionFloor', () => {
+  it('토큰이 늘면 임계가 오른다 — 4 × √(토큰 수)', () => {
+    assert.equal(injectionFloor(1), 4);
+    assert.equal(injectionFloor(4), 8);
+    assert.equal(injectionFloor(9), 12);
+  });
+  it('토큰이 없으면 0', () => {
+    assert.equal(injectionFloor(0), 0);
+  });
+});
+
+describe('globalSearch.gateInjectionMatches', () => {
+  const m = (slug: string, score: number) => ({
+    scope: 'user' as const, category: 'workflows', slug, title: slug, score,
+  });
+
+  it('절대 임계 미달을 버린다', () => {
+    // 토큰 4개 → 임계 8
+    const out = gateInjectionMatches([m('a', 20), m('b', 7)], 4);
+    assert.deepEqual(out.map((x) => x.slug), ['a']);
+  });
+  it('최고점의 60% 미만을 버린다', () => {
+    // 임계 4(1토큰) 위이지만 20의 60%=12에 못 미치는 것은 나간다
+    const out = gateInjectionMatches([m('a', 20), m('b', 12), m('c', 11)], 1);
+    assert.deepEqual(out.map((x) => x.slug), ['a', 'b']);
+  });
+  it('상위 3건에서 끊는다', () => {
+    const out = gateInjectionMatches([m('a', 20), m('b', 19), m('c', 18), m('d', 17)], 1);
+    assert.deepEqual(out.map((x) => x.slug), ['a', 'b', 'c']);
+  });
+  it('점수 내림차순으로 낸다 — 입력 순서와 무관하게', () => {
+    const out = gateInjectionMatches([m('b', 20), m('a', 30), m('c', 25)], 1);
+    assert.deepEqual(out.map((x) => x.slug), ['a', 'c', 'b']);
+  });
+  it('후보가 없으면 빈 배열', () => {
+    assert.deepEqual(gateInjectionMatches([], 3), []);
+  });
+});
+
+describe('globalSearch.resolveInjection', () => {
+  it('사용자 지식과 프로젝트 지식을 함께 돌리고 scope를 달아 낸다', async () => {
+    const g = await tmpGlobal();
+    await writeProfileDocs(g, 'default', {
+      docs: [{ category: 'workflows', slug: 'git-flow', title: 'git-flow 배포', summary: 'main 릴리스 전용', body: '', indexEntries: ['배포', 'release'] }],
+    });
+    await writeProfileDocs(g, 'proj-1', {
+      docs: [{ category: 'conventions', slug: 'release', title: '릴리스 절차', summary: '태그 후 배포', body: '', indexEntries: ['배포', 'release'] }],
+    }, 'project');
+
+    const out = await resolveInjection(g, { user: 'default', project: 'proj-1' }, '배포');
+    assert.equal(out.length, 2);
+    assert.deepEqual([...new Set(out.map((x) => x.scope))].sort(), ['project', 'user']);
+    assert.ok(out.every((x) => x.title.length > 0), '제목이 실린다');
+  });
+
+  it('프로젝트 지식 자리가 없으면 사용자 지식만 돌린다', async () => {
+    const g = await tmpGlobal();
+    await writeProfileDocs(g, 'default', {
+      docs: [{ category: 'workflows', slug: 'git-flow', title: 'git-flow 배포', summary: 'main 릴리스 전용', body: '', indexEntries: ['배포'] }],
+    });
+    const out = await resolveInjection(g, { user: 'default', project: null }, '배포');
+    assert.equal(out.length, 1);
+    assert.equal(out[0].scope, 'user');
+  });
+
+  it('무관한 프롬프트에는 아무것도 안 낸다', async () => {
+    const g = await tmpGlobal();
+    await writeProfileDocs(g, 'default', {
+      docs: [{ category: 'workflows', slug: 'git-flow', title: 'git-flow', summary: 'main 릴리스 전용', body: '', indexEntries: ['배포'] }],
+    });
+    assert.deepEqual(await resolveInjection(g, { user: 'default', project: null }, '오늘 몇 시야'), []);
+  });
+
+  it('빈 쿼리는 빈 배열 — 토큰이 없으면 임계가 0이라 전부 통과할 수 있다', async () => {
+    const g = await tmpGlobal();
+    await writeProfileDocs(g, 'default', {
+      docs: [{ category: 'workflows', slug: 'git-flow', title: 'git-flow', summary: 'main 릴리스 전용', body: '', indexEntries: ['배포'] }],
+    });
+    assert.deepEqual(await resolveInjection(g, { user: 'default', project: null }, '   '), []);
   });
 });

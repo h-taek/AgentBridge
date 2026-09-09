@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// @agentbridge-cli-version 0.5.4
+// @agentbridge-cli-version 0.6.0
 "use strict";
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -550,6 +550,29 @@ var init_globalSearch = __esm({
   }
 });
 
+// packages/core/src/memoryReadLog.ts
+function memoryReadLogPath(globalDir) {
+  return (0, import_node_path3.join)(globalDir, "memory-reads.jsonl");
+}
+async function appendMemoryReadLog(globalDir, entries) {
+  if (entries.length === 0) return;
+  const at = (/* @__PURE__ */ new Date()).toISOString();
+  const lines = entries.map((e) => JSON.stringify({ id: e.id, scope: e.scope, at }) + "\n").join("");
+  try {
+    await import_node_fs2.promises.mkdir(globalDir, { recursive: true });
+    await import_node_fs2.promises.appendFile(memoryReadLogPath(globalDir), lines, "utf8");
+  } catch {
+  }
+}
+var import_node_fs2, import_node_path3;
+var init_memoryReadLog = __esm({
+  "packages/core/src/memoryReadLog.ts"() {
+    "use strict";
+    import_node_fs2 = require("node:fs");
+    import_node_path3 = require("node:path");
+  }
+});
+
 // packages/core/src/agentCli/irRender.ts
 function fmtList(items, indent = "") {
   if (!Array.isArray(items) || items.length === 0) return `${indent}(none)`;
@@ -637,6 +660,7 @@ var read_exports = {};
 __export(read_exports, {
   readContext: () => readContext,
   readMemory: () => readMemory,
+  readMemoryDoc: () => readMemoryDoc,
   readTurns: () => readTurns,
   resolveProfileIdForScope: () => resolveProfileIdForScope,
   searchMemory: () => searchMemory
@@ -740,6 +764,37 @@ async function searchMemory(storageRoot, wsDir, query) {
   }
   return lines.join("\n").trimEnd();
 }
+function splitDocId(id) {
+  const trimmed = String(id || "").trim();
+  const cut = trimmed.indexOf("/");
+  if (cut <= 0 || cut === trimmed.length - 1) return null;
+  return { category: trimmed.slice(0, cut), slug: trimmed.slice(cut + 1) };
+}
+function renderDocFull(rec, scope) {
+  const lines = [`## ${rec.title}`, "", `${SCOPE_LABEL[scope]} \xB7 ${docId(rec)}`, ""];
+  if (rec.summary) lines.push(rec.summary, "");
+  if (rec.body) lines.push(rec.body);
+  return lines.join("\n").trimEnd();
+}
+async function readMemoryDoc(storageRoot, wsDir, id, scope) {
+  const parsed = splitDocId(id);
+  if (!parsed) return `"${id}"\uB294 \uC2DD\uBCC4\uC790 \uBAA8\uC591\uC774 \uC544\uB2C8\uB2E4. <\uCE74\uD14C\uACE0\uB9AC>/<\uC2AC\uB7EC\uADF8>\uB85C \uC628\uB2E4.`;
+  const globalDir = getGlobalDir(storageRoot);
+  const scopes = scope ? [scope] : ["user", "project"];
+  const found = [];
+  for (const s of scopes) {
+    const profileId = await resolveProfileIdForScope(wsDir, s);
+    if (!profileId) continue;
+    const docs = await readProfileDocs(globalDir, profileId, s).catch(() => []);
+    const hit = docs.find((d) => d.category === parsed.category && d.slug === parsed.slug);
+    if (hit) found.push({ rec: hit, scope: s });
+  }
+  if (found.length === 0) {
+    return `"${id}"\uC5D0 \uD574\uB2F9\uD558\uB294 \uD56D\uBAA9\uC774 \uC5C6\uB2E4. \uC2DD\uBCC4\uC790\uB294 \`memory search\`\uB098 \`memory user\`\uC758 \uC904 \uC55E\uC5D0 \uC788\uB2E4.`;
+  }
+  await appendMemoryReadLog(globalDir, found.map((f) => ({ id, scope: f.scope })));
+  return found.map((f) => renderDocFull(f.rec, f.scope)).join("\n\n");
+}
 var import_fs4, import_path5, SCOPE_LABEL;
 var init_read = __esm({
   "packages/core/src/agentCli/read.ts"() {
@@ -752,6 +807,7 @@ var init_read = __esm({
     init_globalPaths();
     init_gitRemote();
     init_globalSearch();
+    init_memoryReadLog();
     init_irRender();
     SCOPE_LABEL = { user: "\uC0AC\uC6A9\uC790 \uC9C0\uC2DD", project: "\uD504\uB85C\uC81D\uD2B8 \uC9C0\uC2DD" };
   }
@@ -860,14 +916,14 @@ async function readProposals(globalDir, profileId, scope = "user") {
   const dir = proposalsDir(globalDir, profileId, scope);
   let files;
   try {
-    files = await import_node_fs2.promises.readdir(dir);
+    files = await import_node_fs3.promises.readdir(dir);
   } catch {
     return [];
   }
   const out = [];
   for (const f of files.filter((f2) => f2.endsWith(".json")).sort()) {
     try {
-      const raw = await import_node_fs2.promises.readFile((0, import_node_path3.join)(dir, f), "utf8");
+      const raw = await import_node_fs3.promises.readFile((0, import_node_path4.join)(dir, f), "utf8");
       const obj = JSON.parse(raw);
       if (obj && typeof obj.title === "string" && typeof obj.category === "string") out.push(obj);
     } catch {
@@ -877,7 +933,7 @@ async function readProposals(globalDir, profileId, scope = "user") {
 }
 async function writeProposals(globalDir, profileId, inputs, opts, scope = "user") {
   const dir = proposalsDir(globalDir, profileId, scope);
-  await import_node_fs2.promises.mkdir(dir, { recursive: true });
+  await import_node_fs3.promises.mkdir(dir, { recursive: true });
   const seen = /* @__PURE__ */ new Set();
   for (const p of await readProposals(globalDir, profileId, scope)) seen.add(dedupKey(p.category, p.title));
   for (const d of opts.existingDocTitles) seen.add(dedupKey(d.category, d.title));
@@ -909,18 +965,18 @@ async function writeProposals(globalDir, profileId, inputs, opts, scope = "user"
       ...inp.indexEntries?.length ? { indexEntries: inp.indexEntries.slice(0, DOC_CAPS.indexEntries) } : {},
       ...inp.targetSlug ? { targetSlug: inp.targetSlug } : {}
     };
-    await import_node_fs2.promises.writeFile((0, import_node_path3.join)(dir, `${rec.id}.json`), JSON.stringify(rec, null, 2) + "\n", "utf8");
+    await import_node_fs3.promises.writeFile((0, import_node_path4.join)(dir, `${rec.id}.json`), JSON.stringify(rec, null, 2) + "\n", "utf8");
     written.push(rec);
     n++;
   }
   return { written, skipped };
 }
-var import_node_fs2, import_node_path3;
+var import_node_fs3, import_node_path4;
 var init_proposalStore = __esm({
   "packages/core/src/proposalStore.ts"() {
     "use strict";
-    import_node_fs2 = require("node:fs");
-    import_node_path3 = require("node:path");
+    import_node_fs3 = require("node:fs");
+    import_node_path4 = require("node:path");
     init_globalPaths();
     init_globalMarkdown();
     init_globalStore();
@@ -1567,8 +1623,8 @@ function runGit(cwd, args, opts = {}) {
   });
 }
 async function snapshotAgainst(dir, base) {
-  const scratch = await import_node_fs3.promises.mkdtemp((0, import_node_path4.join)((0, import_node_os.tmpdir)(), "agentbridge-index-"));
-  const env = { GIT_INDEX_FILE: (0, import_node_path4.join)(scratch, "index") };
+  const scratch = await import_node_fs4.promises.mkdtemp((0, import_node_path5.join)((0, import_node_os.tmpdir)(), "agentbridge-index-"));
+  const env = { GIT_INDEX_FILE: (0, import_node_path5.join)(scratch, "index") };
   try {
     await runGit(dir, ["read-tree", "HEAD"], { env });
     await runGit(dir, ["add", "-A"], { env, timeout: GIT_WRITE_TIMEOUT_MS });
@@ -1585,7 +1641,7 @@ async function snapshotAgainst(dir, base) {
       files: names.split("\n").map((l) => l.trim()).filter(Boolean)
     };
   } finally {
-    await import_node_fs3.promises.rm(scratch, { recursive: true, force: true }).catch(() => {
+    await import_node_fs4.promises.rm(scratch, { recursive: true, force: true }).catch(() => {
     });
   }
 }
@@ -1623,13 +1679,13 @@ function truncatePatch(patch, limit = PATCH_LIMIT_BYTES) {
   }
   return { patch: kept.join("\n"), omitted };
 }
-var import_node_child_process2, import_node_fs3, import_node_path4, import_node_os, GIT_TIMEOUT_MS2, GIT_WRITE_TIMEOUT_MS, GIT_MAX_BUFFER2, PATCH_LIMIT_BYTES;
+var import_node_child_process2, import_node_fs4, import_node_path5, import_node_os, GIT_TIMEOUT_MS2, GIT_WRITE_TIMEOUT_MS, GIT_MAX_BUFFER2, PATCH_LIMIT_BYTES;
 var init_diffMerge = __esm({
   "packages/core/src/agent/diffMerge.ts"() {
     "use strict";
     import_node_child_process2 = require("node:child_process");
-    import_node_fs3 = require("node:fs");
-    import_node_path4 = require("node:path");
+    import_node_fs4 = require("node:fs");
+    import_node_path5 = require("node:path");
     import_node_os = require("node:os");
     init_cleanup();
     GIT_TIMEOUT_MS2 = 1e4;
@@ -1936,6 +1992,7 @@ var {
   readContext: readContext2,
   readTurns: readTurns2,
   readMemory: readMemory2,
+  readMemoryDoc: readMemoryDoc2,
   searchMemory: searchMemory2,
   resolveProfileIdForScope: resolveProfileIdForScope2
 } = (init_read(), __toCommonJS(read_exports));
@@ -1962,6 +2019,7 @@ var COMMANDS = [
   ["memory user [--full]", "\uC0AC\uC6A9\uC790 \uC9C0\uC2DD. \uAE30\uBCF8\uC740 \uC694\uC57D, --full\uC774 \uC804\uBB38"],
   ["memory project [--full]", "\uC774 \uC800\uC7A5\uC18C\uC758 \uD504\uB85C\uC81D\uD2B8 \uC9C0\uC2DD"],
   ["memory search <\uC9C8\uC758>", "\uB450 \uC9C0\uC2DD\uC744 \uC9C8\uC758\uB85C \uAC80\uC0C9"],
+  ["memory read <\uC2DD\uBCC4\uC790>", "\uD55C \uAC74\uC758 \uC804\uBB38. \uC2DD\uBCC4\uC790\uB294 <\uCE74\uD14C\uACE0\uB9AC>/<\uC2AC\uB7EC\uADF8> (--scope\uB85C \uD55C\uCABD\uB9CC)"],
   ["memory add", "\uC0C8 \uC0AC\uC2E4\uC744 \uC81C\uC548 \uD050\uC5D0 \uB123\uB294\uB2E4 (--scope --category --title --summary --body)"],
   ["memory update <\uC2DD\uBCC4\uC790>", "\uC774\uBBF8 \uC788\uB294 \uD56D\uBAA9\uC744 \uACE0\uCE58\uB294 \uC81C\uC548 (\uAC19\uC740 \uC778\uC790, \uC548 \uC900 \uAC83\uC740 \uADF8\uB300\uB85C)"],
   ["status", "\uC5B4\uB514\uC5D0 \uBB34\uC5C7\uC774 \uAE54\uB824 \uC788\uB294\uC9C0\uC640 \uBC30\uC120 \uC790\uAC00 \uC9C4\uB2E8"],
@@ -2028,6 +2086,12 @@ function scopeOption(args) {
   if (v !== "user" && v !== "project") fail("--scope\uB294 user \uB610\uB294 project\uB2E4");
   return v;
 }
+function optionalScopeOption(args) {
+  const v = strOption(args, "--scope");
+  if (v === void 0) return void 0;
+  if (v !== "user" && v !== "project") fail("--scope\uB294 user \uB610\uB294 project\uB2E4");
+  return v;
+}
 function writeFields(args) {
   return {
     title: strOption(args, "--title"),
@@ -2050,6 +2114,11 @@ async function dispatch(cmd, args, wsDir, storageRoot) {
       const sub = args[0];
       if (sub === "user" || sub === "project") {
         return readMemory2(storageRoot, wsDir, sub, args.includes("--full"));
+      }
+      if (sub === "read") {
+        const id = args[1];
+        if (!id || id.startsWith("--")) fail("memory read\uC5D0\uB294 \uC2DD\uBCC4\uC790\uAC00 \uC628\uB2E4 (<\uCE74\uD14C\uACE0\uB9AC>/<\uC2AC\uB7EC\uADF8>)");
+        return readMemoryDoc2(storageRoot, wsDir, id, optionalScopeOption(args));
       }
       if (sub === "search") {
         const query = args.slice(1).join(" ").trim();

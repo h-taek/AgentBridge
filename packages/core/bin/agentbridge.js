@@ -19,7 +19,7 @@
 
 'use strict'
 
-// @agentbridge-cli-version 0.5.4
+// @agentbridge-cli-version 0.6.0
 // (단일 설치 버전 비교용 — 이 파일을 수정하면 반드시 버전을 올릴 것)
 
 const fs = require('fs')
@@ -30,6 +30,7 @@ const {
   readContext,
   readTurns,
   readMemory,
+  readMemoryDoc,
   searchMemory,
   resolveProfileIdForScope
 } = require('../src/agentCli/read')
@@ -58,6 +59,7 @@ const COMMANDS = [
   ['memory user [--full]', '사용자 지식. 기본은 요약, --full이 전문'],
   ['memory project [--full]', '이 저장소의 프로젝트 지식'],
   ['memory search <질의>', '두 지식을 질의로 검색'],
+  ['memory read <식별자>', '한 건의 전문. 식별자는 <카테고리>/<슬러그> (--scope로 한쪽만)'],
   ['memory add', '새 사실을 제안 큐에 넣는다 (--scope --category --title --summary --body)'],
   ['memory update <식별자>', '이미 있는 항목을 고치는 제안 (같은 인자, 안 준 것은 그대로)'],
   ['status', '어디에 무엇이 깔려 있는지와 배선 자가 진단'],
@@ -139,6 +141,15 @@ function scopeOption(args) {
   return v
 }
 
+// `memory read`의 scope는 기본값이 없다. 식별자에 scope가 없어서 양쪽을 다 찾는 것이 기본이고,
+// --scope는 좁히는 용도다.
+function optionalScopeOption(args) {
+  const v = strOption(args, '--scope')
+  if (v === undefined) return undefined
+  if (v !== 'user' && v !== 'project') fail('--scope는 user 또는 project다')
+  return v
+}
+
 function writeFields(args) {
   return {
     title: strOption(args, '--title'),
@@ -165,6 +176,11 @@ async function dispatch(cmd, args, wsDir, storageRoot) {
       const sub = args[0]
       if (sub === 'user' || sub === 'project') {
         return readMemory(storageRoot, wsDir, sub, args.includes('--full'))
+      }
+      if (sub === 'read') {
+        const id = args[1]
+        if (!id || id.startsWith('--')) fail('memory read에는 식별자가 온다 (<카테고리>/<슬러그>)')
+        return readMemoryDoc(storageRoot, wsDir, id, optionalScopeOption(args))
       }
       if (sub === 'search') {
         const query = args.slice(1).join(' ').trim()
