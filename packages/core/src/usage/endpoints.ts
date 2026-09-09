@@ -16,7 +16,22 @@ export interface UsageRequest {
 export interface UsageRequestInput {
   accessToken: string;
   accountId?: string | null;
+  /**
+   * agy 전용. 설치본이 `CLOUD_CODE_URL`로 백엔드를 바꿔 놓았을 때 그 값을 그대로 쓴다.
+   * 호스트가 읽어 넘긴다 — 이 함수는 환경을 안 본다.
+   */
+  baseUrl?: string | null;
 }
+
+// agy의 기본 백엔드. **prod(`cloudcode-pa`)가 아니라 daily다.**
+//
+// 둘 다 200을 내고 응답 모양도 같아서 처음에는 구분이 안 됐다(research/01 §호스트). 차이는
+// 값이다 — prod는 이 계정을 처음 보는 것처럼 답해서 네 버킷이 전부 remainingFraction=1이고
+// resetTime이 부를 때마다 '지금+창 길이'로 밀린다. 실제 사용량은 daily에만 있다.
+//
+// agy 자신을 `CLOUD_CODE_URL=https://cloudcode-pa.googleapis.com`으로 띄우면 agy도 100%를
+// 표시한다(2026-09-09 실측, research/05). 그러니 이건 우리 해석 문제가 아니라 호스트 문제다.
+const AGY_DEFAULT_BASE_URL = 'https://daily-cloudcode-pa.googleapis.com';
 
 const USER_AGENT: Record<CliKind, string> = {
   claude: 'claude-code/2.1.0',
@@ -51,8 +66,9 @@ export function buildUsageRequest(cli: CliKind, input: UsageRequestInput): Usage
     return { url: 'https://chatgpt.com/backend-api/wham/usage', method: 'GET', headers };
   }
 
+  const base = (input.baseUrl || AGY_DEFAULT_BASE_URL).replace(/\/+$/, '');
   return {
-    url: 'https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary',
+    url: `${base}/v1internal:retrieveUserQuotaSummary`,
     method: 'POST',
     headers: {
       Authorization: auth,

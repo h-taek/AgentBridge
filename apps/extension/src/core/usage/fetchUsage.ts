@@ -79,7 +79,12 @@ type Attempt =
   | { kind: 'unavailable' };
 
 async function attempt(cli: CliKind, ticket: Ticket, deps: UsageFetchDeps): Promise<Attempt> {
-  const request = buildUsageRequest(cli, ticket);
+  // agy는 설치본이 `CLOUD_CODE_URL`로 백엔드를 바꿔 놓았을 수 있다. 그러면 우리도 따라간다 —
+  // 우리가 보는 사용량과 CLI가 보는 사용량이 갈리면 안 된다.
+  const request = buildUsageRequest(cli, {
+    ...ticket,
+    baseUrl: cli === 'agy' ? process.env.CLOUD_CODE_URL || null : null,
+  });
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   let response: FetchResponseLike;
