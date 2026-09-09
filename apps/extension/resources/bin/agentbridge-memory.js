@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// @agentbridge-helper-version 0.6.1
+// @agentbridge-helper-version 0.6.2
 "use strict";
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -831,7 +831,9 @@ __export(globalSearch_exports, {
   resolveContext: () => resolveContext,
   resolveInjection: () => resolveInjection,
   scoreDoc: () => scoreDoc,
+  scoreDocGroups: () => scoreDocGroups,
   tokenizeQuery: () => tokenizeQuery,
+  tokenizeQueryGroups: () => tokenizeQueryGroups,
   tokenizeRaw: () => tokenizeRaw
 });
 function tokenizeRaw(text) {
@@ -847,14 +849,21 @@ function koreanVariant(token) {
   }
   return null;
 }
-function tokenizeQuery(query) {
-  const out = /* @__PURE__ */ new Set();
+function tokenizeQueryGroups(query) {
+  const groups = [];
+  const seen = /* @__PURE__ */ new Set();
   for (const tok of tokenizeRaw(query)) {
     const v = koreanVariant(tok);
     if (v && STOP_WORDS.has(v)) continue;
-    out.add(tok);
-    if (v) out.add(v);
+    if (seen.has(tok)) continue;
+    seen.add(tok);
+    groups.push(v ? [tok, v] : [tok]);
   }
+  return groups;
+}
+function tokenizeQuery(query) {
+  const out = /* @__PURE__ */ new Set();
+  for (const group of tokenizeQueryGroups(query)) for (const tok of group) out.add(tok);
   return [...out];
 }
 function countTokenMatches(text, tokens) {
@@ -914,6 +923,24 @@ async function resolveContext(globalDir, profileId, query, opts) {
   scored.sort((a, b) => b.score - a.score || a.title.localeCompare(b.title));
   return scored.slice(0, opts?.topN ?? 5);
 }
+function groupHits(text, group) {
+  return group.some((tok) => countTokenMatches(text, [tok]) > 0) ? 1 : 0;
+}
+function scoreDocGroups(rec, groups) {
+  const fields = [
+    [rec.indexEntries.join(" "), 10],
+    [rec.title, 7],
+    [rec.summary, 5],
+    [rec.category, 2],
+    [`${rec.category}/${rec.slug}`, 2],
+    [rec.body, 1]
+  ];
+  let score = 0;
+  for (const group of groups) {
+    for (const [text, weight] of fields) score += groupHits(text, group) * weight;
+  }
+  return score;
+}
 function injectionFloor(tokenCount) {
   return 4 * Math.sqrt(tokenCount);
 }
@@ -925,8 +952,8 @@ function gateInjectionMatches(candidates, tokenCount) {
   return passed.filter((c) => c.score >= top * RELATIVE_FLOOR).sort((a, b) => b.score - a.score || a.title.localeCompare(b.title)).slice(0, MAX_MATCHES);
 }
 async function resolveInjection(globalDir, ids, query) {
-  const tokens = tokenizeQuery(query);
-  if (tokens.length === 0) return [];
+  const groups = tokenizeQueryGroups(query);
+  if (groups.length === 0) return [];
   const candidates = [];
   for (const [scope, profileId] of [
     ["user", ids.user],
@@ -940,11 +967,11 @@ async function resolveInjection(globalDir, ids, query) {
         category: rec.category,
         slug: rec.slug,
         title: rec.title,
-        score: scoreDoc(rec, tokens)
+        score: scoreDocGroups(rec, groups)
       });
     }
   }
-  return gateInjectionMatches(candidates, tokens.length);
+  return gateInjectionMatches(candidates, groups.length);
 }
 var STOP_WORDS, KOREAN_PARTICLES, HANGUL, RELATIVE_FLOOR, MAX_MATCHES;
 var init_globalSearch = __esm({
@@ -1566,6 +1593,11 @@ async function buildSubagentBlocks(wsDir, sessionToken) {
     stuck: stuck.length === 0 ? "" : 'Check the stalled subagents with `agent read <name>`, then send more instructions (`agent send <name> --prompt "..."`) or close them (`agent close <name>`). ' + stuck.length + " went quiet without finishing (" + stuck.join(", ") + "). The user may have interrupted them, or they may be stuck."
   };
 }
+function slugCarriesTitle(slug, title) {
+  const norm = (v) => String(v || "").toLowerCase().replace(/[^a-z0-9가-힣]/g, "");
+  const withoutHash = String(slug || "").replace(/-[a-z0-9]{5,10}$/, "");
+  return norm(withoutHash) === norm(title);
+}
 function buildMatchBlock(matches) {
   if (!matches || matches.length === 0) return "";
   const one = matches.length === 1;
@@ -1573,7 +1605,15 @@ function buildMatchBlock(matches) {
     "Read these before you answer, with `memory read <id>`. " + matches.length + (one ? " piece of long-term memory overlaps" : " pieces of long-term memory overlap") + " this prompt. Only the titles are here \u2014 the bodies are not.",
     ""
   ];
-  for (const m of matches) lines.push("- " + m.category + "/" + m.slug + " \u2014 " + m.title);
+  for (const m of matches) {
+    const id = m.category + "/" + m.slug;
+    lines.push("- " + id + (slugCarriesTitle(m.slug, m.title) ? "" : " \u2014 " + m.title));
+  }
+  lines.push(
+    "",
+    "These were picked by word overlap, not by judgment. If a title is unrelated to what the",
+    "user is actually asking, ignore it and do not read it."
+  );
   return lines.join("\n");
 }
 function buildProposalBlock() {

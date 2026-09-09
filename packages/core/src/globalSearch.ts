@@ -44,16 +44,30 @@ function koreanVariant(token: string): string | null {
   return null;
 }
 
-// 쿼리 토큰 = 원형 + (한글 조사 변이형). 비파괴 — 원형은 항상 남는다.
-export function tokenizeQuery(query: string): string[] {
-  const out = new Set<string>();
+// 쿼리 토큰을 '한 단어 = 한 그룹'으로 묶는다. 그룹은 [원형] 또는 [원형, 조사 변이형]이다.
+//
+// 원형과 변이형은 같은 단어의 두 표기이지 두 단어가 아니다. 평평한 토큰 목록으로 쓰면 둘 다
+// 같은 문서에 걸려 점수가 두 배가 되고, 토큰 수도 부풀어 임계 계산이 어긋난다. 실제로 부사
+// '그대로'가 '그대로'+'그대'로 쪼개져 한 문서에서 12점을 벌었다 — 조사가 아닌 꼬리까지 떼기
+// 때문에 이런 일이 생긴다. 그룹으로 세면 recall은 그대로고(둘 중 뭐가 걸리든 1점) 중복만 없다.
+export function tokenizeQueryGroups(query: string): string[][] {
+  const groups: string[][] = [];
+  const seen = new Set<string>();
   for (const tok of tokenizeRaw(query)) {
     const v = koreanVariant(tok);
     // 조사 변이형이 불용어면 이 토큰은 의미 없는 기능어(예: 방법을→방법) → 원형·변이형 모두 버림
     if (v && STOP_WORDS.has(v)) continue;
-    out.add(tok);
-    if (v) out.add(v);
+    if (seen.has(tok)) continue;
+    seen.add(tok);
+    groups.push(v ? [tok, v] : [tok]);
   }
+  return groups;
+}
+
+// 쿼리 토큰 = 원형 + (한글 조사 변이형). 비파괴 — 원형은 항상 남는다.
+export function tokenizeQuery(query: string): string[] {
+  const out = new Set<string>();
+  for (const group of tokenizeQueryGroups(query)) for (const tok of group) out.add(tok);
   return [...out];
 }
 
@@ -155,6 +169,30 @@ export async function resolveContext(
 // exactPhraseScore 가산은 쓰지 않는다. 프롬프트 전문이 문서에 통째로 들어 있을 일이 없다 —
 // 짧은 질의를 손으로 넣는 `memory search`에서만 뜻이 있는 가산이다.
 
+// 한 필드에서 그룹은 한 번만 센다. 변이형이 몇 개 걸리든 단어 하나다.
+function groupHits(text: string, group: string[]): number {
+  return group.some((tok) => countTokenMatches(text, [tok]) > 0) ? 1 : 0;
+}
+
+// scoreDoc과 같은 가중치인데 세는 단위가 토큰이 아니라 단어다. `memory search`는 계속 scoreDoc을
+// 쓴다 — 거기서는 임계가 1~2점이라 중복 가산이 순위만 흔들었고, 절대 임계를 쓰는 주입에서만
+// 오탐이 된다. 검색 결과를 같이 바꾸지 않으려고 함수를 나눠 둔다.
+export function scoreDocGroups(rec: SearchDocRecord, groups: string[][]): number {
+  const fields: Array<[string, number]> = [
+    [rec.indexEntries.join(' '), 10],
+    [rec.title, 7],
+    [rec.summary, 5],
+    [rec.category, 2],
+    [`${rec.category}/${rec.slug}`, 2],
+    [rec.body, 1],
+  ];
+  let score = 0;
+  for (const group of groups) {
+    for (const [text, weight] of fields) score += groupHits(text, group) * weight;
+  }
+  return score;
+}
+
 export type InjectionMatch = {
   scope: ProposalScope;
   category: string;
@@ -195,8 +233,8 @@ export async function resolveInjection(
   ids: { user: string | null; project: string | null },
   query: string,
 ): Promise<InjectionMatch[]> {
-  const tokens = tokenizeQuery(query);
-  if (tokens.length === 0) return [];
+  const groups = tokenizeQueryGroups(query);
+  if (groups.length === 0) return [];
 
   const candidates: InjectionMatch[] = [];
   for (const [scope, profileId] of [
@@ -211,9 +249,9 @@ export async function resolveInjection(
         category: rec.category,
         slug: rec.slug,
         title: rec.title,
-        score: scoreDoc(rec, tokens),
+        score: scoreDocGroups(rec, groups),
       });
     }
   }
-  return gateInjectionMatches(candidates, tokens.length);
+  return gateInjectionMatches(candidates, groups.length);
 }

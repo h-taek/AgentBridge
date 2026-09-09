@@ -5,7 +5,13 @@ import { tokenizeQuery } from '@agentbridge/core';
 import { countTokenMatches } from '@agentbridge/core';
 import { scoreDoc, minimumUsefulScore } from '@agentbridge/core';
 import { getGlobalDir, writeProfileDocs, resolveContext } from '@agentbridge/core';
-import { injectionFloor, gateInjectionMatches, resolveInjection } from '@agentbridge/core';
+import {
+  injectionFloor,
+  gateInjectionMatches,
+  resolveInjection,
+  tokenizeQueryGroups,
+  scoreDocGroups,
+} from '@agentbridge/core';
 
 describe('globalSearch.tokenize', () => {
   it('영문: 소문자화 + 불용어/1글자 제거', () => {
@@ -155,6 +161,52 @@ describe('globalSearch.gateInjectionMatches', () => {
   });
 });
 
+describe('globalSearch.tokenizeQueryGroups', () => {
+  it('원형과 조사 변이형이 한 그룹이다', () => {
+    assert.deepEqual(tokenizeQueryGroups('배포를'), [['배포를', '배포']]);
+  });
+  it('변이형이 없으면 혼자 선다', () => {
+    assert.deepEqual(tokenizeQueryGroups('deploy'), [['deploy']]);
+  });
+  it('그룹 수가 곧 단어 수다 — 임계가 부풀지 않는다', () => {
+    // '그대로'는 조사가 아닌 꼬리('로')까지 떼여 '그대'를 만든다. 그래도 단어는 하나다.
+    assert.equal(tokenizeQueryGroups('그대로 보여줘').length, 2);
+    assert.equal(tokenizeQuery('그대로 보여줘').length, 3); // 평평한 목록은 셋
+  });
+  it('평평한 목록은 그룹을 펼친 것과 같다 — 기존 소비자가 안 바뀐다', () => {
+    const flat = tokenizeQueryGroups('배포를 알려줘').flat();
+    assert.deepEqual(new Set(tokenizeQuery('배포를 알려줘')), new Set(flat));
+  });
+});
+
+describe('globalSearch.scoreDocGroups', () => {
+  const rec = {
+    category: 'workflows', slug: 'evidence', title: '근거',
+    summary: '그대로 두지 말고 근거를 댄다', indexEntries: ['evidence'], body: '그대로',
+  };
+
+  it('한 단어가 두 번 세이지 않는다', () => {
+    // 평평한 목록은 '그대로'와 '그대'가 따로 걸려 summary·body에서 두 배가 된다.
+    const flat = scoreDoc(rec, tokenizeQuery('그대로'));
+    const grouped = scoreDocGroups(rec, tokenizeQueryGroups('그대로'));
+    assert.equal(flat, 12);    // summary 5 + body 1, 두 번
+    assert.equal(grouped, 6);  // summary 5 + body 1, 한 번
+  });
+
+  it('변이형만 걸려도 점수는 난다 — recall이 안 줄어든다', () => {
+    const doc = { ...rec, summary: '배포 절차', body: '' };
+    assert.ok(scoreDocGroups(doc, tokenizeQueryGroups('배포를')) > 0);
+  });
+
+  it('영문은 그룹이 홑이라 scoreDoc과 같다', () => {
+    const doc = { category: 'infra', slug: 'deploy', title: 'Deployment', summary: 'ship it', indexEntries: ['deploy'], body: '' };
+    assert.equal(
+      scoreDocGroups(doc, tokenizeQueryGroups('deployment')),
+      scoreDoc(doc, tokenizeQuery('deployment')),
+    );
+  });
+});
+
 describe('globalSearch.resolveInjection', () => {
   it('사용자 지식과 프로젝트 지식을 함께 돌리고 scope를 달아 낸다', async () => {
     const g = await tmpGlobal();
@@ -195,5 +247,21 @@ describe('globalSearch.resolveInjection', () => {
       docs: [{ category: 'workflows', slug: 'git-flow', title: 'git-flow', summary: 'main 릴리스 전용', body: '', indexEntries: ['배포'] }],
     });
     assert.deepEqual(await resolveInjection(g, { user: 'default', project: null }, '   '), []);
+  });
+
+  it('한 단어를 두 번 세어 임계를 넘던 오탐이 안 걸린다 (2026-09-09 라이브)', async () => {
+    const g = await tmpGlobal();
+    await writeProfileDocs(g, 'default', {
+      docs: [{
+        category: 'workflows',
+        slug: '모르는-건-모른다고-주장엔-외부-근거를',
+        title: '모르는 건 모른다고, 주장엔 외부 근거를',
+        summary: '추측을 사실처럼 말하지 말고 근거를 그대로 댄다.',
+        body: '모르면 모른다고 한다.',
+        indexEntries: ['근거', '추측'],
+      }],
+    });
+    const q = '훅으로 들어온 <agentbridge-context> 블록의 1절만 그대로 보여줘. 요약하지 말고.';
+    assert.deepEqual(await resolveInjection(g, { user: 'default', project: null }, q), []);
   });
 });

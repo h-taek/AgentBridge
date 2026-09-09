@@ -24,7 +24,7 @@
 
 'use strict'
 
-// @agentbridge-helper-version 0.6.1
+// @agentbridge-helper-version 0.6.2
 // (단일 설치 버전 비교용 — 이 파일을 수정하면 반드시 버전을 올릴 것)
 
 const fs = require('fs')
@@ -265,6 +265,16 @@ async function buildSubagentBlocks(wsDir, sessionToken) {
 }
 
 // 이번 턴 프롬프트에 걸린 장기 기억 (spec §1). 식별자와 제목만 싣는다.
+//
+// 제목을 덧붙이지 않는 자리가 있다. `memory add`로 들어온 항목은 슬러그가 제목을 slugify한
+// 것이라(proposalStore의 slugFromTitle) 식별자 안에 제목이 이미 들어 있다. 그대로 이어 붙이면
+// 한 줄에 같은 말이 두 번 나온다. 슬러그와 제목이 갈리는 항목에만 제목을 붙인다.
+function slugCarriesTitle(slug, title) {
+  const norm = (v) => String(v || '').toLowerCase().replace(/[^a-z0-9가-힣]/g, '')
+  const withoutHash = String(slug || '').replace(/-[a-z0-9]{5,10}$/, '')
+  return norm(withoutHash) === norm(title)
+}
+
 function buildMatchBlock(matches) {
   if (!matches || matches.length === 0) return ''
   const one = matches.length === 1
@@ -275,7 +285,17 @@ function buildMatchBlock(matches) {
       ' this prompt. Only the titles are here — the bodies are not.',
     ''
   ]
-  for (const m of matches) lines.push('- ' + m.category + '/' + m.slug + ' — ' + m.title)
+  for (const m of matches) {
+    const id = m.category + '/' + m.slug
+    lines.push('- ' + id + (slugCarriesTitle(m.slug, m.title) ? '' : ' — ' + m.title))
+  }
+  // 매칭은 단어가 겹친다는 것뿐이지 이 질문에 쓸모 있다는 판정이 아니다. 버리는 값이 싸다 —
+  // 제목 한 줄 읽고 마는 것이라, 게이트를 더 조이는 것보다 여기서 거르게 하는 편이 손실이 적다.
+  lines.push(
+    '',
+    'These were picked by word overlap, not by judgment. If a title is unrelated to what the',
+    'user is actually asking, ignore it and do not read it.'
+  )
   return lines.join('\n')
 }
 

@@ -89,6 +89,36 @@ describe('helper inject — 매칭 주입 (0.6.0 spec/03 §1)', () => {
     assert.match(ctx, /1 piece of long-term memory overlaps/);
   });
 
+  // 매칭은 단어가 겹친다는 것뿐이다. 게이트를 더 조여 정탐까지 버리는 대신 모델이 제목을 보고
+  // 버리게 한다 — 어휘 매칭으로 의미를 가르는 데는 한계가 있다.
+  it('무관하면 무시하라는 조건을 함께 싣는다', () => {
+    const ctx = ctxFor('how do I handle deployment to production?');
+    assert.match(ctx, /not by judgment/);
+    assert.match(ctx, /ignore it and do not read it/);
+  });
+
+  // 슬러그가 제목을 slugify한 것이라(memory add 경로) 이어 붙이면 같은 말이 두 번 나온다.
+  it('슬러그가 제목을 담고 있으면 제목을 덧붙이지 않는다', async () => {
+    await writeProfileDocs(getGlobalDir(userData), 'default', {
+      docs: [{
+        category: 'infra',
+        slug: 'keychain-토큰-보관-1abc23',
+        title: 'Keychain 토큰 보관',
+        summary: '자격증명은 키체인에서 읽는다.',
+        body: '파일 폴백은 그다음이다.',
+        indexEntries: ['keychain', '토큰'],
+      }],
+    });
+    const ctx = ctxFor('keychain 토큰 어디서 읽지');
+    assert.match(ctx, /- infra\/keychain-토큰-보관-1abc23$/m);
+    assert.doesNotMatch(ctx, /keychain-토큰-보관-1abc23 — /);
+  });
+
+  it('슬러그와 제목이 갈리면 제목을 붙인다', () => {
+    const ctx = ctxFor('how do I handle deployment to production?');
+    assert.match(ctx, /- conventions\/deploy-flow — Deployment workflow/);
+  });
+
   it('무관한 프롬프트에는 1-1 소절이 제목째 빠진다', () => {
     const ctx = ctxFor('what time is it right now');
     assert.doesNotMatch(ctx, /### 1-1/);

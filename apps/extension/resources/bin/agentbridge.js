@@ -397,14 +397,21 @@ function koreanVariant(token) {
   }
   return null;
 }
-function tokenizeQuery(query) {
-  const out = /* @__PURE__ */ new Set();
+function tokenizeQueryGroups(query) {
+  const groups = [];
+  const seen = /* @__PURE__ */ new Set();
   for (const tok of tokenizeRaw(query)) {
     const v = koreanVariant(tok);
     if (v && STOP_WORDS.has(v)) continue;
-    out.add(tok);
-    if (v) out.add(v);
+    if (seen.has(tok)) continue;
+    seen.add(tok);
+    groups.push(v ? [tok, v] : [tok]);
   }
+  return groups;
+}
+function tokenizeQuery(query) {
+  const out = /* @__PURE__ */ new Set();
+  for (const group of tokenizeQueryGroups(query)) for (const tok of group) out.add(tok);
   return [...out];
 }
 function countTokenMatches(text, tokens) {
