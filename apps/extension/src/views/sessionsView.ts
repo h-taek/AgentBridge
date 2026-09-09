@@ -7,7 +7,7 @@ import {
   computeSessionActivity,
   type SessionActivity,
 } from '@agentbridge/core';
-import { buildSessionRows, type SessionRowView } from './sessionsViewModel';
+import { buildSessionRows, needsTwistColumn, type SessionRowView } from './sessionsViewModel';
 import type { UsageStore } from '../core/usage/usageStore';
 import { buildUsageStrip, type UsageStripView } from './usageViewModel';
 
@@ -178,6 +178,7 @@ export class SessionsViewProvider implements vscode.WebviewViewProvider {
     void this.view?.webview.postMessage({
       type: 'rows',
       rows: this.rows,
+      twistColumn: needsTwistColumn(this.rows),
       selected: this.selected ?? null,
       labels: {
         rename: vscode.l10n.t('Rename Session'),
@@ -272,6 +273,8 @@ export class SessionsViewProvider implements vscode.WebviewViewProvider {
      stroke-width를 그만큼 줄여 화면상 두께를 1.25px로 붙들어 둔다. */
   .twist svg { width:18px; height:18px; }
   .twist.leaf svg { display:none; }
+  /* 펼칠 것이 하나도 없으면 손잡이 자리를 통째로 뺀다. flex gap도 같이 사라진다. */
+  #list.flat .twist { display:none; }
   .dot { width:16px; height:16px; flex-shrink:0; }
   /* 시간은 이름 글씨 바로 뒤에 붙고, 버튼은 행 오른쪽 끝에 붙는다. 둘은 다른 자리라
      동시에 보인다. 이름은 줄어들며 말줄임돼서 긴 이름이 줄을 밀어내지 않는다. */
@@ -384,7 +387,8 @@ export class SessionsViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  function drawRows(rows) {
+  function drawRows(rows, twistColumn) {
+    listEl.classList.toggle('flat', !twistColumn);
     listEl.replaceChildren();
     for (const r of rows) {
       const row = document.createElement('div');
@@ -479,7 +483,7 @@ export class SessionsViewProvider implements vscode.WebviewViewProvider {
     if (msg.type === 'rows') {
       if (msg.selected) selected = msg.selected;
       if (msg.labels) labels = msg.labels;
-      drawRows(msg.rows);
+      drawRows(msg.rows, msg.twistColumn);
     } else if (msg.type === 'usage') {
       drawUsage(msg.strip, msg.text || {});
     } else if (msg.type === 'select') {

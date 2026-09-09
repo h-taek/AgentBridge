@@ -69,6 +69,15 @@ export function buildSessionRows(input: SessionRowsInput): SessionRowView[] {
   return out;
 }
 
+// 접기 손잡이 자리를 비워 둘지. 펼칠 것이 하나도 없으면 목록 전체가 왼쪽에 붙는다.
+//
+// 행마다 따로 정하지 않는 이유는 왼쪽 끝이 들쭉날쭉해지기 때문이다. 서브가 있는 세션과 없는
+// 세션이 섞이면 같은 단계인데 이름 시작점이 달라진다. 그래서 목록 단위로 정한다 — 서브가
+// 하나도 없는 흔한 경우에 24px을 돌려받고, 있을 때는 줄이 맞는다.
+export function needsTwistColumn(rows: SessionRowView[]): boolean {
+  return rows.some((r) => r.hasChildren);
+}
+
 export function timeAgo(iso: string, now: number): string {
   const mins = Math.floor((now - Date.parse(iso)) / 60_000);
   if (mins < 1) return 'just now';

@@ -3,7 +3,7 @@
 import { strict as assert } from 'assert';
 import type { SessionActivity } from '@agentbridge/core';
 import type { SessionMeta } from '../src/core/sessionRegistry';
-import { buildSessionRows, timeAgo } from '../src/views/sessionsViewModel';
+import { buildSessionRows, needsTwistColumn, timeAgo } from '../src/views/sessionsViewModel';
 
 const NOW = Date.parse('2026-09-08T12:00:00Z');
 
@@ -29,6 +29,36 @@ const build = (
   });
 
 describe('views/sessionsViewModel', () => {
+  // 손잡이 자리는 목록 단위로 정한다. 행마다 정하면 서브가 있는 세션과 없는 세션이 섞였을 때
+  // 같은 단계인데 이름 시작점이 달라진다.
+  describe('접기 손잡이 자리', () => {
+    it('서브가 하나도 없으면 자리를 안 비운다', () => {
+      const rows = build([meta({ sessionId: 'a' }), meta({ sessionId: 'b' })]);
+      assert.equal(needsTwistColumn(rows), false);
+    });
+
+    it('서브가 하나라도 있으면 자리를 비운다 — 줄이 맞아야 한다', () => {
+      const rows = build([
+        meta({ sessionId: 'p' }),
+        meta({ sessionId: 'c', parentSessionId: 'p' }),
+        meta({ sessionId: 'l' }),
+      ]);
+      assert.equal(needsTwistColumn(rows), true);
+    });
+
+    it('부모를 접어 자식이 안 보여도 자리는 그대로다 — 손잡이가 거기 있다', () => {
+      const rows = build(
+        [meta({ sessionId: 'p' }), meta({ sessionId: 'c', parentSessionId: 'p' })],
+        { collapsed: ['p'] },
+      );
+      assert.equal(needsTwistColumn(rows), true);
+    });
+
+    it('세션이 없으면 자리도 없다', () => {
+      assert.equal(needsTwistColumn([]), false);
+    });
+  });
+
   describe('평탄화', () => {
     const parent = meta({ sessionId: 'p' });
     const child = meta({ sessionId: 'c', parentSessionId: 'p' });
