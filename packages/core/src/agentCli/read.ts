@@ -17,6 +17,7 @@ import { readProfileDocs, resolveProfile } from '../globalStore';
 import { getGlobalDir } from '../globalPaths';
 import { resolveProjectProfileId } from '../gitRemote';
 import { resolveContext } from '../globalSearch';
+import { appendMemoryReadLog } from '../memoryReadLog';
 import { renderIrSections } from './irRender';
 
 // ─── context ────────────────────────────────────────────────────────────
@@ -153,4 +154,57 @@ export async function searchMemory(
     lines.push('');
   }
   return lines.join('\n').trimEnd();
+}
+
+// ─── memory read (0.6.0 spec/03 §3) ─────────────────────────────────────
+//
+// 훅이 매 턴 싣는 것은 식별자와 제목뿐이라(spec §1) 본문을 낼 명령이 필요하다. `memory search`는
+// 제목과 요약까지고, `memory user --full`은 전량이라 한 건을 보려고 부를 물건이 아니다.
+//
+// 식별자에 scope가 없다. 카테고리 목록이 양쪽 공통이라 `conventions/release-flow`가 사용자
+// 지식과 프로젝트 지식에 동시에 설 수 있다. 그래서 기본은 양쪽을 다 찾고, 둘 다 있으면 둘 다
+// 낸다 — 어느 쪽을 원했는지는 우리가 아니라 모델이 안다. `--scope`로 좁힐 수 있다.
+
+function splitDocId(id: string): { category: string; slug: string } | null {
+  const trimmed = String(id || '').trim();
+  const cut = trimmed.indexOf('/');
+  if (cut <= 0 || cut === trimmed.length - 1) return null;
+  // 슬러그에 `/`가 더 있을 수 있다(docs/ 아래 중첩) — 첫 칸에서만 가른다.
+  return { category: trimmed.slice(0, cut), slug: trimmed.slice(cut + 1) };
+}
+
+function renderDocFull(rec: SearchDocRecord, scope: ProposalScope): string {
+  const lines = [`## ${rec.title}`, '', `${SCOPE_LABEL[scope]} · ${docId(rec)}`, ''];
+  if (rec.summary) lines.push(rec.summary, '');
+  if (rec.body) lines.push(rec.body);
+  return lines.join('\n').trimEnd();
+}
+
+export async function readMemoryDoc(
+  storageRoot: string,
+  wsDir: string,
+  id: string,
+  scope?: ProposalScope,
+): Promise<string> {
+  const parsed = splitDocId(id);
+  if (!parsed) return `"${id}"는 식별자 모양이 아니다. <카테고리>/<슬러그>로 온다.`;
+
+  const globalDir = getGlobalDir(storageRoot);
+  const scopes: ProposalScope[] = scope ? [scope] : ['user', 'project'];
+
+  const found: Array<{ rec: SearchDocRecord; scope: ProposalScope }> = [];
+  for (const s of scopes) {
+    const profileId = await resolveProfileIdForScope(wsDir, s);
+    if (!profileId) continue;
+    const docs = await readProfileDocs(globalDir, profileId, s).catch(() => []);
+    const hit = docs.find((d) => d.category === parsed.category && d.slug === parsed.slug);
+    if (hit) found.push({ rec: hit, scope: s });
+  }
+
+  if (found.length === 0) {
+    return `"${id}"에 해당하는 항목이 없다. 식별자는 \`memory search\`나 \`memory user\`의 줄 앞에 있다.`;
+  }
+
+  await appendMemoryReadLog(globalDir, found.map((f) => ({ id, scope: f.scope })));
+  return found.map((f) => renderDocFull(f.rec, f.scope)).join('\n\n');
 }

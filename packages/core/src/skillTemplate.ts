@@ -11,7 +11,7 @@
 //
 // `uninstall`은 싣지 않는다. 사용자 명령이지 에이전트 명령이 아니다.
 
-export const SKILL_VERSION = '0.5.7';
+export const SKILL_VERSION = '0.6.0';
 export const SKILL_DIR_NAME = 'agentbridge';
 
 // 셸에서 그대로 쓸 수 있게 공백 있는 경로를 감싼다.
@@ -64,6 +64,9 @@ Run these when the condition holds, not "if it seems useful":
   done** (style, tooling, workflow, conventions) — \`memory search "<query>"\`
 - **A question about this repository's own rules or history** —
   \`memory project\`
+- **The turn started with a list of matching entries** — \`memory read <id>\` for
+  the ones that bear on the question. That list carries titles only; the bodies
+  are not in your prompt
 - **Before recording anything** — read first, see below
 
 \`memory search\` is the normal lookup. Reading everything is for the write path.
@@ -75,6 +78,7 @@ Each line is the part after the run command.
     context                       compacted state of the current project
     turns --last 5                raw recent conversation
     memory search "<query>"       search both user and project knowledge
+    memory read <id>              one entry in full, body included
     memory user                   the user's durable preferences (summaries)
     memory user --full            ... with full bodies
     memory project                what is durable about this repository
@@ -161,8 +165,27 @@ should outlive this session:
 
 Both go to a queue the user approves. They do not appear in reads until then.
 
-Record what would change how someone works next time — not what the repository
-already says, not what only matters in this conversation.
+\`--summary\` is the conclusion — one or two sentences, what to do. \`--body\` is
+the grounds: why it was decided, what it replaces, and the user's own wording
+where the wording is the point. Do not paraphrase a phrasing preference.
+
+### What counts as evidence
+
+Weigh what you saw, in this order:
+
+1. **What the user said.** Repetition, corrections (scope, order, wording), an
+   interruption, a "do it again" — these are the signal.
+2. **Tool output.** What a command actually printed beats what anyone assumed.
+3. **What you said.** Weakest. Your turns record what you tried, not what the
+   user wants.
+
+Throw away: options that were discussed and not adopted; proposals you made
+that the user did not take up; anything the repository already states (its
+README, CLAUDE.md, the code itself); anything that only matters until this task
+ends; and a restatement of something already recorded — that is
+\`memory update <id>\`, not a second entry.
+
+Record what would change how someone works next time.
 
 ## Outside AgentBridge
 

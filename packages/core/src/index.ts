@@ -18,6 +18,7 @@ export * from './proposalCursor';
 export * from './proposalPass';
 export * from './globalSearch';
 export * from './globalInject';
+export * from './memoryReadLog';
 export * from './usage/normalize';
 export * from './usage/endpoints';
 
@@ -44,6 +45,7 @@ export * from './workspaceStore';
 export * from './hookStatusStore';
 export * from './sessionRegistry';
 export * from './sessionOwner';
+export * from './turnCounter';
 export * from './fileTail';
 export * from './transcriptReader/types';
 export * from './transcriptReader/util';
