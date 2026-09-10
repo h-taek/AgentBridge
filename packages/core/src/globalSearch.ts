@@ -44,16 +44,30 @@ function koreanVariant(token: string): string | null {
   return null;
 }
 
-// 쿼리 토큰 = 원형 + (한글 조사 변이형). 비파괴 — 원형은 항상 남는다.
-export function tokenizeQuery(query: string): string[] {
-  const out = new Set<string>();
+// 쿼리 토큰을 '한 단어 = 한 그룹'으로 묶는다. 그룹은 [원형] 또는 [원형, 조사 변이형]이다.
+//
+// 원형과 변이형은 같은 단어의 두 표기이지 두 단어가 아니다. 평평한 토큰 목록으로 쓰면 둘 다
+// 같은 문서에 걸려 점수가 두 배가 되고, 토큰 수도 부풀어 임계 계산이 어긋난다. 실제로 부사
+// '그대로'가 '그대로'+'그대'로 쪼개져 한 문서에서 12점을 벌었다 — 조사가 아닌 꼬리까지 떼기
+// 때문에 이런 일이 생긴다. 그룹으로 세면 recall은 그대로고(둘 중 뭐가 걸리든 1점) 중복만 없다.
+export function tokenizeQueryGroups(query: string): string[][] {
+  const groups: string[][] = [];
+  const seen = new Set<string>();
   for (const tok of tokenizeRaw(query)) {
     const v = koreanVariant(tok);
     // 조사 변이형이 불용어면 이 토큰은 의미 없는 기능어(예: 방법을→방법) → 원형·변이형 모두 버림
     if (v && STOP_WORDS.has(v)) continue;
-    out.add(tok);
-    if (v) out.add(v);
+    if (seen.has(tok)) continue;
+    seen.add(tok);
+    groups.push(v ? [tok, v] : [tok]);
   }
+  return groups;
+}
+
+// 쿼리 토큰 = 원형 + (한글 조사 변이형). 비파괴 — 원형은 항상 남는다.
+export function tokenizeQuery(query: string): string[] {
+  const out = new Set<string>();
+  for (const group of tokenizeQueryGroups(query)) for (const tok of group) out.add(tok);
   return [...out];
 }
 
@@ -141,4 +155,103 @@ export async function resolveContext(
   }
   scored.sort((a, b) => b.score - a.score || a.title.localeCompare(b.title));
   return scored.slice(0, opts?.topN ?? 5);
+}
+
+// ─── 훅 주입 게이트 (0.6.0 spec/03 §1-3) ─────────────────────────────────
+//
+// 훅이 매 턴 프롬프트를 쿼리로 삼아 점수를 매기고, 통과한 것의 식별자와 제목만 주입한다.
+// 본문은 모델이 `memory read`로 가져간다.
+//
+// 임계를 `memory search`와 따로 두는 이유는 부르는 주체가 다르기 때문이다. 검색은 모델이
+// 필요하다고 판단해 부른 것이라 관대해도 되지만, 주입은 아무도 안 물었는데 매 턴 들어간다.
+// 그래서 minimumUsefulScore(1~2점)보다 훨씬 높게 잡고 건수도 3건에서 끊는다.
+//
+// exactPhraseScore 가산은 쓰지 않는다. 프롬프트 전문이 문서에 통째로 들어 있을 일이 없다 —
+// 짧은 질의를 손으로 넣는 `memory search`에서만 뜻이 있는 가산이다.
+
+// 한 필드에서 그룹은 한 번만 센다. 변이형이 몇 개 걸리든 단어 하나다.
+function groupHits(text: string, group: string[]): number {
+  return group.some((tok) => countTokenMatches(text, [tok]) > 0) ? 1 : 0;
+}
+
+// scoreDoc과 같은 가중치인데 세는 단위가 토큰이 아니라 단어다. `memory search`는 계속 scoreDoc을
+// 쓴다 — 거기서는 임계가 1~2점이라 중복 가산이 순위만 흔들었고, 절대 임계를 쓰는 주입에서만
+// 오탐이 된다. 검색 결과를 같이 바꾸지 않으려고 함수를 나눠 둔다.
+export function scoreDocGroups(rec: SearchDocRecord, groups: string[][]): number {
+  const fields: Array<[string, number]> = [
+    [rec.indexEntries.join(' '), 10],
+    [rec.title, 7],
+    [rec.summary, 5],
+    [rec.category, 2],
+    [`${rec.category}/${rec.slug}`, 2],
+    [rec.body, 1],
+  ];
+  let score = 0;
+  for (const group of groups) {
+    for (const [text, weight] of fields) score += groupHits(text, group) * weight;
+  }
+  return score;
+}
+
+export type InjectionMatch = {
+  scope: ProposalScope;
+  category: string;
+  slug: string;
+  title: string;
+  score: number;
+};
+
+// 절대 임계. 토큰이 많은 긴 프롬프트일수록 우연히 몇 개 겹치기 쉬우므로 같이 올린다.
+// 선형이 아니라 제곱근인 것은, 토큰 수에 비례해 올리면 긴 프롬프트에서 아무것도 안 걸리기 때문이다.
+export function injectionFloor(tokenCount: number): number {
+  return 4 * Math.sqrt(tokenCount);
+}
+
+// 상대 임계: 최고점의 이 비율 미만은 버린다. 1등이 확실할 때 곁다리를 안 붙이는 장치다.
+const RELATIVE_FLOOR = 0.6;
+const MAX_MATCHES = 3;
+
+// 세 조건을 차례로 건다. 순수 함수 — 파일을 안 읽는다.
+export function gateInjectionMatches(
+  candidates: InjectionMatch[],
+  tokenCount: number,
+): InjectionMatch[] {
+  const floor = injectionFloor(tokenCount);
+  const passed = candidates.filter((c) => c.score >= floor && c.score > 0);
+  if (passed.length === 0) return [];
+  const top = Math.max(...passed.map((c) => c.score));
+  return passed
+    .filter((c) => c.score >= top * RELATIVE_FLOOR)
+    .sort((a, b) => b.score - a.score || a.title.localeCompare(b.title))
+    .slice(0, MAX_MATCHES);
+}
+
+// 사용자 지식과 프로젝트 지식을 함께 돌린다. 어느 쪽 것인지는 붙여서 낸다 — 식별자
+// (<카테고리>/<슬러그>)가 양쪽에서 겹칠 수 있어 그것만으로는 자리를 못 가리기 때문이다.
+export async function resolveInjection(
+  globalDir: string,
+  ids: { user: string | null; project: string | null },
+  query: string,
+): Promise<InjectionMatch[]> {
+  const groups = tokenizeQueryGroups(query);
+  if (groups.length === 0) return [];
+
+  const candidates: InjectionMatch[] = [];
+  for (const [scope, profileId] of [
+    ['user', ids.user],
+    ['project', ids.project],
+  ] as const) {
+    if (!profileId) continue;
+    const docs = await readProfileDocs(globalDir, profileId, scope).catch(() => []);
+    for (const rec of docs) {
+      candidates.push({
+        scope,
+        category: rec.category,
+        slug: rec.slug,
+        title: rec.title,
+        score: scoreDocGroups(rec, groups),
+      });
+    }
+  }
+  return gateInjectionMatches(candidates, groups.length);
 }

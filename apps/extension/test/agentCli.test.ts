@@ -237,6 +237,68 @@ describe('agent CLI — 골격과 신원 해소 (0.5.0 W1)', () => {
     assert.match(r.stdout, /없다/);
   });
 
+  // ── memory read (0.6.0 spec/03 §3) ────────────────────────────────────
+  //
+  // 훅이 싣는 것은 식별자와 제목뿐이라 본문을 낼 명령이 필요하다. 식별자에 scope가 없어서
+  // 양쪽을 다 찾는다 — 같은 <카테고리>/<슬러그>가 사용자 지식과 프로젝트 지식에 동시에 있을 수 있다.
+
+  it('memory read — 식별자 하나의 전문을 낸다', () => {
+    const r = run(['memory', 'read', 'workflows/isolated-debug']);
+    assert.equal(r.status, 0);
+    assert.match(r.stdout, /격리 환경 디버깅/);
+    assert.match(r.stdout, /주변 요소를 배제/); // 본문까지
+  });
+
+  it('memory read — 양쪽에 같은 식별자가 있으면 둘 다 낸다', async () => {
+    // 프로젝트 쪽 conventions/release-flow는 위에서 심었다. 같은 식별자를 사용자 쪽에도 둔다.
+    await writeProfileDocs(getGlobalDir(root), 'default', {
+      docs: [{
+        category: 'conventions',
+        slug: 'release-flow',
+        title: '내 발행 습관',
+        summary: '어느 저장소에서든 태그를 먼저 단다.',
+        body: '사용자 지식 쪽 본문.',
+        indexEntries: ['발행'],
+      }],
+    });
+
+    const r = run(['memory', 'read', 'conventions/release-flow']);
+    assert.equal(r.status, 0);
+    assert.match(r.stdout, /내 발행 습관/);  // user
+    assert.match(r.stdout, /발행 절차/);     // project
+  });
+
+  it('memory read — --scope로 한쪽만 낸다', () => {
+    const r = run(['memory', 'read', 'conventions/release-flow', '--scope', 'project']);
+    assert.equal(r.status, 0);
+    assert.match(r.stdout, /발행 절차/);
+    assert.doesNotMatch(r.stdout, /내 발행 습관/);
+  });
+
+  it('memory read — 없는 식별자는 그 사실을 말한다', () => {
+    const r = run(['memory', 'read', 'conventions/nope']);
+    assert.equal(r.status, 0);
+    assert.match(r.stdout, /없다/);
+  });
+
+  it('memory read — 식별자가 없으면 사용법을 내고 exit 2', () => {
+    const r = run(['memory', 'read']);
+    assert.equal(r.status, 2);
+    assert.match(r.stderr, /식별자/);
+  });
+
+  it('memory read — 읽은 것을 로그에 남긴다 (식별자와 시각만)', async () => {
+    run(['memory', 'read', 'workflows/isolated-debug']);
+    const raw = await fsp.readFile(join(getGlobalDir(root), 'memory-reads.jsonl'), 'utf8');
+    const lines = raw.trim().split('\n').map((l) => JSON.parse(l));
+    const hit = lines.filter((l) => l.id === 'workflows/isolated-debug');
+    assert.ok(hit.length >= 1);
+    assert.equal(hit[0].scope, 'user');
+    assert.equal(typeof hit[0].at, 'string');
+    // 대화 내용은 남기지 않는다 — 필드가 셋뿐이다.
+    assert.deepEqual(Object.keys(hit[0]).sort(), ['at', 'id', 'scope']);
+  });
+
   it('memory에 알 수 없는 하위 명령이 오면 사용법을 낸다', () => {
     const r = run(['memory', 'nope']);
     assert.equal(r.status, 2);

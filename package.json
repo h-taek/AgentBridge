@@ -2,7 +2,7 @@
   "name": "agentbridge",
   "displayName": "AgentBridge",
   "description": "%extension.description%",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "publisher": "h-taek",
   "license": "MIT",
   "repository": {
@@ -56,7 +56,8 @@
       "agentbridge": [
         {
           "id": "agentbridge.sessions",
-          "name": "Sessions"
+          "name": "Sessions",
+          "type": "webview"
         },
         {
           "type": "webview",
@@ -111,6 +112,11 @@
       {
         "command": "agentbridge.enableCloseConfirm",
         "title": "%agentbridge.enableCloseConfirm.title%"
+      },
+      {
+        "command": "agentbridge.refresh",
+        "title": "%agentbridge.refresh.title%",
+        "icon": "$(refresh)"
       }
     ],
     "menus": {
@@ -122,9 +128,14 @@
       ],
       "view/title": [
         {
+          "command": "agentbridge.refresh",
+          "when": "view == agentbridge.sessions",
+          "group": "navigation@1"
+        },
+        {
           "command": "agentbridge.newSession",
           "when": "view == agentbridge.sessions",
-          "group": "navigation"
+          "group": "navigation@2"
         },
         {
           "command": "agentbridge.refineMemory",
@@ -135,28 +146,6 @@
           "command": "agentbridge.resetMemory",
           "when": "view == agentbridge.memoryPanel",
           "group": "navigation@2"
-        }
-      ],
-      "view/item/context": [
-        {
-          "command": "agentbridge.renameSession",
-          "when": "viewItem =~ /^(session|subsession)-/",
-          "group": "inline@1"
-        },
-        {
-          "command": "agentbridge.deleteSession",
-          "when": "viewItem =~ /^(session|subsession)-/",
-          "group": "inline@2"
-        },
-        {
-          "command": "agentbridge.renameSession",
-          "when": "viewItem =~ /^(session|subsession)-/",
-          "group": "context@1"
-        },
-        {
-          "command": "agentbridge.deleteSession",
-          "when": "viewItem =~ /^(session|subsession)-/",
-          "group": "context@2"
         }
       ]
     },

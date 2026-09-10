@@ -5,6 +5,7 @@ export * from './shared/cli';
 export * from './shared/ir';
 export * from './shared/turns';
 export * from './shared/global';
+export * from './shared/usage';
 export * from './globalPaths';
 export * from './globalMarkdown';
 export * from './globalValidate';
@@ -17,6 +18,9 @@ export * from './proposalCursor';
 export * from './proposalPass';
 export * from './globalSearch';
 export * from './globalInject';
+export * from './memoryReadLog';
+export * from './usage/normalize';
+export * from './usage/endpoints';
 
 // 순수 유틸
 export * from './shellQuote';
@@ -41,6 +45,7 @@ export * from './workspaceStore';
 export * from './hookStatusStore';
 export * from './sessionRegistry';
 export * from './sessionOwner';
+export * from './turnCounter';
 export * from './fileTail';
 export * from './transcriptReader/types';
 export * from './transcriptReader/util';

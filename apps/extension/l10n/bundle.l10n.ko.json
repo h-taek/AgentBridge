@@ -50,5 +50,14 @@
   "Closing ends the session and the turn in progress is lost.": "닫으면 세션이 끝나고 진행 중인 턴은 사라집니다.",
   "Keep running": "계속 두기",
   "Close and stop asking": "닫고 다시 묻지 않기",
-  "AgentBridge: Will ask again before closing a session that is still working.": "AgentBridge: 작업 중인 세션을 닫을 때 다시 확인합니다."
+  "AgentBridge: Will ask again before closing a session that is still working.": "AgentBridge: 작업 중인 세션을 닫을 때 다시 확인합니다.",
+  "Resets in {0}": "{0} 뒤 리셋",
+  "{0}d {1}h": "{0}일 {1}시간",
+  "{0}h {1}m": "{0}시간 {1}분",
+  "{0}m": "{0}분",
+  "Rename Session": "이름 바꾸기",
+  "Delete Session": "삭제",
+  "Usage unavailable": "사용량 조회 불가",
+  "5h - {0}%": "5h - {0}%",
+  "5h - {0}% | 1w - {1}%": "5h - {0}% | 1w - {1}%"
 }

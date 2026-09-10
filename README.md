@@ -1,6 +1,6 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="packages/assets/brand/agentbridge-dark.png" />
+    <source media="(prefers-color-scheme: dark)" srcset="https://github.com/h-taek/AgentBridge/raw/main/packages/assets/brand/agentbridge-dark.png" />
     <img src="packages/assets/brand/agentbridge-light.png" width="220" alt="AgentBridge logo" />
   </picture>
 </p>
@@ -8,12 +8,12 @@
 <h1 align="center">AgentBridge</h1>
 
 <p align="center">
-  <img alt="version 0.6.0" src="https://img.shields.io/badge/version-0.6.0-orange">
-  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-green.svg"></a>
+  <img alt="version 0.7.0" src="https://img.shields.io/badge/version-0.7.0-orange">
+  <a href="https://github.com/h-taek/AgentBridge/blob/main/LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-green.svg"></a>
   <img alt="macOS Apple Silicon" src="https://img.shields.io/badge/macOS-Apple%20Silicon-4493F8">
 </p>
 
-<p align="center"><a href="README.ko.md"><b>한국어</b></a></p>
+<p align="center"><a href="https://github.com/h-taek/AgentBridge/blob/main/README.ko.md"><b>한국어</b></a></p>
 
 <p align="center">
   Run Claude · Codex · Antigravity in one workspace on a shared working context.<br />
@@ -83,6 +83,7 @@ That record is never pushed into the prompt. The hook adds a single short instru
 ### Also included
 
 - Your CLIs, your subscriptions — no server of ours, no separate account. Model costs stay inside the CLI subscriptions you already pay for.
+- Subscription quota display — remaining subscription quota for Claude, Codex, and Antigravity appears as icons under the Sessions header. Hover for a tooltip with the weekly remaining quota and reset time.
 - Your project folder untouched — hooks and skills install into your own agent settings. No AgentBridge file is written to the repository.
 - Cheap background work — summaries and session naming run headless on a CLI you pick. When its quota runs out, the next CLI takes over.
 - Drag paths in — hold Shift and drop a file on the chat, and its path lands in the input line as `@path`. Explorer files, editor tabs, and files from outside the IDE all work.
