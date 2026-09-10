@@ -8,7 +8,7 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ### Added
 
-- **Subscription quota display.** Remaining subscription quota for Claude, Codex, and Antigravity appears as a row of colored pills right under the Sessions header. AgentBridge reads local credentials to query each vendor directly, without launching a CLI or parsing the screen. The pills show the 5-hour window, while the tooltip gives the weekly remaining quota and reset time. The number turns red below 15% remaining. Values refresh every five minutes, and the refresh button on the Sessions header re-reads them immediately.
+- **Subscription quota display.** The remaining subscription quota for Claude, Codex and Antigravity shows as icons under the Sessions header. The icons show the 5-hour window, while the tooltip gives the weekly remaining quota and the reset time. They refresh every five minutes, and the refresh button on the Sessions header re-reads them immediately.
 
 ### Fixed
 
