@@ -83,7 +83,7 @@ That record is never pushed into the prompt. The hook adds a single short instru
 ### Also included
 
 - Your CLIs, your subscriptions — no server of ours, no separate account. Model costs stay inside the CLI subscriptions you already pay for.
-- Subscription quota display — remaining subscription quota for Claude, Codex, and Antigravity appears as icons under the Sessions header. The icons show the 5-hour window, with weekly remaining quota and reset times in the tooltip, and refresh every five minutes or immediately with the refresh button on the Sessions header.
+- Subscription quota display — remaining subscription quota for Claude, Codex, and Antigravity appears as icons under the Sessions header. Hover for a tooltip with the weekly remaining quota and reset time.
 - Your project folder untouched — hooks and skills install into your own agent settings. No AgentBridge file is written to the repository.
 - Cheap background work — summaries and session naming run headless on a CLI you pick. When its quota runs out, the next CLI takes over.
 - Drag paths in — hold Shift and drop a file on the chat, and its path lands in the input line as `@path`. Explorer files, editor tabs, and files from outside the IDE all work.
