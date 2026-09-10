@@ -4,6 +4,16 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 <p align="center"><a href="https://github.com/h-taek/AgentBridge/blob/main/CHANGELOG.ko.md">한국어</a></p>
 
+## [0.7.0] — 2026-09-10
+
+### Added
+
+- **Subscription quota display.** Remaining subscription quota for Claude, Codex, and Antigravity appears as a row of colored pills right under the Sessions header. AgentBridge reads local credentials to query each vendor directly, without launching a CLI or parsing the screen. The pills show the 5-hour window, while the tooltip gives the weekly remaining quota and reset time. The number turns red below 15% remaining. Values refresh every five minutes, and the refresh button on the Sessions header re-reads them immediately.
+
+### Fixed
+
+- **Long-term memory omitted from conversation.** In 0.6.0, the hook only carried a list of conditions for when to query memory, so if nothing matched those conditions, the agent never called long-term memory at all. The hook now matches user input against long-term memory each turn as a query and carries the titles of matching entries into that turn, while the agent fetches only the bodies it needs. Recording no longer waits for conditions either, instructing the agent every five turns.
+
 ## [0.6.0] — 2026-09-07
 
 ### Added

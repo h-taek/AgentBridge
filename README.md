@@ -8,7 +8,7 @@
 <h1 align="center">AgentBridge</h1>
 
 <p align="center">
-  <img alt="version 0.6.0" src="https://img.shields.io/badge/version-0.6.0-orange">
+  <img alt="version 0.7.0" src="https://img.shields.io/badge/version-0.7.0-orange">
   <a href="https://github.com/h-taek/AgentBridge/blob/main/LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-green.svg"></a>
   <img alt="macOS Apple Silicon" src="https://img.shields.io/badge/macOS-Apple%20Silicon-4493F8">
 </p>
