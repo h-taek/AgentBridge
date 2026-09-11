@@ -76,5 +76,6 @@
   "Sent with it": "함께 보내는 것",
   "AgentBridge: the HTML viewer runs on local workspaces only.": "AgentBridge: HTML 뷰어는 로컬 워크스페이스에서만 돈다.",
   "Line": "줄",
-  "(ancestor)": "(상위 요소)"
+  "(ancestor)": "(상위 요소)",
+  "The viewer could not reach the extension.": "뷰어가 익스텐션에 닿지 못했다."
 }

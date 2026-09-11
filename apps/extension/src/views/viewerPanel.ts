@@ -5,6 +5,7 @@ import * as fs from 'fs';
 import { startViewerServer, watchServedFiles, buildViewerPrompt } from '@agentbridge/core';
 import type { ViewerServer, ViewerWatch, PickedElement } from '@agentbridge/core';
 import { assetRootUri, assetRootPath } from '../core/assetRoot';
+import * as output from '../log/output';
 import { getActivePanel, getAllPanels } from './chatPanel';
 import { getSessions } from '../core/sessionRegistry';
 import * as workspaceStore from '../core/workspaceStore';
@@ -24,10 +25,6 @@ import { queueSend } from './viewerSend';
 //
 // 사용자가 치는 글과 세션 이름은 iframe 안에 두지 않는다. 인라인 패널은 웹뷰가 그리고, 안쪽은
 // 요소의 화면 좌표만 보낸다(spec 3.4).
-
-// 웹뷰가 출처를 알려줄 때까지 기다리는 상한. 이보다 늦으면 서버를 띄우지 않는다 — 출처를
-// 모르는 채로 띄우면 짚기 스크립트가 아무 메시지나 받게 된다.
-const ORIGIN_TIMEOUT_MS = 5000;
 
 type ViewerState = 'starting' | 'ready' | 'missing' | 'serverError' | 'noAgent';
 
@@ -53,7 +50,7 @@ export class HtmlViewerProvider implements vscode.CustomReadonlyEditorProvider, 
     return { uri, dispose: (): void => undefined };
   }
 
-  async resolveCustomEditor(doc: vscode.CustomDocument, panel: vscode.WebviewPanel): Promise<void> {
+  resolveCustomEditor(doc: vscode.CustomDocument, panel: vscode.WebviewPanel): void {
     const viewer = new Viewer(doc.uri, panel, this.extensionUri);
     this.live.add(viewer);
     this.active = viewer;
@@ -65,7 +62,7 @@ export class HtmlViewerProvider implements vscode.CustomReadonlyEditorProvider, 
       if (this.active === viewer) this.active = undefined;
       viewer.dispose();
     });
-    await viewer.start();
+    viewer.start();
   }
 
   // 소스로 돌아가는 명령이 쓴다. activeCustomEditorId는 어느 뷰 타입인지만 알려주고 무엇을
@@ -86,6 +83,7 @@ class Viewer {
   private server: ViewerServer | undefined;
   private watch: ViewerWatch | undefined;
   private disposed = false;
+  private started = false;
   private panelOpen = false;
   private pendingReload = false;
   private sessions: ViewerSession[] = [];
@@ -96,21 +94,31 @@ class Viewer {
     private readonly extensionUri: vscode.Uri,
   ) {}
 
-  async start(): Promise<void> {
+  // 여기서 기다리지 않는다. VS Code는 resolveCustomEditor가 끝나야 웹뷰 다리를 완성하므로,
+  // 이 함수 안에서 웹뷰의 첫 메시지를 기다리면 그 메시지가 영영 안 온다(실측). 화면만 띄우고
+  // 나가고, 나머지는 출처가 도착했을 때 이어 간다.
+  start(): void {
     const webview = this.panel.webview;
     webview.options = { enableScripts: true, localResourceRoots: [assetRootUri(this.extensionUri)] };
     webview.onDidReceiveMessage((msg: FromWebview) => void this.onMessage(msg));
 
     // 1단계 — 기동 화면. iframe도 frame-src도 아직 없다.
     webview.html = buildViewerHtml();
+  }
 
-    const origin = await this.awaitOrigin();
-    if (this.disposed) return;
+  // 웹뷰가 자기 출처를 알려 왔다. 받았다고 답하고 서버를 띄운다. 웹뷰는 답이 올 때까지
+  // 다시 말하므로 이 자리는 여러 번 불릴 수 있다 — 첫 번째만 일한다.
+  private async onOrigin(origin: string): Promise<void> {
+    if (this.started || this.disposed) return;
+    this.started = true;
+    this.post({ t: 'ack' });
+    output.log(`viewer: origin=${origin} uri=${this.uri.fsPath}`);
     if (!origin || origin === 'null') {
       this.setState('serverError', vscode.l10n.t('Could not read the webview origin.'));
       return;
     }
 
+    const webview = this.panel.webview;
     const folder = vscode.workspace.getWorkspaceFolder(this.uri);
     if (!folder) {
       this.setState(
@@ -127,6 +135,7 @@ class Viewer {
         pickerPath: path.join(assetRootPath(this.extensionUri.fsPath), 'out', 'viewerPicker.js'),
       });
     } catch (err) {
+      output.error(`viewer: 서버 기동 실패 — ${String(err)}`);
       this.setState('serverError', String(err));
       return;
     }
@@ -143,6 +152,8 @@ class Viewer {
       .join('/');
     webview.html = buildViewerHtml(this.server.port, `${this.server.origin}/${rel}`);
 
+    output.log(`viewer: ${this.server.origin}/${rel}`);
+
     this.watch = watchServedFiles(() => this.onFileChange());
   }
 
@@ -155,20 +166,10 @@ class Viewer {
 
   // ── 메시지 ───────────────────────────────────────────────────────────────
 
-  private originResolve: ((origin: string) => void) | undefined;
-
-  private awaitOrigin(): Promise<string> {
-    return new Promise((resolve) => {
-      this.originResolve = resolve;
-      setTimeout(() => resolve(''), ORIGIN_TIMEOUT_MS);
-    });
-  }
-
   private async onMessage(msg: FromWebview): Promise<void> {
     switch (msg.t) {
       case 'origin':
-        this.originResolve?.(msg.origin ?? '');
-        this.originResolve = undefined;
+        await this.onOrigin(msg.origin ?? '');
         return;
       case 'pageReady':
         // 페이지가 부른 파일이 이제 서버에 기록돼 있다. 감시 대상은 서빙 루트가 아니라 이 집합이다.
@@ -300,6 +301,7 @@ export function buildViewerHtml(port?: number, src = ''): string {
     detail: vscode.l10n.t('Sent with it'),
     line: vscode.l10n.t('Line'),
     ancestor: vscode.l10n.t('(ancestor)'),
+    noBridge: vscode.l10n.t('The viewer could not reach the extension.'),
   };
   return /*html*/ `<!DOCTYPE html>
 <html lang="en">
@@ -386,7 +388,36 @@ const TEXT = ${JSON.stringify(text)};
 
 if (!SERVER_ORIGIN) {
   // 1단계 — 출처를 알려주는 API가 없어 웹뷰가 자기 출처를 직접 보고한다.
-  vs.postMessage({ t: 'origin', origin: window.origin });
+  //
+  // 여기서도 상태 메시지를 받아야 한다. 안 받으면 기동이 어디서 실패하든 화면에는
+  // '뷰어를 띄우는 중'만 남아 무엇이 잘못됐는지 볼 길이 없다.
+  const status = document.getElementById('status');
+  let acked = false;
+  let tries = 0;
+
+  // 상태 메시지는 두 단계 모두 받아야 한다. 1단계에서 안 받으면 기동이 어디서 실패하든
+  // 화면에는 '뷰어를 띄우는 중'만 남는다.
+  window.addEventListener('message', (e) => {
+    const d = (e.data || {});
+    if (d.t === 'ack') { acked = true; return; }
+    if (d.t !== 'state') return;
+    if (d.state === 'missing') status.textContent = TEXT.missing;
+    else if (d.state === 'serverError') status.textContent = d.detail || '';
+  });
+
+  // 뜨자마자 보낸 메시지는 익스텐션 쪽 다리가 아직 안 걸려 있으면 사라진다. 받았다는 답이
+  // 올 때까지 다시 말한다.
+  const announce = () => {
+    if (acked) return;
+    tries += 1;
+    if (tries > 40) {
+      status.textContent = TEXT.noBridge + ' (' + (window.origin || '?') + ')';
+      return;
+    }
+    vs.postMessage({ t: 'origin', origin: window.origin });
+    setTimeout(announce, 250);
+  };
+  announce();
 } else {
   const stage = document.getElementById('stage');
   const frame = document.getElementById('frame');

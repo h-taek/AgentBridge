@@ -580,11 +580,14 @@ export function activate(context: vscode.ExtensionContext) {
       return;
     }
     await vscode.commands.executeCommand('vscode.openWith', uri, HtmlViewerProvider.viewType);
+    await closeTabsFor(uri, 'text');
   });
   const closeHtmlViewer = vscode.commands.registerCommand('agentbridge.closeHtmlViewer', async () => {
     // activeCustomEditorId는 어느 뷰 타입인지만 알려준다. 무엇을 열고 있는지는 뷰어가 안다.
     const uri = htmlViewer.activeUri();
-    if (uri) await vscode.commands.executeCommand('vscode.openWith', uri, 'default');
+    if (!uri) return;
+    await vscode.commands.executeCommand('vscode.openWith', uri, 'default');
+    await closeTabsFor(uri, 'viewer');
   });
   context.subscriptions.push(
     vscode.window.registerCustomEditorProvider(HtmlViewerProvider.viewType, htmlViewer, {
@@ -600,6 +603,26 @@ export function activate(context: vscode.ExtensionContext) {
     newSession, newSessionFromTab, newSessionWithModel, openSessionCmd, selectSessionCmd, refineCmd, resetCmd, enableCloseConfirmCmd, renameCmd, deleteCmd,
     output.getOutputChannel(),
   );
+}
+
+// 탭 전환의 뒷정리. `vscode.openWith`는 같은 파일의 다른 편집기를 새 탭으로 연다 — 원래 탭을
+// 바꾸지 않는다(실측). 그래서 연 뒤에 반대편 탭을 닫아야 "버튼 하나가 두 방향을 맡는다"가 된다.
+async function closeTabsFor(uri: vscode.Uri, kind: 'text' | 'viewer'): Promise<void> {
+  const key = uri.toString();
+  const targets = vscode.window.tabGroups.all
+    .flatMap((group) => group.tabs)
+    .filter((tab) => {
+      const input = tab.input;
+      if (kind === 'text') {
+        return input instanceof vscode.TabInputText && input.uri.toString() === key;
+      }
+      return (
+        input instanceof vscode.TabInputCustom &&
+        input.viewType === HtmlViewerProvider.viewType &&
+        input.uri.toString() === key
+      );
+    });
+  if (targets.length > 0) await vscode.window.tabGroups.close(targets, true);
 }
 
 function timeAgo(iso: string): string {
