@@ -457,7 +457,8 @@ export function buildViewerHtml(
   #who{display:flex;align-items:center;gap:6px;padding:8px 9px 7px;position:relative}
   #who img{width:11px;height:11px;display:block;flex-shrink:0}
   #whoname{font-size:12px;color:var(--fg)}
-  #who .cv{font-size:11px;color:var(--dim);line-height:1}
+  #who .cv{display:inline-flex;align-items:center;justify-content:center;width:12px;height:12px;
+    font-size:13px;line-height:1;color:var(--dim)}
   #who .sp{flex:1}
   #pickbtn{display:inline-flex;align-items:center;gap:6px;cursor:pointer}
   #x{width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;
@@ -476,7 +477,8 @@ export function buildViewerHtml(
   #foot{display:flex;align-items:center;gap:8px;padding:8px 9px 9px}
   #foot .sp{flex:1}
   #more{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--dim);cursor:pointer}
-  #more .cv{font-size:13px;line-height:1;width:12px;text-align:center}
+  #more .cv{display:inline-flex;align-items:center;justify-content:center;width:12px;height:12px;
+    font-size:13px;line-height:1}
   #brief{font-weight:400;font-family:var(--vscode-editor-font-family);font-size:10.5px}
   #detail{margin:0 9px 9px;padding:7px 8px;background:var(--input);border-radius:3px;
     font-family:var(--vscode-editor-font-family);font-size:10.5px;line-height:1.65;
