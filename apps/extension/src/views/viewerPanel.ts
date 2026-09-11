@@ -30,6 +30,9 @@ import { queueSend } from './viewerSend';
 
 type ViewerState = 'missing' | 'serverError';
 
+// 선택창이 열려 있는 동안 세션 목록을 다시 세는 주기.
+const SESSION_POLL_MS = 1000;
+
 interface FromWebview {
   t?: string;
   origin?: string;
@@ -107,6 +110,10 @@ class Viewer {
   private panelOpen = false;
   private pendingReload = false;
   private sessions: ViewerSession[] = [];
+  // 선택창이 열려 있는 동안만 도는 목록 갱신. 세션은 다른 탭에서 아무 때나 생기고 닫히는데
+  // 그것을 알려 주는 이벤트가 없어 짧게 다시 센다.
+  private poll: NodeJS.Timeout | undefined;
+  private lastList = '';
 
   constructor(
     readonly uri: vscode.Uri,
@@ -186,6 +193,7 @@ class Viewer {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    this.stopPoll();
     this.watch?.close();
     void this.server?.close();
   }
@@ -237,7 +245,11 @@ class Viewer {
         }
         return;
       case 'pickSession':
-        await this.pickSession();
+        await this.pushSessions(true);
+        if (!this.poll) this.poll = setInterval(() => void this.pushSessions(false), SESSION_POLL_MS);
+        return;
+      case 'pickerClosed':
+        this.stopPoll();
         return;
       case 'send':
         await this.send(msg);
@@ -252,12 +264,23 @@ class Viewer {
 
   // 고를 수 있는 세션을 웹뷰에 넘긴다. 고르는 화면은 웹뷰가 그린다 — 뷰어는 오른쪽 편집기
   // 그룹에 있는데 IDE 기본 선택창은 창 맨 위에 떠서 눈이 엉뚱한 데로 간다.
-  private async pickSession(): Promise<void> {
+  //
+  // force가 아니면 목록이 실제로 달라졌을 때만 보낸다. 안 그러면 창이 열려 있는 내내 같은
+  // 목록을 다시 그려 선택이 흔들린다.
+  private async pushSessions(force: boolean): Promise<void> {
+    if (this.disposed) return;
     this.sessions = await this.candidates();
-    this.post({
-      t: 'sessions',
-      list: this.sessions.map((s) => ({ sessionId: s.sessionId, name: s.name, model: s.model })),
-    });
+    const list = this.sessions.map((s) => ({ sessionId: s.sessionId, name: s.name, model: s.model }));
+    const sig = JSON.stringify(list);
+    if (!force && sig === this.lastList) return;
+    this.lastList = sig;
+    this.post({ t: 'sessions', list });
+  }
+
+  private stopPoll(): void {
+    if (!this.poll) return;
+    clearInterval(this.poll);
+    this.poll = undefined;
   }
 
   private async candidates(): Promise<ViewerSession[]> {
@@ -579,6 +602,7 @@ if (!SERVER_ORIGIN) {
   let picked = null;          // { el, rect }
   let sessions = [];
   let sessionId = '';
+  let picker = '';            // '' | 'modal' | 'drop' — 무엇이 열려 있나
   const base = frame.src;
 
   // 페이지가 떴으면 기동 화면을 걷는다. 짚기 스크립트가 안 와도 읽기는 돼야 한다 —
@@ -603,7 +627,7 @@ if (!SERVER_ORIGIN) {
     panel.hidden = !open;
     vs.postMessage({ t: 'panel', open: open });
     if (!open) {
-      picked = null; note.value = ''; warn.hidden = true; drop.hidden = true;
+      picked = null; note.value = ''; warn.hidden = true; closePicker();
       detail.hidden = true; brief.hidden = false;
       more.querySelector('.cv').innerHTML = '&#9656;';
       send.disabled = false;
@@ -646,20 +670,45 @@ if (!SERVER_ORIGIN) {
     into.appendChild(el);
   };
 
+  // 목록은 창이 열려 있는 동안 익스텐션이 계속 밀어 준다. 다른 탭에서 세션이 생기거나
+  // 닫히면 창을 닫았다 열지 않아도 따라온다.
+  const openPicker = (which) => {
+    picker = which;
+    vs.postMessage({ t: 'pickSession' });
+  };
+  const closePicker = () => {
+    if (!picker) return;
+    picker = '';
+    scrim.hidden = true;
+    drop.hidden = true;
+    vs.postMessage({ t: 'pickerClosed' });
+  };
+  const drawPicker = () => {
+    list.innerHTML = '';
+    drop.innerHTML = '';
+    for (const s of sessions) {
+      row(s, list, true, (v) => { sessionId = v.sessionId; drawSess(); closePicker(); setMode(true); });
+      row(s, drop, false, (v) => { sessionId = v.sessionId; drawSess(); closePicker(); });
+    }
+    const empty = sessions.length === 0;
+    none.hidden = !empty;
+    why.hidden = !empty;
+    why.textContent = empty ? TEXT.noSession : '';
+    bar.classList.toggle('lock', empty);
+    scrim.hidden = picker !== 'modal';
+    drop.hidden = picker !== 'drop';
+  };
+
   sw.addEventListener('click', () => {
     if (!ready || bar.classList.contains('lock')) return;
     if (agent) { setMode(false); return; }
     if (sessionId) { setMode(true); return; }
-    vs.postMessage({ t: 'pickSession' });
+    openPicker('modal');
   });
   pickbtn.addEventListener('click', (e) => {
     e.stopPropagation();
-    drop.hidden = !drop.hidden;
-    if (drop.hidden) return;
-    drop.innerHTML = '';
-    for (const s of sessions) {
-      row(s, drop, false, (v) => { sessionId = v.sessionId; drop.hidden = true; drawSess(); });
-    }
+    if (picker === 'drop') closePicker();
+    else openPicker('drop');
   });
   x.addEventListener('click', () => setPanel(false));
   more.addEventListener('click', () => {
@@ -677,14 +726,14 @@ if (!SERVER_ORIGIN) {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send.click(); }
     if (e.key === 'Escape') setPanel(false);
   });
-  scrim.addEventListener('click', (e) => { if (e.target === scrim) scrim.hidden = true; });
+  scrim.addEventListener('click', (e) => { if (e.target === scrim) closePicker(); });
   document.addEventListener('click', (e) => {
-    if (!drop.hidden && !drop.contains(e.target) && !pickbtn.contains(e.target)) drop.hidden = true;
+    if (picker === 'drop' && !drop.contains(e.target) && !pickbtn.contains(e.target)) closePicker();
     if (!panel.hidden && !panel.contains(e.target) && e.target !== sw) setPanel(false);
   });
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
-    if (!scrim.hidden) scrim.hidden = true;
+    if (picker) closePicker();
     else if (!panel.hidden) setPanel(false);
   });
 
@@ -697,18 +746,13 @@ if (!SERVER_ORIGIN) {
         else if (d.state === 'serverError') showState(d.detail || '', true);
       } else if (d.t === 'sessions') {
         sessions = d.list || [];
-        const empty = sessions.length === 0;
-        none.hidden = !empty;
-        why.hidden = !empty;
-        why.textContent = empty ? TEXT.noSession : '';
-        bar.classList.toggle('lock', empty);
-        list.innerHTML = '';
-        for (const s of sessions) {
-          row(s, list, true, (v) => {
-            sessionId = v.sessionId; drawSess(); scrim.hidden = true; setMode(true);
-          });
+        // 고른 세션이 목록에서 사라졌다(탭이 닫혔다). 보낼 곳이 없으므로 읽기로 돌아간다.
+        if (sessionId && !sessions.some((v) => v.sessionId === sessionId)) {
+          sessionId = '';
+          drawSess();
+          if (agent) setMode(false);
         }
-        scrim.hidden = false;
+        drawPicker();
       } else if (d.t === 'reload') {
         fresh.hidden = true;
         frame.src = base + (base.indexOf('?') === -1 ? '?' : '&') + 'ab=' + Date.now();

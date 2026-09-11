@@ -97,7 +97,20 @@ describe('views/viewerPanel HTML', () => {
   it('세션 선택은 우리 창으로 한다 — IDE 기본 선택창을 부르지 않는다', () => {
     const body = scriptBody(build(51234));
     assert.match(body, /t: 'pickSession'/);
-    assert.match(body, /scrim\.hidden = false/);
+    assert.match(body, /openPicker\('modal'\)/);
+  });
+
+  it('창이 열려 있는 동안만 목록 갱신을 받는다', () => {
+    // 열 때 요청하고 닫을 때 끊는다. 익스텐션은 이 둘 사이에만 다시 센다.
+    const body = scriptBody(build(51234));
+    assert.match(body, /t: 'pickerClosed'/);
+    assert.match(body, /scrim\.hidden = picker !== 'modal'/);
+    assert.match(body, /drop\.hidden = picker !== 'drop'/);
+  });
+
+  it('고른 세션이 목록에서 사라지면 읽기로 돌아간다', () => {
+    const body = scriptBody(build(51234));
+    assert.match(body, /if \(agent\) setMode\(false\);/);
   });
 
   it('안에서 온 메시지와 익스텐션 메시지를 출처로 가른다', () => {
