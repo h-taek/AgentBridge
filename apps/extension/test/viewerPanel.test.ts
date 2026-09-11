@@ -6,8 +6,16 @@
 import { strict as assert } from 'assert';
 import { buildViewerHtml } from '../src/views/viewerPanel';
 
+const ASSETS = {
+  claude: 'https://webview/media/logos/claude.svg',
+  codex: 'https://webview/media/logos/codex.svg',
+  agy: 'https://webview/media/logos/agy.svg',
+  brand: 'https://webview/media/icon-dark.svg',
+};
+const CSP = "'self' https://*.cdn";
+
 const build = (port?: number, src = 'http://127.0.0.1:51234/docs/a.html'): string =>
-  buildViewerHtml(port, src);
+  buildViewerHtml(ASSETS, CSP, port, src);
 
 function scriptBody(doc: string): string {
   const m = /<script nonce="[^"]+">([\s\S]*?)<\/script>/.exec(doc);
@@ -24,8 +32,7 @@ describe('views/viewerPanel HTML', () => {
   });
 
   it('2단계 화면은 받은 포트만 frame-src에 넣는다', () => {
-    const doc = build(51234);
-    const csp = /content="([^"]+)"/.exec(doc)?.[1] ?? '';
+    const csp = /content="([^"]+)"/.exec(build(51234))?.[1] ?? '';
     assert.match(csp, /frame-src http:\/\/127\.0\.0\.1:51234;/);
     assert.equal(csp.includes('127.0.0.1:*'), false);
     assert.match(csp, /default-src 'none'/);
@@ -33,8 +40,30 @@ describe('views/viewerPanel HTML', () => {
     assert.match(csp, /script-src 'nonce-/);
   });
 
+  it('이미지는 웹뷰 출처에서만 받는다', () => {
+    // 로고를 그리려면 img-src가 필요하다. 열어 주는 것은 웹뷰 자신의 출처뿐이다.
+    const csp = /content="([^"]+)"/.exec(build(51234))?.[1] ?? '';
+    assert.ok(csp.includes(`img-src ${CSP};`), csp);
+  });
+
   it('iframe이 서버 주소를 가리킨다', () => {
-    assert.match(build(51234), /<iframe id="frame" src="http:\/\/127\.0\.0\.1:51234\/docs\/a\.html"/);
+    assert.match(
+      build(51234),
+      /<iframe id="frame" src="http:\/\/127\.0\.0\.1:51234\/docs\/a\.html"/,
+    );
+  });
+
+  it('두 단계 모두 브랜드 로고를 싣는다', () => {
+    for (const doc of [build(undefined), build(51234)]) {
+      assert.ok(doc.includes(ASSETS.brand), '브랜드 로고가 없다');
+    }
+  });
+
+  it('모델 로고 셋을 스크립트가 들고 있다', () => {
+    const body = scriptBody(build(51234));
+    for (const url of [ASSETS.claude, ASSETS.codex, ASSETS.agy]) {
+      assert.ok(body.includes(url), `${url}가 없다`);
+    }
   });
 
   it('스크립트가 문법 오류 없이 파싱된다', () => {
@@ -54,20 +83,21 @@ describe('views/viewerPanel HTML', () => {
 
   it('그릴 자리를 모두 만든다', () => {
     const doc = build(51234);
-    for (const id of [
-      'stage',
-      'frame',
-      'status',
-      'toggle',
-      'hint',
-      'panel',
-      'note',
-      'detail',
-      'send',
-      'warn',
-    ]) {
+    const ids = [
+      'stage', 'frame', 'state', 'load', 'msg', 'again',
+      'panel', 'nub', 'who', 'pickbtn', 'drop', 'x', 'note', 'more', 'brief', 'detail', 'warn', 'send',
+      'scrim', 'modal', 'list', 'none',
+      'bar', 'sw', 'lab', 'fresh', 'why', 'sess',
+    ];
+    for (const id of ids) {
       assert.ok(doc.includes(`id="${id}"`), `${id}가 없다`);
     }
+  });
+
+  it('세션 선택은 우리 창으로 한다 — IDE 기본 선택창을 부르지 않는다', () => {
+    const body = scriptBody(build(51234));
+    assert.match(body, /t: 'pickSession'/);
+    assert.match(body, /scrim\.hidden = false/);
   });
 
   it('안에서 온 메시지와 익스텐션 메시지를 출처로 가른다', () => {
@@ -76,13 +106,13 @@ describe('views/viewerPanel HTML', () => {
 
   it('iframe으로 보낼 때 targetOrigin을 준다', () => {
     const body = scriptBody(build(51234));
-    assert.match(body, /frame\.contentWindow\.postMessage\(msg, SERVER_ORIGIN\)/);
+    assert.match(body, /frame\.contentWindow\.postMessage\(m, SERVER_ORIGIN\)/);
     assert.match(body, /ab: 'mode'/);
   });
 
   it('에이전트 모드는 준비 신호가 있어야 열린다', () => {
     const body = scriptBody(build(51234));
-    assert.match(body, /if \(!ready\) return;/);
+    assert.match(body, /if \(!ready \|\| bar\.classList\.contains\('lock'\)\) return;/);
     assert.match(body, /ab === 'ready'/);
   });
 
@@ -93,5 +123,11 @@ describe('views/viewerPanel HTML', () => {
   it('인라인 패널의 열림 상태를 익스텐션에 알린다', () => {
     // 패널이 열려 있는 동안 다시 그리기를 미루는 판정이 이 신호에 걸려 있다.
     assert.match(scriptBody(build(51234)), /t: 'panel', open: open/);
+  });
+
+  it('상태 화면의 재시도가 익스텐션에 닿는다', () => {
+    for (const doc of [build(undefined), build(51234)]) {
+      assert.match(scriptBody(doc), /t: 'retry'/);
+    }
   });
 });

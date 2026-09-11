@@ -23,10 +23,12 @@ import { queueSend } from './viewerSend';
 // 웹뷰에게 window.origin을 묻고, 받은 값으로 서버를 띄운 뒤 포트를 frame-src에 박아 HTML을
 // 다시 만든다. 출처는 (뷰 타입, 익스텐션 id)로 정해져 다시 띄워도 같은 값이 온다.
 //
-// 사용자가 치는 글과 세션 이름은 iframe 안에 두지 않는다. 인라인 패널은 웹뷰가 그리고, 안쪽은
-// 요소의 화면 좌표만 보낸다(spec 3.4).
+// 사용자가 치는 글과 세션 이름은 iframe 안에 두지 않는다. 인라인 패널과 세션 선택 창은 웹뷰가
+// 그리고, 안쪽은 요소의 화면 좌표만 보낸다(spec 3.4).
+//
+// 화면은 docs/0.7.0/plan/mockups/viewer-ui.html에서 합의한 것을 옮긴 것이다.
 
-type ViewerState = 'starting' | 'ready' | 'missing' | 'serverError' | 'noAgent';
+type ViewerState = 'missing' | 'serverError';
 
 interface FromWebview {
   t?: string;
@@ -35,6 +37,14 @@ interface FromWebview {
   el?: PickedElement;
   note?: string;
   open?: boolean;
+}
+
+// 웹뷰가 로드하는 이미지. 모델 로고는 세션 목록·탭이 쓰는 것과 같은 파일이다.
+export interface ViewerAssets {
+  claude: string;
+  codex: string;
+  agy: string;
+  brand: string;
 }
 
 export class HtmlViewerProvider implements vscode.CustomReadonlyEditorProvider, vscode.Disposable {
@@ -113,7 +123,7 @@ class Viewer {
     webview.onDidReceiveMessage((msg: FromWebview) => void this.onMessage(msg));
 
     // 1단계 — 기동 화면. iframe도 frame-src도 아직 없다.
-    webview.html = buildViewerHtml();
+    webview.html = buildViewerHtml(this.assets(), webview.cspSource);
   }
 
   // 웹뷰가 자기 출처를 알려 왔다. 받았다고 답하고 서버를 띄운다. 웹뷰는 답이 올 때까지
@@ -145,8 +155,9 @@ class Viewer {
         pickerPath: path.join(assetRootPath(this.extensionUri.fsPath), 'out', 'viewerPicker.js'),
       });
     } catch (err) {
+      // 화면에는 한 줄만 띄우고 원인은 출력 채널에 남긴다.
       output.error(`viewer: 서버 기동 실패 — ${String(err)}`);
-      this.setState('serverError', String(err));
+      this.setState('serverError', vscode.l10n.t('Failed to start viewer server'));
       return;
     }
     if (this.disposed) {
@@ -160,7 +171,12 @@ class Viewer {
       .split(path.sep)
       .map(encodeURIComponent)
       .join('/');
-    webview.html = buildViewerHtml(this.server.port, `${this.server.origin}/${rel}`);
+    webview.html = buildViewerHtml(
+      this.assets(),
+      webview.cspSource,
+      this.server.port,
+      `${this.server.origin}/${rel}`,
+    );
 
     output.log(`viewer: ${this.server.origin}/${rel}`);
 
@@ -172,6 +188,33 @@ class Viewer {
     this.disposed = true;
     this.watch?.close();
     void this.server?.close();
+  }
+
+  // 상태 화면의 재시도. 처음부터 다시 건다 — 기동 화면을 새로 넣으면 웹뷰가 자기 출처를 다시
+  // 알려 오고 그때 서버를 새로 띄운다.
+  private retry(): void {
+    if (this.disposed) return;
+    this.watch?.close();
+    this.watch = undefined;
+    void this.server?.close();
+    this.server = undefined;
+    this.started = false;
+    this.panel.webview.html = buildViewerHtml(this.assets(), this.panel.webview.cspSource);
+  }
+
+  private assets(): ViewerAssets {
+    const root = assetRootUri(this.extensionUri);
+    const uri = (...seg: string[]): string =>
+      this.panel.webview.asWebviewUri(vscode.Uri.joinPath(root, ...seg)).toString();
+    const kind = vscode.window.activeColorTheme.kind;
+    const light =
+      kind === vscode.ColorThemeKind.Light || kind === vscode.ColorThemeKind.HighContrastLight;
+    return {
+      claude: uri('media', 'logos', 'claude.svg'),
+      codex: uri('media', 'logos', 'codex.svg'),
+      agy: uri('media', 'logos', 'agy.svg'),
+      brand: uri('media', light ? 'icon-light.svg' : 'icon-dark.svg'),
+    };
   }
 
   // ── 메시지 ───────────────────────────────────────────────────────────────
@@ -199,27 +242,22 @@ class Viewer {
       case 'send':
         await this.send(msg);
         return;
+      case 'retry':
+        this.retry();
+        return;
       default:
         return;
     }
   }
 
+  // 고를 수 있는 세션을 웹뷰에 넘긴다. 고르는 화면은 웹뷰가 그린다 — 뷰어는 오른쪽 편집기
+  // 그룹에 있는데 IDE 기본 선택창은 창 맨 위에 떠서 눈이 엉뚱한 데로 간다.
   private async pickSession(): Promise<void> {
     this.sessions = await this.candidates();
-    if (this.sessions.length === 0) {
-      this.setState('noAgent');
-      this.post({ t: 'session', sessionId: '' });
-      return;
-    }
     this.post({
       t: 'sessions',
-      list: this.sessions.map((s) => ({ sessionId: s.sessionId, name: s.name })),
+      list: this.sessions.map((s) => ({ sessionId: s.sessionId, name: s.name, model: s.model })),
     });
-    const picked = await vscode.window.showQuickPick(
-      this.sessions.map((s) => ({ label: s.name, description: s.model, id: s.sessionId })),
-      { title: vscode.l10n.t('Send picked elements to which session?') },
-    );
-    this.post({ t: 'session', sessionId: picked?.id ?? '' });
   }
 
   private async candidates(): Promise<ViewerSession[]> {
@@ -245,11 +283,7 @@ class Viewer {
     const session = this.sessions.find((s) => s.sessionId === sessionId);
     const panel = getActivePanel(sessionId);
     if (!session || !panel || !panel.alive) {
-      this.post({
-        t: 'sent',
-        ok: false,
-        error: vscode.l10n.t('That session is not running anymore.'),
-      });
+      this.post({ t: 'sent', ok: false, error: vscode.l10n.t('Session is not running') });
       return;
     }
     // 문서 경로는 고른 세션의 작업 디렉터리 기준이다. 세션마다 답이 다를 수 있어 고른 뒤에 센다.
@@ -259,18 +293,14 @@ class Viewer {
     this.post(
       ok
         ? { t: 'sent', ok: true }
-        : {
-            t: 'sent',
-            ok: false,
-            error: vscode.l10n.t('Could not put the prompt into that session.'),
-          },
+        : { t: 'sent', ok: false, error: vscode.l10n.t('Could not send to that session') },
     );
   }
 
   private onFileChange(): void {
     // 바뀐 것이 문서 자신의 사라짐일 수 있다. 그때 다시 그리라고 하면 iframe에 404가 뜬다.
     if (!fs.existsSync(this.uri.fsPath)) {
-      this.setState('missing');
+      this.setState('missing', path.basename(this.uri.fsPath));
       return;
     }
     if (this.panelOpen) {
@@ -297,19 +327,27 @@ class Viewer {
 // 렌더된 HTML을 뽑아 파서에 태워야 하는데, 그러려면 패널 없이 부를 수 있어야 한다.
 //
 // port가 없으면 1단계(기동 화면), 있으면 2단계(iframe)다.
-export function buildViewerHtml(port?: number, src = ''): string {
+export function buildViewerHtml(
+  assets: ViewerAssets,
+  cspSource: string,
+  port?: number,
+  src = '',
+): string {
   const nonce = getNonce();
   const frameSrc = port ? ` frame-src http://127.0.0.1:${port};` : '';
   const text = {
-    starting: vscode.l10n.t('Starting the viewer…'),
-    missing: vscode.l10n.t('That file is gone.'),
-    noAgent: vscode.l10n.t('Agent mode needs a running session whose working folder holds this file.'),
-    stale: vscode.l10n.t('A newer version is on disk. It loads when this panel closes.'),
-    read: vscode.l10n.t('Read'),
-    agent: vscode.l10n.t('Agent'),
+    agent: vscode.l10n.t('Agent mode'),
+    noSession: vscode.l10n.t('No running sessions'),
+    noSessionHere: vscode.l10n.t('No running sessions in current folder'),
+    pick: vscode.l10n.t('Select session'),
+    note: vscode.l10n.t('Describe changes'),
+    info: vscode.l10n.t('Element info'),
     send: vscode.l10n.t('Send'),
-    note: vscode.l10n.t('What should change here?'),
-    detail: vscode.l10n.t('Sent with it'),
+    fresh: vscode.l10n.t('New version available'),
+    loading: vscode.l10n.t('Loading'),
+    missing: vscode.l10n.t('File not found: {0}'),
+    retry: vscode.l10n.t('Retry'),
+    close: vscode.l10n.t('Close'),
     line: vscode.l10n.t('Line'),
     ancestor: vscode.l10n.t('(ancestor)'),
     noBridge: vscode.l10n.t('The viewer could not reach the extension.'),
@@ -319,188 +357,316 @@ export function buildViewerHtml(port?: number, src = ''): string {
 <head>
 <meta charset="UTF-8"/>
 <meta http-equiv="Content-Security-Policy"
-  content="default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}';${frameSrc}">
+  content="default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}'; img-src ${cspSource};${frameSrc}">
 <style nonce="${nonce}">
-  * { margin:0; padding:0; box-sizing:border-box; }
-  html, body { height:100%; }
-  body {
-    display:flex; flex-direction:column;
-    background: var(--vscode-editor-background);
-    color: var(--vscode-foreground);
-    font-family: var(--vscode-font-family);
-    font-size: 13px;
+  :root{
+    --ed: var(--vscode-editor-background);
+    --widget: var(--vscode-editorWidget-background);
+    --wborder: var(--vscode-widget-border, rgba(128,128,128,.35));
+    --fg: var(--vscode-foreground);
+    --dim: var(--vscode-descriptionForeground);
+    --input: var(--vscode-input-background);
+    --iborder: var(--vscode-input-border, transparent);
+    --btn: var(--vscode-button-background);
+    --btnfg: var(--vscode-button-foreground);
+    --sbtn: var(--vscode-button-secondaryBackground);
+    --sbtnfg: var(--vscode-button-secondaryForeground);
+    --hover: var(--vscode-list-hoverBackground);
+    --sel: var(--vscode-list-activeSelectionBackground);
+    --selfg: var(--vscode-list-activeSelectionForeground);
+    --focus: var(--vscode-focusBorder);
+    --err: var(--vscode-errorForeground);
+    --ok: var(--vscode-testing-iconPassed, #73c991);
+    --pborder: var(--vscode-panel-border, rgba(128,128,128,.25));
+    --pick: #ff8c00;
   }
-  #stage { position:relative; flex:1 1 auto; min-height:0; }
-  #frame { width:100%; height:100%; border:0; display:block; background:#fff; }
-  #status {
-    position:absolute; inset:0; display:none; align-items:center; justify-content:center;
-    padding:24px; text-align:center; white-space:pre-wrap;
-    background: var(--vscode-editor-background);
-    color: var(--vscode-descriptionForeground);
-  }
-  #status.on { display:flex; }
-  #bar {
-    display:flex; align-items:center; gap:10px; padding:5px 10px;
-    border-top:1px solid var(--vscode-panel-border, rgba(128,128,128,.25));
-  }
-  button {
-    font-family:inherit; font-size:12px; padding:2px 10px; border:0; border-radius:2px;
-    color: var(--vscode-button-secondaryForeground); background: var(--vscode-button-secondaryBackground);
-    cursor:pointer;
-  }
-  button.on { color: var(--vscode-button-foreground); background: var(--vscode-button-background); }
-  button:disabled { opacity:.5; cursor:default; }
-  #hint { color: var(--vscode-descriptionForeground); font-size:12px; }
-  #panel {
-    position:absolute; z-index:2; width:320px; padding:8px;
-    border:1px solid var(--vscode-focusBorder); border-radius:4px;
-    background: var(--vscode-editorWidget-background);
-    box-shadow:0 2px 8px rgba(0,0,0,.3);
-  }
-  #panel[hidden] { display:none; }
-  #who { width:100%; text-align:left; margin-bottom:6px; }
-  #note {
-    width:100%; height:64px; resize:none; padding:4px; font-family:inherit; font-size:12px;
-    color: var(--vscode-input-foreground); background: var(--vscode-input-background);
-    border:1px solid var(--vscode-input-border, transparent);
-  }
-  #detail { margin-top:6px; font-size:11px; color: var(--vscode-descriptionForeground); }
-  #meta { white-space:pre-wrap; word-break:break-all; margin-top:4px; }
-  #warn { margin-top:6px; font-size:11px; color: var(--vscode-errorForeground); }
-  #warn[hidden] { display:none; }
-  #send { margin-top:6px; }
-  #list { list-style:none; margin-top:4px; }
-  #list[hidden] { display:none; }
-  #list li { padding:3px 4px; cursor:pointer; border-radius:2px; }
-  #list li:hover { background: var(--vscode-list-hoverBackground); }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{height:100%}
+  body{display:flex;flex-direction:column;background:var(--ed);color:var(--fg);
+    font-family:var(--vscode-font-family);font-size:13px}
+  [hidden]{display:none !important}
+
+  #stage{position:relative;flex:1 1 auto;min-height:0}
+  #frame{width:100%;height:100%;border:0;display:block;background:#fff}
+
+  /* ── 하단 바 ── */
+  #bar{display:flex;align-items:center;gap:9px;height:30px;padding:0 10px;
+    border-top:1px solid var(--pborder);flex-shrink:0}
+  #bar.lock{opacity:.55}
+  #sw{width:26px;height:14px;border-radius:999px;background:var(--input);
+    border:1px solid var(--iborder);position:relative;flex-shrink:0;cursor:pointer}
+  #sw i{position:absolute;top:1px;left:1px;width:10px;height:10px;border-radius:999px;
+    background:var(--dim)}
+  #sw.on{background:var(--btn);border-color:var(--btn)}
+  #sw.on i{left:13px;background:var(--btnfg)}
+  #bar.lock #sw{cursor:default}
+  #lab{font-size:11.5px;color:var(--dim)}
+  #bar.on #lab{color:var(--fg)}
+  #sp{flex:1}
+  #fresh{display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--ok)}
+  #why{font-size:11px;color:var(--dim)}
+  #sess{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:var(--fg)}
+  #sess img{width:10.5px;height:10.5px;display:block}
+  #sess b{font-weight:400}
+  #bar:not(.on) #sess{color:var(--dim);opacity:.75}
+
+  /* ── 세션 선택 ── */
+  #scrim{position:absolute;inset:0;background:rgba(0,0,0,.45);z-index:4;
+    display:flex;align-items:center;justify-content:center}
+  #modal{width:300px;max-width:90%;background:var(--widget);border:1px solid var(--wborder);
+    border-radius:6px;box-shadow:0 8px 24px rgba(0,0,0,.5);overflow:hidden}
+  #modal .hd{font-size:10px;line-height:1;letter-spacing:.06em;text-transform:uppercase;
+    color:var(--dim);padding:6px 12px 5px;border-bottom:1px solid var(--wborder)}
+  #list{padding:4px 0;max-height:240px;overflow-y:auto}
+  #none{padding:12px;font-size:11.5px;color:var(--dim)}
+  .opt{display:flex;align-items:center;gap:8px;padding:7px 12px;cursor:pointer}
+  .opt:hover{background:var(--hover)}
+  .opt.sel{background:var(--sel);color:var(--selfg)}
+  .opt img{width:11px;height:11px;flex-shrink:0;display:block}
+  .opt .nm{font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .opt .sub{margin-left:auto;font-size:11px;color:var(--dim);white-space:nowrap}
+
+  /* ── 인라인 패널 ── */
+  #panel{position:absolute;z-index:3;width:296px;background:var(--widget);
+    border:1px solid var(--wborder);border-radius:6px;box-shadow:0 6px 18px rgba(0,0,0,.45)}
+  #nub{position:absolute;top:-5px;left:22px;width:8px;height:8px;background:var(--widget);
+    border-left:1px solid var(--wborder);border-top:1px solid var(--wborder);transform:rotate(45deg)}
+  #who{display:flex;align-items:center;gap:6px;padding:8px 9px 7px;position:relative}
+  #who img{width:11px;height:11px;display:block;flex-shrink:0}
+  #whoname{font-size:12px;color:var(--fg)}
+  #who .cv{font-size:11px;color:var(--dim);line-height:1}
+  #who .sp{flex:1}
+  #pickbtn{display:inline-flex;align-items:center;gap:6px;cursor:pointer}
+  #x{width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;
+    border-radius:3px;color:var(--dim);font-size:12px;cursor:pointer}
+  #x:hover{background:var(--hover);color:var(--fg)}
+  /* 폭은 가장 긴 세션 이름이 정한다. 고정값이면 짧은 이름에선 허전하고 긴 이름은 잘린다 */
+  #drop{position:absolute;top:27px;left:8px;width:max-content;min-width:140px;max-width:260px;
+    background:var(--widget);border:1px solid var(--wborder);border-radius:5px;
+    box-shadow:0 6px 18px rgba(0,0,0,.5);padding:3px 0;z-index:5}
+  #drop .opt{padding:5px 10px}
+  #drop .nm{overflow:visible;text-overflow:clip}
+  #note{display:block;width:calc(100% - 18px);margin:0 9px;min-height:54px;resize:none;
+    background:var(--input);border:1px solid var(--iborder);border-radius:3px;padding:6px 7px;
+    font-family:inherit;font-size:12px;color:var(--vscode-input-foreground)}
+  #note:focus{outline:none;border-color:var(--focus)}
+  #foot{display:flex;align-items:center;gap:8px;padding:8px 9px 9px}
+  #foot .sp{flex:1}
+  #more{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--dim);cursor:pointer}
+  #more .cv{font-size:13px;line-height:1;width:12px;text-align:center}
+  #brief{font-weight:400;font-family:var(--vscode-editor-font-family);font-size:10.5px}
+  #detail{margin:0 9px 9px;padding:7px 8px;background:var(--input);border-radius:3px;
+    font-family:var(--vscode-editor-font-family);font-size:10.5px;line-height:1.65;
+    color:var(--dim);white-space:pre-wrap;word-break:break-all}
+  #warn{margin:0 9px 9px;font-size:11px;color:var(--err)}
+  .btn{font-size:11.5px;line-height:1.45;padding:1.5px 10px;border:0;border-radius:3px;
+    font-family:inherit;background:var(--btn);color:var(--btnfg);cursor:pointer}
+  .btn.sec{background:var(--sbtn);color:var(--sbtnfg)}
+  .btn:disabled{opacity:.5;cursor:default}
+
+  /* ── 상태 화면 ── */
+  #state{position:absolute;inset:0;z-index:2;background:var(--ed);display:flex;
+    flex-direction:column;align-items:center;justify-content:center;gap:7px;padding:22px;
+    text-align:center}
+  #state img{width:38px;height:38px;display:block;margin-bottom:3px}
+  #state .bname{font-size:11.5px;font-weight:700;color:var(--fg);letter-spacing:.01em}
+  #msg{font-size:11.5px;color:var(--dim);max-width:280px;margin-top:2px}
+  #load{font-size:11px;color:var(--dim)}
+  /* 셋이 같은 1.2초 타임라인을 공유한다. 33%에 둘째, 66%에 셋째가 켜지고 한 바퀴 끝에 하나로 돌아간다 */
+  #load i{font-style:normal;animation:1.2s infinite}
+  #load i:nth-child(1){animation-name:d1}
+  #load i:nth-child(2){animation-name:d2}
+  #load i:nth-child(3){animation-name:d3}
+  @keyframes d1{0%,100%{opacity:1}}
+  @keyframes d2{0%,32.9%{opacity:0}33%,100%{opacity:1}}
+  @keyframes d3{0%,65.9%{opacity:0}66%,100%{opacity:1}}
 </style>
 </head>
 <body>
 <div id="stage">
   ${port ? `<iframe id="frame" src="${src}" title="preview"></iframe>` : ''}
-  <div id="status" class="on">${escapeHtml(text.starting)}</div>
+
+  <div id="state">
+    <img src="${assets.brand}" alt=""/>
+    <div class="bname">AgentBridge</div>
+    <div id="load">${escapeHtml(text.loading)}<i>.</i><i>.</i><i>.</i></div>
+    <div id="msg" hidden></div>
+    <button id="again" class="btn sec" hidden>${escapeHtml(text.retry)}</button>
+  </div>
+
   <div id="panel" hidden>
-  <button id="who"></button>
-  <ul id="list" hidden></ul>
-  <textarea id="note" placeholder="${escapeHtml(text.note)}"></textarea>
-  <details id="detail"><summary>${escapeHtml(text.detail)}</summary><div id="meta"></div></details>
-  <div id="warn" hidden></div>
-  <button id="send">${escapeHtml(text.send)}</button>
+    <div id="nub"></div>
+    <div id="who">
+      <span id="pickbtn"><img id="wholog" src="${assets.claude}" alt=""/><span id="whoname"></span><span class="cv">&#9662;</span></span>
+      <span class="sp"></span>
+      <span id="x" title="${escapeHtml(text.close)}">&#10005;</span>
+      <div id="drop" hidden></div>
+    </div>
+    <textarea id="note" placeholder="${escapeHtml(text.note)}"></textarea>
+    <div id="foot">
+      <span id="more"><span class="cv">&#9656;</span>${escapeHtml(text.info)} <b id="brief"></b></span>
+      <span class="sp"></span>
+      <button id="send" class="btn">${escapeHtml(text.send)}</button>
+    </div>
+    <div id="detail" hidden></div>
+    <div id="warn" hidden></div>
+  </div>
+
+  <div id="scrim" hidden>
+    <div id="modal">
+      <div class="hd">${escapeHtml(text.pick)}</div>
+      <div id="list"></div>
+      <div id="none" hidden>${escapeHtml(text.noSessionHere)}</div>
+    </div>
   </div>
 </div>
-<div id="bar">
-  <button id="toggle" disabled>${escapeHtml(text.agent)}</button>
-  <span id="hint"></span>
+
+<div id="bar" class="lock">
+  <span id="sw"><i></i></span><span id="lab">${escapeHtml(text.agent)}</span>
+  <span id="sp"></span>
+  <span id="why" hidden></span>
+  <span id="fresh" hidden>&#10003; ${escapeHtml(text.fresh)}</span>
+  <span id="sess" hidden><img alt=""/><b></b></span>
 </div>
+
 <script nonce="${nonce}">
 const vs = acquireVsCodeApi();
 const SERVER_ORIGIN = ${port ? JSON.stringify(`http://127.0.0.1:${port}`) : "''"};
 const TEXT = ${JSON.stringify(text)};
+const LOGO = ${JSON.stringify({ claude: assets.claude, codex: assets.codex, agy: assets.agy })};
+
+const $ = (id) => document.getElementById(id);
+const state = $('state'), load = $('load'), msg = $('msg'), again = $('again');
+
+const showState = (line, retry) => {
+  state.hidden = false;
+  load.hidden = !!line;
+  msg.hidden = !line;
+  msg.textContent = line || '';
+  again.hidden = !retry;
+};
+again.addEventListener('click', () => vs.postMessage({ t: 'retry' }));
 
 if (!SERVER_ORIGIN) {
   // 1단계 — 출처를 알려주는 API가 없어 웹뷰가 자기 출처를 직접 보고한다.
-  //
-  // 여기서도 상태 메시지를 받아야 한다. 안 받으면 기동이 어디서 실패하든 화면에는
-  // '뷰어를 띄우는 중'만 남아 무엇이 잘못됐는지 볼 길이 없다.
-  const status = document.getElementById('status');
-  let acked = false;
-  let tries = 0;
-
-  // 상태 메시지는 두 단계 모두 받아야 한다. 1단계에서 안 받으면 기동이 어디서 실패하든
-  // 화면에는 '뷰어를 띄우는 중'만 남는다.
+  let acked = false, tries = 0;
   window.addEventListener('message', (e) => {
-    const d = (e.data || {});
+    const d = e.data || {};
     if (d.t === 'ack') { acked = true; return; }
-    if (d.t !== 'state') return;
-    if (d.state === 'missing') status.textContent = TEXT.missing;
-    else if (d.state === 'serverError') status.textContent = d.detail || '';
+    if (d.t === 'state') showState(d.detail || '', d.state === 'serverError');
   });
-
   // 뜨자마자 보낸 메시지는 익스텐션 쪽 다리가 아직 안 걸려 있으면 사라진다. 받았다는 답이
   // 올 때까지 다시 말한다.
   const announce = () => {
     if (acked) return;
     tries += 1;
-    if (tries > 40) {
-      status.textContent = TEXT.noBridge + ' (' + (window.origin || '?') + ')';
-      return;
-    }
+    if (tries > 40) { showState(TEXT.noBridge, false); return; }
     vs.postMessage({ t: 'origin', origin: window.origin });
     setTimeout(announce, 250);
   };
   announce();
 } else {
-  const stage = document.getElementById('stage');
-  const frame = document.getElementById('frame');
-  const status = document.getElementById('status');
-  const toggle = document.getElementById('toggle');
-  const hint = document.getElementById('hint');
-  const panel = document.getElementById('panel');
-  const who = document.getElementById('who');
-  const list = document.getElementById('list');
-  const note = document.getElementById('note');
-  const meta = document.getElementById('meta');
-  const warn = document.getElementById('warn');
-  const send = document.getElementById('send');
+  const stage = $('stage'), frame = $('frame'), bar = $('bar'), sw = $('sw');
+  const why = $('why'), fresh = $('fresh'), sess = $('sess');
+  const panel = $('panel'), drop = $('drop'), pickbtn = $('pickbtn');
+  const wholog = $('wholog'), whoname = $('whoname'), x = $('x');
+  const note = $('note'), more = $('more'), brief = $('brief'), detail = $('detail');
+  const warn = $('warn'), send = $('send');
+  const scrim = $('scrim'), list = $('list'), none = $('none');
 
-  let ready = false;        // 짚기 스크립트가 떴다
+  let ready = false;          // 짚기 스크립트가 떴다
   let agent = false;
-  let sessionId = '';
+  let picked = null;          // { el, rect }
   let sessions = [];
-  let picked = null;        // { el, rect }
-  let base = frame.src;
+  let sessionId = '';
+  const base = frame.src;
 
-  const say = (msg) => {
-  status.textContent = msg || '';
-  status.classList.toggle('on', !!msg);
+  // 페이지가 떴으면 기동 화면을 걷는다. 짚기 스크립트가 안 와도 읽기는 돼야 한다 —
+  // 그 경우 토글만 잠긴 채로 남는다.
+  frame.addEventListener('load', () => { state.hidden = true; });
+
+  const toFrame = (m) => { if (frame.contentWindow) frame.contentWindow.postMessage(m, SERVER_ORIGIN); };
+  const logoOf = (model) => LOGO[model] || LOGO.claude;
+  const tail = (sel) => { const p = String(sel || '').split(' > '); return p[p.length - 1] || ''; };
+
+  const drawSess = () => {
+    const s = sessions.find((v) => v.sessionId === sessionId);
+    sess.hidden = !s;
+    if (!s) return;
+    sess.querySelector('img').src = logoOf(s.model);
+    sess.querySelector('b').textContent = s.name;
+    wholog.src = logoOf(s.model);
+    whoname.textContent = s.name;
   };
-  const toFrame = (msg) => {
-  if (frame.contentWindow) frame.contentWindow.postMessage(msg, SERVER_ORIGIN);
-  };
+
   const setPanel = (open) => {
-  panel.hidden = !open;
-  vs.postMessage({ t: 'panel', open: open });
-  if (!open) { picked = null; warn.hidden = true; note.value = ''; list.hidden = true; send.disabled = false; }
+    panel.hidden = !open;
+    vs.postMessage({ t: 'panel', open: open });
+    if (!open) {
+      picked = null; note.value = ''; warn.hidden = true; drop.hidden = true;
+      detail.hidden = true; brief.hidden = false;
+      more.querySelector('.cv').innerHTML = '&#9656;';
+      send.disabled = false;
+    }
   };
+
   const setMode = (on) => {
-  agent = on;
-  toggle.classList.toggle('on', on);
-  toggle.textContent = on ? TEXT.read : TEXT.agent;
-  toFrame({ ab: 'mode', mode: on ? 'agent' : 'read' });
-  if (!on) setPanel(false);
+    agent = on;
+    sw.classList.toggle('on', on);
+    bar.classList.toggle('on', on);
+    toFrame({ ab: 'mode', mode: on ? 'agent' : 'read' });
+    if (!on) setPanel(false);
   };
+
   // 안쪽이 준 좌표는 iframe 뷰포트 기준이다. iframe의 자리를 더해 웹뷰 좌표로 옮기고,
   // 패널이 웹뷰 밖으로 나가면 안쪽으로 당긴다 — 패널은 항상 온전히 보여야 한다.
   const place = (rect) => {
-  const box = frame.getBoundingClientRect();
-  const stageBox = stage.getBoundingClientRect();
-  const w = panel.offsetWidth || 320;
-  const h = panel.offsetHeight || 160;
-  let x = box.left - stageBox.left + rect.x;
-  let y = box.top - stageBox.top + rect.y + rect.h + 6;
-  x = Math.max(4, Math.min(x, stageBox.width - w - 4));
-  y = Math.max(4, Math.min(y, stageBox.height - h - 4));
-  panel.style.left = x + 'px';
-  panel.style.top = y + 'px';
-  };
-  const drawWho = () => {
-  const found = sessions.find((s) => s.sessionId === sessionId);
-  who.textContent = found ? found.name : '';
-  list.innerHTML = '';
-  for (const s of sessions) {
-    const li = document.createElement('li');
-    li.textContent = s.name;
-    li.addEventListener('click', () => { sessionId = s.sessionId; list.hidden = true; drawWho(); });
-    list.appendChild(li);
-  }
+    const box = frame.getBoundingClientRect();
+    const sb = stage.getBoundingClientRect();
+    const w = panel.offsetWidth || 296, h = panel.offsetHeight || 170;
+    let px = box.left - sb.left + rect.x;
+    let py = box.top - sb.top + rect.y + rect.h + 6;
+    px = Math.max(4, Math.min(px, sb.width - w - 4));
+    py = Math.max(4, Math.min(py, sb.height - h - 4));
+    panel.style.left = px + 'px';
+    panel.style.top = py + 'px';
   };
 
-  toggle.addEventListener('click', () => {
-  if (!ready) return;
-  if (agent) { setMode(false); return; }
-  vs.postMessage({ t: 'pickSession' });     // 짚을 때마다 묻지 않기 위해 앞에서 한 번 받는다
+  const row = (s, into, withModel, onPick) => {
+    const el = document.createElement('div');
+    el.className = 'opt' + (s.sessionId === sessionId ? ' sel' : '');
+    const img = document.createElement('img'); img.src = logoOf(s.model); el.appendChild(img);
+    const nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = s.name;
+    el.appendChild(nm);
+    if (withModel) {
+      const sub = document.createElement('span'); sub.className = 'sub'; sub.textContent = s.model;
+      el.appendChild(sub);
+    }
+    el.addEventListener('click', () => onPick(s));
+    into.appendChild(el);
+  };
+
+  sw.addEventListener('click', () => {
+    if (!ready || bar.classList.contains('lock')) return;
+    if (agent) { setMode(false); return; }
+    if (sessionId) { setMode(true); return; }
+    vs.postMessage({ t: 'pickSession' });
   });
-  who.addEventListener('click', () => { list.hidden = !list.hidden; });
+  pickbtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    drop.hidden = !drop.hidden;
+    if (drop.hidden) return;
+    drop.innerHTML = '';
+    for (const s of sessions) {
+      row(s, drop, false, (v) => { sessionId = v.sessionId; drop.hidden = true; drawSess(); });
+    }
+  });
+  x.addEventListener('click', () => setPanel(false));
+  more.addEventListener('click', () => {
+    detail.hidden = !detail.hidden;
+    brief.hidden = !detail.hidden;
+    more.querySelector('.cv').innerHTML = detail.hidden ? '&#9656;' : '&#9662;';
+  });
   send.addEventListener('click', () => {
     if (!picked || !sessionId || send.disabled) return;
     // 답이 올 때까지 잠근다. 엔터와 클릭이 겹치면 같은 요소가 두 번 간다.
@@ -508,61 +674,80 @@ if (!SERVER_ORIGIN) {
     vs.postMessage({ t: 'send', sessionId: sessionId, el: picked.el, note: note.value });
   });
   note.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send.click(); }
-  if (e.key === 'Escape') setPanel(false);
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send.click(); }
+    if (e.key === 'Escape') setPanel(false);
   });
+  scrim.addEventListener('click', (e) => { if (e.target === scrim) scrim.hidden = true; });
   document.addEventListener('click', (e) => {
-  if (!panel.hidden && !panel.contains(e.target) && e.target !== toggle) setPanel(false);
+    if (!drop.hidden && !drop.contains(e.target) && !pickbtn.contains(e.target)) drop.hidden = true;
+    if (!panel.hidden && !panel.contains(e.target) && e.target !== sw) setPanel(false);
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if (!scrim.hidden) scrim.hidden = true;
+    else if (!panel.hidden) setPanel(false);
   });
 
   window.addEventListener('message', (e) => {
-  if (e.origin !== SERVER_ORIGIN) {
-    // 익스텐션이 보낸 것. 웹뷰 출처는 우리 것이라 페이지가 흉내 낼 수 없다.
-    const d = e.data || {};
-    if (d.t === 'state') {
-      if (d.state === 'noAgent') { ready = false; toggle.disabled = true; hint.textContent = TEXT.noAgent; setMode(false); }
-      else if (d.state === 'missing') say(TEXT.missing);
-      else if (d.state === 'serverError') say(d.detail || '');
-    } else if (d.t === 'sessions') {
-      sessions = d.list || [];
-      drawWho();
-    } else if (d.t === 'session') {
-      if (d.sessionId) { sessionId = d.sessionId; drawWho(); setMode(true); }
-    } else if (d.t === 'reload') {
-      hint.textContent = '';
-      frame.src = base + (base.indexOf('?') === -1 ? '?' : '&') + 'ab=' + Date.now();
-    } else if (d.t === 'stale') {
-      hint.textContent = TEXT.stale;
-    } else if (d.t === 'sent') {
-      send.disabled = false;
-      if (d.ok) setPanel(false);
-      else { warn.textContent = d.error || ''; warn.hidden = false; }
+    if (e.origin !== SERVER_ORIGIN) {
+      // 익스텐션이 보낸 것. 웹뷰 출처는 우리 것이라 페이지가 흉내 낼 수 없다.
+      const d = e.data || {};
+      if (d.t === 'state') {
+        if (d.state === 'missing') showState(TEXT.missing.replace('{0}', d.detail || ''), false);
+        else if (d.state === 'serverError') showState(d.detail || '', true);
+      } else if (d.t === 'sessions') {
+        sessions = d.list || [];
+        const empty = sessions.length === 0;
+        none.hidden = !empty;
+        why.hidden = !empty;
+        why.textContent = empty ? TEXT.noSession : '';
+        bar.classList.toggle('lock', empty);
+        list.innerHTML = '';
+        for (const s of sessions) {
+          row(s, list, true, (v) => {
+            sessionId = v.sessionId; drawSess(); scrim.hidden = true; setMode(true);
+          });
+        }
+        scrim.hidden = false;
+      } else if (d.t === 'reload') {
+        fresh.hidden = true;
+        frame.src = base + (base.indexOf('?') === -1 ? '?' : '&') + 'ab=' + Date.now();
+      } else if (d.t === 'stale') {
+        fresh.hidden = false;
+      } else if (d.t === 'sent') {
+        send.disabled = false;
+        if (d.ok) setPanel(false);
+        else { warn.textContent = d.error || ''; warn.hidden = false; }
+      }
+      return;
     }
-    return;
-  }
-  // 안쪽(iframe)에서 온 것.
-  const d = e.data || {};
-  if (d.ab === 'ready') {
-    ready = true;
-    toggle.disabled = false;
-    say('');
-    vs.postMessage({ t: 'pageReady' });
-    // 다시 그린 페이지 안의 스크립트는 읽기 모드로 시작한다. 밖이 에이전트 모드면 다시
-    // 말해 줘야 한다 — 안 하면 모드는 켜져 보이는데 오버레이가 안 뜬다.
-    if (agent) toFrame({ ab: 'mode', mode: 'agent' });
-  } else if (d.ab === 'pick') {
-    picked = { el: d.el, rect: d.rect };
-    meta.textContent = TEXT.line + ' ' + d.el.line + (d.el.lineIsAncestor ? ' ' + TEXT.ancestor : '') +
-      '\\n' + d.el.selector + '\\n' + d.el.tag;
-    warn.hidden = true;
-    setPanel(true);
-    place(d.rect);
-    note.focus();
-  } else if (d.ab === 'rect') {
-    if (!panel.hidden) place(d.rect);
-  } else if (d.ab === 'dismiss') {
-    setPanel(false);
-  }
+    // 안쪽(iframe)에서 온 것.
+    const d = e.data || {};
+    if (d.ab === 'ready') {
+      ready = true;
+      state.hidden = true;
+      bar.classList.remove('lock');
+      vs.postMessage({ t: 'pageReady' });
+      // 다시 그린 페이지 안의 스크립트는 읽기 모드로 시작한다. 밖이 에이전트 모드면 다시
+      // 말해 줘야 한다 — 안 하면 모드는 켜져 보이는데 오버레이가 안 뜬다.
+      if (agent) toFrame({ ab: 'mode', mode: 'agent' });
+    } else if (d.ab === 'pick') {
+      picked = { el: d.el, rect: d.rect };
+      brief.textContent = d.el.line + ' · ' + tail(d.el.selector);
+      detail.textContent = [
+        TEXT.line + ' ' + d.el.line + (d.el.lineIsAncestor ? ' ' + TEXT.ancestor : ''),
+        d.el.selector,
+        d.el.tag,
+      ].join('\\n');
+      warn.hidden = true;
+      setPanel(true);
+      place(d.rect);
+      note.focus();
+    } else if (d.ab === 'rect') {
+      if (!panel.hidden) place(d.rect);
+    } else if (d.ab === 'dismiss') {
+      setPanel(false);
+    }
   });
 }
 </script>
