@@ -118,3 +118,6 @@ export * from './agent/diffMerge';
 export * from './agent/subEnvironment';
 export * from './agent/agyTrust';
 export * from './agent/claudeTrust';
+
+// HTML 뷰어 (0.7.0)
+export * from './viewerStamp';
