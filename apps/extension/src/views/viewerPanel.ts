@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { randomBytes } from 'crypto';
 import * as path from 'path';
+import * as fs from 'fs';
 import { startViewerServer, watchServedFiles, buildViewerPrompt } from '@agentbridge/core';
 import type { ViewerServer, ViewerWatch, PickedElement } from '@agentbridge/core';
 import { assetRootUri, assetRootPath } from '../core/assetRoot';
@@ -255,6 +256,11 @@ class Viewer {
   }
 
   private onFileChange(): void {
+    // 바뀐 것이 문서 자신의 사라짐일 수 있다. 그때 다시 그리라고 하면 iframe에 404가 뜬다.
+    if (!fs.existsSync(this.uri.fsPath)) {
+      this.setState('missing');
+      return;
+    }
     if (this.panelOpen) {
       // 사용자가 글을 쓰는 중이다. 지금 다시 그리면 쓰던 글과 짚은 요소가 함께 사라진다.
       this.pendingReload = true;

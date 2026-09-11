@@ -75,6 +75,18 @@ describe('viewerServer', () => {
     assert.equal(await res.text(), 'p{color:red}');
   });
 
+  it('주입하는 출처 값을 속성에 넣기 전에 이스케이프한다', async () => {
+    const t = await startViewerServer({
+      root,
+      webviewOrigin: 'vscode-webview://a"><script>x</script>',
+      pickerPath: picker,
+    });
+    const body = await (await fetch(`${t.origin}/a.html`)).text();
+    await t.close();
+    assert.equal(body.includes('"><script>x'), false);
+    assert.match(body, /data-ab-origin="vscode-webview:\/\/a&quot;&gt;&lt;script&gt;/);
+  });
+
   it('짚기 스크립트를 자기 경로로 내보낸다', async () => {
     const res = await fetch(`${s.origin}/__agentbridge/picker.js`);
     assert.equal(res.status, 200);

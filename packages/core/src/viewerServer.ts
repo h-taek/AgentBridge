@@ -15,6 +15,12 @@ import * as path from 'path';
 import type { AddressInfo } from 'net';
 import { stampLines } from './viewerStamp';
 
+// 주입 태그의 속성값에 들어가는 값. 지금 넣는 것은 웹뷰가 보고한 자기 출처뿐이지만, 값의
+// 출처가 바뀌어도 태그를 깨뜨리지 못하게 한다 — 이 자리가 우리가 HTML을 쓰는 유일한 곳이다.
+function escapeAttr(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 export interface ViewerServerOptions {
   root: string; // 서빙 루트. 워크스페이스 폴더
   webviewOrigin: string; // 짚기 스크립트에 박아 줄 출처
@@ -197,7 +203,7 @@ export async function startViewerServer(opts: ViewerServerOptions): Promise<View
       try {
         const content = await fs.promises.readFile(realTarget, 'utf8');
         const stamped = stampLines(content);
-        const scriptTag = `<script src="/__agentbridge/picker.js" data-ab-origin="${opts.webviewOrigin}"></script>`;
+        const scriptTag = `<script src="/__agentbridge/picker.js" data-ab-origin="${escapeAttr(opts.webviewOrigin)}"></script>`;
         const body = stamped.endsWith('\n') ? `${stamped}${scriptTag}\n` : `${stamped}\n${scriptTag}`;
         const buf = Buffer.from(body, 'utf8');
 
