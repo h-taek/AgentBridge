@@ -462,9 +462,9 @@ export function buildViewerHtml(
   .cv{display:inline-flex;align-items:center;justify-content:center;width:12px;height:12px;
     flex-shrink:0;color:var(--dim)}
   .cv::before{content:'';display:block;border-style:solid;border-color:transparent}
-  .cv.down::before{border-width:6px 5px 0 5px;border-top-color:currentColor}
-  .cv.right::before{border-width:5px 0 5px 6px;border-left-color:currentColor}
-  #more.open .cv.right::before{border-width:6px 5px 0 5px;border-top-color:currentColor;
+  .cv.down::before{border-width:3.5px 3px 0 3px;border-top-color:currentColor}
+  .cv.right::before{border-width:3px 0 3px 3.5px;border-left-color:currentColor}
+  #more.open .cv.right::before{border-width:3.5px 3px 0 3px;border-top-color:currentColor;
     border-left-color:transparent}
   #who .sp{flex:1}
   #pickbtn{display:inline-flex;align-items:center;gap:6px;cursor:pointer}
