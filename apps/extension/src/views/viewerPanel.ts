@@ -40,7 +40,9 @@ interface FromWebview {
 export class HtmlViewerProvider implements vscode.CustomReadonlyEditorProvider, vscode.Disposable {
   static readonly viewType = 'agentbridge.htmlViewer';
 
-  private readonly live = new Set<Viewer>();
+  // 패널 하나에 뷰어 하나. VS Code가 같은 패널로 resolve를 다시 부르면(탭 이동·복원) 뷰어가
+  // 둘이 되고, 메시지 수신기도 둘이 되어 보낸 것이 두 번 간다.
+  private readonly live = new Map<vscode.WebviewPanel, Viewer>();
   private active: Viewer | undefined;
 
   constructor(private readonly extensionUri: vscode.Uri) {}
@@ -51,14 +53,22 @@ export class HtmlViewerProvider implements vscode.CustomReadonlyEditorProvider, 
   }
 
   resolveCustomEditor(doc: vscode.CustomDocument, panel: vscode.WebviewPanel): void {
+    const existing = this.live.get(panel);
+    if (existing) {
+      output.log(`viewer: resolve 재호출 — 기존 뷰어를 쓴다 (${doc.uri.fsPath})`);
+      this.active = existing;
+      return;
+    }
+
     const viewer = new Viewer(doc.uri, panel, this.extensionUri);
-    this.live.add(viewer);
+    this.live.set(panel, viewer);
     this.active = viewer;
+    output.log(`viewer: resolve ${doc.uri.fsPath}`);
     panel.onDidChangeViewState(() => {
       if (panel.active) this.active = viewer;
     });
     panel.onDidDispose(() => {
-      this.live.delete(viewer);
+      this.live.delete(panel);
       if (this.active === viewer) this.active = undefined;
       viewer.dispose();
     });
@@ -74,7 +84,7 @@ export class HtmlViewerProvider implements vscode.CustomReadonlyEditorProvider, 
   // 익스텐션이 내려갈 때 남은 서버를 전부 내린다. 탭 닫힘만 처리하면 창을 통째로 닫을 때
   // 포트가 남는다(spec 3.5).
   dispose(): void {
-    for (const viewer of [...this.live]) viewer.dispose();
+    for (const viewer of this.live.values()) viewer.dispose();
     this.live.clear();
   }
 }
@@ -244,6 +254,7 @@ class Viewer {
     }
     // 문서 경로는 고른 세션의 작업 디렉터리 기준이다. 세션마다 답이 다를 수 있어 고른 뒤에 센다.
     const text = buildViewerPrompt(docRelativePath(session.cwd, this.uri.fsPath), el, msg.note ?? '');
+    output.log(`viewer: send → ${sessionId} 줄 ${el.line} (${text.length}자)`);
     const ok = await queueSend(sessionId, () => panel.sendPrompt(text));
     this.post(
       ok
@@ -449,7 +460,7 @@ if (!SERVER_ORIGIN) {
   const setPanel = (open) => {
   panel.hidden = !open;
   vs.postMessage({ t: 'panel', open: open });
-  if (!open) { picked = null; warn.hidden = true; note.value = ''; list.hidden = true; }
+  if (!open) { picked = null; warn.hidden = true; note.value = ''; list.hidden = true; send.disabled = false; }
   };
   const setMode = (on) => {
   agent = on;
@@ -491,8 +502,10 @@ if (!SERVER_ORIGIN) {
   });
   who.addEventListener('click', () => { list.hidden = !list.hidden; });
   send.addEventListener('click', () => {
-  if (!picked || !sessionId) return;
-  vs.postMessage({ t: 'send', sessionId: sessionId, el: picked.el, note: note.value });
+    if (!picked || !sessionId || send.disabled) return;
+    // 답이 올 때까지 잠근다. 엔터와 클릭이 겹치면 같은 요소가 두 번 간다.
+    send.disabled = true;
+    vs.postMessage({ t: 'send', sessionId: sessionId, el: picked.el, note: note.value });
   });
   note.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send.click(); }
@@ -521,6 +534,7 @@ if (!SERVER_ORIGIN) {
     } else if (d.t === 'stale') {
       hint.textContent = TEXT.stale;
     } else if (d.t === 'sent') {
+      send.disabled = false;
       if (d.ok) setPanel(false);
       else { warn.textContent = d.error || ''; warn.hidden = false; }
     }
@@ -533,6 +547,9 @@ if (!SERVER_ORIGIN) {
     toggle.disabled = false;
     say('');
     vs.postMessage({ t: 'pageReady' });
+    // 다시 그린 페이지 안의 스크립트는 읽기 모드로 시작한다. 밖이 에이전트 모드면 다시
+    // 말해 줘야 한다 — 안 하면 모드는 켜져 보이는데 오버레이가 안 뜬다.
+    if (agent) toFrame({ ab: 'mode', mode: 'agent' });
   } else if (d.ab === 'pick') {
     picked = { el: d.el, rect: d.rect };
     meta.textContent = TEXT.line + ' ' + d.el.line + (d.el.lineIsAncestor ? ' ' + TEXT.ancestor : '') +

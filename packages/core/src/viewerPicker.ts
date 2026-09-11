@@ -14,8 +14,24 @@
 
   let agent = false;
   let picked: Element | null = null;
+  let hover: Element | null = null;
 
   const send = (msg: unknown) => parent.postMessage(msg, origin);
+
+  // 오버레이는 position:fixed라 화면 기준으로 그린다. 페이지가 스크롤되면 요소는 움직이는데
+  // 상자는 그 자리에 남으므로, 스크롤·크기 변화 때마다 다시 그려야 한다.
+  const drawBox = (el: Element | null) => {
+    if (!el || !el.isConnected) {
+      box.style.display = 'none';
+      return;
+    }
+    const r = el.getBoundingClientRect();
+    box.style.left = `${r.left}px`;
+    box.style.top = `${r.top}px`;
+    box.style.width = `${r.width}px`;
+    box.style.height = `${r.height}px`;
+    box.style.display = 'block';
+  };
   const rectOf = (el: Element) => {
     const r = el.getBoundingClientRect();
     return { x: r.left, y: r.top, w: r.width, h: r.height };
@@ -74,6 +90,7 @@
     if (!agent) {
       box.style.display = 'none';
       picked = null;
+      hover = null;
     }
   });
 
@@ -83,12 +100,8 @@
       if (!agent) return;
       const el = e.target as Element | null;
       if (!el || !(el instanceof Element)) return;
-      const r = rectOf(el);
-      box.style.left = `${r.x}px`;
-      box.style.top = `${r.y}px`;
-      box.style.width = `${r.w}px`;
-      box.style.height = `${r.h}px`;
-      box.style.display = 'block';
+      hover = el;
+      drawBox(hover);
     },
     true,
   );
@@ -114,6 +127,7 @@
   );
 
   const follow = () => {
+    drawBox(hover);
     if (picked) send({ ab: 'rect', rect: rectOf(picked) });
   };
   addEventListener('scroll', follow, true);
