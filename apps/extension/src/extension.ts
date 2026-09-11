@@ -28,6 +28,7 @@ import { systemCredentialIO } from './core/usage/credentials';
 import { createTokenRefresher, systemRefreshRunner } from './core/usage/refreshToken';
 import { rowKindOf, childSessions, planDeleteConfirm } from './views/sessionTreeModel';
 import { ChatPanel, getActivePanel, getAllPanels, chatPanelEvents, updateSessionTabTitle, markShuttingDown } from './views/chatPanel';
+import { HtmlViewerProvider } from './views/viewerPanel';
 import { compactionEvents } from './core/compactionScheduler';
 import { registerSession, markSessionClosed, markSessionActive, markSessionOpened, renameSession, deleteSession, reclaimPendingModelSessionId } from './core/sessionRegistry';
 import { registerConfigWatcher } from './settings/config';
@@ -563,6 +564,37 @@ export function activate(context: vscode.ExtensionContext) {
     },
   };
   context.subscriptions.push(vscode.window.registerWebviewPanelSerializer('agentbridge.chat', serializer));
+
+  // HTML 뷰어 (0.7.0). 커스텀 에디터라 탭이 곧 에디터다 — 탭을 닫으면 그 뷰어의 서버가 함께
+  // 내려간다. 프로바이더 자신도 subscriptions에 넣는다: 창을 통째로 닫을 때 남은 서버를 내리는
+  // 자리가 거기 하나뿐이다.
+  const htmlViewer = new HtmlViewerProvider(context.extensionUri);
+  const openHtmlViewer = vscode.commands.registerCommand('agentbridge.openHtmlViewer', async () => {
+    const uri = vscode.window.activeTextEditor?.document.uri;
+    if (!uri) return;
+    // 원격은 범위 밖이다 — 웹뷰와 서버가 다른 기계에서 돌아 127.0.0.1이 서로 다른 곳을 가리킨다.
+    if (vscode.env.remoteName) {
+      void vscode.window.showWarningMessage(
+        vscode.l10n.t('AgentBridge: the HTML viewer runs on local workspaces only.'),
+      );
+      return;
+    }
+    await vscode.commands.executeCommand('vscode.openWith', uri, HtmlViewerProvider.viewType);
+  });
+  const closeHtmlViewer = vscode.commands.registerCommand('agentbridge.closeHtmlViewer', async () => {
+    // activeCustomEditorId는 어느 뷰 타입인지만 알려준다. 무엇을 열고 있는지는 뷰어가 안다.
+    const uri = htmlViewer.activeUri();
+    if (uri) await vscode.commands.executeCommand('vscode.openWith', uri, 'default');
+  });
+  context.subscriptions.push(
+    vscode.window.registerCustomEditorProvider(HtmlViewerProvider.viewType, htmlViewer, {
+      webviewOptions: { retainContextWhenHidden: true },
+      supportsMultipleEditorsPerDocument: false,
+    }),
+    htmlViewer,
+    openHtmlViewer,
+    closeHtmlViewer,
+  );
 
   context.subscriptions.push(
     newSession, newSessionFromTab, newSessionWithModel, openSessionCmd, selectSessionCmd, refineCmd, resetCmd, enableCloseConfirmCmd, renameCmd, deleteCmd,

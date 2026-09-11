@@ -117,6 +117,16 @@
         "command": "agentbridge.refresh",
         "title": "%agentbridge.refresh.title%",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "agentbridge.openHtmlViewer",
+        "title": "%agentbridge.openHtmlViewer.title%",
+        "icon": "$(open-preview)"
+      },
+      {
+        "command": "agentbridge.closeHtmlViewer",
+        "title": "%agentbridge.closeHtmlViewer.title%",
+        "icon": "$(go-to-file)"
       }
     ],
     "menus": {
@@ -124,6 +134,16 @@
         {
           "command": "agentbridge.newSessionFromTab",
           "group": "navigation@1"
+        },
+        {
+          "command": "agentbridge.openHtmlViewer",
+          "when": "resourceExtname == .html && !activeCustomEditorId",
+          "group": "navigation@2"
+        },
+        {
+          "command": "agentbridge.closeHtmlViewer",
+          "when": "activeCustomEditorId == agentbridge.htmlViewer",
+          "group": "navigation@2"
         }
       ],
       "view/title": [
@@ -223,7 +243,19 @@
         }
       }
     },
-    "keybindings": []
+    "keybindings": [],
+    "customEditors": [
+      {
+        "viewType": "agentbridge.htmlViewer",
+        "displayName": "%agentbridge.htmlViewer.displayName%",
+        "selector": [
+          {
+            "filenamePattern": "*.html"
+          }
+        ],
+        "priority": "option"
+      }
+    ]
   },
   "private": true,
   "packageManager": "pnpm@9.0.0",

@@ -59,5 +59,22 @@
   "Delete Session": "삭제",
   "Usage unavailable": "사용량 조회 불가",
   "5h - {0}%": "5h - {0}%",
-  "5h - {0}% | 1w - {1}%": "5h - {0}% | 1w - {1}%"
+  "5h - {0}% | 1w - {1}%": "5h - {0}% | 1w - {1}%",
+  "Could not read the webview origin.": "웹뷰 출처를 읽지 못했다.",
+  "The viewer serves files inside the workspace folder only.": "뷰어는 워크스페이스 폴더 안의 파일만 연다.",
+  "That session is not running anymore.": "그 세션은 지금 도는 중이 아니다.",
+  "Could not put the prompt into that session.": "그 세션에 프롬프트를 넣지 못했다.",
+  "Send picked elements to which session?": "짚은 요소를 어느 세션에 보낼까",
+  "Starting the viewer…": "뷰어를 띄우는 중",
+  "That file is gone.": "그 파일이 없다.",
+  "Agent mode needs a running session whose working folder holds this file.": "에이전트 모드는 이 파일을 품은 폴더에서 도는 세션이 있어야 쓸 수 있다.",
+  "A newer version is on disk. It loads when this panel closes.": "새 버전 있음. 이 패널을 접으면 적용된다.",
+  "Read": "읽기",
+  "Agent": "에이전트",
+  "Send": "보내기",
+  "What should change here?": "여기를 어떻게 고칠까",
+  "Sent with it": "함께 보내는 것",
+  "AgentBridge: the HTML viewer runs on local workspaces only.": "AgentBridge: HTML 뷰어는 로컬 워크스페이스에서만 돈다.",
+  "Line": "줄",
+  "(ancestor)": "(상위 요소)"
 }
