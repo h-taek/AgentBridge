@@ -35,6 +35,20 @@ const options = {
   logLevel: 'info',
 };
 
+// 짚기 스크립트 — 서빙되는 페이지 안에서 도는 코드라 익스텐션 번들과 섞이면 안 된다.
+// IIFE 한 덩어리로 내고 서버가 이 파일을 읽어 <script src>로 건다.
+const pickerOptions = {
+  entryPoints: ['../../packages/core/src/viewerPicker.ts'],
+  bundle: true,
+  outfile: 'out/viewerPicker.js',
+  platform: 'browser',
+  format: 'iife',
+  target: 'es2022',
+  sourcemap: !production,
+  minify: production,
+  logLevel: 'info',
+};
+
 // xterm webview 에셋 — out/vendor/@xterm/<pkg>/{css,lib}. webview가 asWebviewUri로 로드하므로
 // 번들 불가, 파일로 동봉해야 한다. chatPanel의 로드 경로도 여기를 가리킨다.
 function vendorXterm() {
@@ -159,8 +173,11 @@ vendorAssets();
 
 if (watch) {
   const ctx = await esbuild.context(options);
+  const pickerCtx = await esbuild.context(pickerOptions);
   await ctx.watch();
+  await pickerCtx.watch();
   console.log('esbuild: watching…');
 } else {
   await esbuild.build(options);
+  await esbuild.build(pickerOptions);
 }
