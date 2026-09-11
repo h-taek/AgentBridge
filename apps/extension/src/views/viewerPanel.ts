@@ -487,7 +487,8 @@ export function buildViewerHtml(
   #more{display:inline-flex;align-items:center;gap:5px;min-width:0;font-size:11px;
     color:var(--dim);cursor:pointer;white-space:nowrap}
   #mlabel{flex-shrink:0}
-  #sep{flex-shrink:0;opacity:.45}
+  #sep{width:1px;height:9px;background:currentColor;opacity:.4;flex-shrink:0}
+  #more.open #sep,#more.open #brief{display:none}
   #brief{font-weight:400;font-family:var(--vscode-editor-font-family);font-size:10.5px;
     min-width:0;overflow:hidden;text-overflow:ellipsis}
   #detail{margin:0 9px 9px;padding:7px 8px;background:var(--input);border-radius:3px;
@@ -539,7 +540,7 @@ export function buildViewerHtml(
     </div>
     <textarea id="note" placeholder="${escapeHtml(text.note)}"></textarea>
     <div id="foot">
-      <span id="more"><span class="cv right"></span><span id="mlabel">${escapeHtml(text.info)}</span><span id="sep">|</span><b id="brief"></b></span>
+      <span id="more"><span class="cv right"></span><span id="mlabel">${escapeHtml(text.info)}</span><span id="sep"></span><b id="brief"></b></span>
       <span class="sp"></span>
       <button id="send" class="btn">${escapeHtml(text.send)}</button>
     </div>
@@ -639,7 +640,7 @@ if (!SERVER_ORIGIN) {
     vs.postMessage({ t: 'panel', open: open });
     if (!open) {
       picked = null; note.value = ''; warn.hidden = true; closePicker();
-      detail.hidden = true; brief.hidden = false; more.classList.remove('open');
+      detail.hidden = true; more.classList.remove('open');
       send.disabled = false;
     }
   };
@@ -723,7 +724,6 @@ if (!SERVER_ORIGIN) {
   x.addEventListener('click', () => setPanel(false));
   more.addEventListener('click', () => {
     detail.hidden = !detail.hidden;
-    brief.hidden = !detail.hidden;
     more.classList.toggle('open', !detail.hidden);
   });
   send.addEventListener('click', () => {
