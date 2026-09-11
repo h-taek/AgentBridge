@@ -11,7 +11,7 @@
   ],
   "scripts": {
     "build": "tsc -p .",
-    "typecheck": "tsc -p . --noEmit",
+    "typecheck": "tsc -p . --noEmit && tsc -p tsconfig.picker.json",
     "clean": "rm -rf dist"
   },
   "devDependencies": {

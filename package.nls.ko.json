@@ -21,5 +21,8 @@
   "agentbridge.turns.assistantDetail.enumDescription.compact": "약 5,000자 (앞 4,000 + 뒤 1,000)",
   "agentbridge.turns.assistantDetail.enumDescription.minimal": "약 1,000자 (앞 800 + 뒤 200)",
   "agentbridge.memory.maxArchiveSnapshots.description": "Context 패널에 보관할 IR 스냅샷 최대 개수. 초과분은 가장 오래된 것부터 삭제.",
-  "agentbridge.refresh.title": "AgentBridge: 세션·사용량 새로고침"
+  "agentbridge.refresh.title": "AgentBridge: 세션·사용량 새로고침",
+  "agentbridge.htmlViewer.displayName": "AgentBridge HTML 뷰어",
+  "agentbridge.openHtmlViewer.title": "AgentBridge: HTML 뷰어로 보기",
+  "agentbridge.closeHtmlViewer.title": "AgentBridge: 소스로 돌아가기"
 }

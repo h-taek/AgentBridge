@@ -28,6 +28,7 @@ import { systemCredentialIO } from './core/usage/credentials';
 import { createTokenRefresher, systemRefreshRunner } from './core/usage/refreshToken';
 import { rowKindOf, childSessions, planDeleteConfirm } from './views/sessionTreeModel';
 import { ChatPanel, getActivePanel, getAllPanels, chatPanelEvents, updateSessionTabTitle, markShuttingDown } from './views/chatPanel';
+import { HtmlViewerProvider } from './views/viewerPanel';
 import { compactionEvents } from './core/compactionScheduler';
 import { registerSession, markSessionClosed, markSessionActive, markSessionOpened, renameSession, deleteSession, reclaimPendingModelSessionId } from './core/sessionRegistry';
 import { registerConfigWatcher } from './settings/config';
@@ -564,10 +565,64 @@ export function activate(context: vscode.ExtensionContext) {
   };
   context.subscriptions.push(vscode.window.registerWebviewPanelSerializer('agentbridge.chat', serializer));
 
+  // HTML 뷰어 (0.7.0). 커스텀 에디터라 탭이 곧 에디터다 — 탭을 닫으면 그 뷰어의 서버가 함께
+  // 내려간다. 프로바이더 자신도 subscriptions에 넣는다: 창을 통째로 닫을 때 남은 서버를 내리는
+  // 자리가 거기 하나뿐이다.
+  const htmlViewer = new HtmlViewerProvider(context.extensionUri);
+  const openHtmlViewer = vscode.commands.registerCommand('agentbridge.openHtmlViewer', async () => {
+    const uri = vscode.window.activeTextEditor?.document.uri;
+    if (!uri) return;
+    // 원격은 범위 밖이다 — 웹뷰와 서버가 다른 기계에서 돌아 127.0.0.1이 서로 다른 곳을 가리킨다.
+    if (vscode.env.remoteName) {
+      void vscode.window.showWarningMessage(
+        vscode.l10n.t('AgentBridge: the HTML viewer runs on local workspaces only.'),
+      );
+      return;
+    }
+    await vscode.commands.executeCommand('vscode.openWith', uri, HtmlViewerProvider.viewType);
+    await closeTabsFor(uri, 'text');
+  });
+  const closeHtmlViewer = vscode.commands.registerCommand('agentbridge.closeHtmlViewer', async () => {
+    // activeCustomEditorId는 어느 뷰 타입인지만 알려준다. 무엇을 열고 있는지는 뷰어가 안다.
+    const uri = htmlViewer.activeUri();
+    if (!uri) return;
+    await vscode.commands.executeCommand('vscode.openWith', uri, 'default');
+    await closeTabsFor(uri, 'viewer');
+  });
+  context.subscriptions.push(
+    vscode.window.registerCustomEditorProvider(HtmlViewerProvider.viewType, htmlViewer, {
+      webviewOptions: { retainContextWhenHidden: true },
+      supportsMultipleEditorsPerDocument: false,
+    }),
+    htmlViewer,
+    openHtmlViewer,
+    closeHtmlViewer,
+  );
+
   context.subscriptions.push(
     newSession, newSessionFromTab, newSessionWithModel, openSessionCmd, selectSessionCmd, refineCmd, resetCmd, enableCloseConfirmCmd, renameCmd, deleteCmd,
     output.getOutputChannel(),
   );
+}
+
+// 탭 전환의 뒷정리. `vscode.openWith`는 같은 파일의 다른 편집기를 새 탭으로 연다 — 원래 탭을
+// 바꾸지 않는다(실측). 그래서 연 뒤에 반대편 탭을 닫아야 "버튼 하나가 두 방향을 맡는다"가 된다.
+async function closeTabsFor(uri: vscode.Uri, kind: 'text' | 'viewer'): Promise<void> {
+  const key = uri.toString();
+  const targets = vscode.window.tabGroups.all
+    .flatMap((group) => group.tabs)
+    .filter((tab) => {
+      const input = tab.input;
+      if (kind === 'text') {
+        return input instanceof vscode.TabInputText && input.uri.toString() === key;
+      }
+      return (
+        input instanceof vscode.TabInputCustom &&
+        input.viewType === HtmlViewerProvider.viewType &&
+        input.uri.toString() === key
+      );
+    });
+  if (targets.length > 0) await vscode.window.tabGroups.close(targets, true);
 }
 
 function timeAgo(iso: string): string {
