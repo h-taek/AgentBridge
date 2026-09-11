@@ -457,8 +457,15 @@ export function buildViewerHtml(
   #who{display:flex;align-items:center;gap:6px;padding:8px 9px 7px;position:relative}
   #who img{width:11px;height:11px;display:block;flex-shrink:0}
   #whoname{font-size:12px;color:var(--fg)}
-  #who .cv{display:inline-flex;align-items:center;justify-content:center;width:12px;height:12px;
-    font-size:13px;line-height:1;color:var(--dim)}
+  /* ▸·▾ 문자는 글자 상자 안에서 아래로 치우쳐 그려진다. 상자를 가운데 놓아도 잉크가 안 맞아
+     테두리로 직접 그린다 — 도형이 상자를 꽉 채우므로 중앙이 정확하다 */
+  .cv{display:inline-flex;align-items:center;justify-content:center;width:12px;height:12px;
+    flex-shrink:0;color:var(--dim)}
+  .cv::before{content:'';display:block;border-style:solid;border-color:transparent}
+  .cv.down::before{border-width:6px 5px 0 5px;border-top-color:currentColor}
+  .cv.right::before{border-width:5px 0 5px 6px;border-left-color:currentColor}
+  #more.open .cv.right::before{border-width:6px 5px 0 5px;border-top-color:currentColor;
+    border-left-color:transparent}
   #who .sp{flex:1}
   #pickbtn{display:inline-flex;align-items:center;gap:6px;cursor:pointer}
   #x{width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;
@@ -476,10 +483,13 @@ export function buildViewerHtml(
   #note:focus{outline:none;border-color:var(--focus)}
   #foot{display:flex;align-items:center;gap:8px;padding:8px 9px 9px}
   #foot .sp{flex:1}
-  #more{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--dim);cursor:pointer}
-  #more .cv{display:inline-flex;align-items:center;justify-content:center;width:12px;height:12px;
-    font-size:13px;line-height:1}
-  #brief{font-weight:400;font-family:var(--vscode-editor-font-family);font-size:10.5px}
+  #send{flex-shrink:0}
+  #more{display:inline-flex;align-items:center;gap:5px;min-width:0;font-size:11px;
+    color:var(--dim);cursor:pointer;white-space:nowrap}
+  #mlabel{flex-shrink:0}
+  #sep{flex-shrink:0;opacity:.45}
+  #brief{font-weight:400;font-family:var(--vscode-editor-font-family);font-size:10.5px;
+    min-width:0;overflow:hidden;text-overflow:ellipsis}
   #detail{margin:0 9px 9px;padding:7px 8px;background:var(--input);border-radius:3px;
     font-family:var(--vscode-editor-font-family);font-size:10.5px;line-height:1.65;
     color:var(--dim);white-space:pre-wrap;word-break:break-all}
@@ -522,14 +532,14 @@ export function buildViewerHtml(
   <div id="panel" hidden>
     <div id="nub"></div>
     <div id="who">
-      <span id="pickbtn"><img id="wholog" src="${assets.claude}" alt=""/><span id="whoname"></span><span class="cv">&#9662;</span></span>
+      <span id="pickbtn"><img id="wholog" src="${assets.claude}" alt=""/><span id="whoname"></span><span class="cv down"></span></span>
       <span class="sp"></span>
       <span id="x" title="${escapeHtml(text.close)}">&#10005;</span>
       <div id="drop" hidden></div>
     </div>
     <textarea id="note" placeholder="${escapeHtml(text.note)}"></textarea>
     <div id="foot">
-      <span id="more"><span class="cv">&#9656;</span>${escapeHtml(text.info)} <b id="brief"></b></span>
+      <span id="more"><span class="cv right"></span><span id="mlabel">${escapeHtml(text.info)}</span><span id="sep">|</span><b id="brief"></b></span>
       <span class="sp"></span>
       <button id="send" class="btn">${escapeHtml(text.send)}</button>
     </div>
@@ -613,7 +623,6 @@ if (!SERVER_ORIGIN) {
 
   const toFrame = (m) => { if (frame.contentWindow) frame.contentWindow.postMessage(m, SERVER_ORIGIN); };
   const logoOf = (model) => LOGO[model] || LOGO.claude;
-  const tail = (sel) => { const p = String(sel || '').split(' > '); return p[p.length - 1] || ''; };
 
   const drawSess = () => {
     const s = sessions.find((v) => v.sessionId === sessionId);
@@ -630,8 +639,7 @@ if (!SERVER_ORIGIN) {
     vs.postMessage({ t: 'panel', open: open });
     if (!open) {
       picked = null; note.value = ''; warn.hidden = true; closePicker();
-      detail.hidden = true; brief.hidden = false;
-      more.querySelector('.cv').innerHTML = '&#9656;';
+      detail.hidden = true; brief.hidden = false; more.classList.remove('open');
       send.disabled = false;
     }
   };
@@ -716,7 +724,7 @@ if (!SERVER_ORIGIN) {
   more.addEventListener('click', () => {
     detail.hidden = !detail.hidden;
     brief.hidden = !detail.hidden;
-    more.querySelector('.cv').innerHTML = detail.hidden ? '&#9656;' : '&#9662;';
+    more.classList.toggle('open', !detail.hidden);
   });
   send.addEventListener('click', () => {
     if (!picked || !sessionId || send.disabled) return;
@@ -779,7 +787,7 @@ if (!SERVER_ORIGIN) {
       if (agent) toFrame({ ab: 'mode', mode: 'agent' });
     } else if (d.ab === 'pick') {
       picked = { el: d.el, rect: d.rect };
-      brief.textContent = d.el.line + ' · ' + tail(d.el.selector);
+      brief.textContent = TEXT.line + ' ' + d.el.line;
       detail.textContent = [
         TEXT.line + ' ' + d.el.line + (d.el.lineIsAncestor ? ' ' + TEXT.ancestor : ''),
         d.el.selector,
