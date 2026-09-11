@@ -390,6 +390,12 @@ export class ChatPanel {
     }
   }
 
+  // 뷰어가 이 세션에 보낼 수 있는지 판정하는 값(0.7.0 HTML 뷰어). 세션 레코드에는 없고
+  // SpawnOptions에만 있다 — 격리 서브는 저장소 밖 worktree에서 돈다.
+  get cwd(): string {
+    return this.opts.cwd;
+  }
+
   // 이 세션의 프로세스가 살아 있는가. `agent check`가 빈손으로 돌아올 때 "아직 일하는 중"과
   // "신호 없이 끝남"을 가르는 재료다 (0.5.0 B-6).
   get alive(): boolean {
