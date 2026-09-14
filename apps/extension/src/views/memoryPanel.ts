@@ -47,9 +47,12 @@ export class MemoryPanelProvider implements vscode.WebviewViewProvider {
   setBadge(count: number): void {
     this.pendingBadge = count;
     if (!this.view) return;
-    this.view.badge = count > 0
-      ? { value: count, tooltip: vscode.l10n.t('{0} pending proposals', count) }
-      : undefined;
+    // 0도 뱃지로 보낸다. IDE는 뱃지를 undefined로 되돌려도 화면에서 걷어내지 않는다 —
+    // workbench의 WebviewViewPane.updateBadge는 값이 있을 때만 새 activity를 걸고, TreeView
+    // 쪽에 있는 clear 경로가 웹뷰 뷰에는 없다. 그래서 undefined를 보내면 마지막으로 보인
+    // 숫자가 그대로 남는다. 액티비티 바는 뱃지 숫자의 합이 0이면 아무것도 그리지 않으므로,
+    // 0짜리 뱃지는 이전 activity를 밀어내면서 화면을 비운다.
+    this.view.badge = { value: count, tooltip: vscode.l10n.t('{0} pending proposals', count) };
   }
 
   resolveWebviewView(

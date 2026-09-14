@@ -21,5 +21,8 @@
   "agentbridge.turns.assistantDetail.enumDescription.compact": "~5,000 characters (head 4,000 + tail 1,000)",
   "agentbridge.turns.assistantDetail.enumDescription.minimal": "~1,000 characters (head 800 + tail 200)",
   "agentbridge.memory.maxArchiveSnapshots.description": "Max IR snapshots to keep in the Context panel; the oldest beyond this limit are deleted.",
-  "agentbridge.refresh.title": "AgentBridge: Refresh Sessions and Usage"
+  "agentbridge.refresh.title": "AgentBridge: Refresh Sessions and Usage",
+  "agentbridge.htmlViewer.displayName": "AgentBridge HTML Viewer",
+  "agentbridge.openHtmlViewer.title": "AgentBridge: Open HTML Viewer",
+  "agentbridge.closeHtmlViewer.title": "AgentBridge: Back to Source"
 }

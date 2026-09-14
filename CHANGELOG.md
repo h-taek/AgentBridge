@@ -4,6 +4,17 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 <p align="center"><a href="https://github.com/h-taek/AgentBridge/blob/main/CHANGELOG.ko.md">한국어</a></p>
 
+## [0.8.0] — 2026-09-14
+
+### Added
+
+- **HTML viewer.** A button in the editor tab title bar switches an HTML file in the workspace between the source and the viewer. The view re-renders automatically when you edit the file, and it targets local HTML files rather than running development servers.
+- **HTML element feedback.** The agent mode toggle at the bottom turns it on. Hovering over an element on the page shows an overlay; click to capture the element, attach a note, and send it to the session you want. You pick that session inside the viewer.
+
+### Fixed
+
+- **Pending memory proposal badge lingering.** When pending long-term memory proposals were cleared, the numeric badge on the activity bar icon remained visible on screen. The badge now disappears when proposals reach zero.
+
 ## [0.7.0] — 2026-09-10
 
 ### Added
