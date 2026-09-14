@@ -8,7 +8,7 @@
 <h1 align="center">AgentBridge</h1>
 
 <p align="center">
-  <img alt="version 0.7.0" src="https://img.shields.io/badge/version-0.7.0-orange">
+  <img alt="version 0.8.0" src="https://img.shields.io/badge/version-0.8.0-orange">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-green.svg"></a>
   <img alt="macOS Apple Silicon" src="https://img.shields.io/badge/macOS-Apple%20Silicon-4493F8">
 </p>
@@ -77,6 +77,13 @@ Claude Code, Codex, Antigravity를 번갈아 쓰면 모델을 바꿀 때마다 �
 <p>역할이나 일하는 방식, 저장소의 관례처럼 오래 가는 것만 남긴다. 에이전트가 일하다 제안하고, 승인한 것만 기억이 된다.</p>
 </td>
 <td width="50%"><img src="packages/assets/readme/feature-memory.gif" alt="장기 기억 패널과 승인 대기 제안" /></td>
+</tr>
+<tr>
+<td width="50%">
+<h3>HTML 뷰어</h3>
+<p>에이전트가 만든 HTML 화면을 브라우저 없이 IDE 안에서 바로 본다. 화면 위 요소를 클릭해 메모를 붙여 세션으로 보낼 수 있다. 파일을 고치면 화면이 자동으로 다시 그려진다.</p>
+</td>
+<td width="50%"><img src="packages/assets/readme/feature-viewer.gif" alt="HTML 뷰어에서 요소를 선택해 피드백을 보내는 장면" /></td>
 </tr>
 </table>
 
