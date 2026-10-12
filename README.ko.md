@@ -146,6 +146,7 @@ VS Code 설정(`settings.json` 또는 설정 화면):
 | `agentbridge.refine.fixedCli` | `agy` | `fixed` 정책 고정 CLI |
 | `agentbridge.turns.assistantDetail` | `compact` | 턴 기록에 저장할 답변 양 |
 | `agentbridge.memory.maxArchiveSnapshots` | `15` | 보관할 이전 스냅샷 수 |
+| `agentbridge.session.confirmClose` | `true` | 작업 중인 세션 탭을 닫을 때 확인 |
 
 ## 데이터 위치
 

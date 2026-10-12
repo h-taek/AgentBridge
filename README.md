@@ -146,6 +146,7 @@ VS Code settings (`settings.json` or the settings UI):
 | `agentbridge.refine.fixedCli` | `agy` | CLI pinned under the `fixed` policy |
 | `agentbridge.turns.assistantDetail` | `compact` | How much of each answer to keep in the turn record |
 | `agentbridge.memory.maxArchiveSnapshots` | `15` | How many previous snapshots to keep |
+| `agentbridge.session.confirmClose` | `true` | Ask before closing a session tab that is still working |
 
 ## Where data lives
 
