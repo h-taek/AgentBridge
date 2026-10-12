@@ -4,6 +4,25 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 <p align="center"><a href="https://github.com/h-taek/AgentBridge/blob/main/CHANGELOG.ko.md">한국어</a></p>
 
+## [0.8.1] — 2026-10-12
+
+### Changed
+
+- **HTML viewer agent mode Shift-click.** Agent mode controls now include Shift-clicking to pass a regular click to the page instead of selecting an element. You can open menus or follow links without leaving agent mode, then select elements in that state.
+- **HTML viewer agent mode stepwise Esc.** Esc handling in agent mode now steps back one level at a time — closing the session picker modal, then the inline panel, and finally agent mode. This behaves the same even after clicking inside the page.
+- **HTML viewer agent mode re-rendering.** While in agent mode, file changes no longer re-render the view immediately and only display "New version available". The update applies when exiting agent mode so that state created by interacting with the page is not lost; previously, re-renders were deferred only while the inline panel was open.
+- **Session close confirmation dialog.** The confirmation dialog when closing a working session tab now has two buttons: Close and Cancel. Pressing Cancel (or Esc) keeps the session running and restores the tab to its exact previous location — the same column, width, and tab order.
+- **Session close confirmation setting.** Disabling the confirmation dialog was moved from the dialog button to a new setting, `agentbridge.session.confirmClose` (enabled by default). It controls whether to show a confirmation dialog when closing a working session tab.
+- **Long-term memory recording criteria.** The agent is now instructed every turn to record into AgentBridge instead of the harness's own memory (such as Claude Code's memory folder), saving only what remains valid in different tasks weeks later while omitting current task workarounds or one-off corrections. User knowledge and project knowledge are divided by whether the rule still holds after removing project-specific names (files, screens, tools, people, numbers) — with most going to project knowledge.
+
+### Removed
+
+- **Close confirmation button and command.** The "Close and stop asking" button in the confirmation dialog and the command `AgentBridge: Ask Again Before Closing a Working Session` were removed. Even if confirmation was previously disabled per repository, the dialog will appear again — use the setting to turn it off.
+
+### Fixed
+
+- **Session terminating on close cancellation.** When closing a working session tab, clicking Cancel in the confirmation dialog previously terminated the session. Canceling now no longer closes the session.
+
 ## [0.8.0] — 2026-09-14
 
 ### Added

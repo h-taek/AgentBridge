@@ -2,7 +2,7 @@
   "name": "agentbridge",
   "displayName": "AgentBridge",
   "description": "%extension.description%",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "publisher": "h-taek",
   "license": "MIT",
   "repository": {
