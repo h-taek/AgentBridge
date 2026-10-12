@@ -23,7 +23,7 @@ import { quoteCommandLine } from '../shared/shellQuote';
 import type { SpawnOptions } from '../pty/types';
 import { createGroupLocker, type GroupLocker } from './groupLock';
 import { decideClose } from './closeConfirm';
-import { getWorkspaceStore } from '../core/coreInstances';
+import { locate, planRestore, sameSpot, type GroupSnapshot, type Place } from './panelPlace';
 
 const activePanels = new Map<string, ChatPanel>();
 const MAX_TAB_TITLE_LENGTH = 11;
@@ -36,6 +36,18 @@ let shuttingDown = false;
 export function markShuttingDown(): void {
   shuttingDown = true;
 }
+
+// 그룹 포커스 명령. n번째 그룹에 포커스를 준 뒤 그 옆에 빈 그룹을 끼운다(0.8.0 spec/02 §2).
+const FOCUS_GROUP = [
+  'workbench.action.focusFirstEditorGroup',
+  'workbench.action.focusSecondEditorGroup',
+  'workbench.action.focusThirdEditorGroup',
+  'workbench.action.focusFourthEditorGroup',
+  'workbench.action.focusFifthEditorGroup',
+  'workbench.action.focusSixthEditorGroup',
+  'workbench.action.focusSeventhEditorGroup',
+  'workbench.action.focusEighthEditorGroup',
+];
 
 function tabTitle(title: string): string {
   return title.length > MAX_TAB_TITLE_LENGTH ? title.substring(0, MAX_TAB_TITLE_LENGTH) + '…' : title;
@@ -75,6 +87,10 @@ export class ChatPanel {
   // 이 패널이 새 AB 컬럼을 만들며 생성됐는지 — 그룹 자동 잠금은 이때만 수행한다.
   // (기존 AB 그룹에 합류하거나 IDE 재시작 복원되는 패널은 잠금에 손대지 않는다.)
   private readonly shouldLock: boolean;
+  // 탭이 지금 열려 있는가. 닫기 확인을 기다리는 동안은 닫혀 있다 — 그 사이 패널을 건드리면 안 된다.
+  private panelOpen = true;
+  // 닫히기 직전 자리. 닫기를 취소하면 여기로 되살린다 (0.8.0 spec/02 §2).
+  private place: Place | undefined;
 
   markDeleted(): void {
     this.deletedExternally = true;
@@ -174,6 +190,68 @@ export class ChatPanel {
     });
     if (opts.sessionId) activePanels.set(opts.sessionId, this);
     this.wirePanel();
+    ChatPanel.track(this);
+  }
+
+  // ─── 닫히기 직전 자리 기록 (0.8.0 spec/02 §2) ────────────────────────
+  //
+  // 닫힌 뒤에는 자리가 이미 사라져 있으므로 미리 들고 있어야 한다. 탭·그룹이 바뀔 때 읽고, 넓이만
+  // 바꾸는 조작은 이벤트가 없어 1초마다 다시 읽는다(research/02 §3). 레이아웃은 창 하나에 하나라
+  // 패널마다 따로 돌지 않고 열린 채팅 패널 전부를 한 번에 갱신한다.
+  private static readonly tracked = new Set<ChatPanel>();
+  private static trackTimer: ReturnType<typeof setInterval> | undefined;
+  private static trackSubs: vscode.Disposable[] = [];
+
+  private static track(chat: ChatPanel): void {
+    ChatPanel.tracked.add(chat);
+    if (ChatPanel.trackTimer) return;
+    const record = () => void ChatPanel.recordPlaces();
+    ChatPanel.trackTimer = setInterval(record, 1000);
+    ChatPanel.trackSubs = [
+      vscode.window.tabGroups.onDidChangeTabs(record),
+      vscode.window.tabGroups.onDidChangeTabGroups(record),
+    ];
+    record();
+  }
+
+  private static untrack(chat: ChatPanel): void {
+    ChatPanel.tracked.delete(chat);
+    if (ChatPanel.tracked.size > 0 || !ChatPanel.trackTimer) return;
+    clearInterval(ChatPanel.trackTimer);
+    ChatPanel.trackTimer = undefined;
+    for (const d of ChatPanel.trackSubs) d.dispose();
+    ChatPanel.trackSubs = [];
+  }
+
+  private static snapshotGroups(): GroupSnapshot[] {
+    return vscode.window.tabGroups.all.map((g) => ({
+      column: g.viewColumn,
+      tabs: g.tabs.map((t) => ({
+        label: t.label,
+        chat: t.input instanceof vscode.TabInputWebview && t.input.viewType.includes('agentbridge.chat'),
+      })),
+    }));
+  }
+
+  // 레이아웃을 읽는 사이 탭이 닫히거나 옮겨질 수 있다. 앞뒤 자리가 같을 때만 남긴다 — 탭을 옮기면
+  // 닫힘과 열림이 따로 오므로 닫힘만 보고 기록을 멈추면 옛 자리로 되살린다.
+  private static async recordPlaces(): Promise<void> {
+    const open = [...ChatPanel.tracked].filter((c) => c.panelOpen);
+    if (open.length === 0) return;
+    const before = ChatPanel.snapshotGroups();
+    let layout: unknown;
+    try {
+      layout = await vscode.commands.executeCommand('vscode.getEditorLayout');
+    } catch {
+      return;
+    }
+    const after = ChatPanel.snapshotGroups();
+    for (const chat of open) {
+      if (!chat.panelOpen) continue;
+      const a = locate(before, chat.panel.title);
+      const b = locate(after, chat.panel.title);
+      if (a && sameSpot(a, b)) chat.place = { ...a, layout, groupCount: after.length };
+    }
   }
 
   // 패널 하나에 붙는 배선 전부. 생성자와 재부착(W8)이 같은 것을 쓴다 — 둘이 갈리면 다시 연
@@ -241,6 +319,7 @@ export class ChatPanel {
     });
 
     this.panel.onDidDispose(() => {
+      this.panelOpen = false;
       void this.onPanelClosed();
     });
 
@@ -293,52 +372,27 @@ export class ChatPanel {
       deletedExternally: this.deletedExternally,
       hasPty: !!this.ptyProcess,
       turnRunning,
-      askDisabled: turnRunning && (await this.isCloseConfirmDisabled()),
+      askDisabled: !vscode.workspace.getConfiguration('agentbridge').get<boolean>('session.confirmClose', true),
     });
     if (decision === 'close') {
       this.dispose();
       return;
     }
-    const keepLabel = vscode.l10n.t('Keep running');
-    const neverLabel = vscode.l10n.t('Close and stop asking');
+    // '닫기'를 첫 버튼으로 둬 IDE의 기본 버튼 색을 받는다. '취소'는 IDE가 붙이는 취소 자리를
+    // 대신해 Esc와 창 닫기도 '취소'가 된다 (0.8.0 spec/02 §1).
+    const closeItem: vscode.MessageItem = { title: vscode.l10n.t('Close') };
+    const cancelItem: vscode.MessageItem = { title: vscode.l10n.t('Cancel'), isCloseAffordance: true };
     const answer = await vscode.window.showWarningMessage(
       vscode.l10n.t('"{0}" is still working. Close it anyway?', this.opts.terminalName),
       { modal: true, detail: vscode.l10n.t('Closing ends the session and the turn in progress is lost.') },
-      keepLabel,
-      neverLabel,
+      closeItem,
+      cancelItem,
     );
-    if (answer === neverLabel) {
-      await this.setCloseConfirmDisabled();
+    if (answer === closeItem) {
       this.dispose();
       return;
     }
-    if (answer !== keepLabel) {
-      this.dispose();
-      return;
-    }
-    this.reattach();
-  }
-
-  // 이 레포에서 확인을 껐는가 (0.5.0 6단계). 값은 workspace.json에 있어 저장소마다 따로 간다.
-  // 못 읽으면 묻는 쪽으로 떨어진다 — 못 묻는 것이 잘못 닫는 것보다 낫다.
-  private async isCloseConfirmDisabled(): Promise<boolean> {
-    const { workspaceId } = this.opts;
-    if (!workspaceId) return false;
-    try {
-      return (await getWorkspaceStore().loadWorkspace(workspaceId)).closeConfirmDisabled === true;
-    } catch {
-      return false;
-    }
-  }
-
-  private async setCloseConfirmDisabled(): Promise<void> {
-    const { workspaceId } = this.opts;
-    if (!workspaceId) return;
-    try {
-      await getWorkspaceStore().updateWorkspaceMeta(workspaceId, { closeConfirmDisabled: true });
-    } catch (err) {
-      output.warn(`닫기 확인 끄기 저장 실패: ${String(err)}`);
-    }
+    await this.reattach();
   }
 
   // 상태 표시가 쓰는 판정을 그대로 쓴다 — 우리가 따로 매기는 값이 아니다.
@@ -356,19 +410,47 @@ export class ChatPanel {
 
   // 계속을 고른 경우. PTY는 아직 살아 있으므로 새 탭을 만들어 다시 붙인다. 화면은 웹뷰가
   // 준비되면 크기 신호로 하니스가 스스로 다시 그린다.
-  private reattach(): void {
+  // 닫히기 직전 자리에 다시 연다 (0.8.0 spec/02 §2). 확인 창이 떠 있던 동안 그룹 수는 이미 줄어
+  // 있다 — 닫힌 직후의 dispose 시점에는 아직 안 줄었을 때가 있다(research/02 §3).
+  private async reattach(): Promise<void> {
+    let plan = planRestore(this.place, vscode.window.tabGroups.all.length);
+    if (plan.kind === 'insert') {
+      try {
+        await vscode.commands.executeCommand(FOCUS_GROUP[plan.neighbor - 1]);
+        await vscode.commands.executeCommand(
+          plan.side === 'right' ? 'workbench.action.newGroupRight' : 'workbench.action.newGroupLeft',
+        );
+        await vscode.commands.executeCommand('vscode.setEditorLayout', plan.layout);
+      } catch (err) {
+        output.warn(`닫힌 자리 되살리기 실패, 원래 규칙으로 연다: ${String(err)}`);
+        plan = { kind: 'fallback' };
+      }
+    }
+    const column = plan.kind === 'fallback' ? ChatPanel.pickColumn().column : plan.column;
     this.panel = vscode.window.createWebviewPanel(
       'agentbridge.chat',
       tabTitle(this.opts.terminalName),
-      { viewColumn: ChatPanel.pickColumn().column, preserveFocus: false },
+      { viewColumn: column, preserveFocus: false },
       {
         enableScripts: true,
         retainContextWhenHidden: true,
         localResourceRoots: ChatPanel.localRoots(this.extensionUri),
       },
     );
+    this.panelOpen = true;
     this.wirePanel();
-    output.log(`ChatPanel 재부착: ${this.opts.sessionId?.slice(0, 8)}`);
+    try {
+      // 새로 연 탭이 활성이다. 순서를 되돌리는 것도 다시 만든 그룹을 잠그는 것도 활성 기준이다.
+      if (plan.kind === 'join') {
+        await vscode.commands.executeCommand('moveActiveEditor', { to: 'position', value: plan.index + 1 });
+      } else if (plan.kind === 'insert') {
+        // 그룹을 잠갔는지는 API로 읽을 수 없다. 다시 만든 그룹은 새 AB 컬럼처럼 잠근다.
+        await vscode.commands.executeCommand('workbench.action.lockEditorGroup');
+      }
+    } catch (err) {
+      output.warn(`다시 연 탭 자리 맞추기 실패: ${String(err)}`);
+    }
+    output.log(`ChatPanel 재부착(${plan.kind}): ${this.opts.sessionId?.slice(0, 8)}`);
   }
 
   // 크기 신호로 하니스가 화면 전체를 다시 그리게 한다. 같은 크기를 그대로 주면 신호가 안 가는
@@ -704,6 +786,7 @@ export class ChatPanel {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    ChatPanel.untrack(this);
 
     if (this.opts.sessionId) activePanels.delete(this.opts.sessionId);
 

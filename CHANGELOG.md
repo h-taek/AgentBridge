@@ -4,6 +4,18 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 <p align="center"><a href="https://github.com/h-taek/AgentBridge/blob/main/CHANGELOG.ko.md">한국어</a></p>
 
+## [0.8.1] — 2026-10-12
+
+### Changed
+
+- **HTML viewer agent mode.** Shift-click passes a normal click to the page, so you can open menus or follow links without leaving the mode. Esc backs out one step at a time — session picker, inline panel, then the mode. File changes are applied when you leave the mode.
+- **Closing a working session.** The dialog now has Close and Cancel. Cancel reopens the tab where it was, at the same width. The "Close and stop asking" button and its command are replaced by the `agentbridge.session.confirmClose` setting.
+- **Long-term memory recording.** Agents record into AgentBridge instead of their harness's own memory, and only what will still matter in later tasks. Most of it now goes to project knowledge.
+
+### Fixed
+
+- **Cancel closing the session.** Cancel in the close dialog ended the session.
+
 ## [0.8.0] — 2026-09-14
 
 ### Added

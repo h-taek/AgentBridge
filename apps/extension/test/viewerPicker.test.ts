@@ -23,6 +23,15 @@ describe('viewerPicker 산출물', () => {
     assert.match(readFileSync(out, 'utf8'), /\.origin !== \w+/);
   });
 
+  it('shift+클릭은 짚지 않고 Shift를 뺀 일반 클릭으로 다시 보낸다', () => {
+    const src = readFileSync(out, 'utf8');
+    // 원래 클릭은 막는다 — 그대로 두면 브라우저가 링크를 새 창으로 연다.
+    assert.match(src, /if \(e\.shiftKey\) \{\s*e\.preventDefault\(\);\s*e\.stopImmediatePropagation\(\);/);
+    assert.match(src, /dispatchEvent\(\s*new MouseEvent\("click"/);
+    // 다시 보낸 클릭이 이 리스너를 지날 때 짚지 않는다.
+    assert.match(src, /if \(!agent \|\| passing\) return;/);
+  });
+
   it('밖으로 보낼 때 targetOrigin을 준다', () => {
     assert.match(readFileSync(out, 'utf8'), /parent\.postMessage\(\w+, \w+\)/);
   });

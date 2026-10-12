@@ -8,7 +8,7 @@
 <h1 align="center">AgentBridge</h1>
 
 <p align="center">
-  <img alt="version 0.8.0" src="https://img.shields.io/badge/version-0.8.0-orange">
+  <img alt="version 0.8.1" src="https://img.shields.io/badge/version-0.8.1-orange">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-green.svg"></a>
   <img alt="macOS Apple Silicon" src="https://img.shields.io/badge/macOS-Apple%20Silicon-4493F8">
 </p>
@@ -146,6 +146,7 @@ VS Code 설정(`settings.json` 또는 설정 화면):
 | `agentbridge.refine.fixedCli` | `agy` | `fixed` 정책 고정 CLI |
 | `agentbridge.turns.assistantDetail` | `compact` | 턴 기록에 저장할 답변 양 |
 | `agentbridge.memory.maxArchiveSnapshots` | `15` | 보관할 이전 스냅샷 수 |
+| `agentbridge.session.confirmClose` | `true` | 작업 중인 세션 탭을 닫을 때 확인 |
 
 ## 데이터 위치
 

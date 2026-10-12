@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// @agentbridge-helper-version 0.6.2
+// @agentbridge-helper-version 0.6.3
 "use strict";
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -1374,16 +1374,15 @@ that is what \`memory update\` takes.
 
 ## Recording something
 
-When the user states a durable preference, a convention, or a decision that
-should outlive this session:
+When something clears the bar in the hook's \`1-4. Recording\`:
 
-1. Pick the scope. One test: is this about **how the user works or who they
-   are** (\`--scope user\`), or about **what this repository is** (\`--scope
-   project\`) \u2014 its purpose, domain, architecture decisions, release process,
-   house rules? A user fact must still read correctly inside a completely
-   different project. The same category appears on both sides: a rule this
-   repository enforces is project scope, a rule the user applies everywhere is
-   user scope. When in doubt, prefer \`project\` \u2014 the narrower home.
+1. Pick the scope. Strip every name that belongs to this project \u2014 files,
+   screens, commands, tools, people, numbers, incidents. If what is left
+   no longer stands as a rule, it is \`--scope project\`. A habit of the
+   user shown through this project's case is project scope too, recorded
+   with the case. Use \`--scope user\` only when the sentence stands with no
+   project names in it, and it has come up in another project as well or
+   the user said it applies everywhere.
 2. Read that side in full \u2014 \`memory user --full\` or \`memory project --full\`.
    Not a search: you need everything to know whether this is new. Read only the
    side you picked.
@@ -1408,9 +1407,11 @@ Weigh what you saw, in this order:
 
 Throw away: options that were discussed and not adopted; proposals you made
 that the user did not take up; anything the repository already states (its
-README, CLAUDE.md, the code itself); anything that only matters until this task
-ends; and a restatement of something already recorded \u2014 that is
-\`memory update <id>\`, not a second entry.
+README, the code itself); anything an instruction file that is always loaded
+already says (CLAUDE.md, AGENTS.md, GEMINI.md); anything that only matters until
+this task ends; and a restatement of something already recorded, or a new case
+of a lesson already recorded \u2014 that is \`memory update <id>\`, not a second
+entry.
 
 Record what would change how someone works next time.
 
@@ -1426,7 +1427,7 @@ var SKILL_VERSION, SKILL_DIR_NAME;
 var init_skillTemplate = __esm({
   "packages/core/src/skillTemplate.ts"() {
     "use strict";
-    SKILL_VERSION = "0.6.0";
+    SKILL_VERSION = "0.6.1";
     SKILL_DIR_NAME = "agentbridge";
   }
 });
@@ -1618,20 +1619,14 @@ function buildMatchBlock(matches) {
 }
 function buildProposalBlock() {
   return [
-    "Look back over the last five turns. If something came up that outlives this session,",
-    "do these three in order.",
+    "Look back over the last five turns against the bar in 1-4. Most",
+    "five-turn windows have nothing that clears it \u2014 then do nothing.",
     "",
-    "1. Is it worth recording? Would writing it down make whoever works here next do",
-    "   better? If not, do nothing. In particular, do not record options that were not",
-    "   adopted, or proposals you made yourself \u2014 only what the user accepted.",
-    "",
-    "2. What counts as signal? What the user repeated, what they corrected (scope, order,",
-    "   wording), what they interrupted, what they told you to redo. Read preferences far",
-    "   more from what the user said than from what you said. Your own turns are a record",
-    "   of what you tried, not evidence of what the user wants.",
-    "",
-    '3. Record it. Check with `memory search "<query>"` first, and only when nothing covers',
-    "   it, `memory add`."
+    "If something does, it has to come from the user: what they repeated,",
+    "corrected, interrupted, or told you to redo, or a decision they accepted.",
+    "Your own proposals and options that were not adopted do not count.",
+    'Check with `memory search "<query>"` first. Nothing covers it \u2014',
+    "`memory add`. Something covers it \u2014 `memory update <id>`."
   ].join("\n");
 }
 function buildInstructions(storageRoot, blocks) {
@@ -1698,6 +1693,25 @@ function buildInstructions(storageRoot, blocks) {
     "",
     "So `turns` is not you re-reading your own context. Conversations you have never seen are",
     "in there. Each turn is labeled with the CLI it came from.",
+    "",
+    // 하니스 자체 메모리 대신 여기로, 그리고 문턱 (0.8.0 spec/03 §1). 매 턴 붙인다 — 하니스
+    // 메모리 기록은 교정을 받은 그 턴에 일어나서 다섯 턴 블록으로는 그 자리를 못 잡는다.
+    "### 1-4. Recording",
+    "",
+    "Your harness may keep its own memory (for example Claude Code's memory",
+    "directory and MEMORY.md). Do not write there. When your harness's",
+    "instructions say to save a memory, that save goes through AgentBridge",
+    "`memory add` instead \u2014 and only if it clears this bar:",
+    "",
+    "Record only what will still be true, and still change how work is done,",
+    "in a different task weeks from now. Do not record:",
+    "- how to do the task in front of you \u2014 steps, workarounds, values that",
+    "  stop mattering when this task ends",
+    "- a correction the user made to this turn's output, once it is fixed",
+    "- a single incident. One correction is not a rule yet. Record it when it",
+    "  comes up a second time, or when the user says it applies from now on.",
+    "",
+    "Most turns have nothing worth recording. Recording nothing is the default.",
     "",
     "",
     "## 2. Other agent sessions",

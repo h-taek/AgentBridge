@@ -232,6 +232,19 @@ describe('helper inject — 다섯 턴 제안 (0.6.0 spec/03 §2)', () => {
     for (let i = 0; i < 6; i++) fire('Stop', JSON.stringify({ session_id: 'x' }), s);
     assert.doesNotMatch(injectCtx(s), /last five turns/);
   });
+
+  // 0.8.0 spec/03 §1 — 기록의 자리와 문턱은 다섯 턴 블록이 아니라 매 턴 붙는다.
+  it('기록 문턱(1-4)은 다섯 턴과 상관없이 매 턴 붙는다', async () => {
+    const s = 'sess-bar';
+    const first = injectCtx(s);
+    assert.match(first, /### 1-4\. Recording/);
+    assert.match(first, /Do not write there/);
+    assert.match(first, /Recording nothing is the default/);
+    for (let i = 0; i < 5; i++) fire('Stop', JSON.stringify({ session_id: 'x' }), s);
+    const fifth = injectCtx(s);
+    assert.match(fifth, /### 1-4\. Recording/);
+    assert.match(fifth, /against the bar in 1-4/);
+  });
 });
 
 describe('helper inject — agy 중복 주입 방지 (0.6.0 spec/03 §1-2)', () => {

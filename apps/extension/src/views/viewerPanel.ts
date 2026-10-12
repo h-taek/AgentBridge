@@ -39,7 +39,7 @@ interface FromWebview {
   sessionId?: string;
   el?: PickedElement;
   note?: string;
-  open?: boolean;
+  on?: boolean;
 }
 
 // 웹뷰가 로드하는 이미지. 모델 로고는 세션 목록·탭이 쓰는 것과 같은 파일이다.
@@ -107,7 +107,7 @@ class Viewer {
   private watch: ViewerWatch | undefined;
   private disposed = false;
   private started = false;
-  private panelOpen = false;
+  private agentMode = false;
   private pendingReload = false;
   private sessions: ViewerSession[] = [];
   // 선택창이 열려 있는 동안만 도는 목록 갱신. 세션은 다른 탭에서 아무 때나 생기고 닫히는데
@@ -236,10 +236,10 @@ class Viewer {
         // 페이지가 부른 파일이 이제 서버에 기록돼 있다. 감시 대상은 서빙 루트가 아니라 이 집합이다.
         if (this.server) this.watch?.update(this.server.servedFiles());
         return;
-      case 'panel':
-        this.panelOpen = !!msg.open;
-        // 패널이 열려 있는 동안 미뤄 둔 갱신은 접힐 때 적용한다(spec 3.4).
-        if (!this.panelOpen && this.pendingReload) {
+      case 'mode':
+        this.agentMode = !!msg.on;
+        // 에이전트 모드 동안 미뤄 둔 갱신은 모드를 나갈 때 적용한다(0.8.0 spec/01 §3).
+        if (!this.agentMode && this.pendingReload) {
           this.pendingReload = false;
           this.post({ t: 'reload' });
         }
@@ -326,8 +326,9 @@ class Viewer {
       this.setState('missing', path.basename(this.uri.fsPath));
       return;
     }
-    if (this.panelOpen) {
-      // 사용자가 글을 쓰는 중이다. 지금 다시 그리면 쓰던 글과 짚은 요소가 함께 사라진다.
+    if (this.agentMode) {
+      // 사용자가 페이지를 조작해 만든 상태 위에서 짚는 중이다. 지금 다시 그리면 그 상태와 쓰던
+      // 글, 짚은 요소가 함께 사라진다.
       this.pendingReload = true;
       this.post({ t: 'stale' });
       return;
@@ -637,7 +638,6 @@ if (!SERVER_ORIGIN) {
 
   const setPanel = (open) => {
     panel.hidden = !open;
-    vs.postMessage({ t: 'panel', open: open });
     if (!open) {
       picked = null; note.value = ''; warn.hidden = true; closePicker();
       detail.hidden = true; more.classList.remove('open');
@@ -650,6 +650,7 @@ if (!SERVER_ORIGIN) {
     sw.classList.toggle('on', on);
     bar.classList.toggle('on', on);
     toFrame({ ab: 'mode', mode: on ? 'agent' : 'read' });
+    vs.postMessage({ t: 'mode', on: on });
     if (!on) setPanel(false);
   };
 
@@ -734,17 +735,22 @@ if (!SERVER_ORIGIN) {
   });
   note.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send.click(); }
-    if (e.key === 'Escape') setPanel(false);
   });
   scrim.addEventListener('click', (e) => { if (e.target === scrim) closePicker(); });
   document.addEventListener('click', (e) => {
     if (picker === 'drop' && !drop.contains(e.target) && !pickbtn.contains(e.target)) closePicker();
     if (!panel.hidden && !panel.contains(e.target) && e.target !== sw) setPanel(false);
   });
-  document.addEventListener('keydown', (e) => {
-    if (e.key !== 'Escape') return;
+  // Esc는 한 번에 한 겹만 닫는다 — 선택 창, 패널, 에이전트 모드 순(0.8.0 spec/01 §2). 페이지 안의
+  // Esc는 짚기 스크립트가 넘겨 같은 자리로 온다. 입력칸의 Esc도 여기서만 처리한다 — 입력칸이
+  // 따로 패널을 접으면 같은 키가 올라와 모드까지 끈다.
+  const escape = () => {
     if (picker) closePicker();
     else if (!panel.hidden) setPanel(false);
+    else if (agent) setMode(false);
+  };
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') escape();
   });
 
   window.addEventListener('message', (e) => {
@@ -799,8 +805,8 @@ if (!SERVER_ORIGIN) {
       note.focus();
     } else if (d.ab === 'rect') {
       if (!panel.hidden) place(d.rect);
-    } else if (d.ab === 'dismiss') {
-      setPanel(false);
+    } else if (d.ab === 'escape') {
+      escape();
     }
   });
 }

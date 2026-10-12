@@ -8,7 +8,7 @@
 <h1 align="center">AgentBridge</h1>
 
 <p align="center">
-  <img alt="version 0.8.0" src="https://img.shields.io/badge/version-0.8.0-orange">
+  <img alt="version 0.8.1" src="https://img.shields.io/badge/version-0.8.1-orange">
   <a href="https://github.com/h-taek/AgentBridge/blob/main/LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-green.svg"></a>
   <img alt="macOS Apple Silicon" src="https://img.shields.io/badge/macOS-Apple%20Silicon-4493F8">
 </p>
@@ -146,6 +146,7 @@ VS Code settings (`settings.json` or the settings UI):
 | `agentbridge.refine.fixedCli` | `agy` | CLI pinned under the `fixed` policy |
 | `agentbridge.turns.assistantDetail` | `compact` | How much of each answer to keep in the turn record |
 | `agentbridge.memory.maxArchiveSnapshots` | `15` | How many previous snapshots to keep |
+| `agentbridge.session.confirmClose` | `true` | Ask before closing a session tab that is still working |
 
 ## Where data lives
 

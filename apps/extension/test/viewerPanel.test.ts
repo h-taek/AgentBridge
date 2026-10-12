@@ -133,9 +133,18 @@ describe('views/viewerPanel HTML', () => {
     assert.match(scriptBody(build(51234)), /if \(d\.ok\) setPanel\(false\);/);
   });
 
-  it('인라인 패널의 열림 상태를 익스텐션에 알린다', () => {
-    // 패널이 열려 있는 동안 다시 그리기를 미루는 판정이 이 신호에 걸려 있다.
-    assert.match(scriptBody(build(51234)), /t: 'panel', open: open/);
+  it('에이전트 모드 여부를 익스텐션에 알린다', () => {
+    // 모드 동안 다시 그리기를 미루는 판정이 이 신호에 걸려 있다(0.8.0 spec/01 §3).
+    assert.match(scriptBody(build(51234)), /t: 'mode', on: on/);
+  });
+
+  it('Esc는 선택 창, 패널, 에이전트 모드 순으로 한 겹만 닫는다', () => {
+    const body = scriptBody(build(51234));
+    assert.match(body, /if \(picker\) closePicker\(\);\s*else if \(!panel\.hidden\) setPanel\(false\);\s*else if \(agent\) setMode\(false\);/);
+    // 페이지 안의 Esc도 같은 자리로 온다.
+    assert.match(body, /ab === 'escape'\) \{\s*escape\(\);/);
+    // 입력칸이 따로 패널을 접지 않는다 — 접으면 같은 키가 올라와 모드까지 끈다.
+    assert.doesNotMatch(body, /note\.addEventListener\('keydown'[^}]*Escape/);
   });
 
   it('상태 화면의 재시도가 익스텐션에 닿는다', () => {

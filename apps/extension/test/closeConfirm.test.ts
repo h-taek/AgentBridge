@@ -34,7 +34,7 @@ describe('closeConfirm', () => {
     assert.equal(decideClose({ ...base, hasPty: false }), 'close');
   });
 
-  it('사용자가 이 레포에서 껐으면 도는 중이어도 안 묻는다', () => {
+  it('사용자가 설정에서 껐으면 도는 중이어도 안 묻는다', () => {
     assert.equal(decideClose({ ...base, askDisabled: true }), 'close');
   });
 });

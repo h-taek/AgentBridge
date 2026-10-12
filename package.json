@@ -2,7 +2,7 @@
   "name": "agentbridge",
   "displayName": "AgentBridge",
   "description": "%extension.description%",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "publisher": "h-taek",
   "license": "MIT",
   "repository": {
@@ -108,10 +108,6 @@
         "command": "agentbridge.selectSession",
         "title": "%agentbridge.selectSession.title%",
         "icon": "$(history)"
-      },
-      {
-        "command": "agentbridge.enableCloseConfirm",
-        "title": "%agentbridge.enableCloseConfirm.title%"
       },
       {
         "command": "agentbridge.refresh",
@@ -240,6 +236,11 @@
           "minimum": 5,
           "maximum": 100,
           "description": "%agentbridge.memory.maxArchiveSnapshots.description%"
+        },
+        "agentbridge.session.confirmClose": {
+          "type": "boolean",
+          "default": true,
+          "description": "%agentbridge.session.confirmClose.description%"
         }
       }
     },

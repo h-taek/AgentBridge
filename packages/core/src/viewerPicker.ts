@@ -13,6 +13,8 @@
   document.documentElement.appendChild(host);
 
   let agent = false;
+  // shift+클릭 대신 보낸 클릭이 이 리스너를 다시 지나는 동안 켠다. 안 켜면 그 클릭을 짚는다.
+  let passing = false;
   let picked: Element | null = null;
   let hover: Element | null = null;
 
@@ -109,7 +111,35 @@
   addEventListener(
     'click',
     (e) => {
-      if (!agent) return;
+      if (!agent || passing) return;
+      // shift+클릭은 짚지 않고 페이지의 일반 클릭으로 보낸다 — 메뉴를 열어야 보이는 요소를 짚으려면
+      // 페이지를 조작할 수 있어야 한다(0.8.0 spec/01 §1). 그대로 흘리면 브라우저가 링크의
+      // shift+클릭을 새 창 열기로 읽으므로, 원래 클릭은 막고 Shift를 뺀 클릭을 같은 요소에 다시 보낸다.
+      if (e.shiftKey) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        passing = true;
+        try {
+          e.target?.dispatchEvent(
+            new MouseEvent('click', {
+              bubbles: true,
+              cancelable: true,
+              composed: true,
+              view: window,
+              detail: e.detail,
+              screenX: e.screenX,
+              screenY: e.screenY,
+              clientX: e.clientX,
+              clientY: e.clientY,
+              button: e.button,
+              buttons: e.buttons,
+            }),
+          );
+        } finally {
+          passing = false;
+        }
+        return;
+      }
       e.preventDefault();
       e.stopPropagation();
       picked = e.target as Element;
@@ -121,7 +151,8 @@
   addEventListener(
     'keydown',
     (e) => {
-      if (agent && e.key === 'Escape') send({ ab: 'dismiss' });
+      // 무엇을 닫을지는 밖이 정한다. 여기서는 키가 눌렸다는 것만 넘긴다.
+      if (agent && e.key === 'Escape') send({ ab: 'escape' });
     },
     true,
   );
