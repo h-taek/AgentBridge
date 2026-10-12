@@ -12,7 +12,7 @@ export interface CloseInput {
   deletedExternally: boolean;
   hasPty: boolean;
   turnRunning: boolean;
-  // 사용자가 이 레포에서 확인을 껐다. workspace.json에 남는다.
+  // 사용자가 설정(`agentbridge.session.confirmClose`)에서 확인을 껐다 (0.8.0 spec/02 §3).
   askDisabled: boolean;
 }
 

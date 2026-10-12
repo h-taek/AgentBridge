@@ -24,7 +24,7 @@
 
 'use strict'
 
-// @agentbridge-helper-version 0.6.2
+// @agentbridge-helper-version 0.6.3
 // (단일 설치 버전 비교용 — 이 파일을 수정하면 반드시 버전을 올릴 것)
 
 const fs = require('fs')
@@ -299,23 +299,18 @@ function buildMatchBlock(matches) {
   return lines.join('\n')
 }
 
-// 다섯 턴마다 기록을 명령한다 (spec §2-2). 조건이 걸리기를 기다리지 않는다.
+// 다섯 턴마다 기록할 것이 있었는지 점검하게 한다 (0.8.0 spec/03 §2). 기록을 시키지 않는다 —
+// 기준은 매 턴 붙는 1-4에 있고, 이 블록은 그 기준으로 돌아보라는 것뿐이다.
 function buildProposalBlock() {
   return [
-    'Look back over the last five turns. If something came up that outlives this session,',
-    'do these three in order.',
+    'Look back over the last five turns against the bar in 1-4. Most',
+    'five-turn windows have nothing that clears it — then do nothing.',
     '',
-    '1. Is it worth recording? Would writing it down make whoever works here next do',
-    '   better? If not, do nothing. In particular, do not record options that were not',
-    '   adopted, or proposals you made yourself — only what the user accepted.',
-    '',
-    '2. What counts as signal? What the user repeated, what they corrected (scope, order,',
-    '   wording), what they interrupted, what they told you to redo. Read preferences far',
-    '   more from what the user said than from what you said. Your own turns are a record',
-    '   of what you tried, not evidence of what the user wants.',
-    '',
-    '3. Record it. Check with `memory search "<query>"` first, and only when nothing covers',
-    '   it, `memory add`.'
+    'If something does, it has to come from the user: what they repeated,',
+    'corrected, interrupted, or told you to redo, or a decision they accepted.',
+    'Your own proposals and options that were not adopted do not count.',
+    'Check with `memory search "<query>"` first. Nothing covers it —',
+    '`memory add`. Something covers it — `memory update <id>`.'
   ].join('\n')
 }
 
@@ -387,6 +382,25 @@ function buildInstructions(storageRoot, blocks) {
     '',
     'So `turns` is not you re-reading your own context. Conversations you have never seen are',
     'in there. Each turn is labeled with the CLI it came from.',
+    '',
+    // 하니스 자체 메모리 대신 여기로, 그리고 문턱 (0.8.0 spec/03 §1). 매 턴 붙인다 — 하니스
+    // 메모리 기록은 교정을 받은 그 턴에 일어나서 다섯 턴 블록으로는 그 자리를 못 잡는다.
+    '### 1-4. Recording',
+    '',
+    "Your harness may keep its own memory (for example Claude Code's memory",
+    'directory and MEMORY.md). Do not write there. When your harness\'s',
+    'instructions say to save a memory, that save goes through AgentBridge',
+    '`memory add` instead — and only if it clears this bar:',
+    '',
+    'Record only what will still be true, and still change how work is done,',
+    'in a different task weeks from now. Do not record:',
+    '- how to do the task in front of you — steps, workarounds, values that',
+    '  stop mattering when this task ends',
+    "- a correction the user made to this turn's output, once it is fixed",
+    '- a single incident. One correction is not a rule yet. Record it when it',
+    '  comes up a second time, or when the user says it applies from now on.',
+    '',
+    'Most turns have nothing worth recording. Recording nothing is the default.',
     '',
     '',
     '## 2. Other agent sessions',

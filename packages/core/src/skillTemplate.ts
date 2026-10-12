@@ -11,7 +11,7 @@
 //
 // `uninstall`은 싣지 않는다. 사용자 명령이지 에이전트 명령이 아니다.
 
-export const SKILL_VERSION = '0.6.0';
+export const SKILL_VERSION = '0.6.1';
 export const SKILL_DIR_NAME = 'agentbridge';
 
 // 셸에서 그대로 쓸 수 있게 공백 있는 경로를 감싼다.
@@ -147,16 +147,15 @@ that is what \`memory update\` takes.
 
 ## Recording something
 
-When the user states a durable preference, a convention, or a decision that
-should outlive this session:
+When something clears the bar in the hook's \`1-4. Recording\`:
 
-1. Pick the scope. One test: is this about **how the user works or who they
-   are** (\`--scope user\`), or about **what this repository is** (\`--scope
-   project\`) — its purpose, domain, architecture decisions, release process,
-   house rules? A user fact must still read correctly inside a completely
-   different project. The same category appears on both sides: a rule this
-   repository enforces is project scope, a rule the user applies everywhere is
-   user scope. When in doubt, prefer \`project\` — the narrower home.
+1. Pick the scope. Strip every name that belongs to this project — files,
+   screens, commands, tools, people, numbers, incidents. If what is left
+   no longer stands as a rule, it is \`--scope project\`. A habit of the
+   user shown through this project's case is project scope too, recorded
+   with the case. Use \`--scope user\` only when the sentence stands with no
+   project names in it, and it has come up in another project as well or
+   the user said it applies everywhere.
 2. Read that side in full — \`memory user --full\` or \`memory project --full\`.
    Not a search: you need everything to know whether this is new. Read only the
    side you picked.
@@ -181,9 +180,11 @@ Weigh what you saw, in this order:
 
 Throw away: options that were discussed and not adopted; proposals you made
 that the user did not take up; anything the repository already states (its
-README, CLAUDE.md, the code itself); anything that only matters until this task
-ends; and a restatement of something already recorded — that is
-\`memory update <id>\`, not a second entry.
+README, the code itself); anything an instruction file that is always loaded
+already says (CLAUDE.md, AGENTS.md, GEMINI.md); anything that only matters until
+this task ends; and a restatement of something already recorded, or a new case
+of a lesson already recorded — that is \`memory update <id>\`, not a second
+entry.
 
 Record what would change how someone works next time.
 

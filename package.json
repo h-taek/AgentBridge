@@ -110,10 +110,6 @@
         "icon": "$(history)"
       },
       {
-        "command": "agentbridge.enableCloseConfirm",
-        "title": "%agentbridge.enableCloseConfirm.title%"
-      },
-      {
         "command": "agentbridge.refresh",
         "title": "%agentbridge.refresh.title%",
         "icon": "$(refresh)"
@@ -240,6 +236,11 @@
           "minimum": 5,
           "maximum": 100,
           "description": "%agentbridge.memory.maxArchiveSnapshots.description%"
+        },
+        "agentbridge.session.confirmClose": {
+          "type": "boolean",
+          "default": true,
+          "description": "%agentbridge.session.confirmClose.description%"
         }
       }
     },
