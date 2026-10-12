@@ -48,9 +48,6 @@
   "Project": "Project",
   "\"{0}\" is still working. Close it anyway?": "\"{0}\" is still working. Close it anyway?",
   "Closing ends the session and the turn in progress is lost.": "Closing ends the session and the turn in progress is lost.",
-  "Keep running": "Keep running",
-  "Close and stop asking": "Close and stop asking",
-  "AgentBridge: Will ask again before closing a session that is still working.": "AgentBridge: Will ask again before closing a session that is still working.",
   "Resets in {0}": "Resets in {0}",
   "{0}d {1}h": "{0}d {1}h",
   "{0}h {1}m": "{0}h {1}m",
@@ -78,6 +75,7 @@
   "File not found: {0}": "File not found: {0}",
   "Retry": "Retry",
   "Close": "Close",
+  "Cancel": "Cancel",
   "Session is not running": "Session is not running",
   "Could not send to that session": "Could not send to that session",
   "Failed to start viewer server": "Failed to start viewer server"
