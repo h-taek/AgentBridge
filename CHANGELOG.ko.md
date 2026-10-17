@@ -2,6 +2,12 @@
 
 이 프로젝트는 [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/) 1.1.0 형식을 따르며 [Semantic Versioning](https://semver.org/spec/v2.0.0.html)을 사용한다.
 
+## [0.8.2] — 2026-10-17
+
+### Fixed
+
+- **Antigravity 잔량이 사라지던 문제.** Antigravity 쪽 변경 이후 Sessions 헤더 아래 Antigravity 아이콘에 잔량이 표시되지 않던 문제를 고쳤다. 5시간·주간 잔량이 다시 표시된다.
+
 ## [0.8.1] — 2026-10-12
 
 ### Changed
