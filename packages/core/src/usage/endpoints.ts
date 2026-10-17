@@ -1,7 +1,8 @@
 // 사용량 엔드포인트의 요청 명세. 순수 함수라 네트워크를 건드리지 않는다.
 //
 // 세 요청 모두 해당 CLI가 실제로 보내는 헤더를 그대로 보낸다. 헤더가 게이트라 지어내면 막힌다 —
-// agy는 User-Agent에 'antigravity' 부분문자열이 없으면 403이 난다(research/01 §4).
+// agy는 User-Agent에 'antigravity' 부분문자열이 없으면 403이 난다(research/01 §4). 형식도 본다 —
+// 옛 형식(`antigravity-cli/…`)은 200을 받지만 Gemini 그룹이 빠진 채 온다(0.8.1 research/01).
 // 벤더 UA는 상수로 두고, 벤더가 바꾸면 우리도 따라 바꾼다.
 
 import type { CliKind } from '../shared/cli';
@@ -36,7 +37,7 @@ const AGY_DEFAULT_BASE_URL = 'https://daily-cloudcode-pa.googleapis.com';
 const USER_AGENT: Record<CliKind, string> = {
   claude: 'claude-code/2.1.0',
   codex: 'codex-cli',
-  agy: 'antigravity-cli/1.1.27 (darwin; arm64)',
+  agy: 'antigravity/cli/1.4.0',
 };
 
 export function buildUsageRequest(cli: CliKind, input: UsageRequestInput): UsageRequest {

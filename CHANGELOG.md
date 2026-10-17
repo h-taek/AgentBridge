@@ -4,6 +4,12 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 <p align="center"><a href="https://github.com/h-taek/AgentBridge/blob/main/CHANGELOG.ko.md">한국어</a></p>
 
+## [0.8.2] — 2026-10-17
+
+### Fixed
+
+- **Antigravity quota missing.** After a change on Antigravity's side, the Antigravity icon under the Sessions header stopped showing its remaining quota. The 5-hour and weekly quota show again.
+
 ## [0.8.1] — 2026-10-12
 
 ### Changed

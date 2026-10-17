@@ -77,6 +77,12 @@ describe('usage/endpoints', () => {
       assert.match(req.headers['User-Agent'], /antigravity/);
     });
 
+    // 옛 형식(`antigravity-cli/…`)도 200을 받지만 Gemini 그룹이 빠진 채 온다. 값이 비어도
+    // 오류가 안 나는 종류의 고장이라 형식을 박아 둔다(0.8.1 research/01).
+    it("User-Agent는 agy와 같은 'antigravity/cli/' 형식이다", () => {
+      assert.match(req.headers['User-Agent'], /^antigravity\/cli\//);
+    });
+
     // 설치본이 CLOUD_CODE_URL로 백엔드를 바꿔 놓았으면 우리도 따라간다. 우리가 보는 사용량과
     // CLI가 보는 사용량이 갈리면 안 된다.
     it('baseUrl을 주면 그 호스트로 간다', () => {
