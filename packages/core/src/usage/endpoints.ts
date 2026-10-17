@@ -2,7 +2,7 @@
 //
 // 세 요청 모두 해당 CLI가 실제로 보내는 헤더를 그대로 보낸다. 헤더가 게이트라 지어내면 막힌다 —
 // agy는 User-Agent에 'antigravity' 부분문자열이 없으면 403이 난다(research/01 §4). 형식도 본다 —
-// 옛 형식(`antigravity-cli/…`)은 200을 받지만 Gemini 그룹이 빠진 채 온다(0.8.1 research/01).
+// 옛 형식(`antigravity-cli/…`)은 200을 받지만 Gemini 그룹이 빠진 채 온다(0.8.0 research/03).
 // 벤더 UA는 상수로 두고, 벤더가 바꾸면 우리도 따라 바꾼다.
 
 import type { CliKind } from '../shared/cli';
