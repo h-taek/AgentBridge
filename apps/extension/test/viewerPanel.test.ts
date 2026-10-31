@@ -192,4 +192,9 @@ describe('views/viewerPanel HTML', () => {
       scriptBody(build(51234)),
       /history\.(back|forward|go)\(|navigation\.(back|forward|traverseTo)\(/,
     ));
+  it('좁을 때 새 버전 있음은 글자를 숨기고 마우스오버로 남긴다', () => {
+    const doc = build(51234);
+    assert.match(doc, /<span id="fresh" title="[^"]+" hidden>&#10003; <b>/);
+    assert.match(doc, /#bar\.narrower #fresh b\{display:none\}/);
+  });
 });

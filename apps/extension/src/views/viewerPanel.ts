@@ -502,8 +502,10 @@ export function buildViewerHtml(
   #lab{font-size:11.5px;color:var(--dim);flex-shrink:0}
   #bar.on #lab{color:var(--fg)}
   #bar.narrow #lab{display:none}
+  #bar.narrower #fresh b{display:none}
   #sp{flex:1}
   #fresh{display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--ok);flex-shrink:0}
+  #fresh b{font-weight:400}
   #why{font-size:11px;color:var(--dim);min-width:0;overflow:hidden;text-overflow:ellipsis}
   #sess{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:var(--fg);min-width:0}
   #sess img{width:10.5px;height:10.5px;display:block;flex-shrink:0}
@@ -643,7 +645,7 @@ export function buildViewerHtml(
   <span id="sw" title="${escapeHtml(text.agent)}"><i></i></span><span id="lab">${escapeHtml(text.agent)}</span>
   <span id="sp"></span>
   <span id="why" hidden></span>
-  <span id="fresh" hidden>&#10003; ${escapeHtml(text.fresh)}</span>
+  <span id="fresh" title="${escapeHtml(text.fresh)}" hidden>&#10003; <b>${escapeHtml(text.fresh)}</b></span>
   <span id="sess" hidden><img alt=""/><b></b></span>
   <span class="zoom">
     <span id="zout" class="ib dis" title="${escapeHtml(text.zoomOut)}"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M4 8h8"/></svg></span>
@@ -704,6 +706,8 @@ if (!SERVER_ORIGIN) {
   const warn = $('warn'), send = $('send');
   const scrim = $('scrim'), list = $('list'), none = $('none');
 
+  // 세션 이름이 이 폭(px)보다 좁아지면 바가 모자란 것으로 본다. 한글 서너 자가 남는 폭이다.
+  const SESS_MIN = 48;
   let nav = { stack: [], idx: -1, off: false, expect: null };
   let z = 100;
   let ready = false;          // 짚기 스크립트가 떴다
@@ -719,9 +723,16 @@ if (!SERVER_ORIGIN) {
   const toFrame = (m) => { if (frame.contentWindow) frame.contentWindow.postMessage(m, SERVER_ORIGIN); };
   const logoOf = (model) => LOGO[model] || LOGO.claude;
 
+  // 좁으면 세션 이름이 먼저 말줄임으로 줄고, 이름이 거의 안 남으면 모드 글자를, 그래도 모자라면
+  // '새 버전 있음' 글자를 숨긴다(0.8.0 spec/04 §5). 세션 이름은 폭 0까지 줄어들어 넘침으로는
+  // 안 잡히므로 남은 폭도 함께 본다.
+  const sessName = sess.querySelector('b');
+  const squeezed = () =>
+    bar.scrollWidth > bar.clientWidth || (!sess.hidden && sessName.clientWidth < SESS_MIN);
   const fitBar = () => {
-    bar.classList.remove('narrow');
-    if (bar.scrollWidth > bar.clientWidth) bar.classList.add('narrow');
+    bar.classList.remove('narrow', 'narrower');
+    if (squeezed()) bar.classList.add('narrow');
+    if (squeezed()) bar.classList.add('narrower');
   };
 
   const drawBar = () => {
