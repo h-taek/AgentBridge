@@ -11,6 +11,7 @@ import { getSessions } from '../core/sessionRegistry';
 import * as workspaceStore from '../core/workspaceStore';
 import { candidateSessions, docRelativePath, type ViewerSession } from './viewerSessions';
 import { queueSend } from './viewerSend';
+import { navStep, navCan, zoomStep, parseZoom } from './viewerNav';
 
 // HTML 뷰어 (0.7.0 spec 3.1·3.4). 에이전트가 만든 로컬 HTML을 앱 안에서 보고, 요소를 짚어
 // 고른 세션에 되돌려준다.
@@ -429,6 +430,12 @@ export function buildViewerHtml(
     line: vscode.l10n.t('Line'),
     ancestor: vscode.l10n.t('(ancestor)'),
     noBridge: vscode.l10n.t('The viewer could not reach the extension.'),
+    back: vscode.l10n.t('Back'),
+    fwd: vscode.l10n.t('Forward'),
+    reload: vscode.l10n.t('Reload'),
+    zoomOut: vscode.l10n.t('Zoom out'),
+    zoomIn: vscode.l10n.t('Zoom in'),
+    zoom: vscode.l10n.t('Zoom: click to enter'),
   };
   return /*html*/ `<!DOCTYPE html>
 <html lang="en">
@@ -456,6 +463,7 @@ export function buildViewerHtml(
     --err: var(--vscode-errorForeground);
     --ok: var(--vscode-testing-iconPassed, #73c991);
     --pborder: var(--vscode-panel-border, rgba(128,128,128,.25));
+    --tbhover: var(--vscode-toolbar-hoverBackground);
     --pick: #ff8c00;
   }
   *{margin:0;padding:0;box-sizing:border-box}
@@ -464,13 +472,26 @@ export function buildViewerHtml(
     font-family:var(--vscode-font-family);font-size:13px}
   [hidden]{display:none !important}
 
-  #stage{position:relative;flex:1 1 auto;min-height:0}
-  #frame{width:100%;height:100%;border:0;display:block;background:#fff}
+  #stage{position:relative;flex:1 1 auto;min-height:0;overflow:hidden}
+  #frame{width:100%;height:100%;border:0;display:block;background:#fff;transform-origin:0 0}
 
   /* ── 하단 바 ── */
   #bar{display:flex;align-items:center;gap:9px;height:30px;padding:0 10px;
-    border-top:1px solid var(--pborder);flex-shrink:0}
-  #bar.lock{opacity:.55}
+    border-top:1px solid var(--pborder);flex-shrink:0;white-space:nowrap}
+  #bar.lock #sw,#bar.lock #lab{opacity:.55}
+  .nav,.zoom{display:inline-flex;align-items:center;gap:1px;flex-shrink:0}
+  .nav{margin-right:3px}
+  .ib{width:20px;height:20px;display:inline-flex;align-items:center;justify-content:center;
+    border-radius:4px;color:var(--fg);cursor:pointer}
+  .ib svg{width:14px;height:14px;display:block}
+  .ib:not(.dis):hover{background:var(--tbhover)}
+  .ib.dis,#pct.dis{opacity:.4;cursor:default}
+  #pct{font-size:11px;color:var(--fg);min-width:38px;text-align:center;padding:0 3px;
+    height:18px;line-height:16px;border:1px solid transparent;border-radius:3px;
+    font-variant-numeric:tabular-nums;cursor:pointer}
+  #pct.edit{background:var(--input);border-color:var(--focus);text-align:left;cursor:text}
+  #pct.edit input{width:30px;border:0;outline:none;background:transparent;color:var(--fg);
+    font:inherit;padding:0;margin:0}
   #sw{width:26px;height:14px;border-radius:999px;background:var(--input);
     border:1px solid var(--iborder);position:relative;flex-shrink:0;cursor:pointer}
   #sw i{position:absolute;top:1px;left:1px;width:10px;height:10px;border-radius:999px;
@@ -478,14 +499,15 @@ export function buildViewerHtml(
   #sw.on{background:var(--btn);border-color:var(--btn)}
   #sw.on i{left:13px;background:var(--btnfg)}
   #bar.lock #sw{cursor:default}
-  #lab{font-size:11.5px;color:var(--dim)}
+  #lab{font-size:11.5px;color:var(--dim);flex-shrink:0}
   #bar.on #lab{color:var(--fg)}
+  #bar.narrow #lab{display:none}
   #sp{flex:1}
-  #fresh{display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--ok)}
-  #why{font-size:11px;color:var(--dim)}
-  #sess{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:var(--fg)}
-  #sess img{width:10.5px;height:10.5px;display:block}
-  #sess b{font-weight:400}
+  #fresh{display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--ok);flex-shrink:0}
+  #why{font-size:11px;color:var(--dim);min-width:0;overflow:hidden;text-overflow:ellipsis}
+  #sess{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:var(--fg);min-width:0}
+  #sess img{width:10.5px;height:10.5px;display:block;flex-shrink:0}
+  #sess b{font-weight:400;min-width:0;overflow:hidden;text-overflow:ellipsis}
   #bar:not(.on) #sess{color:var(--dim);opacity:.75}
 
   /* ── 세션 선택 ── */
@@ -613,11 +635,21 @@ export function buildViewerHtml(
 </div>
 
 <div id="bar" class="lock">
-  <span id="sw"><i></i></span><span id="lab">${escapeHtml(text.agent)}</span>
+  <span class="nav">
+    <span id="back" class="ib dis" title="${escapeHtml(text.back)}"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3.5 5.5 8l4.5 4.5"/></svg></span>
+    <span id="fwd" class="ib dis" title="${escapeHtml(text.fwd)}"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3.5 10.5 8 6 12.5"/></svg></span>
+    <span id="reload" class="ib dis" title="${escapeHtml(text.reload)}"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12.6 9.2A4.8 4.8 0 1 1 11.4 4.4"/><path d="M12.2 2.4v2.6H9.6"/></svg></span>
+  </span>
+  <span id="sw" title="${escapeHtml(text.agent)}"><i></i></span><span id="lab">${escapeHtml(text.agent)}</span>
   <span id="sp"></span>
   <span id="why" hidden></span>
   <span id="fresh" hidden>&#10003; ${escapeHtml(text.fresh)}</span>
   <span id="sess" hidden><img alt=""/><b></b></span>
+  <span class="zoom">
+    <span id="zout" class="ib dis" title="${escapeHtml(text.zoomOut)}"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M4 8h8"/></svg></span>
+    <span id="pct" class="dis" title="${escapeHtml(text.zoom)}">100%</span>
+    <span id="zin" class="ib dis" title="${escapeHtml(text.zoomIn)}"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M4 8h8M8 4v8"/></svg></span>
+  </span>
 </div>
 
 <script nonce="${nonce}">
@@ -657,7 +689,14 @@ if (!SERVER_ORIGIN) {
   };
   announce();
 } else {
+  const navStep = (${navStep.toString()});
+  const navCan = (${navCan.toString()});
+  const zoomStep = (${zoomStep.toString()});
+  const parseZoom = (${parseZoom.toString()});
+
   const stage = $('stage'), frame = $('frame'), bar = $('bar'), sw = $('sw');
+  const back = $('back'), fwd = $('fwd'), reload = $('reload');
+  const zout = $('zout'), pct = $('pct'), zin = $('zin');
   const why = $('why'), fresh = $('fresh'), sess = $('sess');
   const panel = $('panel'), drop = $('drop'), pickbtn = $('pickbtn');
   const wholog = $('wholog'), whoname = $('whoname'), x = $('x');
@@ -665,29 +704,94 @@ if (!SERVER_ORIGIN) {
   const warn = $('warn'), send = $('send');
   const scrim = $('scrim'), list = $('list'), none = $('none');
 
+  let nav = { stack: [], idx: -1, off: false, expect: null };
+  let z = 100;
   let ready = false;          // 짚기 스크립트가 떴다
+  let gotReady = false;       // 이번 페이지 이동에서 준비 신호를 받았나
+  let offTimer = 0;
+  let pageState = 'loading';  // '' | 'loading' | 'missing' | 'serverError'
   let agent = false;
   let picked = null;          // { el, rect }
   let sessions = [];
   let sessionId = '';
   let picker = '';            // '' | 'modal' | 'drop' — 무엇이 열려 있나
-  const base = frame.src;
-
-  // 페이지가 떴으면 기동 화면을 걷는다. 짚기 스크립트가 안 와도 읽기는 돼야 한다 —
-  // 그 경우 토글만 잠긴 채로 남는다.
-  frame.addEventListener('load', () => { state.hidden = true; });
 
   const toFrame = (m) => { if (frame.contentWindow) frame.contentWindow.postMessage(m, SERVER_ORIGIN); };
   const logoOf = (model) => LOGO[model] || LOGO.claude;
 
+  const fitBar = () => {
+    bar.classList.remove('narrow');
+    if (bar.scrollWidth > bar.clientWidth) bar.classList.add('narrow');
+  };
+
+  const drawBar = () => {
+    const can = navCan(nav);
+    const live = state.hidden;
+    const lockNav = !panel.hidden;
+    back.classList.toggle('dis', lockNav || !can.back || (!live && pageState !== 'missing'));
+    fwd.classList.toggle('dis', !live || lockNav || !can.fwd);
+    reload.classList.toggle('dis', !live || lockNav || nav.off || !ready);
+    zout.classList.toggle('dis', !live || z <= 25);
+    pct.classList.toggle('dis', !live);
+    zin.classList.toggle('dis', !live || z >= 200);
+    if (!pct.classList.contains('edit')) pct.textContent = z + '%';
+    pct.title = Math.round(stage.clientWidth * 100 / z) + 'px';
+  };
+
+  const step = (ev) => {
+    const r = navStep(nav, ev);
+    nav = r.s;
+    if (r.replace && frame.contentWindow) {
+      gotReady = false;
+      clearTimeout(offTimer);
+      frame.contentWindow.location.replace(SERVER_ORIGIN + r.replace);
+    }
+    if (r.scrollTo !== undefined) {
+      toFrame({ ab: 'scroll', y: r.scrollTo });
+    }
+    drawBar();
+  };
+
+  const setZoom = (next) => {
+    z = next;
+    frame.style.width = 10000 / z + '%';
+    frame.style.height = 10000 / z + '%';
+    frame.style.transform = 'scale(' + z / 100 + ')';
+    if (!panel.hidden && picked) place(picked.rect);
+    drawBar();
+  };
+
+  // 페이지가 떴으면 기동 화면을 걷는다. 짚기 스크립트가 안 와도 읽기는 돼야 한다 —
+  // 이미지·404처럼 준비 신호가 끝내 안 오면 off 상태로 넘겨 뒤로만 열어 둔다.
+  frame.addEventListener('load', () => {
+    state.hidden = true;
+    pageState = '';
+    drawBar();
+    clearTimeout(offTimer);
+    offTimer = setTimeout(() => {
+      if (!gotReady) {
+        ready = false;
+        if (agent) setMode(false);
+        bar.classList.add('lock');
+        step({ k: 'off' });
+      }
+    }, 150);
+  });
+
+  const ro = new ResizeObserver(() => { fitBar(); drawBar(); });
+  ro.observe(bar);
+  ro.observe(stage);
+
   const drawSess = () => {
     const s = sessions.find((v) => v.sessionId === sessionId);
     sess.hidden = !s;
-    if (!s) return;
-    sess.querySelector('img').src = logoOf(s.model);
-    sess.querySelector('b').textContent = s.name;
-    wholog.src = logoOf(s.model);
-    whoname.textContent = s.name;
+    if (s) {
+      sess.querySelector('img').src = logoOf(s.model);
+      sess.querySelector('b').textContent = s.name;
+      wholog.src = logoOf(s.model);
+      whoname.textContent = s.name;
+    }
+    fitBar();
   };
 
   const setPanel = (open) => {
@@ -697,6 +801,7 @@ if (!SERVER_ORIGIN) {
       detail.hidden = true; more.classList.remove('open');
       send.disabled = false;
     }
+    drawBar();
   };
 
   const setMode = (on) => {
@@ -708,14 +813,15 @@ if (!SERVER_ORIGIN) {
     if (!on) setPanel(false);
   };
 
-  // 안쪽이 준 좌표는 iframe 뷰포트 기준이다. iframe의 자리를 더해 웹뷰 좌표로 옮기고,
+  // 안쪽이 준 좌표는 iframe 뷰포트 기준이다. 배율을 곱해 웹뷰 좌표로 옮기고,
   // 패널이 웹뷰 밖으로 나가면 안쪽으로 당긴다 — 패널은 항상 온전히 보여야 한다.
   const place = (rect) => {
     const box = frame.getBoundingClientRect();
     const sb = stage.getBoundingClientRect();
     const w = panel.offsetWidth || 296, h = panel.offsetHeight || 170;
-    let px = box.left - sb.left + rect.x;
-    let py = box.top - sb.top + rect.y + rect.h + 6;
+    const k = z / 100;
+    let px = box.left - sb.left + rect.x * k;
+    let py = box.top - sb.top + (rect.y + rect.h) * k + 6;
     px = Math.max(4, Math.min(px, sb.width - w - 4));
     py = Math.max(4, Math.min(py, sb.height - h - 4));
     panel.style.left = px + 'px';
@@ -753,17 +859,77 @@ if (!SERVER_ORIGIN) {
     list.innerHTML = '';
     drop.innerHTML = '';
     for (const s of sessions) {
-      row(s, list, true, (v) => { sessionId = v.sessionId; drawSess(); closePicker(); setMode(true); });
-      row(s, drop, false, (v) => { sessionId = v.sessionId; drawSess(); closePicker(); });
+      row(s, list, true, (v) => {
+        sessionId = v.sessionId;
+        vs.postMessage({ t: 'chose', sessionId: sessionId });
+        drawSess();
+        closePicker();
+        setMode(true);
+      });
+      row(s, drop, false, (v) => {
+        sessionId = v.sessionId;
+        vs.postMessage({ t: 'chose', sessionId: sessionId });
+        drawSess();
+        closePicker();
+      });
     }
     const empty = sessions.length === 0;
     none.hidden = !empty;
     why.hidden = !empty;
     why.textContent = empty ? TEXT.noSession : '';
-    bar.classList.toggle('lock', empty);
+    bar.classList.toggle('lock', empty || !ready || !state.hidden);
     scrim.hidden = picker !== 'modal';
     drop.hidden = picker !== 'drop';
+    fitBar();
   };
+
+  back.addEventListener('click', () => {
+    if (back.classList.contains('dis')) return;
+    step({ k: 'go', dir: -1 });
+  });
+  fwd.addEventListener('click', () => {
+    if (fwd.classList.contains('dis')) return;
+    step({ k: 'go', dir: 1 });
+  });
+  reload.addEventListener('click', () => {
+    if (reload.classList.contains('dis')) return;
+    fresh.hidden = true;
+    fitBar();
+    toFrame({ ab: 'reload' });
+  });
+  zout.addEventListener('click', () => {
+    if (zout.classList.contains('dis')) return;
+    setZoom(zoomStep(z, -1));
+  });
+  zin.addEventListener('click', () => {
+    if (zin.classList.contains('dis')) return;
+    setZoom(zoomStep(z, 1));
+  });
+  pct.addEventListener('click', () => {
+    if (pct.classList.contains('dis') || pct.classList.contains('edit')) return;
+    pct.classList.add('edit');
+    pct.textContent = '';
+    const inp = document.createElement('input');
+    inp.type = 'text';
+    inp.value = String(z);
+    pct.appendChild(inp);
+    inp.focus();
+    inp.select();
+    let done = false;
+    const finish = (apply) => {
+      if (done) return;
+      done = true;
+      pct.classList.remove('edit');
+      const next = apply ? parseZoom(inp.value) : null;
+      if (next !== null) setZoom(next);
+      else pct.textContent = z + '%';
+    };
+    inp.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); finish(false); }
+      else if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+    });
+    inp.addEventListener('blur', () => finish(false));
+  });
 
   sw.addEventListener('click', () => {
     if (!ready || bar.classList.contains('lock')) return;
@@ -812,8 +978,12 @@ if (!SERVER_ORIGIN) {
       // 익스텐션이 보낸 것. 웹뷰 출처는 우리 것이라 페이지가 흉내 낼 수 없다.
       const d = e.data || {};
       if (d.t === 'state') {
+        pageState = d.state || '';
+        if (agent) setMode(false);
+        bar.classList.add('lock');
         if (d.state === 'missing') showState(TEXT.missing.replace('{0}', d.detail || ''), false);
         else if (d.state === 'serverError') showState(d.detail || '', true);
+        drawBar();
       } else if (d.t === 'sessions') {
         sessions = d.list || [];
         // 고른 세션이 목록에서 사라졌다(탭이 닫혔다). 보낼 곳이 없으므로 읽기로 돌아간다.
@@ -825,9 +995,11 @@ if (!SERVER_ORIGIN) {
         drawPicker();
       } else if (d.t === 'reload') {
         fresh.hidden = true;
-        frame.src = base + (base.indexOf('?') === -1 ? '?' : '&') + 'ab=' + Date.now();
+        fitBar();
+        toFrame({ ab: 'reload' });
       } else if (d.t === 'stale') {
         fresh.hidden = false;
+        fitBar();
       } else if (d.t === 'sent') {
         send.disabled = false;
         if (d.ok) setPanel(false);
@@ -838,13 +1010,27 @@ if (!SERVER_ORIGIN) {
     // 안쪽(iframe)에서 온 것.
     const d = e.data || {};
     if (d.ab === 'ready') {
+      gotReady = true;
+      clearTimeout(offTimer);
       ready = true;
       state.hidden = true;
+      pageState = '';
+      fresh.hidden = true;
+      why.hidden = true;
       bar.classList.remove('lock');
-      vs.postMessage({ t: 'pageReady' });
+      vs.postMessage({ t: 'pageReady', url: d.url || '' });
+      step({ k: 'at', url: d.url || '', full: true });
+      fitBar();
       // 다시 그린 페이지 안의 스크립트는 읽기 모드로 시작한다. 밖이 에이전트 모드면 다시
       // 말해 줘야 한다 — 안 하면 모드는 켜져 보이는데 오버레이가 안 뜬다.
       if (agent) toFrame({ ab: 'mode', mode: 'agent' });
+    } else if (d.ab === 'hash') {
+      step({ k: 'at', url: d.url || '', full: false });
+    } else if (d.ab === 'leave') {
+      gotReady = false;
+      clearTimeout(offTimer);
+      ready = false;
+      step({ k: 'leave', y: typeof d.y === 'number' ? d.y : 0 });
     } else if (d.ab === 'pick') {
       picked = { el: d.el, rect: d.rect };
       brief.textContent = TEXT.line + ' ' + d.el.line;
@@ -858,7 +1044,10 @@ if (!SERVER_ORIGIN) {
       place(d.rect);
       note.focus();
     } else if (d.ab === 'rect') {
-      if (!panel.hidden) place(d.rect);
+      if (!panel.hidden) {
+        if (picked) picked.rect = d.rect;
+        place(d.rect);
+      }
     } else if (d.ab === 'escape') {
       escape();
     }

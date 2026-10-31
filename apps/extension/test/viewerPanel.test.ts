@@ -170,4 +170,26 @@ describe('views/viewerPanel HTML', () => {
       { open: '/w/a.html', close: '/w/a.html' },
     );
   });
+
+  it('2단계 바에 이동·배율이 있다', () => {
+    const doc = build(51234);
+    for (const id of ['back', 'fwd', 'reload', 'zout', 'pct', 'zin']) {
+      assert.match(doc, new RegExp(`id="${id}"`));
+    }
+  });
+
+  it('새로고침은 iframe 주소를 다시 넣지 않는다', () =>
+    assert.doesNotMatch(scriptBody(build(51234)), /frame\.src\s*=/));
+
+  it('이동은 바깥에서 replace로 한다', () =>
+    assert.match(scriptBody(build(51234)), /contentWindow\.location\.replace\(/));
+
+  it('입력칸 Esc는 전파를 끊는다', () =>
+    assert.match(scriptBody(build(51234)), /Escape[\s\S]{0,120}stopPropagation\(\)/));
+
+  it('창 전체 기록을 거스르지 않는다', () =>
+    assert.doesNotMatch(
+      scriptBody(build(51234)),
+      /history\.(back|forward|go)\(|navigation\.(back|forward|traverseTo)\(/,
+    ));
 });
