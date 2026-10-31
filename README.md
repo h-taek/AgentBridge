@@ -8,7 +8,7 @@
 <h1 align="center">AgentBridge</h1>
 
 <p align="center">
-  <img alt="version 0.8.2" src="https://img.shields.io/badge/version-0.8.2-orange">
+  <img alt="version 0.8.3" src="https://img.shields.io/badge/version-0.8.3-orange">
   <a href="https://github.com/h-taek/AgentBridge/blob/main/LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-green.svg"></a>
   <img alt="macOS Apple Silicon" src="https://img.shields.io/badge/macOS-Apple%20Silicon-4493F8">
 </p>
@@ -81,7 +81,7 @@ That record is never pushed into the prompt. The hook adds a single short instru
 <tr>
 <td width="50%">
 <h3>HTML viewer</h3>
-<p>View HTML pages created by agents inside the IDE without opening a browser. Click an element on the page to attach a note and send it to a session. The view updates automatically whenever the file changes.</p>
+<p>View HTML pages created by agents inside the IDE without opening a browser. Click an element on the page to attach a note and send it to a session. The view updates automatically whenever the file changes. Move back and forward across linked pages, and change the zoom to check different screen widths.</p>
 </td>
 <td width="50%"><img src="packages/assets/readme/feature-viewer.gif" alt="Selecting an element in the HTML viewer and sending feedback" /></td>
 </tr>

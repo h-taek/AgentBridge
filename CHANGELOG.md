@@ -4,6 +4,22 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 <p align="center"><a href="https://github.com/h-taek/AgentBridge/blob/main/CHANGELOG.ko.md">한국어</a></p>
 
+## [0.8.3] — 2026-11-01
+
+### Added
+
+- **HTML viewer navigation.** Back, forward, and reload buttons in the bottom bar let you follow links inside a mockup to other pages and come back. Going back restores the scroll position from when you left. Each viewer tab works independently without affecting other viewers open beside it.
+- **HTML viewer zoom.** The `− 100% +` controls on the right side of the bottom bar scale the view down and up like browser zoom. Click the number to type a zoom level directly, or hover over it to see the width in pixels (`px`) that the page receives. You can check a desktop-width layout even in a narrow tab next to an agent panel.
+
+### Changed
+
+- **HTML viewer tab title and source view.** The tab title follows the file name of the page you are currently viewing. The view source button opens the source of the page you are currently viewing.
+
+### Fixed
+
+- **Element feedback path on linked pages.** Selecting and sending an element on a page reached via a link sent the path of the initially opened file along with it.
+- **Edits on a linked page returning to the initial file.** When the file of a page reached via a link changed, the viewer returned to the initially opened file. It now re-renders the page you were viewing.
+
 ## [0.8.2] — 2026-10-17
 
 ### Fixed

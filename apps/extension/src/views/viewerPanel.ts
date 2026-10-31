@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { randomBytes } from 'crypto';
 import * as path from 'path';
 import * as fs from 'fs';
-import { startViewerServer, watchServedFiles, buildViewerPrompt } from '@agentbridge/core';
+import { startViewerServer, resolveServedPage, watchServedFiles, buildViewerPrompt } from '@agentbridge/core';
 import type { ViewerServer, ViewerWatch, PickedElement } from '@agentbridge/core';
 import { assetRootUri, assetRootPath } from '../core/assetRoot';
 import * as output from '../log/output';
@@ -11,6 +11,7 @@ import { getSessions } from '../core/sessionRegistry';
 import * as workspaceStore from '../core/workspaceStore';
 import { candidateSessions, docRelativePath, type ViewerSession } from './viewerSessions';
 import { queueSend } from './viewerSend';
+import { navStep, navCan, zoomStep, parseZoom } from './viewerNav';
 
 // HTML 뷰어 (0.7.0 spec 3.1·3.4). 에이전트가 만든 로컬 HTML을 앱 안에서 보고, 요소를 짚어
 // 고른 세션에 되돌려준다.
@@ -36,10 +37,28 @@ const SESSION_POLL_MS = 1000;
 interface FromWebview {
   t?: string;
   origin?: string;
+  url?: string;
   sessionId?: string;
   el?: PickedElement;
   note?: string;
   on?: boolean;
+}
+
+// 탭 제목은 지금 페이지의 파일 이름이다(0.8.0 spec/04 §3).
+export function pageTitle(page: string): string {
+  return path.basename(page);
+}
+
+// 소스 보기는 지금 페이지를 열고, 닫는 뷰어 탭은 처음 연 파일로 찾는다. 지금 페이지가
+// 지워졌으면 탭의 파일을 연다(0.8.0 spec/04 §3).
+export function sourceTarget(
+  t: { uri: string; page: string },
+  exists: (p: string) => boolean,
+): { open: string; close: string } {
+  return {
+    open: exists(t.page) ? t.page : t.uri,
+    close: t.uri,
+  };
 }
 
 // 웹뷰가 로드하는 이미지. 모델 로고는 세션 목록·탭이 쓰는 것과 같은 파일이다.
@@ -90,8 +109,16 @@ export class HtmlViewerProvider implements vscode.CustomReadonlyEditorProvider, 
 
   // 소스로 돌아가는 명령이 쓴다. activeCustomEditorId는 어느 뷰 타입인지만 알려주고 무엇을
   // 열고 있는지는 안 알려준다.
-  activeUri(): vscode.Uri | undefined {
-    return this.active?.uri;
+  activeTarget(): { uri: vscode.Uri; page: vscode.Uri } | undefined {
+    if (!this.active) return undefined;
+    const { open } = sourceTarget(
+      { uri: this.active.uri.fsPath, page: this.active.page.fsPath },
+      fs.existsSync,
+    );
+    return {
+      uri: this.active.uri,
+      page: open === this.active.page.fsPath ? this.active.page : this.active.uri,
+    };
   }
 
   // 익스텐션이 내려갈 때 남은 서버를 전부 내린다. 탭 닫힘만 처리하면 창을 통째로 닫을 때
@@ -103,12 +130,15 @@ export class HtmlViewerProvider implements vscode.CustomReadonlyEditorProvider, 
 }
 
 class Viewer {
+  page: vscode.Uri;
+  private root = '';
   private server: ViewerServer | undefined;
   private watch: ViewerWatch | undefined;
   private disposed = false;
   private started = false;
   private agentMode = false;
   private pendingReload = false;
+  private chosen = '';
   private sessions: ViewerSession[] = [];
   // 선택창이 열려 있는 동안만 도는 목록 갱신. 세션은 다른 탭에서 아무 때나 생기고 닫히는데
   // 그것을 알려 주는 이벤트가 없어 짧게 다시 센다.
@@ -119,7 +149,9 @@ class Viewer {
     readonly uri: vscode.Uri,
     private readonly panel: vscode.WebviewPanel,
     private readonly extensionUri: vscode.Uri,
-  ) {}
+  ) {
+    this.page = uri;
+  }
 
   // 여기서 기다리지 않는다. VS Code는 resolveCustomEditor가 끝나야 웹뷰 다리를 완성하므로,
   // 이 함수 안에서 웹뷰의 첫 메시지를 기다리면 그 메시지가 영영 안 온다(실측). 화면만 띄우고
@@ -154,10 +186,11 @@ class Viewer {
       );
       return;
     }
+    this.root = folder.uri.fsPath;
 
     try {
       this.server = await startViewerServer({
-        root: folder.uri.fsPath,
+        root: this.root,
         webviewOrigin: origin,
         pickerPath: path.join(assetRootPath(this.extensionUri.fsPath), 'out', 'viewerPicker.js'),
       });
@@ -174,7 +207,7 @@ class Viewer {
 
     // 2단계 — 받은 포트만 frame-src에 넣고 iframe을 싣는다.
     const rel = path
-      .relative(folder.uri.fsPath, this.uri.fsPath)
+      .relative(this.root, this.uri.fsPath)
       .split(path.sep)
       .map(encodeURIComponent)
       .join('/');
@@ -195,6 +228,7 @@ class Viewer {
     this.disposed = true;
     this.stopPoll();
     this.watch?.close();
+    this.watch = undefined;
     void this.server?.close();
   }
 
@@ -233,8 +267,10 @@ class Viewer {
         await this.onOrigin(msg.origin ?? '');
         return;
       case 'pageReady':
-        // 페이지가 부른 파일이 이제 서버에 기록돼 있다. 감시 대상은 서빙 루트가 아니라 이 집합이다.
-        if (this.server) this.watch?.update(this.server.servedFiles());
+        await this.onPageReady(msg.url ?? '');
+        return;
+      case 'chose':
+        this.chosen = msg.sessionId ?? '';
         return;
       case 'mode':
         this.agentMode = !!msg.on;
@@ -262,6 +298,22 @@ class Viewer {
     }
   }
 
+  // 짚기 스크립트가 보낸 경로는 서버가 내보낸 HTML일 때만 받는다(0.8.0 spec/04 §1).
+  // 지금 페이지가 바뀌면 감시를 새로 걸어 지나온 페이지의 파일 변화에는 반응하지 않는다.
+  private async onPageReady(url: string): Promise<void> {
+    if (this.disposed || !this.server || !this.root) return;
+    const urlPath = url.split(/[?#]/)[0];
+    const next = resolveServedPage(this.root, urlPath, this.server.servedFiles());
+    if (!next) return;
+    this.page = vscode.Uri.file(next);
+    this.panel.title = pageTitle(next);
+    this.pendingReload = false;
+    this.watch?.close();
+    this.watch = watchServedFiles(() => this.onFileChange());
+    this.watch.update(this.server.pageFiles(next));
+    if (this.chosen) await this.pushSessions(true);
+  }
+
   // 고를 수 있는 세션을 웹뷰에 넘긴다. 고르는 화면은 웹뷰가 그린다 — 뷰어는 오른쪽 편집기
   // 그룹에 있는데 IDE 기본 선택창은 창 맨 위에 떠서 눈이 엉뚱한 데로 간다.
   //
@@ -270,6 +322,9 @@ class Viewer {
   private async pushSessions(force: boolean): Promise<void> {
     if (this.disposed) return;
     this.sessions = await this.candidates();
+    if (this.chosen && !this.sessions.some((s) => s.sessionId === this.chosen)) {
+      this.chosen = '';
+    }
     const list = this.sessions.map((s) => ({ sessionId: s.sessionId, name: s.name, model: s.model }));
     const sig = JSON.stringify(list);
     if (!force && sig === this.lastList) return;
@@ -284,7 +339,7 @@ class Viewer {
   }
 
   private async candidates(): Promise<ViewerSession[]> {
-    const folder = vscode.workspace.getWorkspaceFolder(this.uri);
+    const folder = vscode.workspace.getWorkspaceFolder(this.page);
     if (!folder) return [];
     const workspaceId = workspaceStore.getOrCreateWorkspaceId(folder.uri.fsPath);
     const meta = await getSessions(workspaceId);
@@ -296,7 +351,7 @@ class Viewer {
       cwd: p.cwd,
       alive: p.alive,
     }));
-    return candidateSessions(all, this.uri.fsPath);
+    return candidateSessions(all, this.page.fsPath);
   }
 
   private async send(msg: FromWebview): Promise<void> {
@@ -310,7 +365,7 @@ class Viewer {
       return;
     }
     // 문서 경로는 고른 세션의 작업 디렉터리 기준이다. 세션마다 답이 다를 수 있어 고른 뒤에 센다.
-    const text = buildViewerPrompt(docRelativePath(session.cwd, this.uri.fsPath), el, msg.note ?? '');
+    const text = buildViewerPrompt(docRelativePath(session.cwd, this.page.fsPath), el, msg.note ?? '');
     output.log(`viewer: send → ${sessionId} 줄 ${el.line} (${text.length}자)`);
     const ok = await queueSend(sessionId, () => panel.sendPrompt(text));
     this.post(
@@ -322,8 +377,8 @@ class Viewer {
 
   private onFileChange(): void {
     // 바뀐 것이 문서 자신의 사라짐일 수 있다. 그때 다시 그리라고 하면 iframe에 404가 뜬다.
-    if (!fs.existsSync(this.uri.fsPath)) {
-      this.setState('missing', path.basename(this.uri.fsPath));
+    if (!fs.existsSync(this.page.fsPath)) {
+      this.setState('missing', pageTitle(this.page.fsPath));
       return;
     }
     if (this.agentMode) {
@@ -375,6 +430,12 @@ export function buildViewerHtml(
     line: vscode.l10n.t('Line'),
     ancestor: vscode.l10n.t('(ancestor)'),
     noBridge: vscode.l10n.t('The viewer could not reach the extension.'),
+    back: vscode.l10n.t('Back'),
+    fwd: vscode.l10n.t('Forward'),
+    reload: vscode.l10n.t('Reload'),
+    zoomOut: vscode.l10n.t('Zoom out'),
+    zoomIn: vscode.l10n.t('Zoom in'),
+    zoom: vscode.l10n.t('Zoom: click to enter'),
   };
   return /*html*/ `<!DOCTYPE html>
 <html lang="en">
@@ -402,6 +463,7 @@ export function buildViewerHtml(
     --err: var(--vscode-errorForeground);
     --ok: var(--vscode-testing-iconPassed, #73c991);
     --pborder: var(--vscode-panel-border, rgba(128,128,128,.25));
+    --tbhover: var(--vscode-toolbar-hoverBackground);
     --pick: #ff8c00;
   }
   *{margin:0;padding:0;box-sizing:border-box}
@@ -410,13 +472,26 @@ export function buildViewerHtml(
     font-family:var(--vscode-font-family);font-size:13px}
   [hidden]{display:none !important}
 
-  #stage{position:relative;flex:1 1 auto;min-height:0}
-  #frame{width:100%;height:100%;border:0;display:block;background:#fff}
+  #stage{position:relative;flex:1 1 auto;min-height:0;overflow:hidden}
+  #frame{width:100%;height:100%;border:0;display:block;background:#fff;transform-origin:0 0}
 
   /* ── 하단 바 ── */
   #bar{display:flex;align-items:center;gap:9px;height:30px;padding:0 10px;
-    border-top:1px solid var(--pborder);flex-shrink:0}
-  #bar.lock{opacity:.55}
+    border-top:1px solid var(--pborder);flex-shrink:0;white-space:nowrap}
+  #bar.lock #sw,#bar.lock #lab{opacity:.55}
+  .nav,.zoom{display:inline-flex;align-items:center;gap:1px;flex-shrink:0}
+  .nav{margin-right:3px}
+  .ib{width:20px;height:20px;display:inline-flex;align-items:center;justify-content:center;
+    border-radius:4px;color:var(--fg);cursor:pointer}
+  .ib svg{width:14px;height:14px;display:block}
+  .ib:not(.dis):hover{background:var(--tbhover)}
+  .ib.dis,#pct.dis{opacity:.4;cursor:default}
+  #pct{font-size:11px;color:var(--fg);min-width:38px;text-align:center;padding:0 3px;
+    height:18px;line-height:16px;border:1px solid transparent;border-radius:3px;
+    font-variant-numeric:tabular-nums;cursor:pointer}
+  #pct.edit{background:var(--input);border-color:var(--focus);text-align:left;cursor:text}
+  #pct.edit input{width:30px;border:0;outline:none;background:transparent;color:var(--fg);
+    font:inherit;padding:0;margin:0}
   #sw{width:26px;height:14px;border-radius:999px;background:var(--input);
     border:1px solid var(--iborder);position:relative;flex-shrink:0;cursor:pointer}
   #sw i{position:absolute;top:1px;left:1px;width:10px;height:10px;border-radius:999px;
@@ -424,14 +499,17 @@ export function buildViewerHtml(
   #sw.on{background:var(--btn);border-color:var(--btn)}
   #sw.on i{left:13px;background:var(--btnfg)}
   #bar.lock #sw{cursor:default}
-  #lab{font-size:11.5px;color:var(--dim)}
+  #lab{font-size:11.5px;color:var(--dim);flex-shrink:0}
   #bar.on #lab{color:var(--fg)}
+  #bar.narrow #lab{display:none}
+  #bar.narrower #fresh b{display:none}
   #sp{flex:1}
-  #fresh{display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--ok)}
-  #why{font-size:11px;color:var(--dim)}
-  #sess{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:var(--fg)}
-  #sess img{width:10.5px;height:10.5px;display:block}
-  #sess b{font-weight:400}
+  #fresh{display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--ok);flex-shrink:0}
+  #fresh b{font-weight:400}
+  #why{font-size:11px;color:var(--dim);min-width:0;overflow:hidden;text-overflow:ellipsis}
+  #sess{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:var(--fg);min-width:0}
+  #sess img{width:10.5px;height:10.5px;display:block;flex-shrink:0}
+  #sess b{font-weight:400;min-width:0;overflow:hidden;text-overflow:ellipsis}
   #bar:not(.on) #sess{color:var(--dim);opacity:.75}
 
   /* ── 세션 선택 ── */
@@ -559,11 +637,21 @@ export function buildViewerHtml(
 </div>
 
 <div id="bar" class="lock">
-  <span id="sw"><i></i></span><span id="lab">${escapeHtml(text.agent)}</span>
+  <span class="nav">
+    <span id="back" class="ib dis" title="${escapeHtml(text.back)}"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3.5 5.5 8l4.5 4.5"/></svg></span>
+    <span id="fwd" class="ib dis" title="${escapeHtml(text.fwd)}"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3.5 10.5 8 6 12.5"/></svg></span>
+    <span id="reload" class="ib dis" title="${escapeHtml(text.reload)}"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12.6 9.2A4.8 4.8 0 1 1 11.4 4.4"/><path d="M12.2 2.4v2.6H9.6"/></svg></span>
+  </span>
+  <span id="sw" title="${escapeHtml(text.agent)}"><i></i></span><span id="lab">${escapeHtml(text.agent)}</span>
   <span id="sp"></span>
   <span id="why" hidden></span>
-  <span id="fresh" hidden>&#10003; ${escapeHtml(text.fresh)}</span>
+  <span id="fresh" title="${escapeHtml(text.fresh)}" hidden>&#10003; <b>${escapeHtml(text.fresh)}</b></span>
   <span id="sess" hidden><img alt=""/><b></b></span>
+  <span class="zoom">
+    <span id="zout" class="ib dis" title="${escapeHtml(text.zoomOut)}"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M4 8h8"/></svg></span>
+    <span id="pct" class="dis" title="${escapeHtml(text.zoom)}">100%</span>
+    <span id="zin" class="ib dis" title="${escapeHtml(text.zoomIn)}"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M4 8h8M8 4v8"/></svg></span>
+  </span>
 </div>
 
 <script nonce="${nonce}">
@@ -603,7 +691,14 @@ if (!SERVER_ORIGIN) {
   };
   announce();
 } else {
+  const navStep = (${navStep.toString()});
+  const navCan = (${navCan.toString()});
+  const zoomStep = (${zoomStep.toString()});
+  const parseZoom = (${parseZoom.toString()});
+
   const stage = $('stage'), frame = $('frame'), bar = $('bar'), sw = $('sw');
+  const back = $('back'), fwd = $('fwd'), reload = $('reload');
+  const zout = $('zout'), pct = $('pct'), zin = $('zin');
   const why = $('why'), fresh = $('fresh'), sess = $('sess');
   const panel = $('panel'), drop = $('drop'), pickbtn = $('pickbtn');
   const wholog = $('wholog'), whoname = $('whoname'), x = $('x');
@@ -611,29 +706,103 @@ if (!SERVER_ORIGIN) {
   const warn = $('warn'), send = $('send');
   const scrim = $('scrim'), list = $('list'), none = $('none');
 
+  // 세션 이름이 이 폭(px)보다 좁아지면 바가 모자란 것으로 본다. 한글 서너 자가 남는 폭이다.
+  const SESS_MIN = 48;
+  let nav = { stack: [], idx: -1, off: false, expect: null };
+  let z = 100;
   let ready = false;          // 짚기 스크립트가 떴다
+  let gotReady = false;       // 이번 페이지 이동에서 준비 신호를 받았나
+  let offTimer = 0;
+  let pageState = 'loading';  // '' | 'loading' | 'missing' | 'serverError'
   let agent = false;
   let picked = null;          // { el, rect }
   let sessions = [];
   let sessionId = '';
   let picker = '';            // '' | 'modal' | 'drop' — 무엇이 열려 있나
-  const base = frame.src;
-
-  // 페이지가 떴으면 기동 화면을 걷는다. 짚기 스크립트가 안 와도 읽기는 돼야 한다 —
-  // 그 경우 토글만 잠긴 채로 남는다.
-  frame.addEventListener('load', () => { state.hidden = true; });
 
   const toFrame = (m) => { if (frame.contentWindow) frame.contentWindow.postMessage(m, SERVER_ORIGIN); };
   const logoOf = (model) => LOGO[model] || LOGO.claude;
 
+  // 좁으면 세션 이름이 먼저 말줄임으로 줄고, 이름이 거의 안 남으면 모드 글자를, 그래도 모자라면
+  // '새 버전 있음' 글자를 숨긴다(0.8.0 spec/04 §5). 세션 이름은 폭 0까지 줄어들어 넘침으로는
+  // 안 잡히므로 남은 폭도 함께 본다.
+  const sessName = sess.querySelector('b');
+  const squeezed = () =>
+    bar.scrollWidth > bar.clientWidth || (!sess.hidden && sessName.clientWidth < SESS_MIN);
+  const fitBar = () => {
+    bar.classList.remove('narrow', 'narrower');
+    if (squeezed()) bar.classList.add('narrow');
+    if (squeezed()) bar.classList.add('narrower');
+  };
+
+  const drawBar = () => {
+    const can = navCan(nav);
+    const live = state.hidden;
+    const lockNav = !panel.hidden;
+    back.classList.toggle('dis', lockNav || !can.back || (!live && pageState !== 'missing'));
+    fwd.classList.toggle('dis', !live || lockNav || !can.fwd);
+    reload.classList.toggle('dis', !live || lockNav || nav.off || !ready);
+    zout.classList.toggle('dis', !live || z <= 25);
+    pct.classList.toggle('dis', !live);
+    zin.classList.toggle('dis', !live || z >= 200);
+    if (!pct.classList.contains('edit')) pct.textContent = z + '%';
+    pct.title = Math.round(stage.clientWidth * 100 / z) + 'px';
+  };
+
+  const step = (ev) => {
+    const r = navStep(nav, ev);
+    nav = r.s;
+    if (r.replace && frame.contentWindow) {
+      gotReady = false;
+      clearTimeout(offTimer);
+      frame.contentWindow.location.replace(SERVER_ORIGIN + r.replace);
+    }
+    if (r.scrollTo !== undefined) {
+      toFrame({ ab: 'scroll', y: r.scrollTo });
+    }
+    drawBar();
+  };
+
+  const setZoom = (next) => {
+    z = next;
+    frame.style.width = 10000 / z + '%';
+    frame.style.height = 10000 / z + '%';
+    frame.style.transform = 'scale(' + z / 100 + ')';
+    if (!panel.hidden && picked) place(picked.rect);
+    drawBar();
+  };
+
+  // 페이지가 떴으면 기동 화면을 걷는다. 짚기 스크립트가 안 와도 읽기는 돼야 한다 —
+  // 이미지·404처럼 준비 신호가 끝내 안 오면 off 상태로 넘겨 뒤로만 열어 둔다.
+  frame.addEventListener('load', () => {
+    state.hidden = true;
+    pageState = '';
+    drawBar();
+    clearTimeout(offTimer);
+    offTimer = setTimeout(() => {
+      if (!gotReady) {
+        ready = false;
+        if (agent) setMode(false);
+        bar.classList.add('lock');
+        step({ k: 'off' });
+      }
+    }, 150);
+  });
+
+  const ro = new ResizeObserver(() => { fitBar(); drawBar(); });
+  ro.observe(bar);
+  ro.observe(stage);
+
   const drawSess = () => {
     const s = sessions.find((v) => v.sessionId === sessionId);
     sess.hidden = !s;
-    if (!s) return;
-    sess.querySelector('img').src = logoOf(s.model);
-    sess.querySelector('b').textContent = s.name;
-    wholog.src = logoOf(s.model);
-    whoname.textContent = s.name;
+    if (s) {
+      sess.querySelector('img').src = logoOf(s.model);
+      sess.querySelector('b').textContent = s.name;
+      wholog.src = logoOf(s.model);
+      whoname.textContent = s.name;
+    }
+    fitBar();
   };
 
   const setPanel = (open) => {
@@ -643,6 +812,7 @@ if (!SERVER_ORIGIN) {
       detail.hidden = true; more.classList.remove('open');
       send.disabled = false;
     }
+    drawBar();
   };
 
   const setMode = (on) => {
@@ -654,14 +824,15 @@ if (!SERVER_ORIGIN) {
     if (!on) setPanel(false);
   };
 
-  // 안쪽이 준 좌표는 iframe 뷰포트 기준이다. iframe의 자리를 더해 웹뷰 좌표로 옮기고,
+  // 안쪽이 준 좌표는 iframe 뷰포트 기준이다. 배율을 곱해 웹뷰 좌표로 옮기고,
   // 패널이 웹뷰 밖으로 나가면 안쪽으로 당긴다 — 패널은 항상 온전히 보여야 한다.
   const place = (rect) => {
     const box = frame.getBoundingClientRect();
     const sb = stage.getBoundingClientRect();
     const w = panel.offsetWidth || 296, h = panel.offsetHeight || 170;
-    let px = box.left - sb.left + rect.x;
-    let py = box.top - sb.top + rect.y + rect.h + 6;
+    const k = z / 100;
+    let px = box.left - sb.left + rect.x * k;
+    let py = box.top - sb.top + (rect.y + rect.h) * k + 6;
     px = Math.max(4, Math.min(px, sb.width - w - 4));
     py = Math.max(4, Math.min(py, sb.height - h - 4));
     panel.style.left = px + 'px';
@@ -699,17 +870,77 @@ if (!SERVER_ORIGIN) {
     list.innerHTML = '';
     drop.innerHTML = '';
     for (const s of sessions) {
-      row(s, list, true, (v) => { sessionId = v.sessionId; drawSess(); closePicker(); setMode(true); });
-      row(s, drop, false, (v) => { sessionId = v.sessionId; drawSess(); closePicker(); });
+      row(s, list, true, (v) => {
+        sessionId = v.sessionId;
+        vs.postMessage({ t: 'chose', sessionId: sessionId });
+        drawSess();
+        closePicker();
+        setMode(true);
+      });
+      row(s, drop, false, (v) => {
+        sessionId = v.sessionId;
+        vs.postMessage({ t: 'chose', sessionId: sessionId });
+        drawSess();
+        closePicker();
+      });
     }
     const empty = sessions.length === 0;
     none.hidden = !empty;
     why.hidden = !empty;
     why.textContent = empty ? TEXT.noSession : '';
-    bar.classList.toggle('lock', empty);
+    bar.classList.toggle('lock', empty || !ready || !state.hidden);
     scrim.hidden = picker !== 'modal';
     drop.hidden = picker !== 'drop';
+    fitBar();
   };
+
+  back.addEventListener('click', () => {
+    if (back.classList.contains('dis')) return;
+    step({ k: 'go', dir: -1 });
+  });
+  fwd.addEventListener('click', () => {
+    if (fwd.classList.contains('dis')) return;
+    step({ k: 'go', dir: 1 });
+  });
+  reload.addEventListener('click', () => {
+    if (reload.classList.contains('dis')) return;
+    fresh.hidden = true;
+    fitBar();
+    toFrame({ ab: 'reload' });
+  });
+  zout.addEventListener('click', () => {
+    if (zout.classList.contains('dis')) return;
+    setZoom(zoomStep(z, -1));
+  });
+  zin.addEventListener('click', () => {
+    if (zin.classList.contains('dis')) return;
+    setZoom(zoomStep(z, 1));
+  });
+  pct.addEventListener('click', () => {
+    if (pct.classList.contains('dis') || pct.classList.contains('edit')) return;
+    pct.classList.add('edit');
+    pct.textContent = '';
+    const inp = document.createElement('input');
+    inp.type = 'text';
+    inp.value = String(z);
+    pct.appendChild(inp);
+    inp.focus();
+    inp.select();
+    let done = false;
+    const finish = (apply) => {
+      if (done) return;
+      done = true;
+      pct.classList.remove('edit');
+      const next = apply ? parseZoom(inp.value) : null;
+      if (next !== null) setZoom(next);
+      else pct.textContent = z + '%';
+    };
+    inp.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); finish(false); }
+      else if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+    });
+    inp.addEventListener('blur', () => finish(false));
+  });
 
   sw.addEventListener('click', () => {
     if (!ready || bar.classList.contains('lock')) return;
@@ -758,8 +989,12 @@ if (!SERVER_ORIGIN) {
       // 익스텐션이 보낸 것. 웹뷰 출처는 우리 것이라 페이지가 흉내 낼 수 없다.
       const d = e.data || {};
       if (d.t === 'state') {
+        pageState = d.state || '';
+        if (agent) setMode(false);
+        bar.classList.add('lock');
         if (d.state === 'missing') showState(TEXT.missing.replace('{0}', d.detail || ''), false);
         else if (d.state === 'serverError') showState(d.detail || '', true);
+        drawBar();
       } else if (d.t === 'sessions') {
         sessions = d.list || [];
         // 고른 세션이 목록에서 사라졌다(탭이 닫혔다). 보낼 곳이 없으므로 읽기로 돌아간다.
@@ -771,9 +1006,11 @@ if (!SERVER_ORIGIN) {
         drawPicker();
       } else if (d.t === 'reload') {
         fresh.hidden = true;
-        frame.src = base + (base.indexOf('?') === -1 ? '?' : '&') + 'ab=' + Date.now();
+        fitBar();
+        toFrame({ ab: 'reload' });
       } else if (d.t === 'stale') {
         fresh.hidden = false;
+        fitBar();
       } else if (d.t === 'sent') {
         send.disabled = false;
         if (d.ok) setPanel(false);
@@ -784,13 +1021,27 @@ if (!SERVER_ORIGIN) {
     // 안쪽(iframe)에서 온 것.
     const d = e.data || {};
     if (d.ab === 'ready') {
+      gotReady = true;
+      clearTimeout(offTimer);
       ready = true;
       state.hidden = true;
+      pageState = '';
+      fresh.hidden = true;
+      why.hidden = true;
       bar.classList.remove('lock');
-      vs.postMessage({ t: 'pageReady' });
+      vs.postMessage({ t: 'pageReady', url: d.url || '' });
+      step({ k: 'at', url: d.url || '', full: true });
+      fitBar();
       // 다시 그린 페이지 안의 스크립트는 읽기 모드로 시작한다. 밖이 에이전트 모드면 다시
       // 말해 줘야 한다 — 안 하면 모드는 켜져 보이는데 오버레이가 안 뜬다.
       if (agent) toFrame({ ab: 'mode', mode: 'agent' });
+    } else if (d.ab === 'hash') {
+      step({ k: 'at', url: d.url || '', full: false });
+    } else if (d.ab === 'leave') {
+      gotReady = false;
+      clearTimeout(offTimer);
+      ready = false;
+      step({ k: 'leave', y: typeof d.y === 'number' ? d.y : 0 });
     } else if (d.ab === 'pick') {
       picked = { el: d.el, rect: d.rect };
       brief.textContent = TEXT.line + ' ' + d.el.line;
@@ -804,7 +1055,10 @@ if (!SERVER_ORIGIN) {
       place(d.rect);
       note.focus();
     } else if (d.ab === 'rect') {
-      if (!panel.hidden) place(d.rect);
+      if (!panel.hidden) {
+        if (picked) picked.rect = d.rect;
+        place(d.rect);
+      }
     } else if (d.ab === 'escape') {
       escape();
     }

@@ -78,5 +78,11 @@
   "Cancel": "취소",
   "Session is not running": "해당 세션이 실행 중이 아님",
   "Could not send to that session": "세션에 전송하지 못함",
-  "Failed to start viewer server": "뷰어 서버 시작 실패"
+  "Failed to start viewer server": "뷰어 서버 시작 실패",
+  "Back": "뒤로",
+  "Forward": "앞으로",
+  "Reload": "새로고침",
+  "Zoom out": "축소",
+  "Zoom in": "확대",
+  "Zoom: click to enter": "배율: 눌러서 입력"
 }
