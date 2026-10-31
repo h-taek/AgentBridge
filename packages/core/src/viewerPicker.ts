@@ -86,13 +86,22 @@
 
   addEventListener('message', (e) => {
     if (e.origin !== origin) return; // 페이지가 자기에게 보낸 것은 출처가 달라 걸러진다
-    const d = e.data as { ab?: string; mode?: string };
-    if (d?.ab !== 'mode') return;
-    agent = d.mode === 'agent';
-    if (!agent) {
-      box.style.display = 'none';
-      picked = null;
-      hover = null;
+    const d = e.data as { ab?: string; mode?: string; y?: number };
+    if (d?.ab === 'mode') {
+      agent = d.mode === 'agent';
+      if (!agent) {
+        box.style.display = 'none';
+        picked = null;
+        hover = null;
+      }
+    } else if (d?.ab === 'reload') {
+      location.reload();
+    } else if (d?.ab === 'scroll') {
+      const y = d.y ?? 0;
+      scrollTo(0, y);
+      if (document.readyState !== 'complete') {
+        addEventListener('load', () => scrollTo(0, y), { once: true });
+      }
     }
   });
 
@@ -163,6 +172,8 @@
   };
   addEventListener('scroll', follow, true);
   addEventListener('resize', follow);
+  addEventListener('hashchange', () => send({ ab: 'hash', url: location.pathname + location.hash }));
+  addEventListener('pagehide', () => send({ ab: 'leave', y: scrollY }));
 
-  send({ ab: 'ready' });
+  send({ ab: 'ready', url: location.pathname + location.hash });
 })();
