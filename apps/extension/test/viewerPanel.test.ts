@@ -4,7 +4,7 @@
 // 부족하다 — 템플릿이 평가되고 나서야 깨지는 종류가 있다. 그래서 실제로 만들어진 HTML에서
 // 스크립트를 뽑아 파서에 태운다(sessionsView.test.ts와 같은 방식).
 import { strict as assert } from 'assert';
-import { buildViewerHtml } from '../src/views/viewerPanel';
+import { buildViewerHtml, pageTitle, sourceTarget } from '../src/views/viewerPanel';
 
 const ASSETS = {
   claude: 'https://webview/media/logos/claude.svg',
@@ -151,5 +151,23 @@ describe('views/viewerPanel HTML', () => {
     for (const doc of [build(undefined), build(51234)]) {
       assert.match(scriptBody(doc), /t: 'retry'/);
     }
+  });
+
+  it('탭 제목은 지금 페이지의 파일 이름이다', () => {
+    assert.equal(pageTitle('/w/docs/b.html'), 'b.html');
+  });
+
+  it('소스 보기는 지금 페이지를 열고 탭의 파일로 닫는다', () => {
+    assert.deepEqual(
+      sourceTarget({ uri: '/w/a.html', page: '/w/b.html' }, () => true),
+      { open: '/w/b.html', close: '/w/a.html' },
+    );
+  });
+
+  it('지금 페이지가 지워졌으면 탭의 파일을 연다', () => {
+    assert.deepEqual(
+      sourceTarget({ uri: '/w/a.html', page: '/w/b.html' }, () => false),
+      { open: '/w/a.html', close: '/w/a.html' },
+    );
   });
 });

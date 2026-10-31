@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { randomBytes } from 'crypto';
 import * as path from 'path';
 import * as fs from 'fs';
-import { startViewerServer, watchServedFiles, buildViewerPrompt } from '@agentbridge/core';
+import { startViewerServer, resolveServedPage, watchServedFiles, buildViewerPrompt } from '@agentbridge/core';
 import type { ViewerServer, ViewerWatch, PickedElement } from '@agentbridge/core';
 import { assetRootUri, assetRootPath } from '../core/assetRoot';
 import * as output from '../log/output';
@@ -36,10 +36,28 @@ const SESSION_POLL_MS = 1000;
 interface FromWebview {
   t?: string;
   origin?: string;
+  url?: string;
   sessionId?: string;
   el?: PickedElement;
   note?: string;
   on?: boolean;
+}
+
+// 탭 제목은 지금 페이지의 파일 이름이다(0.8.0 spec/04 §3).
+export function pageTitle(page: string): string {
+  return path.basename(page);
+}
+
+// 소스 보기는 지금 페이지를 열고, 닫는 뷰어 탭은 처음 연 파일로 찾는다. 지금 페이지가
+// 지워졌으면 탭의 파일을 연다(0.8.0 spec/04 §3).
+export function sourceTarget(
+  t: { uri: string; page: string },
+  exists: (p: string) => boolean,
+): { open: string; close: string } {
+  return {
+    open: exists(t.page) ? t.page : t.uri,
+    close: t.uri,
+  };
 }
 
 // 웹뷰가 로드하는 이미지. 모델 로고는 세션 목록·탭이 쓰는 것과 같은 파일이다.
@@ -90,8 +108,16 @@ export class HtmlViewerProvider implements vscode.CustomReadonlyEditorProvider, 
 
   // 소스로 돌아가는 명령이 쓴다. activeCustomEditorId는 어느 뷰 타입인지만 알려주고 무엇을
   // 열고 있는지는 안 알려준다.
-  activeUri(): vscode.Uri | undefined {
-    return this.active?.uri;
+  activeTarget(): { uri: vscode.Uri; page: vscode.Uri } | undefined {
+    if (!this.active) return undefined;
+    const { open } = sourceTarget(
+      { uri: this.active.uri.fsPath, page: this.active.page.fsPath },
+      fs.existsSync,
+    );
+    return {
+      uri: this.active.uri,
+      page: open === this.active.page.fsPath ? this.active.page : this.active.uri,
+    };
   }
 
   // 익스텐션이 내려갈 때 남은 서버를 전부 내린다. 탭 닫힘만 처리하면 창을 통째로 닫을 때
@@ -103,12 +129,15 @@ export class HtmlViewerProvider implements vscode.CustomReadonlyEditorProvider, 
 }
 
 class Viewer {
+  page: vscode.Uri;
+  private root = '';
   private server: ViewerServer | undefined;
   private watch: ViewerWatch | undefined;
   private disposed = false;
   private started = false;
   private agentMode = false;
   private pendingReload = false;
+  private chosen = '';
   private sessions: ViewerSession[] = [];
   // 선택창이 열려 있는 동안만 도는 목록 갱신. 세션은 다른 탭에서 아무 때나 생기고 닫히는데
   // 그것을 알려 주는 이벤트가 없어 짧게 다시 센다.
@@ -119,7 +148,9 @@ class Viewer {
     readonly uri: vscode.Uri,
     private readonly panel: vscode.WebviewPanel,
     private readonly extensionUri: vscode.Uri,
-  ) {}
+  ) {
+    this.page = uri;
+  }
 
   // 여기서 기다리지 않는다. VS Code는 resolveCustomEditor가 끝나야 웹뷰 다리를 완성하므로,
   // 이 함수 안에서 웹뷰의 첫 메시지를 기다리면 그 메시지가 영영 안 온다(실측). 화면만 띄우고
@@ -154,10 +185,11 @@ class Viewer {
       );
       return;
     }
+    this.root = folder.uri.fsPath;
 
     try {
       this.server = await startViewerServer({
-        root: folder.uri.fsPath,
+        root: this.root,
         webviewOrigin: origin,
         pickerPath: path.join(assetRootPath(this.extensionUri.fsPath), 'out', 'viewerPicker.js'),
       });
@@ -174,7 +206,7 @@ class Viewer {
 
     // 2단계 — 받은 포트만 frame-src에 넣고 iframe을 싣는다.
     const rel = path
-      .relative(folder.uri.fsPath, this.uri.fsPath)
+      .relative(this.root, this.uri.fsPath)
       .split(path.sep)
       .map(encodeURIComponent)
       .join('/');
@@ -195,6 +227,7 @@ class Viewer {
     this.disposed = true;
     this.stopPoll();
     this.watch?.close();
+    this.watch = undefined;
     void this.server?.close();
   }
 
@@ -233,8 +266,10 @@ class Viewer {
         await this.onOrigin(msg.origin ?? '');
         return;
       case 'pageReady':
-        // 페이지가 부른 파일이 이제 서버에 기록돼 있다. 감시 대상은 서빙 루트가 아니라 이 집합이다.
-        if (this.server) this.watch?.update(this.server.servedFiles());
+        await this.onPageReady(msg.url ?? '');
+        return;
+      case 'chose':
+        this.chosen = msg.sessionId ?? '';
         return;
       case 'mode':
         this.agentMode = !!msg.on;
@@ -262,6 +297,22 @@ class Viewer {
     }
   }
 
+  // 짚기 스크립트가 보낸 경로는 서버가 내보낸 HTML일 때만 받는다(0.8.0 spec/04 §1).
+  // 지금 페이지가 바뀌면 감시를 새로 걸어 지나온 페이지의 파일 변화에는 반응하지 않는다.
+  private async onPageReady(url: string): Promise<void> {
+    if (this.disposed || !this.server || !this.root) return;
+    const urlPath = url.split(/[?#]/)[0];
+    const next = resolveServedPage(this.root, urlPath, this.server.servedFiles());
+    if (!next) return;
+    this.page = vscode.Uri.file(next);
+    this.panel.title = pageTitle(next);
+    this.pendingReload = false;
+    this.watch?.close();
+    this.watch = watchServedFiles(() => this.onFileChange());
+    this.watch.update(this.server.pageFiles(next));
+    if (this.chosen) await this.pushSessions(true);
+  }
+
   // 고를 수 있는 세션을 웹뷰에 넘긴다. 고르는 화면은 웹뷰가 그린다 — 뷰어는 오른쪽 편집기
   // 그룹에 있는데 IDE 기본 선택창은 창 맨 위에 떠서 눈이 엉뚱한 데로 간다.
   //
@@ -270,6 +321,9 @@ class Viewer {
   private async pushSessions(force: boolean): Promise<void> {
     if (this.disposed) return;
     this.sessions = await this.candidates();
+    if (this.chosen && !this.sessions.some((s) => s.sessionId === this.chosen)) {
+      this.chosen = '';
+    }
     const list = this.sessions.map((s) => ({ sessionId: s.sessionId, name: s.name, model: s.model }));
     const sig = JSON.stringify(list);
     if (!force && sig === this.lastList) return;
@@ -284,7 +338,7 @@ class Viewer {
   }
 
   private async candidates(): Promise<ViewerSession[]> {
-    const folder = vscode.workspace.getWorkspaceFolder(this.uri);
+    const folder = vscode.workspace.getWorkspaceFolder(this.page);
     if (!folder) return [];
     const workspaceId = workspaceStore.getOrCreateWorkspaceId(folder.uri.fsPath);
     const meta = await getSessions(workspaceId);
@@ -296,7 +350,7 @@ class Viewer {
       cwd: p.cwd,
       alive: p.alive,
     }));
-    return candidateSessions(all, this.uri.fsPath);
+    return candidateSessions(all, this.page.fsPath);
   }
 
   private async send(msg: FromWebview): Promise<void> {
@@ -310,7 +364,7 @@ class Viewer {
       return;
     }
     // 문서 경로는 고른 세션의 작업 디렉터리 기준이다. 세션마다 답이 다를 수 있어 고른 뒤에 센다.
-    const text = buildViewerPrompt(docRelativePath(session.cwd, this.uri.fsPath), el, msg.note ?? '');
+    const text = buildViewerPrompt(docRelativePath(session.cwd, this.page.fsPath), el, msg.note ?? '');
     output.log(`viewer: send → ${sessionId} 줄 ${el.line} (${text.length}자)`);
     const ok = await queueSend(sessionId, () => panel.sendPrompt(text));
     this.post(
@@ -322,8 +376,8 @@ class Viewer {
 
   private onFileChange(): void {
     // 바뀐 것이 문서 자신의 사라짐일 수 있다. 그때 다시 그리라고 하면 iframe에 404가 뜬다.
-    if (!fs.existsSync(this.uri.fsPath)) {
-      this.setState('missing', path.basename(this.uri.fsPath));
+    if (!fs.existsSync(this.page.fsPath)) {
+      this.setState('missing', pageTitle(this.page.fsPath));
       return;
     }
     if (this.agentMode) {
