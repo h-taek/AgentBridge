@@ -31,6 +31,7 @@ export interface ViewerServer {
   readonly port: number;
   readonly origin: string; // http://127.0.0.1:<port>
   servedFiles(): string[]; // 지금까지 내보낸 절대 경로
+  pageFiles(htmlPath: string): string[]; // htmlPath를 마지막으로 내보낸 때부터 내보낸 파일
   close(): Promise<void>;
 }
 
@@ -95,9 +96,26 @@ export function resolveServePath(root: string, urlPath: string): string | null {
   return target;
 }
 
+// 짚기 스크립트가 알린 경로를 풀어 서버가 실제로 내보낸 HTML일 때만 절대 경로를 돌려준다.
+export function resolveServedPage(root: string, urlPath: string, served: string[]): string | null {
+  const target = resolveServePath(root, urlPath);
+  if (!target) return null;
+  if (path.extname(target).toLowerCase() !== '.html') return null;
+  if (!served.includes(target)) return null;
+  return target;
+}
+
 // 뷰어 서버를 기동하고 127.0.0.1에서 사용 가능한 포트에 바인딩한다.
 export async function startViewerServer(opts: ViewerServerOptions): Promise<ViewerServer> {
   const served = new Set<string>();
+  const history: string[] = [];
+  const recordServed = (p: string) => {
+    served.add(p);
+    history.push(p);
+    if (history.length > 5000) {
+      history.shift();
+    }
+  };
   let assignedPort = 0;
 
   const server = http.createServer(async (req, res) => {
@@ -207,7 +225,7 @@ export async function startViewerServer(opts: ViewerServerOptions): Promise<View
         const body = stamped.endsWith('\n') ? `${stamped}${scriptTag}\n` : `${stamped}\n${scriptTag}`;
         const buf = Buffer.from(body, 'utf8');
 
-        served.add(filePath);
+        recordServed(filePath);
 
         res.writeHead(200, {
           'Content-Type': contentType,
@@ -229,7 +247,7 @@ export async function startViewerServer(opts: ViewerServerOptions): Promise<View
     // 일반 정적 파일 서빙
     try {
       const data = await fs.promises.readFile(realTarget);
-      served.add(filePath);
+      recordServed(filePath);
 
       res.writeHead(200, {
         'Content-Type': contentType,
@@ -267,6 +285,11 @@ export async function startViewerServer(opts: ViewerServerOptions): Promise<View
     },
     servedFiles() {
       return Array.from(served);
+    },
+    pageFiles(htmlPath: string) {
+      const idx = history.lastIndexOf(htmlPath);
+      if (idx < 0) return [];
+      return Array.from(new Set(history.slice(idx)));
     },
     close() {
       return new Promise<void>((resolve, reject) => {

@@ -569,10 +569,10 @@ export function activate(context: vscode.ExtensionContext) {
   });
   const closeHtmlViewer = vscode.commands.registerCommand('agentbridge.closeHtmlViewer', async () => {
     // activeCustomEditorId는 어느 뷰 타입인지만 알려준다. 무엇을 열고 있는지는 뷰어가 안다.
-    const uri = htmlViewer.activeUri();
-    if (!uri) return;
-    await vscode.commands.executeCommand('vscode.openWith', uri, 'default');
-    await closeTabsFor(uri, 'viewer');
+    const target = htmlViewer.activeTarget();
+    if (!target) return;
+    await vscode.commands.executeCommand('vscode.openWith', target.page, 'default');
+    await closeTabsFor(target.uri, 'viewer');
   });
   context.subscriptions.push(
     vscode.window.registerCustomEditorProvider(HtmlViewerProvider.viewType, htmlViewer, {

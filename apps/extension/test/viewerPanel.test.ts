@@ -4,7 +4,7 @@
 // 부족하다 — 템플릿이 평가되고 나서야 깨지는 종류가 있다. 그래서 실제로 만들어진 HTML에서
 // 스크립트를 뽑아 파서에 태운다(sessionsView.test.ts와 같은 방식).
 import { strict as assert } from 'assert';
-import { buildViewerHtml } from '../src/views/viewerPanel';
+import { buildViewerHtml, pageTitle, sourceTarget } from '../src/views/viewerPanel';
 
 const ASSETS = {
   claude: 'https://webview/media/logos/claude.svg',
@@ -151,5 +151,50 @@ describe('views/viewerPanel HTML', () => {
     for (const doc of [build(undefined), build(51234)]) {
       assert.match(scriptBody(doc), /t: 'retry'/);
     }
+  });
+
+  it('탭 제목은 지금 페이지의 파일 이름이다', () => {
+    assert.equal(pageTitle('/w/docs/b.html'), 'b.html');
+  });
+
+  it('소스 보기는 지금 페이지를 열고 탭의 파일로 닫는다', () => {
+    assert.deepEqual(
+      sourceTarget({ uri: '/w/a.html', page: '/w/b.html' }, () => true),
+      { open: '/w/b.html', close: '/w/a.html' },
+    );
+  });
+
+  it('지금 페이지가 지워졌으면 탭의 파일을 연다', () => {
+    assert.deepEqual(
+      sourceTarget({ uri: '/w/a.html', page: '/w/b.html' }, () => false),
+      { open: '/w/a.html', close: '/w/a.html' },
+    );
+  });
+
+  it('2단계 바에 이동·배율이 있다', () => {
+    const doc = build(51234);
+    for (const id of ['back', 'fwd', 'reload', 'zout', 'pct', 'zin']) {
+      assert.match(doc, new RegExp(`id="${id}"`));
+    }
+  });
+
+  it('새로고침은 iframe 주소를 다시 넣지 않는다', () =>
+    assert.doesNotMatch(scriptBody(build(51234)), /frame\.src\s*=/));
+
+  it('이동은 바깥에서 replace로 한다', () =>
+    assert.match(scriptBody(build(51234)), /contentWindow\.location\.replace\(/));
+
+  it('입력칸 Esc는 전파를 끊는다', () =>
+    assert.match(scriptBody(build(51234)), /Escape[\s\S]{0,120}stopPropagation\(\)/));
+
+  it('창 전체 기록을 거스르지 않는다', () =>
+    assert.doesNotMatch(
+      scriptBody(build(51234)),
+      /history\.(back|forward|go)\(|navigation\.(back|forward|traverseTo)\(/,
+    ));
+  it('좁을 때 새 버전 있음은 글자를 숨기고 마우스오버로 남긴다', () => {
+    const doc = build(51234);
+    assert.match(doc, /<span id="fresh" title="[^"]+" hidden>&#10003; <b>/);
+    assert.match(doc, /#bar\.narrower #fresh b\{display:none\}/);
   });
 });

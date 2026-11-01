@@ -3,6 +3,7 @@ import { readFileSync, existsSync } from 'fs';
 import { resolve } from 'path';
 
 const out = resolve(__dirname, '../out/viewerPicker.js');
+const src = () => readFileSync(out, 'utf8');
 
 describe('viewerPicker 산출물', () => {
   it('빌드가 파일을 낸다', () => {
@@ -35,4 +36,13 @@ describe('viewerPicker 산출물', () => {
   it('밖으로 보낼 때 targetOrigin을 준다', () => {
     assert.match(readFileSync(out, 'utf8'), /parent\.postMessage\(\w+, \w+\)/);
   });
+
+  it('뜰 때 자기 경로를 싣는다', () => assert.match(src(), /ab: "ready", url: location\.pathname \+ location\.hash/));
+  it('앵커 이동과 떠남을 알린다', () => {
+    assert.match(src(), /addEventListener\("hashchange"/);
+    assert.match(src(), /addEventListener\("pagehide"/);
+  });
+  it('새로고침은 페이지 안에서 한다', () => assert.match(src(), /location\.reload\(\)/));
+  it('창 전체 기록을 거스르지 않는다', () =>
+    assert.doesNotMatch(src(), /history\.(back|forward|go)\(|navigation\.(back|forward|traverseTo)\(/));
 });

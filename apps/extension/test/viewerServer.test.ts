@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync, mkdirSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { request } from 'http';
-import { startViewerServer, resolveServePath } from '@agentbridge/core';
+import { startViewerServer, resolveServePath, resolveServedPage } from '@agentbridge/core';
 
 // 날 것의 요청. fetch는 경로의 ..를 보내기 전에 정규화하고 Host 헤더를 못 바꾼다.
 function rawStatus(port: number, path: string, headers: Record<string, string> = {}): Promise<number> {
@@ -40,8 +40,12 @@ describe('viewerServer.resolveServePath', () => {
 
 describe('viewerServer', () => {
   const root = mkdtempSync(join(tmpdir(), 'ab-viewer-'));
+  const abs = (p: string) => join(root, p);
   mkdirSync(join(root, 'sub'));
   writeFileSync(join(root, 'a.html'), '<html>\n<body>\n<p>x</p>\n</body>\n</html>');
+  writeFileSync(join(root, 'a.css'), 'body{margin:0}');
+  writeFileSync(join(root, 'b.html'), '<html>\n<body>\n<p>y</p>\n</body>\n</html>');
+  writeFileSync(join(root, 'b.css'), 'p{color:blue}');
   writeFileSync(join(root, 'sub', 'b.css'), 'p{color:red}');
   writeFileSync(join(root, '.env'), 'SECRET=1');
   const picker = join(root, 'picker.js');
@@ -120,10 +124,40 @@ describe('viewerServer', () => {
     assert.equal(served.includes(picker), false); // 우리 산출물은 감시 대상이 아니다
   });
 
+  it('페이지별 파일은 그 HTML을 마지막으로 내보낸 뒤의 것이다', async () => {
+    await fetch(`${s.origin}/a.html`);
+    await fetch(`${s.origin}/a.css`);
+    await fetch(`${s.origin}/b.html`);
+    await fetch(`${s.origin}/b.css`);
+    assert.deepEqual(s.pageFiles(abs('b.html')), [abs('b.html'), abs('b.css')]);
+    assert.deepEqual(s.pageFiles(abs('a.html')), [abs('a.html'), abs('a.css'), abs('b.html'), abs('b.css')]);
+    assert.deepEqual(s.pageFiles(abs('none.html')), []);
+  });
+
+  it('다시 내보내면 그때부터 센다', async () => {
+    await fetch(`${s.origin}/a.html`);
+    await fetch(`${s.origin}/a.css`);
+    await fetch(`${s.origin}/b.html`);
+    await fetch(`${s.origin}/a.html`);
+    assert.deepEqual(s.pageFiles(abs('a.html')), [abs('a.html')]);
+  });
+
   it('닫으면 포트를 놓는다', async () => {
     const t = await startViewerServer({ root, webviewOrigin: 'vscode-webview://abc', pickerPath: picker });
     const origin = t.origin;
     await t.close();
     await assert.rejects(fetch(`${origin}/a.html`));
+  });
+});
+
+describe('resolveServedPage', () => {
+  const root = '/ws';
+  const abs = (p: string) => join(root, p);
+  it('내보낸 HTML만 받는다', () => {
+    assert.equal(resolveServedPage(root, '/docs/a.html', [abs('docs/a.html')]), abs('docs/a.html'));
+    assert.equal(resolveServedPage(root, '/docs/b.html', [abs('docs/a.html')]), null);
+    assert.equal(resolveServedPage(root, '/a.css', [abs('a.css')]), null);
+    assert.equal(resolveServedPage(root, '/../x.html', [abs('x.html')]), null);
+    assert.equal(resolveServedPage(root, '/docs/a%20b.html', [abs('docs/a b.html')]), abs('docs/a b.html'));
   });
 });

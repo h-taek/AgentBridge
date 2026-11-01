@@ -78,7 +78,7 @@ describe('usage/endpoints', () => {
     });
 
     // 옛 형식(`antigravity-cli/…`)도 200을 받지만 Gemini 그룹이 빠진 채 온다. 값이 비어도
-    // 오류가 안 나는 종류의 고장이라 형식을 박아 둔다(0.8.1 research/01).
+    // 오류가 안 나는 종류의 고장이라 형식을 박아 둔다(0.8.0 research/03).
     it("User-Agent는 agy와 같은 'antigravity/cli/' 형식이다", () => {
       assert.match(req.headers['User-Agent'], /^antigravity\/cli\//);
     });
