@@ -81,7 +81,7 @@ That record is never pushed into the prompt. The hook adds a single short instru
 <tr>
 <td width="50%">
 <h3>HTML viewer</h3>
-<p>View HTML pages created by agents inside the IDE without opening a browser. Click an element on the page to attach a note and send it to a session. The view updates automatically whenever the file changes. Move back and forward across linked pages, and change the zoom to check different screen widths.</p>
+<p>View HTML pages created by agents inside the IDE without opening a browser. Click an element on the page to attach a note and send it to a session.</p>
 </td>
 <td width="50%"><img src="packages/assets/readme/feature-viewer.gif" alt="Selecting an element in the HTML viewer and sending feedback" /></td>
 </tr>

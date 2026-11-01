@@ -81,7 +81,7 @@ Claude Code, Codex, Antigravity를 번갈아 쓰면 모델을 바꿀 때마다 �
 <tr>
 <td width="50%">
 <h3>HTML 뷰어</h3>
-<p>에이전트가 만든 HTML 화면을 브라우저 없이 IDE 안에서 바로 본다. 화면 위 요소를 클릭해 메모를 붙여 세션으로 보낼 수 있다. 파일을 고치면 화면이 자동으로 다시 그려진다. 링크로 이어진 페이지 사이를 뒤로·앞으로 오가고 배율을 바꿔 다른 화면 폭을 확인할 수 있다.</p>
+<p>에이전트가 만든 HTML 화면을 브라우저 없이 IDE 안에서 바로 본다. 화면 위 요소를 클릭해 메모를 붙여 세션으로 보낼 수 있다.</p>
 </td>
 <td width="50%"><img src="packages/assets/readme/feature-viewer.gif" alt="HTML 뷰어에서 요소를 선택해 피드백을 보내는 장면" /></td>
 </tr>
