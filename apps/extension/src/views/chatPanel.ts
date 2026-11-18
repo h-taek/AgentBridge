@@ -554,6 +554,24 @@ export class ChatPanel {
       COLORTERM: 'truecolor',
     };
 
+    // replay.log + owner.json — 두 앱이 같은 세션 디렉토리(V-12 결정적 ID)를 공유하므로
+    // 데스크탑과 동일한 raw replay.log를 기록하고, 이 세션이 *익스텐션에서 라이브*임을 표시.
+    // 소유 표지를 먼저 남기고 기록을 연다(0.8.0 spec/09 §2). 7일 보관 정리는 같은 잠금 안에서
+    // 소유자 유무를 보므로, 이 순서여야 막 열린 기록을 '소유자 없음'으로 보고 지우지 않는다.
+    // PTY를 띄우기 전에 마쳐 두어 onData 등록이 늦어지지 않게 한다.
+    if (this.opts.workspaceId && this.opts.sessionId) {
+      const dir = workspaceStore.getSessionDir(this.opts.workspaceId, this.opts.sessionId);
+      try {
+        await acquireOwnership(dir, { app: 'extension', cols, rows });
+        this.ownerDir = dir;
+        this.replayStream = createWriteStream(replayLogPath(dir), { flags: 'a', encoding: 'utf8' });
+        this.replayStream.on('error', (err) => output.warn(`replay.log write error: ${String(err)}`));
+      } catch (err) {
+        // 표지를 못 남기면 기록 없이 띄운다 — 탭은 뜬다.
+        output.warn(`owner.json acquire 실패 — 화면 기록 없이 띄운다: ${String(err)}`);
+      }
+    }
+
     try {
       this.ensureSpawnHelperExecutable();
       const shellCmd = quoteCommandLine([command, ...args]);
@@ -582,17 +600,6 @@ export class ChatPanel {
           onAutoNamed: (title) => this.setTabTitle(title),
         });
         this.captureRegistered = true;
-      }
-
-      // replay.log + owner.json — 두 앱이 같은 세션 디렉토리(V-12 결정적 ID)를 공유하므로
-      // 데스크탑과 동일한 raw replay.log를 기록하고, 이 세션이 *익스텐션에서 라이브*임을 표시.
-      if (this.opts.workspaceId && this.opts.sessionId) {
-        this.ownerDir = workspaceStore.getSessionDir(this.opts.workspaceId, this.opts.sessionId);
-        this.replayStream = createWriteStream(replayLogPath(this.ownerDir), { flags: 'a', encoding: 'utf8' });
-        this.replayStream.on('error', (err) => output.warn(`replay.log write error: ${String(err)}`));
-        void acquireOwnership(this.ownerDir, { app: 'extension', cols, rows }).catch((err) =>
-          output.warn(`owner.json acquire 실패: ${String(err)}`),
-        );
       }
 
       this.ptyProcess.onData((data) => {
@@ -637,6 +644,18 @@ export class ChatPanel {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       output.error(`ChatPanel PTY spawn failed: ${msg}`);
+      // PTY보다 먼저 잡아 둔 기록과 소유 표지를 푼다 — 안 그러면 뜨지 않은 세션이 살아 있는 것으로 남는다.
+      if (this.replayStream && !this.replayStream.destroyed) {
+        this.replayStream.end();
+        this.replayStream = null;
+      }
+      if (this.ownerDir) {
+        const dir = this.ownerDir;
+        this.ownerDir = null;
+        void releaseOwnership(dir).catch(() => {
+          /* best-effort */
+        });
+      }
       this.panel.webview.postMessage({
         type: 'output',
         data: `\r\n[AgentBridge] Failed to spawn: ${msg}\r\n`,
