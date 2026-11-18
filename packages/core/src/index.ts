@@ -45,6 +45,7 @@ export * from './workspaceStore';
 export * from './hookStatusStore';
 export * from './sessionRegistry';
 export * from './sessionOwner';
+export * from './replayPaths';
 export * from './turnCounter';
 export * from './fileTail';
 export * from './transcriptReader/types';

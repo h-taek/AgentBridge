@@ -184,7 +184,7 @@ describe('agent list·read·check (0.5.0 W4)', () => {
     assert.match(out, /기다리는 동안 끝난 서브가 없다/);
   });
 
-  it('신호 없이 닫힌 서브는 화면 기록의 꼬리와 함께 나온다', async () => {
+  it('신호 없이 닫힌 서브는 재생한 지금 화면과 함께 나온다', async () => {
     await writeSessions(ws, [
       { sessionId: PARENT },
       {
@@ -193,11 +193,25 @@ describe('agent list·read·check (0.5.0 W4)', () => {
         agentName: 'golden-gate',
         closedAt: '2026-09-01T00:10:00.000Z',
       },
+      {
+        sessionId: 'sub-empty',
+        parentSessionId: PARENT,
+        agentName: 'hangang',
+        closedAt: '2026-09-01T00:11:00.000Z',
+      },
     ]);
-    await fsp.writeFile(join(ws, 'sessions', 'sub', 'replay.log'), '마지막 화면 줄\n', 'utf8');
+    await fsp.writeFile(
+      join(ws, 'sessions', 'sub', 'replay.log'),
+      '\x1b[2J\x1b[H첫 줄\r\n둘째 줄\x1b[1;1H덮어쓴 줄\x1b[K',
+      'utf8',
+    );
     const out = await agentCheck(ws, PARENT);
-    assert.match(out, /완료 신호 없이 끝났다/);
-    assert.match(out, /마지막 화면 줄/);
+    assert.match(out, /완료 신호 없이 끝났다\. 지금 화면 \(120×30\):/);
+    assert.match(out, / {6}덮어쓴 줄/);
+    assert.match(out, / {6}둘째 줄/);
+    assert.doesNotMatch(out, /\x1b/);
+    assert.doesNotMatch(out, /첫 줄/);
+    assert.match(out, /hangang[\s\S]*완료 신호 없이 끝났다\. 화면 기록이 없다\./);
   });
 
   it('완료 신호 없이 출력이 멈춘 서브를 check가 따로 낸다', async () => {
@@ -826,5 +840,209 @@ describe('handleStart — 모델·effort 검사와 스폰 연결 (0.8.0 §3·§6
     assert.equal(children[1]!.subEffort, undefined);
     assert.equal(children[2]!.subModel, 'claude-haiku-4-5-20251001');
     assert.equal(children[2]!.subEffort, undefined);
+  });
+});
+
+// ─── 지금 화면 붙이기 · --screen (0.8.0 spec/08 §2) ──────────────────────
+
+describe('agent read 지금 화면 (0.8.0 spec/08)', () => {
+  let ws: string;
+
+  async function writeTurnBodies(sessionId: string, bodies: string[]): Promise<void> {
+    const lines = bodies.map((assistantBody, i) =>
+      JSON.stringify({
+        id: `t${i}`,
+        sessionId,
+        model: 'codex',
+        user: `질문 ${i}`,
+        assistantBody,
+        completedAt: `2026-09-01T00:0${i}:00.000Z`,
+      }),
+    );
+    await fsp.writeFile(join(ws, 'sessions', sessionId, 'turns.jsonl'), lines.join('\n') + '\n', 'utf8');
+  }
+
+  beforeEach(async () => {
+    ws = await makeWorkspace();
+  });
+
+  afterEach(async () => {
+    await fsp.rm(ws, { recursive: true, force: true });
+  });
+
+  it('턴이 없으면 아직 기록된 턴이 없다 뒤에 지금 화면이나 빈 안내를 붙인다', async () => {
+    await writeSessions(ws, [
+      { sessionId: PARENT },
+      { sessionId: 'sub-with-screen', parentSessionId: PARENT, agentName: 'golden-gate' },
+      { sessionId: 'sub-no-screen', parentSessionId: PARENT, agentName: 'hangang' },
+    ]);
+    await fsp.writeFile(
+      join(ws, 'sessions', 'sub-with-screen', 'owner.json'),
+      JSON.stringify({ app: 'extension', pid: process.pid, acquiredAt: Date.now(), cols: 81, rows: 45 }),
+      'utf8',
+    );
+    await fsp.writeFile(
+      join(ws, 'sessions', 'sub-with-screen', 'replay.log'),
+      'Waiting for its response...\r\nesc to cancel',
+      'utf8',
+    );
+
+    const withScreen = await agentRead(ws, PARENT, 'golden-gate');
+    assert.match(withScreen, /^golden-gate: 아직 기록된 턴이 없다\./);
+    assert.match(withScreen, /### 지금 화면 \(81×45\)\n\nWaiting for its response\.\.\.\nesc to cancel$/);
+
+    const noScreen = await agentRead(ws, PARENT, 'hangang');
+    assert.equal(noScreen, 'hangang: 아직 기록된 턴이 없다.\n\n화면 기록이 없다');
+  });
+
+  it('마지막 턴의 답이 공백뿐이면 끝난 서브라도 화면을 붙인다', async () => {
+    await writeSessions(ws, [
+      { sessionId: PARENT },
+      {
+        sessionId: 'sub',
+        parentSessionId: PARENT,
+        agentName: 'golden-gate',
+        closedAt: '2026-09-01T00:10:00.000Z',
+      },
+    ]);
+    await writeTurnBodies('sub', ['첫 답', '  \n\t ']);
+    await fsp.writeFile(join(ws, 'sessions', 'sub', 'replay.log'), '빈 답일 때의 화면', 'utf8');
+
+    const out = await agentRead(ws, PARENT, 'golden-gate');
+    assert.match(out, /질문 0/);
+    assert.match(out, /### 지금 화면 \(120×30\)\n\n빈 답일 때의 화면$/);
+  });
+
+  it('답이 있어도 running·unknown 상태면 화면을 붙인다', async () => {
+    await writeSessions(ws, [
+      { sessionId: PARENT },
+      { sessionId: 'sub-run', parentSessionId: PARENT, agentName: 'golden-gate' },
+      { sessionId: 'sub-unk', parentSessionId: PARENT, agentName: 'tower-bridge' },
+    ]);
+    await writeTurnBodies('sub-run', ['지난 턴 답']);
+    await writeTurnBodies('sub-unk', ['지난 턴 답']);
+    await fsp.writeFile(join(ws, 'sessions', 'sub-run', 'replay.log'), '도는 중 화면', 'utf8');
+    await fsp.writeFile(join(ws, 'sessions', 'sub-unk', 'replay.log'), '멈춘 화면', 'utf8');
+
+    await fsp.writeFile(
+      join(ws, 'sessions', 'sub-run', 'turn-start.json'),
+      JSON.stringify({ agent: 'codex', event: 'UserPromptSubmit', sessionId: 'sub-run', at: Date.now() }),
+      'utf8',
+    );
+    await fsp.writeFile(
+      join(ws, 'sessions', 'sub-unk', 'turn-start.json'),
+      JSON.stringify({
+        agent: 'codex',
+        event: 'UserPromptSubmit',
+        sessionId: 'sub-unk',
+        at: Date.now() - 120_000,
+      }),
+      'utf8',
+    );
+
+    const runningOut = await agentRead(ws, PARENT, 'golden-gate');
+    assert.match(runningOut, /지난 턴 답/);
+    assert.match(runningOut, /### 지금 화면 \(120×30\)\n\n도는 중 화면$/);
+
+    const unknownOut = await agentRead(ws, PARENT, 'tower-bridge');
+    assert.match(unknownOut, /지난 턴 답/);
+    assert.match(unknownOut, /### 지금 화면 \(120×30\)\n\n멈춘 화면$/);
+  });
+
+  it('답이 있고 끝났거나 쉬는 서브는 화면을 붙이지 않는다', async () => {
+    await writeSessions(ws, [
+      { sessionId: PARENT },
+      {
+        sessionId: 'sub-closed',
+        parentSessionId: PARENT,
+        agentName: 'golden-gate',
+        closedAt: '2026-09-01T00:10:00.000Z',
+      },
+      { sessionId: 'sub-done', parentSessionId: PARENT, agentName: 'hangang' },
+    ]);
+    await writeTurnBodies('sub-closed', ['완료 답']);
+    await writeTurnBodies('sub-done', ['턴 끝 답']);
+    await writeSignal(ws, 'sub-done', true, Date.now());
+    await fsp.writeFile(join(ws, 'sessions', 'sub-closed', 'replay.log'), '안 나와야 할 화면', 'utf8');
+    await fsp.writeFile(join(ws, 'sessions', 'sub-done', 'replay.log'), '안 나와야 할 화면', 'utf8');
+
+    const closedOut = await agentRead(ws, PARENT, 'golden-gate');
+    assert.match(closedOut, /완료 답/);
+    assert.doesNotMatch(closedOut, /지금 화면/);
+    assert.doesNotMatch(closedOut, /안 나와야 할 화면/);
+
+    const doneOut = await agentRead(ws, PARENT, 'hangang');
+    assert.match(doneOut, /턴 끝 답/);
+    assert.doesNotMatch(doneOut, /지금 화면/);
+  });
+
+  it('--last 1로 일부만 보여도 판정은 기록 전체의 마지막 턴을 따른다', async () => {
+    await writeSessions(ws, [
+      { sessionId: PARENT },
+      {
+        sessionId: 'sub-filled-last',
+        parentSessionId: PARENT,
+        agentName: 'golden-gate',
+        closedAt: '2026-09-01T00:10:00.000Z',
+      },
+      {
+        sessionId: 'sub-empty-last',
+        parentSessionId: PARENT,
+        agentName: 'hangang',
+        closedAt: '2026-09-01T00:10:00.000Z',
+      },
+    ]);
+    // 앞 턴은 비었지만 마지막 턴에 답이 있는 경우: --last 1이어도 화면이 안 붙는다.
+    await writeTurnBodies('sub-filled-last', ['', '마지막 답']);
+    await fsp.writeFile(join(ws, 'sessions', 'sub-filled-last', 'replay.log'), '화면 X', 'utf8');
+
+    const filledOut = await agentRead(ws, PARENT, 'golden-gate', 1);
+    assert.match(filledOut, /마지막 답/);
+    assert.doesNotMatch(filledOut, /지금 화면/);
+
+    // 앞 턴에 답이 있고 마지막 턴이 빈 경우: --last 1에서 화면이 붙는다.
+    await writeTurnBodies('sub-empty-last', ['앞 턴 답', '']);
+    await fsp.writeFile(join(ws, 'sessions', 'sub-empty-last', 'replay.log'), '화면 O', 'utf8');
+
+    const emptyOut = await agentRead(ws, PARENT, 'hangang', 1);
+    assert.doesNotMatch(emptyOut, /앞 턴 답/);
+    assert.match(emptyOut, /### 지금 화면 \(120×30\)\n\n화면 O$/);
+  });
+
+  it('--screen은 턴 기록 없이 화면만 내고 report-read.json을 쓴다', async () => {
+    await writeSessions(ws, [
+      { sessionId: PARENT },
+      { sessionId: 'sub', parentSessionId: PARENT, agentName: 'golden-gate' },
+      { sessionId: 'sub-empty', parentSessionId: PARENT, agentName: 'hangang' },
+    ]);
+    await writeSignal(ws, 'sub', true, Date.now());
+    await writeTurnBodies('sub', ['답 0']);
+    await fsp.writeFile(
+      join(ws, 'sessions', 'sub', 'replay.log'),
+      'Waiting for its response...\r\nesc to cancel',
+      'utf8',
+    );
+
+    const out = await agentRead(ws, PARENT, 'golden-gate', { screen: true });
+    assert.doesNotMatch(out, /의 기록/);
+    assert.doesNotMatch(out, /질문 0/);
+    assert.match(out, /^### 지금 화면 \(120×30\)\n\nWaiting for its response\.\.\.\nesc to cancel$/);
+
+    await fsp.access(resolveReportReadFile(ws, 'sub'));
+    assert.match(await agentCheck(ws, PARENT), /안 읽은 서브가 없다/);
+
+    const emptyOut = await agentRead(ws, PARENT, 'hangang', { screen: true });
+    assert.equal(emptyOut, '화면 기록이 없다');
+  });
+
+  it('--screen과 --last를 함께 주면 거절한다', async () => {
+    await writeSessions(ws, [
+      { sessionId: PARENT },
+      { sessionId: 'sub', parentSessionId: PARENT, agentName: 'golden-gate' },
+    ]);
+    await assert.rejects(
+      agentRead(ws, PARENT, 'golden-gate', { screen: true, lastN: 1 }),
+      /--screen은 --last와 함께 쓰지 않는다/,
+    );
   });
 });

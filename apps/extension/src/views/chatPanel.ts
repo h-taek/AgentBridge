@@ -16,6 +16,7 @@ import {
   updateOwnerSize,
   releaseOwnership,
   readForeignOwner,
+  replayLogPath,
 } from '@agentbridge/core';
 import { CLI_DISPLAY_NAME, type CliKind } from '../shared/types';
 import modelColors from '@agentbridge/assets/colors.json';
@@ -587,8 +588,7 @@ export class ChatPanel {
       // 데스크탑과 동일한 raw replay.log를 기록하고, 이 세션이 *익스텐션에서 라이브*임을 표시.
       if (this.opts.workspaceId && this.opts.sessionId) {
         this.ownerDir = workspaceStore.getSessionDir(this.opts.workspaceId, this.opts.sessionId);
-        const replayLogPath = join(this.ownerDir, 'replay.log');
-        this.replayStream = createWriteStream(replayLogPath, { flags: 'a', encoding: 'utf8' });
+        this.replayStream = createWriteStream(replayLogPath(this.ownerDir), { flags: 'a', encoding: 'utf8' });
         this.replayStream.on('error', (err) => output.warn(`replay.log write error: ${String(err)}`));
         void acquireOwnership(this.ownerDir, { app: 'extension', cols, rows }).catch((err) =>
           output.warn(`owner.json acquire 실패: ${String(err)}`),

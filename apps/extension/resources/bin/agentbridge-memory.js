@@ -187,6 +187,18 @@ var init_reportState = __esm({
   }
 });
 
+// packages/core/src/replayPaths.ts
+function replayLogPath(sessionDir) {
+  return (0, import_path3.join)(sessionDir, "replay.log");
+}
+var import_path3;
+var init_replayPaths = __esm({
+  "packages/core/src/replayPaths.ts"() {
+    "use strict";
+    import_path3 = require("path");
+  }
+});
+
 // packages/core/src/sessionStatus.ts
 var sessionStatus_exports = {};
 __export(sessionStatus_exports, {
@@ -237,13 +249,10 @@ async function cachedLastOutputAt(cache, path2, stat) {
   cache.set(path2, { mtimeMs, value: mtimeMs });
   return mtimeMs;
 }
-function resolveReplayLogFile(workspaceDir, sessionId) {
-  return (0, import_path3.join)(workspaceDir, "sessions", sessionId, "replay.log");
-}
 async function readSessionActivityInputs(workspaceDir, sessionId, io = defaultIo) {
   const startFile = resolveTurnStartFile(workspaceDir, sessionId);
   const signalFile = resolveTurnSignalFile(workspaceDir, sessionId);
-  const replayLogFile = resolveReplayLogFile(workspaceDir, sessionId);
+  const replayLogFile = replayLogPath((0, import_path4.join)(workspaceDir, "sessions", sessionId));
   const [start, signal, lastOutputAt] = await Promise.all([
     cachedRead(startCache, startFile, io.stat, io.readTurnStart),
     cachedRead(signalCache, signalFile, io.stat, io.readTurnSignal),
@@ -255,13 +264,14 @@ async function readSessionActivityInputs(workspaceDir, sessionId, io = defaultIo
     lastOutputAt
   };
 }
-var import_fs3, import_path3, SILENCE_MS, PRIORITY, defaultIo, startCache, signalCache, outputCache;
+var import_fs3, import_path4, SILENCE_MS, PRIORITY, defaultIo, startCache, signalCache, outputCache;
 var init_sessionStatus = __esm({
   "packages/core/src/sessionStatus.ts"() {
     "use strict";
     import_fs3 = require("fs");
-    import_path3 = require("path");
+    import_path4 = require("path");
     init_turnSignal();
+    init_replayPaths();
     SILENCE_MS = 6e4;
     PRIORITY = ["unknown", "running", "done", "idle"];
     defaultIo = {
@@ -351,7 +361,7 @@ function isPidAlive(pid) {
 async function tryBreakStaleLock(lockDir) {
   let meta = null;
   try {
-    meta = JSON.parse(await import_fs4.promises.readFile((0, import_path4.join)(lockDir, "meta.json"), "utf8"));
+    meta = JSON.parse(await import_fs4.promises.readFile((0, import_path5.join)(lockDir, "meta.json"), "utf8"));
   } catch {
   }
   let stale;
@@ -376,7 +386,7 @@ async function tryBreakStaleLock(lockDir) {
   return true;
 }
 async function withFileLock(targetDir, fn) {
-  const lockDir = (0, import_path4.join)(targetDir, ".lock");
+  const lockDir = (0, import_path5.join)(targetDir, ".lock");
   await import_fs4.promises.mkdir(targetDir, { recursive: true });
   const deadline = Date.now() + ACQUIRE_TIMEOUT_MS;
   let acquiredAt;
@@ -398,18 +408,18 @@ async function withFileLock(targetDir, fn) {
   }
   try {
     const meta = { pid: process.pid, acquiredAt };
-    await import_fs4.promises.writeFile((0, import_path4.join)(lockDir, "meta.json"), JSON.stringify(meta), "utf8");
+    await import_fs4.promises.writeFile((0, import_path5.join)(lockDir, "meta.json"), JSON.stringify(meta), "utf8");
     return await fn();
   } finally {
     await import_fs4.promises.rm(lockDir, { recursive: true, force: true });
   }
 }
-var import_fs4, import_path4, RETRY_INTERVAL_MS, ACQUIRE_TIMEOUT_MS, STALE_LOCK_MS;
+var import_fs4, import_path5, RETRY_INTERVAL_MS, ACQUIRE_TIMEOUT_MS, STALE_LOCK_MS;
 var init_fileLock = __esm({
   "packages/core/src/fileLock.ts"() {
     "use strict";
     import_fs4 = require("fs");
-    import_path4 = require("path");
+    import_path5 = require("path");
     RETRY_INTERVAL_MS = 50;
     ACQUIRE_TIMEOUT_MS = 5e3;
     STALE_LOCK_MS = 1e4;
@@ -423,14 +433,14 @@ var init_fileLock = __esm({
 
 // packages/core/src/storageRoot.ts
 function getStorageRoot() {
-  return (0, import_path5.join)((0, import_os.homedir)(), "agentbridge");
+  return (0, import_path6.join)((0, import_os.homedir)(), "agentbridge");
 }
-var import_os, import_path5;
+var import_os, import_path6;
 var init_storageRoot = __esm({
   "packages/core/src/storageRoot.ts"() {
     "use strict";
     import_os = require("os");
-    import_path5 = require("path");
+    import_path6 = require("path");
   }
 });
 
@@ -1198,16 +1208,16 @@ function canonicalWorkspacePath(folderFsPath) {
   try {
     canonical = (0, import_fs5.realpathSync)(folderFsPath);
   } catch {
-    canonical = (0, import_path6.resolve)(folderFsPath);
+    canonical = (0, import_path7.resolve)(folderFsPath);
   }
   return canonical.normalize("NFC");
 }
-var import_fs5, import_path6;
+var import_fs5, import_path7;
 var init_workspaceId = __esm({
   "packages/core/src/workspaceId.ts"() {
     "use strict";
     import_fs5 = require("fs");
-    import_path6 = require("path");
+    import_path7 = require("path");
   }
 });
 
@@ -1456,7 +1466,9 @@ tab; you give it work, it reports back, you read the report.
     agent start --prompt "..." [--harness claude,codex,agy] [--isolate]
     agent list                    the subs you started, and their state
     agent check [--wait] [--for <seconds>]
-    agent read <name> [--last N]  that sub's full conversation
+    agent read <name> [--last N] [--screen]
+                                  that sub's full conversation; --screen for
+                                  what its terminal shows right now
     agent diff <name> [--stat]    what that sub actually changed
     agent send <name> --prompt "..."
     agent merge <name>            put its changes into the real folder
@@ -1501,6 +1513,14 @@ A sub can also go quiet without finishing: the user interrupted its turn, or it
 is stuck waiting on something. \`check\` and the next-turn line both report those
 separately from finished ones. That state is what we observed, not a verdict \u2014
 read the sub to see how far it got, then send it more instructions or close it.
+
+"Finished" means the sub's harness ended its turn, not that the work you gave
+it is done. A harness can hand the work to its own subagent and end its turn
+while that runs. When a finished sub's reply is empty, \`agent read\` shows its
+screen as well. When the reply says it is waiting, run
+\`agent read <name> --screen\`. Read the screen before deciding the sub failed.
+If it shows the sub still working or waiting, check again later instead of
+closing it.
 
 Every read output item starts with its identifier (\`<category>/<slug>\`) \u2014
 that is what \`memory update\` takes.

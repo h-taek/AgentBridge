@@ -10,6 +10,7 @@ import { promises as fsp } from 'fs';
 import { join } from 'path';
 import { execFile } from 'child_process';
 import { withFileLock, isPidAlive } from './fileLock';
+import { replaySizePath } from './replayPaths';
 
 export type OwnerApp = 'desktop' | 'extension';
 
@@ -73,6 +74,7 @@ export async function acquireOwnership(
       rows: info.rows,
     };
     await writeJsonAtomic(ownerPath(sessionDir), owner);
+    await writeJsonAtomic(replaySizePath(sessionDir), { cols: info.cols, rows: info.rows });
   });
 }
 
@@ -82,6 +84,7 @@ export async function updateOwnerSize(sessionDir: string, cols: number, rows: nu
     const current = await readOwnerUnlocked(sessionDir);
     if (!current) return;
     await writeJsonAtomic(ownerPath(sessionDir), { ...current, cols, rows });
+    await writeJsonAtomic(replaySizePath(sessionDir), { cols, rows });
   });
 }
 

@@ -19,6 +19,7 @@ import {
 import { isUnread, markReported } from '../agent/reportState';
 import { resolveTreePath } from '../agent/cleanup';
 import { subagentDiff, truncatePatch, PATCH_LIMIT_BYTES } from '../agent/diffMerge';
+import { renderScreen, type RenderedScreen } from '../screenReplay';
 import {
   sendHostRequest,
   HOST_AGENT_START,
@@ -34,10 +35,6 @@ import {
 // 안에서 우리 반환을 받게 하기 위해서다. 긴 서브를 백그라운드로 던진 메인은 `--for`로 늘린다.
 export const DEFAULT_WAIT_SEC = 60;
 const WAIT_POLL_MS = 1000;
-
-// 빈손으로 돌아올 때 함께 내는 화면 기록의 꼬리. 우리는 파싱하지 않고 그대로 넘긴다 —
-// 판단은 메인이 한다(B-6).
-const TAIL_BYTES = 2000;
 
 // ─── 레코드에서 서브를 모은다 ────────────────────────────────────────────
 
@@ -171,25 +168,47 @@ export async function agentList(wsDir: string, callerSessionId: string): Promise
 
 // ─── read ───────────────────────────────────────────────────────────────
 
+export interface ReadOptions {
+  lastN?: number;
+  screen?: boolean;
+}
+
+function formatScreenSection(screen: RenderedScreen | null): string {
+  if (!screen || !screen.text) return '화면 기록이 없다';
+  return `### 지금 화면 (${screen.cols}×${screen.rows})\n\n${screen.text}`;
+}
+
 // 서브의 기록은 그 세션 폴더에 쌓인다(B-8). 사용자가 서브에 직접 건 말도 여기 들어 있다.
 export async function agentRead(
   wsDir: string,
   callerSessionId: string,
   name: string,
-  lastN?: number,
+  lastNOrOpts?: number | ReadOptions,
 ): Promise<string> {
+  const opts: ReadOptions =
+    typeof lastNOrOpts === 'number' ? { lastN: lastNOrOpts } : (lastNOrOpts ?? {});
+  if (opts.screen && opts.lastN !== undefined) {
+    throw new Error('--screen은 --last와 함께 쓰지 않는다');
+  }
+
   const sub = await findSub(wsDir, callerSessionId, name);
   const sessionDir = join(wsDir, 'sessions', sub.sessionId);
-  const all = await readAllTurns(sessionDir);
 
   // 읽음 표시를 쓰는 것은 이 명령뿐이다. 대기의 반환이 끄면 그 직후 턴이 중단됐을 때 알림이
   // 어디에도 다시 나타나지 않는다 — 실제로 가져간 시점에 꺼야 읽기 전까지 리마인드가 붙는다.
   await markReported(wsDir, sub.sessionId);
 
-  if (all.length === 0) {
-    return `${name}: 아직 기록된 턴이 없다.${sub.closed ? ' 세션은 이미 끝났다.' : ''}`;
+  if (opts.screen) {
+    return formatScreenSection(await renderScreen(sessionDir));
   }
-  const turns = typeof lastN === 'number' ? all.slice(-lastN) : all;
+
+  const all = await readAllTurns(sessionDir);
+  if (all.length === 0) {
+    const head = `${name}: 아직 기록된 턴이 없다.${sub.closed ? ' 세션은 이미 끝났다.' : ''}`;
+    return `${head}\n\n${formatScreenSection(await renderScreen(sessionDir))}`;
+  }
+
+  const turns = typeof opts.lastN === 'number' ? all.slice(-opts.lastN) : all;
   const lines = [`## ${name} (${sub.model}) 의 기록 — ${turns.length}턴, 오래된 것부터`, ''];
   for (const t of turns) {
     lines.push(`[${t.completedAt || ''}]`);
@@ -197,6 +216,15 @@ export async function agentRead(
     lines.push(`assistant: ${t.assistantBody || ''}`);
     lines.push('');
   }
+
+  // `--last`로 잘랐더라도 빈 답 여부는 기록 전체의 마지막 턴으로 본다.
+  const lastTurn = all[all.length - 1];
+  const emptyReply = (lastTurn.assistantBody ?? '').trim() === '';
+  const activeOrUnknown = sub.activity === 'running' || sub.activity === 'unknown';
+  if (emptyReply || activeOrUnknown) {
+    lines.push(formatScreenSection(await renderScreen(sessionDir)));
+  }
+
   return lines.join('\n');
 }
 
@@ -252,25 +280,6 @@ export interface CheckOptions {
 
 const defaultSleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
-// 화면 기록의 꼬리. 없으면 빈 문자열.
-async function replayTail(wsDir: string, sessionId: string): Promise<string> {
-  const path = join(wsDir, 'sessions', sessionId, 'replay.log');
-  try {
-    const stat = await fsp.stat(path);
-    const start = Math.max(0, stat.size - TAIL_BYTES);
-    const handle = await fsp.open(path, 'r');
-    try {
-      const buf = Buffer.alloc(stat.size - start);
-      await handle.read(buf, 0, buf.length, start);
-      return buf.toString('utf8');
-    } finally {
-      await handle.close();
-    }
-  } catch {
-    return '';
-  }
-}
-
 function renderWoke(done: SubRow[], stuck: SubRow[]): string {
   const lines: string[] = [];
   if (done.length > 0) {
@@ -300,10 +309,10 @@ async function renderEmpty(wsDir: string, subs: SubRow[], waited: boolean): Prom
   for (const s of subs) {
     lines.push(`  ${s.name}  ${formatSubLabel(s, stateText(s))}`);
     if (s.closed) {
-      const tail = await replayTail(wsDir, s.sessionId);
-      if (tail) {
-        lines.push('    — 완료 신호 없이 끝났다. 화면 기록의 꼬리:');
-        for (const l of tail.split('\n').slice(-8)) lines.push(`      ${l.replace(/\s+$/, '')}`);
+      const screen = await renderScreen(join(wsDir, 'sessions', s.sessionId));
+      if (screen && screen.text) {
+        lines.push(`    — 완료 신호 없이 끝났다. 지금 화면 (${screen.cols}×${screen.rows}):`);
+        for (const l of screen.text.split('\n')) lines.push(`      ${l}`);
       } else {
         lines.push('    — 완료 신호 없이 끝났다. 화면 기록이 없다.');
       }

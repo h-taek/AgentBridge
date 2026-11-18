@@ -13,6 +13,7 @@ import {
   resolveTurnStartFile,
   readTurnStart,
 } from './cliAdapter/turnSignal';
+import { replayLogPath } from './replayPaths';
 
 export type SessionActivity = 'idle' | 'running' | 'done' | 'unknown';
 
@@ -130,10 +131,6 @@ async function cachedLastOutputAt(
   return mtimeMs;
 }
 
-function resolveReplayLogFile(workspaceDir: string, sessionId: string): string {
-  return join(workspaceDir, 'sessions', sessionId, 'replay.log');
-}
-
 // 세션 폴더에서 판정 입력 셋(viewedAt 제외)을 모은다. viewedAt은 세션 레코드(workspace.json)
 // 쪽 값이라 이 리더의 몫이 아니다 — 호출부가 합쳐서 computeSessionActivity에 넣는다.
 export async function readSessionActivityInputs(
@@ -143,7 +140,7 @@ export async function readSessionActivityInputs(
 ): Promise<Pick<SessionActivityInput, 'startAt' | 'endAt' | 'lastOutputAt'>> {
   const startFile = resolveTurnStartFile(workspaceDir, sessionId);
   const signalFile = resolveTurnSignalFile(workspaceDir, sessionId);
-  const replayLogFile = resolveReplayLogFile(workspaceDir, sessionId);
+  const replayLogFile = replayLogPath(join(workspaceDir, 'sessions', sessionId));
 
   const [start, signal, lastOutputAt] = await Promise.all([
     cachedRead(startCache, startFile, io.stat, io.readTurnStart),

@@ -15,6 +15,7 @@ import {
   clearTransferRequest,
   ownerPath,
   transferRequestPath,
+  replaySizePath,
 } from '@agentbridge/core';
 
 describe('sessionOwner', () => {
@@ -109,6 +110,14 @@ describe('sessionOwner', () => {
     assert.equal(existsSync(ownerPath(dir)), false);
     await releaseOwnership(dir);
     assert.equal(existsSync(ownerPath(dir)), false);
+  });
+
+  it('replay-size.json은 acquire·resize 때 쓰이고 release 뒤에도 남는다 (0.8.0)', async () => {
+    await acquireOwnership(dir, { app: 'extension', cols: 100, rows: 30 });
+    assert.deepEqual(JSON.parse(await fs.readFile(replaySizePath(dir), 'utf8')), { cols: 100, rows: 30 });
+    await updateOwnerSize(dir, 78, 45);
+    await releaseOwnership(dir);
+    assert.deepEqual(JSON.parse(await fs.readFile(replaySizePath(dir), 'utf8')), { cols: 78, rows: 45 });
   });
 
   it('transfer-request write/read/clear', async () => {

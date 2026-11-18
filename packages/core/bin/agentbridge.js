@@ -301,8 +301,13 @@ async function dispatch(cmd, args, wsDir, storageRoot) {
           return agentList(wsDir, caller)
         case 'read': {
           const name = nameArg()
-          const i = rest.indexOf('--last')
-          return agentRead(wsDir, caller, name, i === -1 ? undefined : intOption(rest, '--last', 0))
+          const screen = rest.includes('--screen')
+          const hasLast = rest.includes('--last')
+          if (screen && hasLast) fail('--screen은 --last와 함께 쓰지 않는다')
+          return agentRead(wsDir, caller, name, {
+            lastN: hasLast ? intOption(rest, '--last', 0) : undefined,
+            screen,
+          })
         }
         case 'diff':
           return agentDiff(wsDir, caller, nameArg(), { statOnly: rest.includes('--stat') })
