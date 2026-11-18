@@ -3,6 +3,7 @@ import { randomBytes } from 'crypto';
 import { promises as fs } from 'fs';
 import * as output from '../log/output';
 import * as workspaceStore from '../core/workspaceStore';
+import { whenWorkspaceReady } from '../core/workspaceReady';
 import { readIR } from '@agentbridge/core';
 import { readAllTurns, listArchives } from '../core/turnsStore';
 import { runManualCompaction, resetMemory } from '../core/compactionScheduler';
@@ -99,9 +100,10 @@ export class MemoryPanelProvider implements vscode.WebviewViewProvider {
     void this.sendIR();
   }
 
-  private getWorkspaceId(): string | null {
+  private async getWorkspaceId(): Promise<string | null> {
     const folderUri = vscode.workspace.workspaceFolders?.[0]?.uri;
     if (!folderUri) return null;
+    await whenWorkspaceReady(); // 이어받기보다 먼저 새 워크스페이스를 만들지 않는다
     return workspaceStore.getOrCreateWorkspaceId(folderUri.fsPath);
   }
 
@@ -111,7 +113,7 @@ export class MemoryPanelProvider implements vscode.WebviewViewProvider {
   }
 
   private async sendIR(): Promise<void> {
-    const wid = this.getWorkspaceId();
+    const wid = await this.getWorkspaceId();
     if (!wid) {
       this.postMessage({ type: 'ir:data', ir: null, turns: [], archives: [], ui: this.readUiState() });
       return;
@@ -153,7 +155,7 @@ export class MemoryPanelProvider implements vscode.WebviewViewProvider {
   }
 
   private async handleRefine(): Promise<void> {
-    const wid = this.getWorkspaceId();
+    const wid = await this.getWorkspaceId();
     if (!wid) {
       vscode.window.showWarningMessage(vscode.l10n.t('AgentBridge: No workspace open.'));
       return;
@@ -204,7 +206,7 @@ export class MemoryPanelProvider implements vscode.WebviewViewProvider {
   }
 
   private async handleReset(): Promise<void> {
-    const wid = this.getWorkspaceId();
+    const wid = await this.getWorkspaceId();
     if (!wid) return;
 
     const answer = await vscode.window.showWarningMessage(

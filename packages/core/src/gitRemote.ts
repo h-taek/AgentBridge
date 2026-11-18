@@ -89,11 +89,13 @@ export const readOriginUrl: GitRemoteReader = (cwd) =>
     );
   });
 
-// 프로젝트 지식 폴더 이름. remote가 있으면 그것으로, 없으면 폴더 경로로 정한다.
-export async function resolveProjectProfileId(
+export type ProjectProfileKey = { id: string; keyedBy: 'remote' | 'path' };
+
+// 프로필 id와 함께 키가 remote 기반인지 경로 기반인지 돌려준다.
+export async function resolveProjectProfileKey(
   cwd: string,
   opts: { readRemote?: GitRemoteReader; logger?: Logger } = {},
-): Promise<string> {
+): Promise<ProjectProfileKey> {
   const log = opts.logger ?? noopLogger;
   const read = opts.readRemote ?? readOriginUrl;
   let url: string | null = null;
@@ -103,7 +105,17 @@ export async function resolveProjectProfileId(
     log.warn(`gitRemote: origin 조회 실패 — ${err instanceof Error ? err.message : String(err)}`);
   }
   const normalized = url ? normalizeRemoteUrl(url) : '';
-  return normalized ? profileIdForRemote(normalized) : profileIdForPath(cwd);
+  return normalized
+    ? { id: profileIdForRemote(normalized), keyedBy: 'remote' }
+    : { id: profileIdForPath(cwd), keyedBy: 'path' };
+}
+
+// 프로젝트 지식 폴더 이름. remote가 있으면 그것으로, 없으면 폴더 경로로 정한다.
+export async function resolveProjectProfileId(
+  cwd: string,
+  opts: { readRemote?: GitRemoteReader; logger?: Logger } = {},
+): Promise<string> {
+  return (await resolveProjectProfileKey(cwd, opts)).id;
 }
 
 // 로컬로 쌓다가 remote가 생기면 키가 바뀌어 지식이 사라진 것처럼 보인다. remote 키 자리가 아직

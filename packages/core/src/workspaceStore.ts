@@ -17,6 +17,7 @@ import {
   mkdirSync,
   readFileSync,
   renameSync,
+  statSync,
   writeFileSync,
   promises as fsp,
 } from 'fs';
@@ -75,6 +76,13 @@ export interface SessionMeta {
   subEffort?: string;
 }
 
+// 같은 디스크 안 이동·이름 변경을 알아보는 폴더 표지. 셋이 모두 같아야 같은 폴더다.
+export interface FolderMark {
+  dev: string;
+  ino: string;
+  birthtimeNs: string;
+}
+
 export interface WorkspaceMeta {
   workspaceId: string;
   title: string;
@@ -87,6 +95,7 @@ export interface WorkspaceMeta {
   // compactionScheduler 락.
   compactionInProgress: { pid: number; startedAt: number } | null;
   codexHookTrust?: 'pending' | 'trusted';
+  folderMark?: FolderMark;
 }
 
 export interface WorkspaceListEntry {
@@ -94,6 +103,7 @@ export interface WorkspaceListEntry {
   title: string;
   updatedAt: string;
   workspacePath: string;
+  folderMark?: FolderMark;
 }
 
 export type SessionUpdatePatch = Partial<{
@@ -115,6 +125,7 @@ export type WorkspaceUpdatePatch = Partial<{
   primarySessionId: string | null;
   compactionInProgress: WorkspaceMeta['compactionInProgress'];
   codexHookTrust: WorkspaceMeta['codexHookTrust'];
+  folderMark: FolderMark;
 }>;
 
 // ─── WorkspaceStore 인터페이스 ─────────────────────────────────────────
@@ -462,6 +473,7 @@ export function createWorkspaceStore(opts: WorkspaceStoreOptions = {}): Workspac
             title: m.title,
             updatedAt: m.updatedAt,
             workspacePath: m.workspacePath,
+            ...(m.folderMark ? { folderMark: m.folderMark } : {}),
           });
         } catch {
           /* skip corrupt */
@@ -564,4 +576,55 @@ export function createWorkspaceStore(opts: WorkspaceStoreOptions = {}): Workspac
 // 호스트 헬퍼: 모델 → 기본 표시 이름.
 export function defaultSessionTitle(model: CliKind): string {
   return CLI_DISPLAY_NAME[model];
+}
+
+// 폴더의 장치 번호·inode·생성 시각을 정밀도 손실 없이 10진 문자열로 읽는다. 없으면 null.
+export function readFolderMark(folderFsPath: string): FolderMark | null {
+  try {
+    const st = statSync(folderFsPath, { bigint: true });
+    if (!st.isDirectory()) return null;
+    return {
+      dev: String(st.dev),
+      ino: String(st.ino),
+      birthtimeNs: String(st.birthtimeNs),
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function isSameFolderMark(a?: FolderMark | null, b?: FolderMark | null): boolean {
+  if (!a || !b) return false;
+  return a.dev === b.dev && a.ino === b.ino && a.birthtimeNs === b.birthtimeNs;
+}
+
+// 시작 시 등록된 워크스페이스 중 경로가 살아 있고 folderMark가 아직 비어 있는 것만 채운다.
+export async function backfillFolderMarks(
+  store: Pick<WorkspaceStore, 'listWorkspaces' | 'updateWorkspaceMeta'>,
+): Promise<void> {
+  const entries = await store.listWorkspaces();
+  for (const entry of entries) {
+    if (entry.folderMark || !entry.workspacePath) continue;
+    const mark = readFolderMark(entry.workspacePath);
+    if (!mark) continue;
+    try {
+      await store.updateWorkspaceMeta(entry.workspaceId, { folderMark: mark });
+    } catch {
+      /* 개별 항목 쓰기 실패는 나머지 백필을 막지 않는다 */
+    }
+  }
+}
+
+// 폴더를 열어 워크스페이스를 잡을 때 현재 폴더 표지가 기록과 다르면 덮어쓴다. 같으면 안 쓴다.
+export async function syncFolderMark(
+  store: Pick<WorkspaceStore, 'loadWorkspace' | 'updateWorkspaceMeta'>,
+  workspaceId: string,
+  folderFsPath: string,
+): Promise<boolean> {
+  const mark = readFolderMark(folderFsPath);
+  if (!mark) return false;
+  const meta = await store.loadWorkspace(workspaceId);
+  if (isSameFolderMark(meta.folderMark, mark)) return false;
+  await store.updateWorkspaceMeta(workspaceId, { folderMark: mark });
+  return true;
 }

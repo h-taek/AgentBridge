@@ -42,6 +42,7 @@ export * from './turnsStore';
 export * from './sessionTitle';
 export * from './irStore';
 export * from './workspaceStore';
+export * from './workspaceTakeover';
 export * from './hookStatusStore';
 export * from './sessionRegistry';
 export * from './sessionOwner';

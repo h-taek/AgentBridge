@@ -3,6 +3,7 @@ import { mkdirSync, watch, type FSWatcher } from 'fs';
 import { join } from 'path';
 import * as output from '../log/output';
 import * as workspaceStore from '../core/workspaceStore';
+import { whenWorkspaceReady } from '../core/workspaceReady';
 import { toProfileDocRow, orderPinnedFirst, isProfileDocPath, shouldRefreshOnProfileFileChange } from './memoryPanelModel';
 import {
   readProposals,
@@ -121,9 +122,10 @@ export class ProfileSection {
     void this.sendProposals();
   }
 
-  private getWorkspaceId(): string | null {
+  private async getWorkspaceId(): Promise<string | null> {
     const folderUri = vscode.workspace.workspaceFolders?.[0]?.uri;
     if (!folderUri) return null;
+    await whenWorkspaceReady(); // 이어받기보다 먼저 새 워크스페이스를 만들지 않는다
     return workspaceStore.getOrCreateWorkspaceId(folderUri.fsPath);
   }
 
@@ -159,7 +161,7 @@ export class ProfileSection {
   }
 
   private async sendProposals(): Promise<void> {
-    const wid = this.getWorkspaceId();
+    const wid = await this.getWorkspaceId();
     if (!wid) {
       this.onCount?.(0);
       this.postMessage({ type: 'proposal:data', user: EMPTY_SIDE, project: null });
@@ -181,7 +183,7 @@ export class ProfileSection {
   // 어느 자리의 제안인지는 웹뷰가 실어 보낸다. 목록이 갈려 있으므로 id만으로는 못 가린다.
   private async resolveSide(scope: ProposalScope): Promise<string | null> {
     if (scope === 'project') return this.getProjectProfileId();
-    const wid = this.getWorkspaceId();
+    const wid = await this.getWorkspaceId();
     return wid ? resolveProfile(wid) : null;
   }
 
