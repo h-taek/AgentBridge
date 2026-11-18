@@ -1,9 +1,14 @@
 import { strict as assert } from 'assert';
+import { promises as fsp } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import {
   extractSessionIdFromStdin,
   extractPromptFromStdin,
   extractInvocationNum,
   extractLastUserInput,
+  resolveInjection,
+  writeProfileDocs,
 } from '@agentbridge/core';
 
 // 쿼리 추출은 0.5.0 B-4에서 폐기했다가 0.6.0 spec/03 §1-1에서 되살렸다. 훅이 매 턴 프롬프트를
@@ -83,5 +88,65 @@ describe('globalInject — extractLastUserInput', () => {
   it('사용자 발화가 없으면 빈 문자열', () => {
     assert.equal(extractLastUserInput(rec({ type: 'PLANNER_RESPONSE', source: 'MODEL' })), '');
     assert.equal(extractLastUserInput(''), '');
+  });
+});
+
+describe('globalSearch.resolveInjection — 핀 문서 제외 (0.8.0 spec/05 §2-2)', () => {
+  let tmp: string;
+
+  beforeEach(async () => {
+    tmp = await fsp.mkdtemp(join(tmpdir(), 'ab-pin-search-'));
+  });
+
+  afterEach(async () => {
+    if (tmp) await fsp.rm(tmp, { recursive: true, force: true });
+  });
+
+  it('pinned 태그가 붙은 문서는 사용자·프로젝트 쪽 모두 후보에서 뺀다', async () => {
+    await writeProfileDocs(tmp, 'default', {
+      docs: [
+        {
+          category: 'conventions',
+          slug: 'pinned-user',
+          title: '배포 핀 규칙',
+          summary: '배포 전 확인',
+          body: '본문',
+          indexEntries: ['배포'],
+          tags: ['pinned'],
+        },
+        {
+          category: 'workflows',
+          slug: 'normal-user',
+          title: '일반 배포 절차',
+          summary: '배포 절차',
+          body: '본문',
+          indexEntries: ['배포'],
+        },
+      ],
+    });
+    await writeProfileDocs(
+      tmp,
+      'proj-1',
+      {
+        docs: [
+          {
+            category: 'infra',
+            slug: 'pinned-proj',
+            title: '프로젝트 배포 핀',
+            summary: '배포 금지 시간',
+            body: '본문',
+            indexEntries: ['배포'],
+            tags: ['pinned'],
+          },
+        ],
+      },
+      'project',
+    );
+
+    const out = await resolveInjection(tmp, { user: 'default', project: 'proj-1' }, '배포');
+    assert.deepEqual(
+      out.map((m) => `${m.scope}:${m.category}/${m.slug}`),
+      ['user:workflows/normal-user'],
+    );
   });
 });

@@ -3,7 +3,12 @@ import { execFileSync } from 'child_process';
 import { promises as fsp } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { writeProfileDocs, getGlobalDir } from '@agentbridge/core';
+import {
+  writeProfileDocs,
+  setDocPinned,
+  resolveProjectProfileId,
+  getGlobalDir,
+} from '@agentbridge/core';
 
 // 훅 주입 (0.6.0 spec/03 §1·§2).
 //
@@ -138,11 +143,30 @@ describe('helper inject — 매칭 주입 (0.6.0 spec/03 §1)', () => {
 
   it('부를 명령과 조건을 싣는다', () => {
     const ctx = ctxFor('x');
-    for (const cmd of ['context', 'turns --last', 'memory search', 'memory read', 'memory add', 'status']) {
+    for (const cmd of [
+      'context',
+      'turns --last',
+      'memory search',
+      'memory read',
+      'memory add',
+      'memory pending',
+      'memory withdraw',
+      'status',
+    ]) {
       assert.ok(ctx.includes(cmd), `지시문에 ${cmd}가 있어야 한다`);
     }
     // 사용자 명령은 싣지 않는다.
     assert.doesNotMatch(ctx, /uninstall/);
+  });
+
+  it('1-4 끝과 3. Commands에 대기 제안 조회·회수 안내를 싣는다', () => {
+    const ctx = ctxFor('x');
+    assert.match(
+      ctx,
+      /If you queued something that should not have been — wrong scope, below the\nbar, a duplicate — `memory pending` lists the queue and `memory withdraw <id>`\ntakes it back\. Any pending proposal can be withdrawn, whichever session\nqueued it\./,
+    );
+    assert.match(ctx, /    memory pending             proposals waiting for the user's approval/);
+    assert.match(ctx, /    memory withdraw <id>       take a pending proposal back/);
   });
 
   it('실행 경로가 박히고, 가장 빡빡한 한도(codex 10,000바이트) 아래다', () => {
@@ -412,5 +436,269 @@ describe('helper inject — 턴 시작 신호(0.5.0 W1)', () => {
     run('claude', 'UserPromptSubmit', JSON.stringify({ prompt: 'hi' }), undefined, 'ws-notoken');
     const sessionsDir = join(userData, 'workspaces', 'ws-notoken', 'sessions');
     await assert.rejects(() => fsp.stat(sessionsDir));
+  });
+});
+
+describe('helper inject — 첫 턴 핀 주입 (0.8.0 spec/05 §2-2)', () => {
+  let tmp: string;
+  let bundlePath: string;
+  let userData: string;
+  let wsDir: string;
+  let projDir: string;
+  let projectProfileId: string;
+
+  before(async function () {
+    this.timeout(30000);
+    tmp = await fsp.mkdtemp(join(tmpdir(), 'ab-pins-'));
+    userData = join(tmp, 'userdata');
+    await fsp.mkdir(join(userData, 'bin'), { recursive: true });
+    bundlePath = join(userData, 'bin', 'agentbridge-memory.js');
+    const bundlerScript = join(process.cwd(), '..', '..', 'scripts', 'bundle-helper.mjs');
+    execFileSync('node', [bundlerScript, bundlePath], { encoding: 'utf8' });
+
+    wsDir = join(userData, 'workspaces', 'ws-1');
+    projDir = join(tmp, 'repo-plain');
+    await fsp.mkdir(wsDir, { recursive: true });
+    await fsp.mkdir(projDir, { recursive: true });
+    await fsp.writeFile(
+      join(wsDir, 'workspace.json'),
+      JSON.stringify({ workspacePath: projDir }),
+      'utf8',
+    );
+    projectProfileId = await resolveProjectProfileId(projDir);
+  });
+
+  after(async () => {
+    if (tmp) await fsp.rm(tmp, { recursive: true, force: true });
+  });
+
+  function fire(
+    event: string,
+    payload: Record<string, unknown>,
+    session: string,
+    agent = 'claude',
+  ): any {
+    const out = execFileSync('node', [bundlePath, 'inject', '--agent', agent, '--event', event], {
+      input: JSON.stringify(payload),
+      encoding: 'utf8',
+      env: { ...process.env, AGENTBRIDGE_WS_DIR: wsDir, AGENTBRIDGE_WS_SESSION: session },
+    });
+    return JSON.parse(out);
+  }
+
+  function injectCtx(prompt: string, session: string): string {
+    return fire('UserPromptSubmit', { prompt }, session).hookSpecificOutput
+      .additionalContext as string;
+  }
+
+  async function clearGlobal(): Promise<void> {
+    await fsp.rm(getGlobalDir(userData), { recursive: true, force: true });
+  }
+
+  it('첫 주입에 사용자·프로젝트 핀 블록을 1-1 바로 앞에 싣고, 둘째 주입에는 안 싣는다', async () => {
+    await clearGlobal();
+    const globalDir = getGlobalDir(userData);
+    await writeProfileDocs(globalDir, 'default', {
+      docs: [
+        {
+          category: 'conventions',
+          slug: 'pinned-style',
+          title: 'Use concise replies',
+          summary: 'Keep answers brief.',
+          body: 'Detailed user rule body.',
+          indexEntries: ['reply', 'concise'],
+          tags: ['pinned'],
+        },
+        {
+          category: 'workflows',
+          slug: 'deploy-flow',
+          title: 'Deployment workflow',
+          summary: 'Tag before push.',
+          body: 'Release body.',
+          indexEntries: ['deployment', 'release'],
+        },
+      ],
+    });
+    await writeProfileDocs(
+      globalDir,
+      projectProfileId,
+      {
+        docs: [
+          {
+            category: 'infra',
+            slug: 'never-force-push-abc12',
+            title: 'Never force push',
+            summary: 'Avoid force push.',
+            body: 'Project rule body.',
+            indexEntries: ['push'],
+            tags: ['pinned'],
+          },
+        ],
+      },
+      'project',
+    );
+
+    const first = injectCtx('deployment release', 'sess-pin-1');
+    assert.match(first, /The user pinned these\. They hold for every task in this session\./);
+    assert.match(first, /- conventions\/pinned-style — Use concise replies/);
+    // 슬러그가 제목을 담고 있으면 제목을 중복해서 붙이지 않는다.
+    assert.match(first, /^- infra\/never-force-push-abc12$/m);
+    assert.doesNotMatch(first, /Detailed user rule body/);
+    assert.doesNotMatch(first, /Project rule body/);
+
+    // 1-1. Do this turn 바로 앞에 놓인다.
+    const pinPos = first.indexOf('The user pinned these.');
+    const turnPos = first.indexOf('### 1-1. Do this turn');
+    assert.ok(pinPos > first.indexOf('## 1. Context') && pinPos < turnPos);
+
+    // 둘째 주입에는 핀 블록이 빠진다.
+    const second = injectCtx('deployment release', 'sess-pin-1');
+    assert.doesNotMatch(second, /The user pinned these\./);
+    assert.doesNotMatch(second, /conventions\/pinned-style/);
+  });
+
+  it('첫 턴이 Stop 없이 끝난 뒤 다음 주입에도 핀 블록이 없다', async () => {
+    await clearGlobal();
+    await writeProfileDocs(getGlobalDir(userData), 'default', {
+      docs: [
+        {
+          category: 'conventions',
+          slug: 'pinned-rule',
+          title: 'Pinned rule',
+          summary: 'Summary.',
+          body: 'Body.',
+          indexEntries: ['pinned'],
+          tags: ['pinned'],
+        },
+      ],
+    });
+
+    const first = injectCtx('hello', 'sess-no-stop');
+    assert.match(first, /The user pinned these\./);
+
+    // Stop 없이 바로 다음 입력 또는 StopFailure 뒤 다음 입력
+    fire('StopFailure', { session_id: 'x' }, 'sess-no-stop');
+    const second = injectCtx('next prompt', 'sess-no-stop');
+    assert.doesNotMatch(second, /The user pinned these\./);
+  });
+
+  it('첫 주입 때 핀이 없었고 그 뒤 핀을 꽂아도 같은 세션에는 안 실린다', async () => {
+    await clearGlobal();
+    const globalDir = getGlobalDir(userData);
+    const { written } = await writeProfileDocs(globalDir, 'default', {
+      docs: [
+        {
+          category: 'conventions',
+          slug: 'later-pin',
+          title: 'Later pinned rule',
+          summary: 'Summary.',
+          body: 'Body.',
+          indexEntries: ['later'],
+        },
+      ],
+    });
+
+    const first = injectCtx('hello', 'sess-late-pin');
+    assert.doesNotMatch(first, /The user pinned these\./);
+
+    await setDocPinned(globalDir, 'default', 'user', written[0]!, true);
+
+    const sameSessionNext = injectCtx('hello again', 'sess-late-pin');
+    assert.doesNotMatch(sameSessionNext, /The user pinned these\./);
+
+    const freshSession = injectCtx('hello fresh', 'sess-fresh-after-pin');
+    assert.match(freshSession, /The user pinned these\./);
+    assert.match(freshSession, /- conventions\/later-pin — Later pinned rule/);
+  });
+
+  it('핀 문서는 단어 겹침 매칭 블록에 나오지 않는다', async () => {
+    await clearGlobal();
+    await writeProfileDocs(getGlobalDir(userData), 'default', {
+      docs: [
+        {
+          category: 'conventions',
+          slug: 'pinned-deploy',
+          title: 'Pinned deployment rule',
+          summary: 'Always check deployment checklist.',
+          body: 'Deployment checklist details.',
+          indexEntries: ['deployment', 'checklist'],
+          tags: ['pinned'],
+        },
+        {
+          category: 'workflows',
+          slug: 'normal-deploy',
+          title: 'Normal deployment guide',
+          summary: 'Standard deployment steps.',
+          body: 'Deployment guide details.',
+          indexEntries: ['deployment', 'steps'],
+        },
+      ],
+    });
+
+    const first = injectCtx('deployment checklist steps', 'sess-no-overlap');
+    // 핀 문서는 핀 블록에만 나오고 1-1 매칭 블록에는 나오지 않는다.
+    const [beforeTurn, afterTurn] = first.split('### 1-1. Do this turn');
+    assert.match(beforeTurn!, /conventions\/pinned-deploy/);
+    assert.ok(afterTurn, '1-1 매칭 블록이 있어야 한다');
+    assert.match(afterTurn, /workflows\/normal-deploy/);
+    assert.doesNotMatch(afterTurn, /conventions\/pinned-deploy/);
+
+    // 둘째 턴에도 매칭 블록에서 빠진다.
+    const second = injectCtx('deployment checklist steps', 'sess-no-overlap');
+    assert.doesNotMatch(second, /conventions\/pinned-deploy/);
+    assert.match(second, /workflows\/normal-deploy/);
+  });
+
+  it('agy PreInvocation은 invocationNum 0에서 한 번만 핀을 싣고 이후 호출·다음 턴엔 안 싣는다', async () => {
+    await clearGlobal();
+    await writeProfileDocs(getGlobalDir(userData), 'default', {
+      docs: [
+        {
+          category: 'conventions',
+          slug: 'agy-pin',
+          title: 'Agy pinned rule',
+          summary: 'Summary.',
+          body: 'Body.',
+          indexEntries: ['agy'],
+          tags: ['pinned'],
+        },
+      ],
+    });
+
+    const transcript = join(tmp, 'agy-pin-transcript.jsonl');
+    await fsp.writeFile(
+      transcript,
+      JSON.stringify({
+        type: 'USER_INPUT',
+        source: 'USER_EXPLICIT',
+        content: '<USER_REQUEST> hi </USER_REQUEST>',
+      }) + '\n',
+      'utf8',
+    );
+
+    const inv1Before0 = fire(
+      'PreInvocation',
+      { conversationId: 'c1', invocationNum: 1, transcriptPath: transcript },
+      'sess-agy-pin',
+      'agy',
+    );
+    assert.deepEqual(inv1Before0, {});
+
+    const inv0 = fire(
+      'PreInvocation',
+      { conversationId: 'c1', invocationNum: 0, transcriptPath: transcript },
+      'sess-agy-pin',
+      'agy',
+    );
+    assert.match(inv0.injectSteps[0].ephemeralMessage, /The user pinned these\./);
+    assert.match(inv0.injectSteps[0].ephemeralMessage, /conventions\/agy-pin/);
+
+    const nextTurn = fire(
+      'PreInvocation',
+      { conversationId: 'c1', invocationNum: 0, transcriptPath: transcript },
+      'sess-agy-pin',
+      'agy',
+    );
+    assert.doesNotMatch(nextTurn.injectSteps[0].ephemeralMessage, /The user pinned these\./);
   });
 });

@@ -82,9 +82,11 @@ Each line is the part after the run command.
     memory user                   the user's durable preferences (summaries)
     memory user --full            ... with full bodies
     memory project                what is durable about this repository
-    memory add --scope user|project --category <c> \\
+    memory add --scope project|user --category <c> \\
         --title "..." --summary "..." --body "..."
     memory update <id> [same flags]
+    memory pending                proposals waiting for approval
+    memory withdraw <proposal-id> take one back
 
 Categories: role, repos, domain, workflows, conventions, infra, verification.
 
@@ -149,13 +151,10 @@ that is what \`memory update\` takes.
 
 When something clears the bar in the hook's \`1-4. Recording\`:
 
-1. Pick the scope. Strip every name that belongs to this project — files,
-   screens, commands, tools, people, numbers, incidents. If what is left
-   no longer stands as a rule, it is \`--scope project\`. A habit of the
-   user shown through this project's case is project scope too, recorded
-   with the case. Use \`--scope user\` only when the sentence stands with no
-   project names in it, and it has come up in another project as well or
-   the user said it applies everywhere.
+1. Pick the scope. \`--scope\` is required. It is \`--scope project\` unless the
+   user said in so many words that this applies everywhere, across projects.
+   A sentence that reads as general is still project scope until the user
+   says so.
 2. Read that side in full — \`memory user --full\` or \`memory project --full\`.
    Not a search: you need everything to know whether this is new. Read only the
    side you picked.
@@ -187,6 +186,14 @@ of a lesson already recorded — that is \`memory update <id>\`, not a second
 entry.
 
 Record what would change how someone works next time.
+
+### Taking a proposal back
+
+When a proposal in the queue should not be there — wrong scope, below the
+bar, a duplicate, or the user said not to keep it — run \`memory pending\`,
+then \`memory withdraw <proposal-id>\`. To change a pending proposal, withdraw
+it and add it again. Approved entries are not withdrawn; they change through
+\`memory update <id>\`.
 
 ## Outside AgentBridge
 

@@ -48,7 +48,7 @@ describe('globalSearch.koreanStopwords', () => {
   it('불용어 한 단어로는 무관 문서가 매칭되지 않는다', () => {
     const noise = {
       category: 'role', slug: 'solo', title: '1인 개발', summary: '혼자',
-      indexEntries: ['solo'], body: '어떻게 진행하든 확인한다',
+      indexEntries: ['solo'], body: '어떻게 진행하든 확인한다', tags: [], path: '',
     };
     // 쿼리의 의미 단어는 '배포'뿐(어떻게는 불용어), noise 문서엔 '배포' 없음 → 0점
     assert.equal(scoreDoc(noise, tokenizeQuery('배포 어떻게')), 0);
@@ -74,7 +74,7 @@ describe('globalSearch.match', () => {
 
 const rec = {
   category: 'workflows', slug: 'git-flow', title: 'git-flow', summary: 'main 릴리스 전용',
-  indexEntries: ['배포', 'release', 'git-flow'], body: 'develop 통합',
+  indexEntries: ['배포', 'release', 'git-flow'], body: 'develop 통합', tags: [], path: '',
 };
 
 describe('globalSearch.score', () => {
@@ -183,6 +183,7 @@ describe('globalSearch.scoreDocGroups', () => {
   const rec = {
     category: 'workflows', slug: 'evidence', title: '근거',
     summary: '그대로 두지 말고 근거를 댄다', indexEntries: ['evidence'], body: '그대로',
+    tags: [], path: '',
   };
 
   it('한 단어가 두 번 세이지 않는다', () => {
@@ -199,7 +200,10 @@ describe('globalSearch.scoreDocGroups', () => {
   });
 
   it('영문은 그룹이 홑이라 scoreDoc과 같다', () => {
-    const doc = { category: 'infra', slug: 'deploy', title: 'Deployment', summary: 'ship it', indexEntries: ['deploy'], body: '' };
+    const doc = {
+      category: 'infra', slug: 'deploy', title: 'Deployment', summary: 'ship it',
+      indexEntries: ['deploy'], body: '', tags: [], path: '',
+    };
     assert.equal(
       scoreDocGroups(doc, tokenizeQueryGroups('deployment')),
       scoreDoc(doc, tokenizeQuery('deployment')),

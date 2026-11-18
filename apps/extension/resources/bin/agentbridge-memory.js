@@ -706,6 +706,7 @@ __export(globalStore_exports, {
   ensureProfile: () => ensureProfile,
   readProfileDocs: () => readProfileDocs,
   resolveProfile: () => resolveProfile,
+  setDocPinned: () => setDocPinned,
   writeIndexFromDocs: () => writeIndexFromDocs,
   writeProfileDocs: () => writeProfileDocs
 });
@@ -771,12 +772,114 @@ async function writeIndexFromDocs(globalDir, profileId, scope = "user") {
   await import_node_fs.promises.writeFile(indexPath, renderIndexMarkdown({ profileId, docs }), "utf8");
   return { indexPath, docCount: files.length };
 }
+function extractTagsBeforeDetails(markdown) {
+  const lines = String(markdown || "").split(/\r?\n/);
+  let inTags = false;
+  const tags = [];
+  for (const line of lines) {
+    if (/^## Details(?:\s|$)/.test(line)) break;
+    if (/^## /.test(line)) {
+      inTags = /^## Tags(?:\s|$)/.test(line);
+      continue;
+    }
+    if (inTags) {
+      const trimmed = line.trim();
+      if (trimmed.startsWith("- ")) {
+        const tag = trimmed.slice(2).trim();
+        if (tag) tags.push(tag);
+      }
+    }
+  }
+  return tags;
+}
+function isPinnedTagLine(line) {
+  const trimmed = line.trim();
+  return trimmed.startsWith("- ") && trimmed.slice(2).trim() === "pinned";
+}
+function updatePinnedInMarkdown(markdown, pinned) {
+  const eol = markdown.includes("\r\n") ? "\r\n" : "\n";
+  const lines = markdown.split(/\r?\n/);
+  const detailsIdx = lines.findIndex((l) => /^## Details(?:\s|$)/.test(l));
+  const limit = detailsIdx >= 0 ? detailsIdx : lines.length;
+  let tagsStart = -1;
+  let tagsEnd = limit;
+  for (let i = 0; i < limit; i++) {
+    if (/^## Tags(?:\s|$)/.test(lines[i])) {
+      tagsStart = i;
+      for (let j = i + 1; j < limit; j++) {
+        if (/^## /.test(lines[j])) {
+          tagsEnd = j;
+          break;
+        }
+      }
+      break;
+    }
+  }
+  if (pinned) {
+    if (tagsStart >= 0) {
+      for (let i = tagsStart + 1; i < tagsEnd; i++) {
+        if (isPinnedTagLine(lines[i])) return markdown;
+      }
+      let lastContent = -1;
+      for (let i = tagsEnd - 1; i > tagsStart; i--) {
+        if (lines[i].trim() !== "") {
+          lastContent = i;
+          break;
+        }
+      }
+      if (lastContent >= 0) {
+        lines.splice(lastContent + 1, 0, "- pinned");
+      } else {
+        const hasBlankAfterHeader = tagsStart + 1 < tagsEnd && lines[tagsStart + 1].trim() === "";
+        if (hasBlankAfterHeader) {
+          lines.splice(tagsStart + 2, 0, "- pinned", "");
+        } else {
+          lines.splice(tagsStart + 1, 0, "", "- pinned", "");
+        }
+      }
+      return lines.join(eol);
+    }
+    let insertAt = limit;
+    const summaryIdx = lines.slice(0, limit).findIndex((l) => /^## Summary(?:\s|$)/.test(l));
+    if (summaryIdx >= 0) {
+      insertAt = limit;
+      for (let i = summaryIdx + 1; i < limit; i++) {
+        if (/^## /.test(lines[i])) {
+          insertAt = i;
+          break;
+        }
+      }
+    }
+    const block = ["## Tags", "", "- pinned", ""];
+    if (insertAt > 0 && lines[insertAt - 1].trim() !== "") {
+      block.unshift("");
+    }
+    lines.splice(insertAt, 0, ...block);
+    return lines.join(eol);
+  }
+  if (tagsStart < 0) return markdown;
+  const pinnedIndices = [];
+  for (let i = tagsStart + 1; i < tagsEnd; i++) {
+    if (isPinnedTagLine(lines[i])) pinnedIndices.push(i);
+  }
+  if (pinnedIndices.length === 0) return markdown;
+  for (let k = pinnedIndices.length - 1; k >= 0; k--) {
+    lines.splice(pinnedIndices[k], 1);
+  }
+  const newTagsEnd = tagsEnd - pinnedIndices.length;
+  const hasRemainingContent = lines.slice(tagsStart + 1, newTagsEnd).some((l) => l.trim() !== "");
+  if (!hasRemainingContent) {
+    lines.splice(tagsStart, newTagsEnd - tagsStart);
+  }
+  return lines.join(eol);
+}
 async function readProfileDocs(globalDir, profileId, scope = "user") {
   const docsDir = profileDocsDir(globalDir, profileId, scope);
   const files = (await listDocRelPaths(docsDir)).filter((f) => !/(^|\/)index\.md$/i.test(f));
   const recs = [];
   for (const file of files) {
-    const raw = await import_node_fs.promises.readFile((0, import_node_path2.join)(docsDir, file), "utf8");
+    const fullPath = (0, import_node_path2.resolve)(docsDir, file);
+    const raw = await import_node_fs.promises.readFile(fullPath, "utf8");
     const category = file.includes("/") ? file.split("/")[0] : "general";
     const slug = file.replace(/\.md$/i, "").split("/").slice(1).join("/") || file.replace(/\.md$/i, "");
     const detailsMatch = raw.match(/## Details\s+([\s\S]*?)$/);
@@ -786,12 +889,14 @@ async function readProfileDocs(globalDir, profileId, scope = "user") {
       title: extractTitle(raw),
       summary: extractSummary(raw),
       indexEntries: extractIndexEntries(raw),
-      body: detailsMatch?.[1]?.trim() || ""
+      body: detailsMatch?.[1]?.trim() || "",
+      tags: extractTagsBeforeDetails(raw),
+      path: fullPath
     });
   }
   return recs;
 }
-async function writeProfileDocs(globalDir, profileId, input, scope = "user") {
+async function writeProfileDocs(globalDir, profileId, input, scope = "user", opts) {
   validateGlobalUpdateInput(input);
   await ensureProfile(globalDir, profileId, scope);
   return withFileLock(globalDir, async () => {
@@ -800,11 +905,36 @@ async function writeProfileDocs(globalDir, profileId, input, scope = "user") {
     for (const doc of input.docs) {
       await import_node_fs.promises.mkdir((0, import_node_path2.join)(docsDir, doc.category), { recursive: true });
       const full = (0, import_node_path2.join)(docsDir, doc.category, `${doc.slug}.md`);
-      await import_node_fs.promises.writeFile(full, renderDocMarkdown(doc), "utf8");
+      let docToWrite = doc;
+      if (opts?.preserveTags) {
+        const existingRaw = await import_node_fs.promises.readFile(full, "utf8").catch(() => null);
+        if (existingRaw !== null) {
+          const existingTags = extractTagsBeforeDetails(existingRaw);
+          if (existingTags.length > 0) {
+            docToWrite = { ...doc, tags: [.../* @__PURE__ */ new Set([...existingTags, ...doc.tags ?? []])] };
+          }
+        }
+      }
+      await import_node_fs.promises.writeFile(full, renderDocMarkdown(docToWrite), "utf8");
       written.push(full);
     }
     const { indexPath } = await writeIndexFromDocs(globalDir, profileId, scope);
     return { written, indexPath };
+  });
+}
+async function setDocPinned(globalDir, profileId, scope, docPath, pinned) {
+  const docsDir = (0, import_node_path2.resolve)(profileDocsDir(globalDir, profileId, scope));
+  const target = (0, import_node_path2.resolve)(docPath);
+  const rel = (0, import_node_path2.relative)(docsDir, target);
+  if (!rel || rel.startsWith("..") || (0, import_node_path2.isAbsolute)(rel) || !target.endsWith(".md")) {
+    throw new Error(`Invalid docPath "${docPath}": must be a .md file inside profile docs.`);
+  }
+  await withFileLock(globalDir, async () => {
+    const raw = await import_node_fs.promises.readFile(target, "utf8");
+    const next = updatePinnedInMarkdown(raw, pinned);
+    if (next !== raw) {
+      await import_node_fs.promises.writeFile(target, next, "utf8");
+    }
   });
 }
 var import_node_fs, import_node_path2;
@@ -962,6 +1092,7 @@ async function resolveInjection(globalDir, ids, query) {
     if (!profileId) continue;
     const docs = await readProfileDocs(globalDir, profileId, scope).catch(() => []);
     for (const rec of docs) {
+      if (rec.tags.includes("pinned")) continue;
       candidates.push({
         scope,
         category: rec.category,
@@ -1154,15 +1285,15 @@ var init_gitRemote = __esm({
     GIT_TIMEOUT_MS = 3e3;
     PROFILE_DIGEST_LEN = 8;
     MAX_NAME_LEN = 48;
-    readOriginUrl = (cwd) => new Promise((resolve2) => {
+    readOriginUrl = (cwd) => new Promise((resolve3) => {
       (0, import_node_child_process.execFile)(
         "git",
         ["config", "--get", "remote.origin.url"],
         { cwd, timeout: GIT_TIMEOUT_MS, windowsHide: true },
         (err, stdout) => {
-          if (err) return resolve2(null);
+          if (err) return resolve3(null);
           const v = String(stdout ?? "").trim();
-          resolve2(v || null);
+          resolve3(v || null);
         }
       );
     });
@@ -1309,9 +1440,11 @@ Each line is the part after the run command.
     memory user                   the user's durable preferences (summaries)
     memory user --full            ... with full bodies
     memory project                what is durable about this repository
-    memory add --scope user|project --category <c> \\
+    memory add --scope project|user --category <c> \\
         --title "..." --summary "..." --body "..."
     memory update <id> [same flags]
+    memory pending                proposals waiting for approval
+    memory withdraw <proposal-id> take one back
 
 Categories: role, repos, domain, workflows, conventions, infra, verification.
 
@@ -1376,13 +1509,10 @@ that is what \`memory update\` takes.
 
 When something clears the bar in the hook's \`1-4. Recording\`:
 
-1. Pick the scope. Strip every name that belongs to this project \u2014 files,
-   screens, commands, tools, people, numbers, incidents. If what is left
-   no longer stands as a rule, it is \`--scope project\`. A habit of the
-   user shown through this project's case is project scope too, recorded
-   with the case. Use \`--scope user\` only when the sentence stands with no
-   project names in it, and it has come up in another project as well or
-   the user said it applies everywhere.
+1. Pick the scope. \`--scope\` is required. It is \`--scope project\` unless the
+   user said in so many words that this applies everywhere, across projects.
+   A sentence that reads as general is still project scope until the user
+   says so.
 2. Read that side in full \u2014 \`memory user --full\` or \`memory project --full\`.
    Not a search: you need everything to know whether this is new. Read only the
    side you picked.
@@ -1415,6 +1545,14 @@ entry.
 
 Record what would change how someone works next time.
 
+### Taking a proposal back
+
+When a proposal in the queue should not be there \u2014 wrong scope, below the
+bar, a duplicate, or the user said not to keep it \u2014 run \`memory pending\`,
+then \`memory withdraw <proposal-id>\`. To change a pending proposal, withdraw
+it and add it again. Approved entries are not withdrawn; they change through
+\`memory update <id>\`.
+
 ## Outside AgentBridge
 
 In a session AgentBridge did not open they print nothing and exit 0. Expected,
@@ -1445,7 +1583,7 @@ var {
 } = (init_globalInject(), __toCommonJS(globalInject_exports));
 var { resolveInjection: resolveInjection2 } = (init_globalSearch(), __toCommonJS(globalSearch_exports));
 var { getGlobalDir: getGlobalDir2 } = (init_globalPaths(), __toCommonJS(globalPaths_exports));
-var { resolveProfile: resolveProfile2 } = (init_globalStore(), __toCommonJS(globalStore_exports));
+var { resolveProfile: resolveProfile2, readProfileDocs: readProfileDocs2 } = (init_globalStore(), __toCommonJS(globalStore_exports));
 var { resolveProjectProfileId: resolveProjectProfileId2 } = (init_gitRemote(), __toCommonJS(gitRemote_exports));
 var { bumpTurnCount: bumpTurnCount2, readTurnCount: readTurnCount2, isProposalTurn: isProposalTurn2 } = (init_turnCounter(), __toCommonJS(turnCounter_exports));
 var { wrapInjectedContext: wrapInjectedContext2 } = (init_contextTag(), __toCommonJS(contextTag_exports));
@@ -1530,9 +1668,9 @@ function parseArgs(argv) {
   return out;
 }
 function readStdin(timeoutMs) {
-  return new Promise((resolve2) => {
+  return new Promise((resolve3) => {
     if (process.stdin.isTTY) {
-      resolve2("");
+      resolve3("");
       return;
     }
     let data = "";
@@ -1544,7 +1682,7 @@ function readStdin(timeoutMs) {
         process.stdin.pause();
       } catch {
       }
-      resolve2(data);
+      resolve3(data);
     };
     const timer = setTimeout(finish, timeoutMs);
     if (timer && typeof timer.unref === "function") timer.unref();
@@ -1599,6 +1737,10 @@ function slugCarriesTitle(slug, title) {
   const withoutHash = String(slug || "").replace(/-[a-z0-9]{5,10}$/, "");
   return norm(withoutHash) === norm(title);
 }
+function formatMemoryLine(doc) {
+  const id = doc.category + "/" + doc.slug;
+  return "- " + id + (slugCarriesTitle(doc.slug, doc.title) ? "" : " \u2014 " + doc.title);
+}
 function buildMatchBlock(matches) {
   if (!matches || matches.length === 0) return "";
   const one = matches.length === 1;
@@ -1607,14 +1749,25 @@ function buildMatchBlock(matches) {
     ""
   ];
   for (const m of matches) {
-    const id = m.category + "/" + m.slug;
-    lines.push("- " + id + (slugCarriesTitle(m.slug, m.title) ? "" : " \u2014 " + m.title));
+    lines.push(formatMemoryLine(m));
   }
   lines.push(
     "",
     "These were picked by word overlap, not by judgment. If a title is unrelated to what the",
     "user is actually asking, ignore it and do not read it."
   );
+  return lines.join("\n");
+}
+function buildPinnedBlock(docs) {
+  if (!docs || docs.length === 0) return "";
+  const lines = [
+    "The user pinned these. They hold for every task in this session. The title",
+    "is the rule; read the body with `memory read <id>` when you need the detail.",
+    ""
+  ];
+  for (const d of docs) {
+    lines.push(formatMemoryLine(d));
+  }
   return lines.join("\n");
 }
 function buildProposalBlock() {
@@ -1650,6 +1803,9 @@ function buildInstructions(storageRoot, blocks) {
     "## 1. Context \u2014 `context` and `memory`",
     ""
   );
+  if (b.pinnedBlock) {
+    push(b.pinnedBlock, "");
+  }
   const thisTurn = [b.matchBlock, b.proposalBlock].filter(Boolean);
   if (thisTurn.length > 0) {
     push("### 1-1. Do this turn", "");
@@ -1713,6 +1869,11 @@ function buildInstructions(storageRoot, blocks) {
     "",
     "Most turns have nothing worth recording. Recording nothing is the default.",
     "",
+    "If you queued something that should not have been \u2014 wrong scope, below the",
+    "bar, a duplicate \u2014 `memory pending` lists the queue and `memory withdraw <id>`",
+    "takes it back. Any pending proposal can be withdrawn, whichever session",
+    "queued it.",
+    "",
     "",
     "## 2. Other agent sessions",
     ""
@@ -1754,6 +1915,8 @@ function buildInstructions(storageRoot, blocks) {
     "    memory project             what is durable about this repository",
     "    memory add                 propose a new fact",
     "    memory update <id>         propose a change to an entry that already exists",
+    "    memory pending             proposals waiting for the user's approval",
+    "    memory withdraw <id>       take a pending proposal back",
     "    status                     whether the wiring is alive, when a command fails",
     "",
     "`memory add` and `memory update` go to a queue the user approves.",
@@ -1819,23 +1982,51 @@ function resolveQuery(agent, stdinRaw) {
   }
   return extractLastUserInput2(readTranscriptTail(transcriptPath));
 }
-async function matchesForQuery(storageRoot, wsDir, query) {
-  if (!query || !query.trim()) return [];
-  let projectId = null;
+async function resolveProfileIds(wsDir) {
+  let project = null;
   try {
     const workspacePath = JSON.parse(
       fs4.readFileSync(path.join(wsDir, "workspace.json"), "utf8")
     ).workspacePath;
     if (typeof workspacePath === "string" && workspacePath) {
-      projectId = await resolveProjectProfileId2(workspacePath);
+      project = await resolveProjectProfileId2(workspacePath);
     }
   } catch {
   }
-  return resolveInjection2(
-    getGlobalDir2(storageRoot),
-    { user: resolveProfile2(path.basename(wsDir)), project: projectId },
-    query
-  );
+  return { user: resolveProfile2(path.basename(wsDir)), project };
+}
+function claimFirstPinInjection(sessionDir) {
+  if (!sessionDir) return false;
+  try {
+    fs4.mkdirSync(sessionDir, { recursive: true });
+    fs4.writeFileSync(path.join(sessionDir, "pins-injected"), String(Date.now()), { flag: "wx" });
+    return true;
+  } catch (e) {
+    if (e && e.code === "EEXIST") return false;
+    throw e;
+  }
+}
+async function pinnedDocsForSession(storageRoot, ids) {
+  const globalDir = getGlobalDir2(storageRoot);
+  const pinned = [];
+  for (const [scope, profileId] of [
+    ["user", ids.user],
+    ["project", ids.project]
+  ]) {
+    if (!profileId) continue;
+    const docs = await readProfileDocs2(globalDir, profileId, scope).catch(() => []);
+    for (const rec of docs) {
+      if (Array.isArray(rec.tags) && rec.tags.includes("pinned")) {
+        pinned.push(rec);
+      }
+    }
+  }
+  return pinned;
+}
+async function matchesForQuery(storageRoot, wsDir, query, ids) {
+  if (!query || !query.trim()) return [];
+  const resolved = ids || await resolveProfileIds(wsDir);
+  return resolveInjection2(getGlobalDir2(storageRoot), resolved, query);
 }
 async function main() {
   const parsed = parseArgs(process.argv.slice(2));
@@ -1963,17 +2154,36 @@ async function main() {
       process.exit(0);
     }
   }
+  const sessionDir = sessionDirOf(wsDir);
+  let profileIdsPromise = null;
+  const getProfileIds = () => {
+    if (!profileIdsPromise) profileIdsPromise = resolveProfileIds(wsDir);
+    return profileIdsPromise;
+  };
+  let pinnedBlock = "";
+  if (INJECTION_EVENTS.has(parsed.event)) {
+    try {
+      if (claimFirstPinInjection(sessionDir)) {
+        pinnedBlock = buildPinnedBlock(await pinnedDocsForSession(storageRoot, await getProfileIds()));
+      }
+    } catch (e) {
+      process.stderr.write("agentbridge-memory: pinned skipped \u2014 " + String(e && e.message ? e.message : e) + "\n");
+    }
+  }
   let matchBlock = "";
   try {
-    matchBlock = buildMatchBlock(
-      await matchesForQuery(storageRoot, wsDir, resolveQuery(parsed.agent, stdinRaw))
-    );
+    const query = resolveQuery(parsed.agent, stdinRaw);
+    if (query && query.trim()) {
+      matchBlock = buildMatchBlock(
+        await matchesForQuery(storageRoot, wsDir, query, await getProfileIds())
+      );
+    }
   } catch (e) {
     process.stderr.write("agentbridge-memory: match skipped \u2014 " + String(e && e.message ? e.message : e) + "\n");
   }
   let proposalBlock = "";
   try {
-    if (isProposalTurn2(await readTurnCount2(sessionDirOf(wsDir)))) proposalBlock = buildProposalBlock();
+    if (isProposalTurn2(await readTurnCount2(sessionDir))) proposalBlock = buildProposalBlock();
   } catch {
   }
   let subs = { unread: "", stuck: "" };
@@ -1988,6 +2198,7 @@ async function main() {
         parsed.event,
         wrapInjectedContext2(
           buildInstructions(storageRoot, {
+            pinnedBlock,
             matchBlock,
             proposalBlock,
             subUnread: subs.unread,
