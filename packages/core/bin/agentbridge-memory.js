@@ -47,7 +47,7 @@ const {
 // 장기 기억 매칭 (0.6.0 spec/03 §1). 훅이 매 턴 프롬프트를 쿼리로 점수화한다.
 const { resolveInjection } = require('../src/globalSearch')
 const { getGlobalDir } = require('../src/globalPaths')
-const { resolveProfile } = require('../src/globalStore')
+const { resolveProfile, readProfileDocs } = require('../src/globalStore')
 const { resolveProjectProfileId } = require('../src/gitRemote')
 // 다섯 턴 제안 (§2). 카운터는 세션 폴더에 있다 — 병렬 세션이 서로 턴을 훔치지 않게.
 const { bumpTurnCount, readTurnCount, isProposalTurn } = require('../src/turnCounter')
@@ -275,6 +275,11 @@ function slugCarriesTitle(slug, title) {
   return norm(withoutHash) === norm(title)
 }
 
+function formatMemoryLine(doc) {
+  const id = doc.category + '/' + doc.slug
+  return '- ' + id + (slugCarriesTitle(doc.slug, doc.title) ? '' : ' — ' + doc.title)
+}
+
 function buildMatchBlock(matches) {
   if (!matches || matches.length === 0) return ''
   const one = matches.length === 1
@@ -286,8 +291,7 @@ function buildMatchBlock(matches) {
     ''
   ]
   for (const m of matches) {
-    const id = m.category + '/' + m.slug
-    lines.push('- ' + id + (slugCarriesTitle(m.slug, m.title) ? '' : ' — ' + m.title))
+    lines.push(formatMemoryLine(m))
   }
   // 매칭은 단어가 겹친다는 것뿐이지 이 질문에 쓸모 있다는 판정이 아니다. 버리는 값이 싸다 —
   // 제목 한 줄 읽고 마는 것이라, 게이트를 더 조이는 것보다 여기서 거르게 하는 편이 손실이 적다.
@@ -296,6 +300,20 @@ function buildMatchBlock(matches) {
     'These were picked by word overlap, not by judgment. If a title is unrelated to what the',
     'user is actually asking, ignore it and do not read it.'
   )
+  return lines.join('\n')
+}
+
+// 세션 첫 턴에 싣는 핀 고정 기억 (0.8.0 spec/05 §2-2). 식별자와 제목만 싣는다.
+function buildPinnedBlock(docs) {
+  if (!docs || docs.length === 0) return ''
+  const lines = [
+    'The user pinned these. They hold for every task in this session. The title',
+    'is the rule; read the body with `memory read <id>` when you need the detail.',
+    ''
+  ]
+  for (const d of docs) {
+    lines.push(formatMemoryLine(d))
+  }
   return lines.join('\n')
 }
 
@@ -337,6 +355,10 @@ function buildInstructions(storageRoot, blocks) {
     '## 1. Context — `context` and `memory`',
     ''
   )
+
+  if (b.pinnedBlock) {
+    push(b.pinnedBlock, '')
+  }
 
   const thisTurn = [b.matchBlock, b.proposalBlock].filter(Boolean)
   if (thisTurn.length > 0) {
@@ -402,6 +424,11 @@ function buildInstructions(storageRoot, blocks) {
     '',
     'Most turns have nothing worth recording. Recording nothing is the default.',
     '',
+    'If you queued something that should not have been — wrong scope, below the',
+    'bar, a duplicate — `memory pending` lists the queue and `memory withdraw <id>`',
+    'takes it back. Any pending proposal can be withdrawn, whichever session',
+    'queued it.',
+    '',
     '',
     '## 2. Other agent sessions',
     ''
@@ -445,6 +472,8 @@ function buildInstructions(storageRoot, blocks) {
     '    memory project             what is durable about this repository',
     '    memory add                 propose a new fact',
     '    memory update <id>         propose a change to an entry that already exists',
+    '    memory pending             proposals waiting for the user\'s approval',
+    '    memory withdraw <id>       take a pending proposal back',
     '    status                     whether the wiring is alive, when a command fails',
     '',
     '`memory add` and `memory update` go to a queue the user approves.',
@@ -514,28 +543,62 @@ function resolveQuery(agent, stdinRaw) {
   return extractLastUserInput(readTranscriptTail(transcriptPath))
 }
 
-// 이번 턴 프롬프트에 걸리는 장기 기억. 사용자 지식과 프로젝트 지식을 함께 돌린다.
+// 사용자 지식과 지금 프로젝트의 프로필 id를 찾는다.
 //
-// 프로젝트 지식의 자리는 정규화한 git remote로 정해지므로 매 턴 `git`을 한 번 부른다. 캐시를
-// 두면 remote가 바뀌었을 때의 무효화가 새 문제가 되므로, 실측에서 훅 소요가 눈에 띌 때 다시 본다.
-async function matchesForQuery(storageRoot, wsDir, query) {
-  if (!query || !query.trim()) return []
-  let projectId = null
+// 프로젝트 지식의 자리는 정규화한 git remote로 정해지므로 `git`을 한 번 부른다. 캐시를 두면
+// remote가 바뀌었을 때의 무효화가 새 문제가 되므로, 실측에서 훅 소요가 눈에 띌 때 다시 본다.
+async function resolveProfileIds(wsDir) {
+  let project = null
   try {
     const workspacePath = JSON.parse(
       fs.readFileSync(path.join(wsDir, 'workspace.json'), 'utf8')
     ).workspacePath
     if (typeof workspacePath === 'string' && workspacePath) {
-      projectId = await resolveProjectProfileId(workspacePath)
+      project = await resolveProjectProfileId(workspacePath)
     }
   } catch {
     /* 프로젝트 지식 자리를 모르면 사용자 지식만 돌린다 */
   }
-  return resolveInjection(
-    getGlobalDir(storageRoot),
-    { user: resolveProfile(path.basename(wsDir)), project: projectId },
-    query
-  )
+  return { user: resolveProfile(path.basename(wsDir)), project }
+}
+
+// 세션 첫 턴 한 번만 핀을 싣기 위한 표지 파일. 턴 수는 Stop에서만 올라가므로 첫 턴 중단·오류
+// 뒤에도 중복 주입을 막으려면 별도 표지 파일(pins-injected)을 wx로 선점해야 한다.
+function claimFirstPinInjection(sessionDir) {
+  if (!sessionDir) return false
+  try {
+    fs.mkdirSync(sessionDir, { recursive: true })
+    fs.writeFileSync(path.join(sessionDir, 'pins-injected'), String(Date.now()), { flag: 'wx' })
+    return true
+  } catch (e) {
+    if (e && e.code === 'EEXIST') return false
+    throw e
+  }
+}
+
+async function pinnedDocsForSession(storageRoot, ids) {
+  const globalDir = getGlobalDir(storageRoot)
+  const pinned = []
+  for (const [scope, profileId] of [
+    ['user', ids.user],
+    ['project', ids.project]
+  ]) {
+    if (!profileId) continue
+    const docs = await readProfileDocs(globalDir, profileId, scope).catch(() => [])
+    for (const rec of docs) {
+      if (Array.isArray(rec.tags) && rec.tags.includes('pinned')) {
+        pinned.push(rec)
+      }
+    }
+  }
+  return pinned
+}
+
+// 이번 턴 프롬프트에 걸리는 장기 기억. 사용자 지식과 프로젝트 지식을 함께 돌린다.
+async function matchesForQuery(storageRoot, wsDir, query, ids) {
+  if (!query || !query.trim()) return []
+  const resolved = ids || (await resolveProfileIds(wsDir))
+  return resolveInjection(getGlobalDir(storageRoot), resolved, query)
 }
 
 async function main() {
@@ -692,18 +755,39 @@ async function main() {
   }
 
   // 이하 전부 best-effort다. 어떤 실패도 지시문 주입을 막지 않는다.
+  const sessionDir = sessionDirOf(wsDir)
+  let profileIdsPromise = null
+  const getProfileIds = () => {
+    if (!profileIdsPromise) profileIdsPromise = resolveProfileIds(wsDir)
+    return profileIdsPromise
+  }
+
+  let pinnedBlock = ''
+  if (INJECTION_EVENTS.has(parsed.event)) {
+    try {
+      if (claimFirstPinInjection(sessionDir)) {
+        pinnedBlock = buildPinnedBlock(await pinnedDocsForSession(storageRoot, await getProfileIds()))
+      }
+    } catch (e) {
+      process.stderr.write('agentbridge-memory: pinned skipped — ' + String(e && e.message ? e.message : e) + '\n')
+    }
+  }
+
   let matchBlock = ''
   try {
-    matchBlock = buildMatchBlock(
-      await matchesForQuery(storageRoot, wsDir, resolveQuery(parsed.agent, stdinRaw))
-    )
+    const query = resolveQuery(parsed.agent, stdinRaw)
+    if (query && query.trim()) {
+      matchBlock = buildMatchBlock(
+        await matchesForQuery(storageRoot, wsDir, query, await getProfileIds())
+      )
+    }
   } catch (e) {
     process.stderr.write('agentbridge-memory: match skipped — ' + String(e && e.message ? e.message : e) + '\n')
   }
 
   let proposalBlock = ''
   try {
-    if (isProposalTurn(await readTurnCount(sessionDirOf(wsDir)))) proposalBlock = buildProposalBlock()
+    if (isProposalTurn(await readTurnCount(sessionDir))) proposalBlock = buildProposalBlock()
   } catch {
     /* 카운터를 못 읽으면 제안 블록만 빠진다 */
   }
@@ -722,6 +806,7 @@ async function main() {
         parsed.event,
         wrapInjectedContext(
           buildInstructions(storageRoot, {
+            pinnedBlock,
             matchBlock,
             proposalBlock,
             subUnread: subs.unread,

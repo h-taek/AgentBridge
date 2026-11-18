@@ -227,6 +227,8 @@ export function activate(context: vscode.ExtensionContext) {
 
   // 활성화 시 대기 제안 수로 뱃지 1회 초기화 (이후엔 패널을 다시 볼 때와 승인·버림이 갱신한다).
   void profileProvider.notifyProposalsUpdated();
+  // 프로필 폴더 아래 .md 변경(IDE 밖 편집 포함)을 감시해 장기 기억 패널을 갱신한다.
+  profileProvider.startWatching();
 
   // 공유 저장소 실시간 동기화 — 다른 앱(데스크탑/다른 호스트)이 workspace.json(세션 목록) 또는
   // owner.json(소유)을 바꾸면 세션 트리를 다시 그린다. 데스크탑과 같은 core 워처를 끌어 쓴다.
@@ -261,6 +263,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push({
     dispose: () => {
+      profileProvider.dispose();
       storageWatcher.stop();
       hostRequests.stop();
       clearInterval(storagePoll);

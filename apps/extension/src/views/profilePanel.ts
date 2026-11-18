@@ -1,12 +1,16 @@
 import * as vscode from 'vscode';
+import { mkdirSync, watch, type FSWatcher } from 'fs';
 import { join } from 'path';
 import * as output from '../log/output';
 import * as workspaceStore from '../core/workspaceStore';
+import { toProfileDocRow, orderPinnedFirst, isProfileDocPath, shouldRefreshOnProfileFileChange } from './memoryPanelModel';
 import {
   readProposals,
   approveProposal,
   discardProposal,
   readProfileDocs,
+  setDocPinned,
+  profileDocsDir,
   getGlobalDir,
   resolveProfile,
   resolveProjectProfileId,
@@ -26,6 +30,9 @@ export class ProfileSection {
   private view: vscode.WebviewView | undefined;
   // git 호출을 매 갱신마다 하지 않도록 폴더별로 기억한다. remote가 없으면 null이 캐시된다.
   private projectProfileCache = new Map<string, string | null>();
+  private docWatcher: FSWatcher | null = null;
+  private docWatchTimer: ReturnType<typeof setTimeout> | null = null;
+  private disposed = false;
 
   // 대기 제안 수가 바뀔 때마다 호출(0 포함). 호스트가 액티비티 바 뱃지를 갱신하는 데 쓴다.
   // 섹션이 접혀 있어도 카운트는 나가야 하므로, 뱃지는 항상 살아있는 세션 TreeView에 건다.
@@ -36,8 +43,55 @@ export class ProfileSection {
     this.view = view;
   }
 
+  // 프로필 폴더(~/agentbridge/global) 아래 .md 변경을 감시해 목록을 다시 보낸다.
+  // createSessionFileWatcher와 같은 방식(재귀 fs.watch + 150ms debounce)을 따르되 index.md는 거른다.
+  startWatching(): void {
+    if (this.docWatcher || this.disposed) return;
+    const globalDir = getGlobalDir();
+    const schedule = (): void => {
+      if (this.docWatchTimer) clearTimeout(this.docWatchTimer);
+      this.docWatchTimer = setTimeout(() => {
+        this.docWatchTimer = null;
+        if (!this.disposed) this.notifyProposalsUpdated();
+      }, 150);
+    };
+    try {
+      mkdirSync(globalDir, { recursive: true });
+      this.docWatcher = watch(globalDir, { recursive: true }, (_event, eventPath) => {
+        if (shouldRefreshOnProfileFileChange(eventPath)) schedule();
+      });
+      this.docWatcher.on('error', (err) => {
+        output.warn(`profilePanel: fs.watch error (${globalDir}) — ${String(err)}`);
+      });
+    } catch (err) {
+      output.warn(`profilePanel: fs.watch 미지원 (${globalDir}) — ${String(err)}`);
+    }
+  }
+
+  dispose(): void {
+    this.disposed = true;
+    if (this.docWatchTimer) {
+      clearTimeout(this.docWatchTimer);
+      this.docWatchTimer = null;
+    }
+    if (this.docWatcher) {
+      try {
+        this.docWatcher.close();
+      } catch {
+        /* noop */
+      }
+      this.docWatcher = null;
+    }
+  }
+
   // 호스트가 못 알아본 메시지를 넘겨받는다. 처리했으면 true.
-  async handleMessage(msg: { type?: string; id?: string; scope?: ProposalScope }): Promise<boolean> {
+  async handleMessage(msg: {
+    type?: string;
+    id?: string;
+    scope?: ProposalScope;
+    path?: string;
+    pinned?: boolean;
+  }): Promise<boolean> {
     switch (msg.type) {
       case 'proposal:list':
         await this.sendProposals();
@@ -50,6 +104,12 @@ export class ProfileSection {
         return true;
       case 'proposal:openFolder':
         await this.handleOpenFolder(msg.scope as ProposalScope);
+        return true;
+      case 'doc:pin':
+        await this.handlePinDoc(msg.path as string, Boolean(msg.pinned), msg.scope as ProposalScope);
+        return true;
+      case 'doc:open':
+        await this.handleOpenDoc(msg.path as string, msg.scope as ProposalScope);
         return true;
       default:
         return false;
@@ -93,7 +153,7 @@ export class ProfileSection {
     ]);
     return {
       proposals,
-      docs: docsRaw.map((d) => ({ category: d.category, slug: d.slug, title: d.title, summary: d.summary })),
+      docs: orderPinnedFirst(docsRaw.map(toProfileDocRow)),
       profileDir: join(globalDir, scope === 'project' ? 'projects' : 'profiles', profileId),
     };
   }
@@ -159,6 +219,44 @@ export class ProfileSection {
     await vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(dir));
   }
 
+  private async handlePinDoc(docPath: string, pinned: boolean, scope: ProposalScope): Promise<void> {
+    if ((scope !== 'user' && scope !== 'project') || typeof docPath !== 'string' || !docPath) {
+      await this.sendProposals();
+      return;
+    }
+    const profileId = await this.resolveSide(scope);
+    if (!profileId) {
+      await this.sendProposals();
+      return;
+    }
+    try {
+      await setDocPinned(getGlobalDir(), profileId, scope, docPath, pinned);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      output.warn(`profilePanel: pin failed — ${msg}`);
+      void vscode.window.showWarningMessage(vscode.l10n.t('AgentBridge: Failed to update the document pin — {0}.', msg));
+    }
+    await this.sendProposals();
+  }
+
+  private async handleOpenDoc(docPath: string, scope: ProposalScope): Promise<void> {
+    if ((scope !== 'user' && scope !== 'project') || typeof docPath !== 'string' || !docPath) return;
+    const profileId = await this.resolveSide(scope);
+    if (!profileId) return;
+    const docsDir = profileDocsDir(getGlobalDir(), profileId, scope);
+    if (!isProfileDocPath(docsDir, docPath)) {
+      output.warn(`profilePanel: rejected doc:open outside profile docs — ${docPath}`);
+      return;
+    }
+    try {
+      await vscode.window.showTextDocument(vscode.Uri.file(docPath), { preview: false });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      output.warn(`profilePanel: open doc failed — ${msg}`);
+      void vscode.window.showWarningMessage(vscode.l10n.t('AgentBridge: Failed to open the document — {0}.', msg));
+    }
+  }
+
   private postMessage(msg: unknown): void {
     this.view?.webview.postMessage(msg);
   }
@@ -176,6 +274,10 @@ export class ProfileSection {
       discard: vscode.l10n.t('Dismiss'),
       profileDocs: vscode.l10n.t('Profile documents'),
       noDocs: vscode.l10n.t('No documents yet. They fill in automatically as you work.'),
+      pinnedGroup: vscode.l10n.t('Pinned'),
+      pinDoc: vscode.l10n.t('Pin to session start'),
+      unpinDoc: vscode.l10n.t('Unpin'),
+      openDocTitle: vscode.l10n.t('Double-click to edit'),
     };
   }
 
@@ -349,16 +451,50 @@ export class ProfileSection {
       margin-bottom: 3px;
     }
     #ltmBody .doc {
+      display: flex;
+      align-items: flex-start;
+      gap: 6px;
       padding: 4px 8px;
       border-radius: 4px;
+      cursor: pointer;
     }
     #ltmBody .doc:hover { background: var(--vscode-list-hoverBackground, rgba(255,255,255,0.04)); }
-    #ltmBody .doc-title { font-size: 12px; line-height: 1.4; }
+    #ltmBody .doc-main { flex: 1; min-width: 0; }
+    #ltmBody .doc-title { font-size: 12px; line-height: 1.4; word-break: break-word; }
     #ltmBody .doc-summary {
       font-size: 11px;
       color: var(--vscode-descriptionForeground);
       line-height: 1.3;
+      word-break: break-word;
     }
+    #ltmBody .doc-pin {
+      flex: 0 0 auto;
+      width: 22px;
+      height: 22px;
+      margin-top: -1px;
+      padding: 0;
+      border: none;
+      border-radius: 4px;
+      background: transparent;
+      color: var(--vscode-descriptionForeground);
+      opacity: 0.55;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+    #ltmBody .doc:hover .doc-pin { opacity: 0.85; }
+    #ltmBody .doc-pin:hover:not(:disabled) {
+      opacity: 1;
+      color: var(--vscode-foreground);
+      background: var(--vscode-toolbar-hoverBackground, rgba(255,255,255,0.1));
+    }
+    #ltmBody .doc-pin[aria-pressed="true"] {
+      opacity: 1;
+      color: var(--vscode-foreground);
+    }
+    #ltmBody .doc-pin:disabled { opacity: 0.35; cursor: default; }
+    #ltmBody .doc-pin svg { width: 14px; height: 14px; display: block; }
 `;
   }
 
@@ -415,6 +551,9 @@ export class ProfileSection {
     });
 
     const BODY_PREVIEW_MAX = 200;
+    const PIN_SVG_OUTLINE = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" stroke-linecap="round"><path d="M5 2.5h6v1.5L9.5 5.5v3l2 1.8V11H4.5v-.7l2-1.8v-3L5 4V2.5z"/><path d="M8 11v3.5"/></svg>';
+    const PIN_SVG_FILLED = '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M5 2h6a.5.5 0 0 1 .5.5V4a.5.5 0 0 1-.15.35L9.8 5.9v2.4l1.95 1.75a.5.5 0 0 1 .17.37V11a.5.5 0 0 1-.5.5H8.6v3a.6.6 0 0 1-1.2 0v-3H4.6a.5.5 0 0 1-.5-.5v-.58a.5.5 0 0 1 .17-.37L6.2 8.3V5.9L4.65 4.35A.5.5 0 0 1 4.5 4V2.5A.5.5 0 0 1 5 2z"/></svg>';
+
     function bodyPreview(body) {
       const flat = String(body || '').replace(/\\s+/g, ' ').trim();
       return flat.length > BODY_PREVIEW_MAX ? flat.slice(0, BODY_PREVIEW_MAX).replace(/\\s+$/, '') + '…' : flat;
@@ -423,7 +562,7 @@ export class ProfileSection {
     function esc(s) {
       const d = document.createElement('div');
       d.textContent = s == null ? '' : String(s);
-      return d.innerHTML;
+      return d.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     }
 
     window.addEventListener('message', (e) => {
@@ -483,15 +622,25 @@ export class ProfileSection {
       } else {
         const groups = [];
         const byCat = {};
+        // 호스트가 고정된 문서를 앞으로 모아 보낸다. 고정된 문서는 카테고리 대신 '고정' 묶음 하나로 묶는다.
         docs.forEach((d) => {
-          if (!byCat[d.category]) { byCat[d.category] = []; groups.push({ category: d.category, docs: byCat[d.category] }); }
-          byCat[d.category].push(d);
+          const key = d.pinned === true ? 'pinned:' : 'cat:' + d.category;
+          if (!byCat[key]) { byCat[key] = []; groups.push({ label: d.pinned === true ? L.pinnedGroup : d.category, docs: byCat[key] }); }
+          byCat[key].push(d);
         });
         groups.forEach((g) => {
-          html += '<div class="doc-group"><div class="doc-cat">' + esc(g.category) + '</div>';
+          html += '<div class="doc-group"><div class="doc-cat">' + esc(g.label) + '</div>';
           g.docs.forEach((d) => {
-            html += '<div class="doc"><div class="doc-title">' + esc(d.title) + '</div>';
+            const pinned = d.pinned === true;
+            const pinLabel = pinned ? L.unpinDoc : L.pinDoc;
+            html += '<div class="doc" data-path="' + esc(d.path) + '">';
+            html += '<div class="doc-main" title="' + esc(L.openDocTitle) + '">';
+            html += '<div class="doc-title">' + esc(d.title) + '</div>';
             if (d.summary) html += '<div class="doc-summary">' + esc(d.summary) + '</div>';
+            html += '</div>';
+            html += '<button type="button" class="doc-pin" data-pin="' + esc(d.path) + '" data-pinned="' + String(pinned) + '" aria-pressed="' + String(pinned) + '" title="' + esc(pinLabel) + '" aria-label="' + esc(pinLabel) + '"' + (busy ? ' disabled' : '') + '>';
+            html += pinned ? PIN_SVG_FILLED : PIN_SVG_OUTLINE;
+            html += '</button>';
             html += '</div>';
           });
           html += '</div>';
@@ -510,8 +659,28 @@ export class ProfileSection {
           const act = btn.getAttribute('data-act');
           busy = true;
           // 진행 중엔 모든 액션 버튼 비활성 — 재조회(proposal:data) 시 busy 해제.
-          contentEl.querySelectorAll('button[data-act]').forEach((b) => { b.disabled = true; });
+          contentEl.querySelectorAll('button[data-act], button[data-pin]').forEach((b) => { b.disabled = true; });
           vscode.postMessage({ type: act === 'approve' ? 'proposal:approve' : 'proposal:discard', id: id, scope: scope });
+        });
+      });
+      contentEl.querySelectorAll('button[data-pin]').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (busy) return;
+          const docPath = btn.getAttribute('data-pin');
+          const wasPinned = btn.getAttribute('data-pinned') === 'true';
+          if (!docPath) return;
+          busy = true;
+          contentEl.querySelectorAll('button[data-act], button[data-pin]').forEach((b) => { b.disabled = true; });
+          vscode.postMessage({ type: 'doc:pin', path: docPath, pinned: !wasPinned, scope: scope });
+        });
+      });
+      contentEl.querySelectorAll('.doc[data-path]').forEach((row) => {
+        row.addEventListener('dblclick', (e) => {
+          if (e.target.closest('.doc-pin')) return;
+          const docPath = row.getAttribute('data-path');
+          if (!docPath) return;
+          vscode.postMessage({ type: 'doc:open', path: docPath, scope: scope });
         });
       });
     }

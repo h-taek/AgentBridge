@@ -267,12 +267,33 @@ async function listDocRelPaths(dir, prefix = "") {
   }
   return files.sort();
 }
+function extractTagsBeforeDetails(markdown) {
+  const lines = String(markdown || "").split(/\r?\n/);
+  let inTags = false;
+  const tags = [];
+  for (const line of lines) {
+    if (/^## Details(?:\s|$)/.test(line)) break;
+    if (/^## /.test(line)) {
+      inTags = /^## Tags(?:\s|$)/.test(line);
+      continue;
+    }
+    if (inTags) {
+      const trimmed = line.trim();
+      if (trimmed.startsWith("- ")) {
+        const tag = trimmed.slice(2).trim();
+        if (tag) tags.push(tag);
+      }
+    }
+  }
+  return tags;
+}
 async function readProfileDocs(globalDir, profileId, scope = "user") {
   const docsDir = profileDocsDir(globalDir, profileId, scope);
   const files = (await listDocRelPaths(docsDir)).filter((f) => !/(^|\/)index\.md$/i.test(f));
   const recs = [];
   for (const file of files) {
-    const raw = await import_node_fs.promises.readFile((0, import_node_path2.join)(docsDir, file), "utf8");
+    const fullPath = (0, import_node_path2.resolve)(docsDir, file);
+    const raw = await import_node_fs.promises.readFile(fullPath, "utf8");
     const category = file.includes("/") ? file.split("/")[0] : "general";
     const slug = file.replace(/\.md$/i, "").split("/").slice(1).join("/") || file.replace(/\.md$/i, "");
     const detailsMatch = raw.match(/## Details\s+([\s\S]*?)$/);
@@ -282,7 +303,9 @@ async function readProfileDocs(globalDir, profileId, scope = "user") {
       title: extractTitle(raw),
       summary: extractSummary(raw),
       indexEntries: extractIndexEntries(raw),
-      body: detailsMatch?.[1]?.trim() || ""
+      body: detailsMatch?.[1]?.trim() || "",
+      tags: extractTagsBeforeDetails(raw),
+      path: fullPath
     });
   }
   return recs;
@@ -368,15 +391,15 @@ var init_gitRemote = __esm({
     GIT_TIMEOUT_MS = 3e3;
     PROFILE_DIGEST_LEN = 8;
     MAX_NAME_LEN = 48;
-    readOriginUrl = (cwd) => new Promise((resolve2) => {
+    readOriginUrl = (cwd) => new Promise((resolve3) => {
       (0, import_node_child_process.execFile)(
         "git",
         ["config", "--get", "remote.origin.url"],
         { cwd, timeout: GIT_TIMEOUT_MS, windowsHide: true },
         (err, stdout) => {
-          if (err) return resolve2(null);
+          if (err) return resolve3(null);
           const v = String(stdout ?? "").trim();
-          resolve2(v || null);
+          resolve3(v || null);
         }
       );
     });
@@ -941,23 +964,32 @@ async function readProposals(globalDir, profileId, scope = "user") {
 async function writeProposals(globalDir, profileId, inputs, opts, scope = "user") {
   const dir = proposalsDir(globalDir, profileId, scope);
   await import_node_fs3.promises.mkdir(dir, { recursive: true });
-  const seen = /* @__PURE__ */ new Set();
-  for (const p of await readProposals(globalDir, profileId, scope)) seen.add(dedupKey(p.category, p.title));
-  for (const d of opts.existingDocTitles) seen.add(dedupKey(d.category, d.title));
+  const pendingIds = /* @__PURE__ */ new Map();
+  const docKeys = /* @__PURE__ */ new Set();
+  for (const p of await readProposals(globalDir, profileId, scope)) {
+    pendingIds.set(dedupKey(p.category, p.title), p.id);
+  }
+  for (const d of opts.existingDocTitles) docKeys.add(dedupKey(d.category, d.title));
   const written = [];
   const skipped = [];
   let n = 0;
   for (const inp of inputs) {
     if (n >= PROPOSAL_CAPS.maxPerPass) {
-      skipped.push(inp);
+      skipped.push({ input: inp, reason: "cap" });
       continue;
     }
     const key = dedupKey(inp.category, inp.title);
-    if (seen.has(key) && !inp.targetSlug) {
-      skipped.push(inp);
-      continue;
+    if (!inp.targetSlug) {
+      if (docKeys.has(key)) {
+        skipped.push({ input: inp, reason: "doc" });
+        continue;
+      }
+      const pendingId = pendingIds.get(key);
+      if (pendingId !== void 0) {
+        skipped.push({ input: inp, reason: "pending", pendingId });
+        continue;
+      }
     }
-    seen.add(key);
     const rec = {
       id: proposalId(inp.category, inp.title),
       createdAt: (/* @__PURE__ */ new Date()).toISOString(),
@@ -973,10 +1005,20 @@ async function writeProposals(globalDir, profileId, inputs, opts, scope = "user"
       ...inp.targetSlug ? { targetSlug: inp.targetSlug } : {}
     };
     await import_node_fs3.promises.writeFile((0, import_node_path4.join)(dir, `${rec.id}.json`), JSON.stringify(rec, null, 2) + "\n", "utf8");
+    pendingIds.set(key, rec.id);
     written.push(rec);
     n++;
   }
   return { written, skipped };
+}
+async function discardProposal(globalDir, profileId, proposalId2, scope = "user") {
+  const file = (0, import_node_path4.join)(proposalsDir(globalDir, profileId, scope), `${proposalId2}.json`);
+  try {
+    await import_node_fs3.promises.unlink(file);
+    return true;
+  } catch {
+    return false;
+  }
 }
 var import_node_fs3, import_node_path4;
 var init_proposalStore = __esm({
@@ -997,9 +1039,13 @@ __export(write_exports, {
   WriteError: () => WriteError,
   addMemory: () => addMemory,
   applyMemoryWrite: () => applyMemoryWrite,
+  listPendingProposals: () => listPendingProposals,
   parseMemoryWriteRequest: () => parseMemoryWriteRequest,
   requestMemoryWrite: () => requestMemoryWrite,
-  updateMemory: () => updateMemory
+  resolveUpdateTarget: () => resolveUpdateTarget,
+  resolveWithdrawTarget: () => resolveWithdrawTarget,
+  updateMemory: () => updateMemory,
+  withdrawMemory: () => withdrawMemory
 });
 function assertCategory(v) {
   if (!v || !GLOBAL_CATEGORIES.includes(v)) {
@@ -1036,7 +1082,12 @@ async function addMemory(storageRoot, profileId, scope, category, fields) {
     scope
   );
   if (skipped.length > 0) {
-    return `\uAC19\uC740 \uC81C\uBAA9\uC774 \uC774\uBBF8 \uC788\uB2E4. \uACE0\uCE58\uB824\uBA74 memory update <\uC2DD\uBCC4\uC790>\uB97C \uC4F4\uB2E4.`;
+    const hit = skipped[0];
+    if (hit.reason === "pending") {
+      const pid = hit.pendingId ?? "<id>";
+      return `\uB300\uAE30\uC5F4\uC5D0 \uAC19\uC740 \uC81C\uBAA9\uC758 \uC81C\uC548\uC774 \uC788\uB2E4 (${pid}). \uBC14\uAFB8\uB824\uBA74 memory withdraw ${pid} \uB4A4\uC5D0 \uB2E4\uC2DC add \uD55C\uB2E4`;
+    }
+    return "\uAC19\uC740 \uC81C\uBAA9\uC774 \uC774\uBBF8 \uC788\uB2E4. \uACE0\uCE58\uB824\uBA74 memory update <\uC2DD\uBCC4\uC790>\uB97C \uC4F4\uB2E4.";
   }
   return `\uC81C\uC548 \uD050\uC5D0 \uB123\uC5C8\uB2E4 (${written[0].id}). \uC0AC\uC6A9\uC790\uAC00 \uC2B9\uC778\uD574\uC57C \uC9C0\uC2DD\uC774 \uB41C\uB2E4.`;
 }
@@ -1073,6 +1124,82 @@ async function updateMemory(storageRoot, profileId, scope, id, fields) {
   );
   return `\uACE0\uCE68 \uC81C\uC548\uC744 \uD050\uC5D0 \uB123\uC5C8\uB2E4 (${written[0].id} \u2192 ${id}). \uC0AC\uC6A9\uC790\uAC00 \uC2B9\uC778\uD574\uC57C \uBC18\uC601\uB41C\uB2E4.`;
 }
+function assertProposalId(id) {
+  if (!id || !id.trim()) throw new WriteError("\uB0B4\uB9B4 \uC81C\uC548\uC758 \uC2DD\uBCC4\uC790\uAC00 \uC5C6\uB2E4");
+  if (id.includes("/") || id.includes("\\") || id === "." || id === "..") {
+    throw new WriteError("\uC81C\uC548 \uC2DD\uBCC4\uC790 \uD615\uC2DD\uC774 \uC544\uB2C8\uB2E4. memory pending\uC73C\uB85C \uD655\uC778\uD55C\uB2E4");
+  }
+}
+async function resolveScopedTarget(wsDir, scope, existsInScope, notFoundMsg) {
+  const scopes = scope ? [scope] : ["user", "project"];
+  const found = [];
+  for (const s of scopes) {
+    const profileId = await resolveProfileIdForScope(wsDir, s);
+    if (!profileId) {
+      if (scope) throw new WriteError("\uC774 \uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4\uC758 \uD504\uB85C\uC81D\uD2B8 \uC9C0\uC2DD \uC790\uB9AC\uB97C \uCC3E\uC744 \uC218 \uC5C6\uB2E4");
+      continue;
+    }
+    if (await existsInScope(s, profileId)) {
+      found.push({ scope: s, profileId });
+    }
+  }
+  if (found.length === 0) throw new WriteError(notFoundMsg);
+  if (found.length > 1) throw new WriteError("\uC591\uCABD\uC5D0 \uAC19\uC740 \uC2DD\uBCC4\uC790\uAC00 \uC788\uB2E4. --scope\uB85C \uACE0\uB978\uB2E4");
+  return found[0];
+}
+async function resolveUpdateTarget(storageRoot, wsDir, id, scope) {
+  const { category, slug } = parseDocId(id);
+  const globalDir = getGlobalDir(storageRoot);
+  return resolveScopedTarget(
+    wsDir,
+    scope,
+    async (s, profileId) => {
+      const docs = await readProfileDocs(globalDir, profileId, s).catch(() => []);
+      return docs.some((d) => d.category === category && d.slug === slug);
+    },
+    `${id}\uC5D0 \uD574\uB2F9\uD558\uB294 \uD56D\uBAA9\uC774 \uC5C6\uB2E4. memory user\uB85C \uBAA9\uB85D\uC744 \uBCF8\uB2E4`
+  );
+}
+async function listPendingProposals(storageRoot, wsDir, scope) {
+  const globalDir = getGlobalDir(storageRoot);
+  const scopes = scope ? [scope] : ["user", "project"];
+  const lines = [];
+  for (const s of scopes) {
+    const profileId = await resolveProfileIdForScope(wsDir, s);
+    if (!profileId) continue;
+    const proposals = await readProposals(globalDir, profileId, s).catch(() => []);
+    if (proposals.length === 0) continue;
+    lines.push(`### ${SCOPE_LABEL2[s]}`);
+    for (const p of proposals) {
+      const kind = p.targetSlug ? `\uACE0\uCE68 ${p.category}/${p.targetSlug}` : "\uC0C8 \uD56D\uBAA9";
+      lines.push(`${p.id}  ${kind}  ${p.title}`);
+    }
+    lines.push("");
+  }
+  if (lines.length === 0) return "\uB300\uAE30 \uC911\uC778 \uC81C\uC548\uC774 \uC5C6\uB2E4";
+  return lines.join("\n").trimEnd();
+}
+async function resolveWithdrawTarget(storageRoot, wsDir, id, scope) {
+  assertProposalId(id);
+  const globalDir = getGlobalDir(storageRoot);
+  return resolveScopedTarget(
+    wsDir,
+    scope,
+    async (s, profileId) => {
+      const proposals = await readProposals(globalDir, profileId, s).catch(() => []);
+      return proposals.some((p) => p.id === id);
+    },
+    `${id}\uC5D0 \uD574\uB2F9\uD558\uB294 \uB300\uAE30 \uC81C\uC548\uC774 \uC5C6\uB2E4. memory pending\uC73C\uB85C \uBAA9\uB85D\uC744 \uBCF8\uB2E4`
+  );
+}
+async function withdrawMemory(storageRoot, profileId, scope, id) {
+  assertProposalId(id);
+  const removed = await discardProposal(getGlobalDir(storageRoot), profileId, id, scope);
+  if (!removed) {
+    throw new WriteError(`${id}\uC5D0 \uD574\uB2F9\uD558\uB294 \uB300\uAE30 \uC81C\uC548\uC774 \uC5C6\uB2E4. memory pending\uC73C\uB85C \uBAA9\uB85D\uC744 \uBCF8\uB2E4`);
+  }
+  return `\uB300\uAE30 \uC81C\uC548\uC744 \uB0B4\uB838\uB2E4 (${id}).`;
+}
 function optionalString(v, label) {
   if (v === void 0 || v === null) return void 0;
   if (typeof v !== "string") throw new WriteError(`${label}\uC740(\uB294) \uBB38\uC790\uC5F4\uC774\uB2E4`);
@@ -1083,13 +1210,18 @@ function parseMemoryWriteRequest(payload) {
     throw new WriteError("\uC4F0\uAE30 \uC694\uCCAD\uC758 \uBAA8\uC591\uC774 \uC544\uB2C8\uB2E4");
   }
   const p = payload;
-  if (p.op !== "add" && p.op !== "update") throw new WriteError(`\uC54C \uC218 \uC5C6\uB294 \uC4F0\uAE30 \uC885\uB958\uB2E4`);
+  if (p.op !== "add" && p.op !== "update" && p.op !== "withdraw") {
+    throw new WriteError(`\uC54C \uC218 \uC5C6\uB294 \uC4F0\uAE30 \uC885\uB958\uB2E4`);
+  }
   if (p.scope !== "user" && p.scope !== "project") throw new WriteError("--scope\uB294 user \uB610\uB294 project\uB2E4");
   if (typeof p.profileId !== "string" || !p.profileId) throw new WriteError("\uD504\uB85C\uD544 \uC790\uB9AC\uAC00 \uC5C6\uB2E4");
   const id = optionalString(p.id, "id");
   if (p.op === "update") {
     if (!id) throw new WriteError("\uACE0\uCE60 \uD56D\uBAA9\uC758 \uC2DD\uBCC4\uC790\uAC00 \uC5C6\uB2E4");
     parseDocId(id);
+  }
+  if (p.op === "withdraw") {
+    assertProposalId(id ?? "");
   }
   const rawFields = p.fields ?? {};
   if (typeof rawFields !== "object" || Array.isArray(rawFields)) throw new WriteError("\uD544\uB4DC\uC758 \uBAA8\uC591\uC774 \uC544\uB2C8\uB2E4");
@@ -1109,6 +1241,9 @@ function applyMemoryWrite(storageRoot, req) {
   if (req.op === "add") {
     return addMemory(storageRoot, req.profileId, req.scope, req.category, req.fields);
   }
+  if (req.op === "withdraw") {
+    return withdrawMemory(storageRoot, req.profileId, req.scope, req.id);
+  }
   return updateMemory(storageRoot, req.profileId, req.scope, req.id, req.fields);
 }
 async function requestMemoryWrite(sessionDir2, raw) {
@@ -1125,7 +1260,7 @@ async function requestMemoryWrite(sessionDir2, raw) {
   if (!result.ok) throw new WriteError(result.output);
   return result.output;
 }
-var WriteError, MODEL_WRITE_CONFIDENCE;
+var WriteError, MODEL_WRITE_CONFIDENCE, SCOPE_LABEL2;
 var init_write = __esm({
   "packages/core/src/agentCli/write.ts"() {
     "use strict";
@@ -1134,9 +1269,11 @@ var init_write = __esm({
     init_globalPaths();
     init_globalStore();
     init_proposalStore();
+    init_read();
     WriteError = class extends Error {
     };
     MODEL_WRITE_CONFIDENCE = 1;
+    SCOPE_LABEL2 = { user: "\uC0AC\uC6A9\uC790 \uC9C0\uC2DD", project: "\uD504\uB85C\uC81D\uD2B8 \uC9C0\uC2DD" };
   }
 });
 
@@ -1607,7 +1744,7 @@ var init_cleanup = __esm({
 
 // packages/core/src/agent/diffMerge.ts
 function runGit(cwd, args, opts = {}) {
-  return new Promise((resolve2, reject) => {
+  return new Promise((resolve3, reject) => {
     (0, import_node_child_process2.execFile)(
       "git",
       args,
@@ -1624,7 +1761,7 @@ function runGit(cwd, args, opts = {}) {
           reject(new Error(`git ${args.join(" ")} \uC2E4\uD328 \u2014 ${detail}`));
           return;
         }
-        resolve2(String(stdout ?? ""));
+        resolve3(String(stdout ?? ""));
       }
     );
   });
@@ -2003,7 +2140,13 @@ var {
   searchMemory: searchMemory2,
   resolveProfileIdForScope: resolveProfileIdForScope2
 } = (init_read(), __toCommonJS(read_exports));
-var { requestMemoryWrite: requestMemoryWrite2, WriteError: WriteError2 } = (init_write(), __toCommonJS(write_exports));
+var {
+  requestMemoryWrite: requestMemoryWrite2,
+  resolveUpdateTarget: resolveUpdateTarget2,
+  listPendingProposals: listPendingProposals2,
+  resolveWithdrawTarget: resolveWithdrawTarget2,
+  WriteError: WriteError2
+} = (init_write(), __toCommonJS(write_exports));
 var { readStatus: readStatus2 } = (init_status(), __toCommonJS(status_exports));
 var {
   agentList: agentList2,
@@ -2089,7 +2232,10 @@ function strOption(args, name) {
   return v;
 }
 function scopeOption(args) {
-  const v = strOption(args, "--scope") || "user";
+  const v = strOption(args, "--scope");
+  if (v === void 0) {
+    fail("--scope\uAC00 \uC5C6\uB2E4. \uC0AC\uC6A9\uC790\uAC00 \uBAA8\uB4E0 \uD504\uB85C\uC81D\uD2B8\uC5D0 \uC801\uC6A9\uB41C\uB2E4\uACE0 \uC9C1\uC811 \uB9D0\uD55C \uAC83\uB9CC user, \uB098\uBA38\uC9C0\uB294 project\uB2E4");
+  }
   if (v !== "user" && v !== "project") fail("--scope\uB294 user \uB610\uB294 project\uB2E4");
   return v;
 }
@@ -2132,19 +2278,40 @@ async function dispatch(cmd, args, wsDir, storageRoot) {
         if (!query) fail("memory search\uC5D0\uB294 \uC9C8\uC758\uAC00 \uC628\uB2E4");
         return searchMemory2(storageRoot, wsDir, query);
       }
-      if (sub === "add" || sub === "update") {
+      if (sub === "pending") {
+        return listPendingProposals2(storageRoot, wsDir, optionalScopeOption(args));
+      }
+      if (sub === "withdraw") {
+        const id = args[1];
+        if (!id || id.startsWith("--")) fail("memory withdraw\uC5D0\uB294 \uC81C\uC548 \uC2DD\uBCC4\uC790\uAC00 \uC628\uB2E4");
+        const target = await resolveWithdrawTarget2(storageRoot, wsDir, id, optionalScopeOption(args));
+        return requestMemoryWrite2(sessionDir(wsDir), {
+          op: "withdraw",
+          scope: target.scope,
+          profileId: target.profileId,
+          id
+        });
+      }
+      if (sub === "add") {
         const scope = scopeOption(args);
         const profileId = await resolveProfileIdForScope2(wsDir, scope);
         if (!profileId) fail("\uC774 \uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4\uC758 \uD504\uB85C\uC81D\uD2B8 \uC9C0\uC2DD \uC790\uB9AC\uB97C \uCC3E\uC744 \uC218 \uC5C6\uB2E4");
-        let id;
-        if (sub === "update") {
-          id = args[1];
-          if (!id || id.startsWith("--")) fail("memory update\uC5D0\uB294 \uC2DD\uBCC4\uC790\uAC00 \uC628\uB2E4");
-        }
         return requestMemoryWrite2(sessionDir(wsDir), {
-          op: sub,
+          op: "add",
           scope,
           profileId,
+          category: strOption(args, "--category"),
+          fields: writeFields(args)
+        });
+      }
+      if (sub === "update") {
+        const id = args[1];
+        if (!id || id.startsWith("--")) fail("memory update\uC5D0\uB294 \uC2DD\uBCC4\uC790\uAC00 \uC628\uB2E4");
+        const target = await resolveUpdateTarget2(storageRoot, wsDir, id, optionalScopeOption(args));
+        return requestMemoryWrite2(sessionDir(wsDir), {
+          op: "update",
+          scope: target.scope,
+          profileId: target.profileId,
           category: strOption(args, "--category"),
           id,
           fields: writeFields(args)

@@ -34,7 +34,13 @@ const {
   searchMemory,
   resolveProfileIdForScope
 } = require('../src/agentCli/read')
-const { requestMemoryWrite, WriteError } = require('../src/agentCli/write')
+const {
+  requestMemoryWrite,
+  resolveUpdateTarget,
+  listPendingProposals,
+  resolveWithdrawTarget,
+  WriteError
+} = require('../src/agentCli/write')
 const { readStatus } = require('../src/agentCli/status')
 const {
   agentList,
@@ -136,7 +142,10 @@ function strOption(args, name) {
 }
 
 function scopeOption(args) {
-  const v = strOption(args, '--scope') || 'user'
+  const v = strOption(args, '--scope')
+  if (v === undefined) {
+    fail('--scope가 없다. 사용자가 모든 프로젝트에 적용된다고 직접 말한 것만 user, 나머지는 project다')
+  }
   if (v !== 'user' && v !== 'project') fail('--scope는 user 또는 project다')
   return v
 }
@@ -187,20 +196,43 @@ async function dispatch(cmd, args, wsDir, storageRoot) {
         if (!query) fail('memory search에는 질의가 온다')
         return searchMemory(storageRoot, wsDir, query)
       }
-      if (sub === 'add' || sub === 'update') {
+      if (sub === 'pending') {
+        return listPendingProposals(storageRoot, wsDir, optionalScopeOption(args))
+      }
+      if (sub === 'withdraw') {
+        const id = args[1]
+        if (!id || id.startsWith('--')) fail('memory withdraw에는 제안 식별자가 온다')
+        const target = await resolveWithdrawTarget(storageRoot, wsDir, id, optionalScopeOption(args))
+        // 지우기도 호스트가 한다. 그래야 패널의 대기 목록과 뱃지가 그 자리에서 갱신된다.
+        return requestMemoryWrite(sessionDir(wsDir), {
+          op: 'withdraw',
+          scope: target.scope,
+          profileId: target.profileId,
+          id
+        })
+      }
+      if (sub === 'add') {
         const scope = scopeOption(args)
         const profileId = await resolveProfileIdForScope(wsDir, scope)
         if (!profileId) fail('이 워크스페이스의 프로젝트 지식 자리를 찾을 수 없다')
-        let id
-        if (sub === 'update') {
-          id = args[1]
-          if (!id || id.startsWith('--')) fail('memory update에는 식별자가 온다')
-        }
         // 쓰기는 호스트가 한다. 그래야 쓴 것이 그 자리에서 화면에 뜬다.
         return requestMemoryWrite(sessionDir(wsDir), {
-          op: sub,
+          op: 'add',
           scope,
           profileId,
+          category: strOption(args, '--category'),
+          fields: writeFields(args)
+        })
+      }
+      if (sub === 'update') {
+        const id = args[1]
+        if (!id || id.startsWith('--')) fail('memory update에는 식별자가 온다')
+        const target = await resolveUpdateTarget(storageRoot, wsDir, id, optionalScopeOption(args))
+        // 쓰기는 호스트가 한다. 그래야 쓴 것이 그 자리에서 화면에 뜬다.
+        return requestMemoryWrite(sessionDir(wsDir), {
+          op: 'update',
+          scope: target.scope,
+          profileId: target.profileId,
           category: strOption(args, '--category'),
           id,
           fields: writeFields(args)

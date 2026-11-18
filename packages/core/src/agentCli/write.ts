@@ -11,8 +11,9 @@ import { GLOBAL_CATEGORIES, type GlobalCategory, type ProposalScope } from '../s
 import { HOST_MEMORY_WRITE, sendHostRequest } from '../hostRequest';
 import { getGlobalDir } from '../globalPaths';
 import { readProfileDocs } from '../globalStore';
-import { writeProposals } from '../proposalStore';
+import { discardProposal, readProposals, writeProposals } from '../proposalStore';
 import type { SearchDocRecord } from '../globalSearch';
+import { resolveProfileIdForScope } from './read';
 
 export type MemoryWriteFields = {
   title?: string;
@@ -70,7 +71,12 @@ export async function addMemory(
   );
 
   if (skipped.length > 0) {
-    return `같은 제목이 이미 있다. 고치려면 memory update <식별자>를 쓴다.`;
+    const hit = skipped[0]!;
+    if (hit.reason === 'pending') {
+      const pid = hit.pendingId ?? '<id>';
+      return `대기열에 같은 제목의 제안이 있다 (${pid}). 바꾸려면 memory withdraw ${pid} 뒤에 다시 add 한다`;
+    }
+    return '같은 제목이 이미 있다. 고치려면 memory update <식별자>를 쓴다.';
   }
   return `제안 큐에 넣었다 (${written[0]!.id}). 사용자가 승인해야 지식이 된다.`;
 }
@@ -121,6 +127,122 @@ export async function updateMemory(
   return `고침 제안을 큐에 넣었다 (${written[0]!.id} → ${id}). 사용자가 승인해야 반영된다.`;
 }
 
+const SCOPE_LABEL: Record<ProposalScope, string> = { user: '사용자 지식', project: '프로젝트 지식' };
+
+export type ScopedTarget = { scope: ProposalScope; profileId: string };
+
+function assertProposalId(id: string): void {
+  if (!id || !id.trim()) throw new WriteError('내릴 제안의 식별자가 없다');
+  if (id.includes('/') || id.includes('\\') || id === '.' || id === '..') {
+    throw new WriteError('제안 식별자 형식이 아니다. memory pending으로 확인한다');
+  }
+}
+
+// 양쪽 또는 지정한 쪽에서 대상의 존재를 확인해 범위와 프로필을 정한다.
+async function resolveScopedTarget(
+  wsDir: string,
+  scope: ProposalScope | undefined,
+  existsInScope: (scope: ProposalScope, profileId: string) => Promise<boolean>,
+  notFoundMsg: string,
+): Promise<ScopedTarget> {
+  const scopes: ProposalScope[] = scope ? [scope] : ['user', 'project'];
+  const found: ScopedTarget[] = [];
+  for (const s of scopes) {
+    const profileId = await resolveProfileIdForScope(wsDir, s);
+    if (!profileId) {
+      if (scope) throw new WriteError('이 워크스페이스의 프로젝트 지식 자리를 찾을 수 없다');
+      continue;
+    }
+    if (await existsInScope(s, profileId)) {
+      found.push({ scope: s, profileId });
+    }
+  }
+  if (found.length === 0) throw new WriteError(notFoundMsg);
+  if (found.length > 1) throw new WriteError('양쪽에 같은 식별자가 있다. --scope로 고른다');
+  return found[0]!;
+}
+
+// `memory update`가 고칠 문서의 범위와 프로필을 찾는다.
+export async function resolveUpdateTarget(
+  storageRoot: string,
+  wsDir: string,
+  id: string,
+  scope?: ProposalScope,
+): Promise<ScopedTarget> {
+  const { category, slug } = parseDocId(id);
+  const globalDir = getGlobalDir(storageRoot);
+  return resolveScopedTarget(
+    wsDir,
+    scope,
+    async (s, profileId) => {
+      const docs = await readProfileDocs(globalDir, profileId, s).catch(() => []);
+      return docs.some((d) => d.category === category && d.slug === slug);
+    },
+    `${id}에 해당하는 항목이 없다. memory user로 목록을 본다`,
+  );
+}
+
+// `memory pending` — 대기 중인 제안을 쪽별로 읽는다. CLI만으로 끝난다.
+export async function listPendingProposals(
+  storageRoot: string,
+  wsDir: string,
+  scope?: ProposalScope,
+): Promise<string> {
+  const globalDir = getGlobalDir(storageRoot);
+  const scopes: ProposalScope[] = scope ? [scope] : ['user', 'project'];
+  const lines: string[] = [];
+
+  for (const s of scopes) {
+    const profileId = await resolveProfileIdForScope(wsDir, s);
+    if (!profileId) continue;
+    const proposals = await readProposals(globalDir, profileId, s).catch(() => []);
+    if (proposals.length === 0) continue;
+    lines.push(`### ${SCOPE_LABEL[s]}`);
+    for (const p of proposals) {
+      const kind = p.targetSlug ? `고침 ${p.category}/${p.targetSlug}` : '새 항목';
+      lines.push(`${p.id}  ${kind}  ${p.title}`);
+    }
+    lines.push('');
+  }
+
+  if (lines.length === 0) return '대기 중인 제안이 없다';
+  return lines.join('\n').trimEnd();
+}
+
+// `memory withdraw`가 내릴 대기 제안의 범위와 프로필을 찾는다.
+export async function resolveWithdrawTarget(
+  storageRoot: string,
+  wsDir: string,
+  id: string,
+  scope?: ProposalScope,
+): Promise<ScopedTarget> {
+  assertProposalId(id);
+  const globalDir = getGlobalDir(storageRoot);
+  return resolveScopedTarget(
+    wsDir,
+    scope,
+    async (s, profileId) => {
+      const proposals = await readProposals(globalDir, profileId, s).catch(() => []);
+      return proposals.some((p) => p.id === id);
+    },
+    `${id}에 해당하는 대기 제안이 없다. memory pending으로 목록을 본다`,
+  );
+}
+
+export async function withdrawMemory(
+  storageRoot: string,
+  profileId: string,
+  scope: ProposalScope,
+  id: string,
+): Promise<string> {
+  assertProposalId(id);
+  const removed = await discardProposal(getGlobalDir(storageRoot), profileId, id, scope);
+  if (!removed) {
+    throw new WriteError(`${id}에 해당하는 대기 제안이 없다. memory pending으로 목록을 본다`);
+  }
+  return `대기 제안을 내렸다 (${id}).`;
+}
+
 // ─── 호스트를 거치는 쓰기 ────────────────────────────────────────────────
 //
 // 쓰는 일 자체는 CLI가 할 수 있다. 그런데 그렇게 쓰면 화면이 그 사실을 모른다 — 제안 뱃지도
@@ -132,11 +254,11 @@ export async function updateMemory(
 // 호스트를 거치는 것과 같은 이유의 다른 축이다.)
 
 export type MemoryWriteRequest = {
-  op: 'add' | 'update';
+  op: 'add' | 'update' | 'withdraw';
   scope: ProposalScope;
   profileId: string;
   category?: string;
-  // op가 update일 때의 대상. `<카테고리>/<slug>`.
+  // op가 update일 때의 대상(`<카테고리>/<slug>`) 또는 withdraw일 때의 제안 id.
   id?: string;
   fields: MemoryWriteFields;
 };
@@ -156,13 +278,18 @@ export function parseMemoryWriteRequest(payload: unknown): MemoryWriteRequest {
     throw new WriteError('쓰기 요청의 모양이 아니다');
   }
   const p = payload as Record<string, unknown>;
-  if (p.op !== 'add' && p.op !== 'update') throw new WriteError(`알 수 없는 쓰기 종류다`);
+  if (p.op !== 'add' && p.op !== 'update' && p.op !== 'withdraw') {
+    throw new WriteError(`알 수 없는 쓰기 종류다`);
+  }
   if (p.scope !== 'user' && p.scope !== 'project') throw new WriteError('--scope는 user 또는 project다');
   if (typeof p.profileId !== 'string' || !p.profileId) throw new WriteError('프로필 자리가 없다');
   const id = optionalString(p.id, 'id');
   if (p.op === 'update') {
     if (!id) throw new WriteError('고칠 항목의 식별자가 없다');
     parseDocId(id); // 형식이 아니면 여기서 거절한다
+  }
+  if (p.op === 'withdraw') {
+    assertProposalId(id ?? '');
   }
   const rawFields = (p.fields ?? {}) as Record<string, unknown>;
   if (typeof rawFields !== 'object' || Array.isArray(rawFields)) throw new WriteError('필드의 모양이 아니다');
@@ -184,6 +311,9 @@ export function parseMemoryWriteRequest(payload: unknown): MemoryWriteRequest {
 export function applyMemoryWrite(storageRoot: string, req: MemoryWriteRequest): Promise<string> {
   if (req.op === 'add') {
     return addMemory(storageRoot, req.profileId, req.scope, req.category, req.fields);
+  }
+  if (req.op === 'withdraw') {
+    return withdrawMemory(storageRoot, req.profileId, req.scope, req.id!);
   }
   return updateMemory(storageRoot, req.profileId, req.scope, req.id!, req.fields);
 }

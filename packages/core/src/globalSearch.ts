@@ -111,6 +111,8 @@ export type SearchDocRecord = {
   summary: string;
   indexEntries: string[];
   body: string;
+  tags: string[];
+  path: string;
 };
 
 // gc-tree scoreDoc 가중치 그대로: label×10 / title×7 / summary×5 / category×2 / path×2 / content×1 + exactPhrase.
@@ -244,6 +246,8 @@ export async function resolveInjection(
     if (!profileId) continue;
     const docs = await readProfileDocs(globalDir, profileId, scope).catch(() => []);
     for (const rec of docs) {
+      // 핀 고정 기억은 세션 첫 턴에 별도로 실리므로 매 턴 단어 겹침 후보에서 뺀다.
+      if (rec.tags.includes('pinned')) continue;
       candidates.push({
         scope,
         category: rec.category,
