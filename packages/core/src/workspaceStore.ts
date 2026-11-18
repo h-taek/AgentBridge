@@ -70,6 +70,9 @@ export interface SessionMeta {
   // — 정리를 부르는 시점이 곧 이전 라운드가 끝났다는 선언이라, 이 표시가 없으면 새 머지가 나올
   // 때까지 그 서브가 계속 남아 상한이 안 생긴다.
   roundKeptAt?: string;
+  // 서브에이전트에 지정된 모델 이름과 effort (0.8.0). 지정하지 않았으면 비어 둔다.
+  subModel?: string;
+  subEffort?: string;
 }
 
 export interface WorkspaceMeta {
@@ -142,7 +145,7 @@ export interface WorkspaceStore {
     model: CliKind,
     kind?: SessionKind,
     sessionId?: string,
-    init?: { parentSessionId?: string; agentName?: string },
+    init?: { parentSessionId?: string; agentName?: string; subModel?: string; subEffort?: string },
   ): Promise<SessionMeta>;
   updateSessionMeta(workspaceId: string, sessionId: string, patch: SessionUpdatePatch): Promise<void>;
   loadSession(workspaceId: string, sessionId: string): Promise<SessionMeta>;
@@ -489,6 +492,8 @@ export function createWorkspaceStore(opts: WorkspaceStoreOptions = {}): Workspac
           kind,
           ...(init?.parentSessionId ? { parentSessionId: init.parentSessionId } : {}),
           ...(init?.agentName ? { agentName: init.agentName } : {}),
+          ...(init?.subModel ? { subModel: init.subModel } : {}),
+          ...(init?.subEffort ? { subEffort: init.subEffort } : {}),
         };
         await fsp.mkdir(sessionDir(workspaceId, sid), { recursive: true });
         meta.sessions.push(session);

@@ -52,7 +52,26 @@ export type SpawnExtras = {
   // 먼저 쓰기 위해 id를 밖에서 발급하는데(B-7), 그 값을 resume 자리로 받으면 어댑터가 이어서
   // 여는 세션으로 보고 첫 프롬프트를 빼 버린다.
   freshSession?: boolean;
+  // 서브에이전트에 지정된 모델 이름과 effort (0.8.0). 주지 않으면 각 하니스가 자기 설정을 쓴다.
+  subModel?: string;
+  subEffort?: string;
 };
+
+// 모델·effort 지정이 있을 때만 하니스별 인자로 바꾼다 (0.8.0). 프롬프트나 이어 열기 인자와
+// 섞이지 않는 자리에 들어가도록 별도 조각으로 낸다.
+function buildModelArgs(kind: CliKind, extras?: SpawnExtras): string[] {
+  const model = extras?.subModel;
+  if (!model) return [];
+  const effort = extras?.subEffort;
+  switch (kind) {
+    case 'claude':
+      return effort ? ['--model', model, '--effort', effort] : ['--model', model];
+    case 'codex':
+      return effort ? ['-m', model, '-c', `model_reasoning_effort="${effort}"`] : ['-m', model];
+    case 'agy':
+      return ['--model', effort ? `${model}-${effort}` : model];
+  }
+}
 
 export interface CliAdapterSet {
   claude: {
@@ -183,8 +202,9 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
         // 옵션이라, 구분자 없이 뒤에 붙이면 프롬프트가 그 옵션의 값으로 먹힌다(라이브에서 확인:
         // "Input must be provided ... when using --print"). resume에는 붙이지 않는다 — 이어서
         // 여는 세션은 이미 그 말을 들었다.
+        const modelArgs = buildModelArgs('claude', extras);
         const promptArgs = !resuming && extras?.initialPrompt ? ['--', extras.initialPrompt] : [];
-        const args = [...sessionArgs, ...accessArgs, ...promptArgs];
+        const args = [...sessionArgs, ...accessArgs, ...modelArgs, ...promptArgs];
 
         return {
           command,
@@ -237,6 +257,7 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
           ? buildWritableRootsArgs(opts.storageRoot, await readCodexWritableRoots())
           : [];
 
+        const modelArgs = buildModelArgs('codex', extras);
         let args: string[];
         let modelSessionId: string | undefined = resumeModelSessionId;
 
@@ -244,14 +265,14 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
         const promptArgs = !resuming && extras?.initialPrompt ? [extras.initialPrompt] : [];
 
         if (!resuming) {
-          args = [...sandboxArgs, ...promptArgs];
+          args = [...sandboxArgs, ...modelArgs, ...promptArgs];
         } else if (resumeModelSessionId) {
-          args = [...sandboxArgs, 'resume', resumeModelSessionId];
+          args = [...sandboxArgs, ...modelArgs, 'resume', resumeModelSessionId];
         } else {
           log.warn(
             `codexAdapter: resume 요청이지만 thread_id 없음 — 새 세션으로 fallback (sessionId=${sessionId.slice(0, 8)})`,
           );
-          args = [...sandboxArgs];
+          args = [...sandboxArgs, ...modelArgs];
           modelSessionId = undefined;
         }
 
@@ -303,6 +324,7 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
         }
 
         const cwdArgs = cwd ? ['--add-dir', cwd] : [];
+        const modelArgs = buildModelArgs('agy', extras);
         // agy의 첫 프롬프트는 위치 인자가 아니라 -i다. --print와 달리 답한 뒤에도 대화형으로 남는다.
         const promptArgs = !resuming && extras?.initialPrompt ? ['-i', extras.initialPrompt] : [];
 
@@ -310,24 +332,24 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
         let modelSessionId: string | undefined = resumeModelSessionId;
 
         if (!resuming) {
-          args = [...cwdArgs, '--dangerously-skip-permissions', ...promptArgs];
+          args = [...cwdArgs, ...modelArgs, '--dangerously-skip-permissions', ...promptArgs];
         } else if (resumeModelSessionId) {
           try {
             const resumeArgs = await resolveResumeArgs({
               sessionId: resumeModelSessionId,
               logger: log,
             });
-            args = [...cwdArgs, ...resumeArgs, '--dangerously-skip-permissions'];
+            args = [...cwdArgs, ...modelArgs, ...resumeArgs, '--dangerously-skip-permissions'];
           } catch (err) {
             log.warn(`agyAdapter: resume 불가 — 새 세션으로 fallback (${String(err)})`);
-            args = [...cwdArgs, '--dangerously-skip-permissions'];
+            args = [...cwdArgs, ...modelArgs, '--dangerously-skip-permissions'];
             modelSessionId = undefined;
           }
         } else {
           log.warn(
             `agyAdapter: resume 요청이지만 conversation UUID 없음 — 새 세션으로 fallback (sessionId=${sessionId.slice(0, 8)})`,
           );
-          args = [...cwdArgs, '--dangerously-skip-permissions'];
+          args = [...cwdArgs, ...modelArgs, '--dangerously-skip-permissions'];
         }
 
         return {

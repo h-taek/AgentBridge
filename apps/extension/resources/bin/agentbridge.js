@@ -901,7 +901,7 @@ async function sendHostRequest(sessionDir2, request, opts = {}) {
     at: now()
   };
 }
-var import_fs5, import_path6, HOST_REQUEST_FILENAME, HOST_RESULT_FILENAME, HOST_REQUEST_TIMEOUT_MS, POLL_MS, HOST_PING, HOST_AGENT_START, HOST_AGENT_SEND, HOST_AGENT_STOP, HOST_AGENT_CLOSE, HOST_AGENT_MERGE, HOST_MEMORY_WRITE, LONG_KINDS, LONG_TIMEOUT_MS, defaultSleep;
+var import_fs5, import_path6, HOST_REQUEST_FILENAME, HOST_RESULT_FILENAME, HOST_REQUEST_TIMEOUT_MS, POLL_MS, HOST_PING, HOST_AGENT_START, HOST_AGENT_SEND, HOST_AGENT_STOP, HOST_AGENT_CLOSE, HOST_AGENT_MERGE, HOST_AGENT_MODELS, HOST_MEMORY_WRITE, LONG_KINDS, LONG_TIMEOUT_MS, defaultSleep;
 var init_hostRequest = __esm({
   "packages/core/src/hostRequest.ts"() {
     "use strict";
@@ -917,8 +917,14 @@ var init_hostRequest = __esm({
     HOST_AGENT_STOP = "agent-stop";
     HOST_AGENT_CLOSE = "agent-close";
     HOST_AGENT_MERGE = "agent-merge";
+    HOST_AGENT_MODELS = "agent-models";
     HOST_MEMORY_WRITE = "memory-write";
-    LONG_KINDS = /* @__PURE__ */ new Set([HOST_AGENT_START, HOST_AGENT_CLOSE, HOST_AGENT_MERGE]);
+    LONG_KINDS = /* @__PURE__ */ new Set([
+      HOST_AGENT_START,
+      HOST_AGENT_CLOSE,
+      HOST_AGENT_MERGE,
+      HOST_AGENT_MODELS
+    ]);
     LONG_TIMEOUT_MS = 3e4;
     defaultSleep = (ms) => new Promise((r) => setTimeout(r, ms));
   }
@@ -1849,10 +1855,12 @@ __export(agent_exports, {
   agentDiff: () => agentDiff,
   agentList: () => agentList,
   agentMerge: () => agentMerge,
+  agentModels: () => agentModels,
   agentRead: () => agentRead,
   agentSend: () => agentSend,
   agentStart: () => agentStart,
   agentStop: () => agentStop,
+  formatSubLabel: () => formatSubLabel,
   listSubs: () => listSubs
 });
 async function readSessions(wsDir) {
@@ -1883,6 +1891,8 @@ async function listSubs(wsDir, callerSessionId) {
         name: s.agentName,
         sessionId: s.sessionId,
         model: s.model,
+        ...s.subModel ? { subModel: s.subModel } : {},
+        ...s.subEffort ? { subEffort: s.subEffort } : {},
         title: s.title ?? s.model,
         closed,
         unread: await isUnread(wsDir, s.sessionId),
@@ -1913,9 +1923,18 @@ function stateText(s) {
       return "\uB178\uB294 \uC911";
   }
 }
+function formatSubLabel(sub, state) {
+  const parts = [sub.model];
+  if (sub.subModel) {
+    parts.push(sub.subModel);
+    if (sub.subEffort) parts.push(sub.subEffort);
+  }
+  if (state) parts.push(state);
+  return `(${parts.join(", ")})`;
+}
 function rowLine(s) {
   const mark = s.unread ? "  \xB7 \uC548 \uC77D\uC740 \uBCF4\uACE0 \uC788\uC74C" : "";
-  return `  ${s.name}  (${s.model}, ${stateText(s)})  ${s.title}${mark}`;
+  return `  ${s.name}  ${formatSubLabel(s, stateText(s))}  ${s.title}${mark}`;
 }
 async function agentList(wsDir, callerSessionId) {
   const subs = await listSubs(wsDir, callerSessionId);
@@ -1981,13 +2000,13 @@ function renderWoke(done, stuck) {
   const lines = [];
   if (done.length > 0) {
     lines.push(`## \uB05D\uB09C \uC11C\uBE0C ${done.length}\uAC1C`, "");
-    for (const s of done) lines.push(`  ${s.name}  (${s.model})  ${s.title}`);
+    for (const s of done) lines.push(`  ${s.name}  ${formatSubLabel(s)}  ${s.title}`);
     lines.push("", "`agent read <\uC774\uB984>`\uC73C\uB85C \uBCF4\uACE0\uB97C \uC77D\uB294\uB2E4.");
   }
   if (stuck.length > 0) {
     if (lines.length > 0) lines.push("");
     lines.push(`## \uC0C1\uD0DC\uB97C \uC54C \uC218 \uC5C6\uB294 \uC11C\uBE0C ${stuck.length}\uAC1C`, "");
-    for (const s of stuck) lines.push(`  ${s.name}  (${s.model})  ${s.title}`);
+    for (const s of stuck) lines.push(`  ${s.name}  ${formatSubLabel(s)}  ${s.title}`);
     lines.push(
       "",
       "\uC644\uB8CC \uC2E0\uD638 \uC5C6\uC774 \uCD9C\uB825\uC774 \uBA48\uCD98 \uC9C0 \uC624\uB798\uB2E4. \uC0AC\uC6A9\uC790\uAC00 \uD134\uC744 \uB04A\uC5C8\uAC70\uB098 \uC11C\uBE0C\uAC00 \uB9C9\uD600 \uC788\uC744 \uC218 \uC788\uB2E4.",
@@ -2001,7 +2020,7 @@ async function renderEmpty(wsDir, subs, waited) {
   if (subs.length === 0) return "\uB744\uC6B4 \uC11C\uBE0C\uAC00 \uC5C6\uB2E4.";
   const lines = [waited ? "\uAE30\uB2E4\uB9AC\uB294 \uB3D9\uC548 \uB05D\uB09C \uC11C\uBE0C\uAC00 \uC5C6\uB2E4." : "\uB05D\uB0AC\uB294\uB370 \uC548 \uC77D\uC740 \uC11C\uBE0C\uAC00 \uC5C6\uB2E4.", ""];
   for (const s of subs) {
-    lines.push(`  ${s.name}  (${s.model}, ${stateText(s)})`);
+    lines.push(`  ${s.name}  ${formatSubLabel(s, stateText(s))}`);
     if (s.closed) {
       const tail = await replayTail(wsDir, s.sessionId);
       if (tail) {
@@ -2047,8 +2066,15 @@ async function callHost(sessionDir2, kind, payload) {
   const result = await sendHostRequest(sessionDir2, newRequest(kind, payload));
   return result.output;
 }
-function agentStart(sessionDir2, prompt, harnesses, isolate) {
-  return callHost(sessionDir2, HOST_AGENT_START, { prompt, harnesses, isolate });
+function agentStart(sessionDir2, prompt, harnesses, isolate, opts) {
+  const payload = { prompt, harnesses, isolate };
+  if (opts?.models && Object.keys(opts.models).length > 0) {
+    payload.models = opts.models;
+  }
+  if (opts?.efforts && Object.keys(opts.efforts).length > 0) {
+    payload.efforts = opts.efforts;
+  }
+  return callHost(sessionDir2, HOST_AGENT_START, payload);
 }
 function agentSend(sessionDir2, name, prompt) {
   return callHost(sessionDir2, HOST_AGENT_SEND, { name, prompt });
@@ -2064,6 +2090,13 @@ function agentCloseRound(sessionDir2) {
 }
 function agentMerge(sessionDir2, name) {
   return callHost(sessionDir2, HOST_AGENT_MERGE, { name });
+}
+function agentModels(sessionDir2, harnesses) {
+  return callHost(
+    sessionDir2,
+    HOST_AGENT_MODELS,
+    harnesses && harnesses.length > 0 ? { harnesses } : {}
+  );
 }
 var import_fs12, import_path14, DEFAULT_WAIT_SEC, WAIT_POLL_MS, TAIL_BYTES, defaultSleep2, requestSeq;
 var init_agent = __esm({
@@ -2159,6 +2192,7 @@ var {
   agentClose: agentClose2,
   agentCloseRound: agentCloseRound2,
   agentMerge: agentMerge2,
+  agentModels: agentModels2,
   DEFAULT_WAIT_SEC: DEFAULT_WAIT_SEC2
 } = (init_agent(), __toCommonJS(agent_exports));
 var { uninstallGlobal: uninstallGlobal2 } = (init_uninstall(), __toCommonJS(uninstall_exports));
@@ -2230,6 +2264,31 @@ function strOption(args, name) {
   const v = args[i + 1];
   if (v === void 0 || v.startsWith("--")) fail(name + "\uC5D0 \uAC12\uC774 \uC5C6\uB2E4");
   return v;
+}
+function harnessPairOption(flag, raw, harnesses) {
+  if (raw === void 0) return void 0;
+  const trimmed = raw.trim();
+  if (!trimmed) fail(flag + "\uC5D0 \uAC12\uC774 \uC5C6\uB2E4");
+  if (!trimmed.includes("=")) {
+    if (new Set(harnesses).size > 1) {
+      fail("\uD558\uB2C8\uC2A4\uAC00 \uC5EC\uB7FF\uC774\uBA74 --model\uACFC --effort\uB294 claude=opus\uCC98\uB7FC \uD558\uB2C8\uC2A4\uBCC4\uB85C \uC4F4\uB2E4");
+    }
+    return { [harnesses[0]]: trimmed };
+  }
+  const out = {};
+  for (const part of trimmed.split(",")) {
+    const entry = part.trim();
+    if (!entry) fail(flag + "\uC758 \uC9DD \uD615\uC2DD\uC774 \uB9DE\uC9C0 \uC54A\uB294\uB2E4");
+    const eq = entry.indexOf("=");
+    if (eq === -1) fail(flag + "\uC758 \uC9DD \uD615\uC2DD\uC774 \uB9DE\uC9C0 \uC54A\uB294\uB2E4: " + entry);
+    const h = entry.slice(0, eq).trim();
+    const val = entry.slice(eq + 1).trim();
+    if (!h) fail(flag + "\uC5D0 \uD558\uB2C8\uC2A4\uAC00 \uC5C6\uB2E4: " + entry);
+    if (!val) fail(flag + "\uC758 " + h + " \uAC12\uC774 \uBE44\uC5B4 \uC788\uB2E4");
+    if (!harnesses.includes(h)) fail(flag + "\uC758 " + h + "\uB294 --harness\uC5D0 \uC5C6\uB2E4");
+    out[h] = val;
+  }
+  return out;
 }
 function scopeOption(args) {
   const v = strOption(args, "--scope");
@@ -2333,6 +2392,12 @@ async function dispatch(cmd, args, wsDir, storageRoot) {
         return v;
       };
       switch (sub) {
+        case "models": {
+          const raw = strOption(rest, "--harness");
+          const harnesses = raw ? raw.split(",").map((h) => h.trim()).filter(Boolean) : ["claude", "codex", "agy"];
+          if (raw !== void 0 && harnesses.length === 0) fail("--harness\uC5D0 \uAC12\uC774 \uC5C6\uB2E4");
+          return agentModels2(sessionDir(wsDir), harnesses);
+        }
         case "list":
           return agentList2(wsDir, caller);
         case "read": {
@@ -2352,7 +2417,20 @@ async function dispatch(cmd, args, wsDir, storageRoot) {
           if (!prompt) fail("agent start\uC5D0\uB294 --prompt\uAC00 \uC628\uB2E4");
           const raw = strOption(rest, "--harness");
           const harnesses = raw ? raw.split(",").map((h) => h.trim()).filter(Boolean) : ["claude"];
-          return agentStart2(sessionDir(wsDir), prompt, harnesses, rest.includes("--isolate"));
+          if (raw !== void 0 && harnesses.length === 0) fail("--harness\uC5D0 \uAC12\uC774 \uC5C6\uB2E4");
+          const models = harnessPairOption("--model", strOption(rest, "--model"), harnesses);
+          const efforts = harnessPairOption("--effort", strOption(rest, "--effort"), harnesses);
+          if (efforts) {
+            for (const h of Object.keys(efforts)) {
+              if (!models || !models[h]) {
+                fail(h + "\uC5D0 --effort\uB9CC \uC788\uB2E4. --model\uACFC \uD568\uAED8 \uC4F4\uB2E4");
+              }
+            }
+          }
+          return agentStart2(sessionDir(wsDir), prompt, harnesses, rest.includes("--isolate"), {
+            models,
+            efforts
+          });
         }
         case "send": {
           const name = nameArg();
