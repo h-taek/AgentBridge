@@ -24,6 +24,7 @@ import {
   syncFolderMark,
   repairWorktrees,
   resolveProjectProfileKey,
+  sweepOldReplayLogs,
   type SpawnExtras,
 } from '@agentbridge/core';
 import { initializeCore, getBundledHelperPath, getBundledCliPath, getWorkspaceStore, getLogger } from './core/coreInstances';
@@ -196,6 +197,16 @@ export function activate(context: vscode.ExtensionContext) {
     }
   })();
   setWorkspaceReady(workspaceReady);
+
+  // 7일 넘은 화면 기록 정리 (0.8.0 spec/09). 이어받기 뒤, 열린 폴더와 상관없이 한 번 돈다.
+  // 기다리지 않고 결과는 출력 로그에만 남긴다.
+  void workspaceReady
+    .then(() => sweepOldReplayLogs(getWorkspaceStore().getGlobalStoragePath(), Date.now()))
+    .then(({ removed, bytes, failed }) => {
+      if (removed > 0) output.log(`화면 기록 정리: ${removed}개, ${(bytes / 1024 / 1024).toFixed(1)}MB`);
+      for (const p of failed) output.warn(`화면 기록 정리 실패: ${p}`);
+    })
+    .catch((err) => output.warn(`화면 기록 정리 오류: ${String(err)}`));
 
   // activate 시점엔 어떤 panel도 안 열려있음 — 모든 세션 active 플래그 초기화.
   // 이후 ChatPanel.create가 markSessionActive로 갱신.
