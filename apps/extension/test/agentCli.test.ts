@@ -796,6 +796,87 @@ describe('agent CLI — 골격과 신원 해소 (0.5.0 W1)', () => {
     assert.equal(effortOnlyMulti.status, 2);
     assert.match(effortOnlyMulti.stderr, /codex에 --effort만 있다\. --model과 함께 쓴다/);
   });
+
+  // ── agent read --screen (0.8.0 spec/08 §2-2) ─────────────────────────────
+
+  it('agent read --screen — 턴 기록 없이 화면만 내고 --last와 함께면 exit 2로 거절한다', async () => {
+    const wsScreenDir = join(root, 'workspaces', 'ws-read-screen');
+    const subSessionDir = join(wsScreenDir, 'sessions', 'sub-1');
+    await fsp.mkdir(subSessionDir, { recursive: true });
+    await fsp.writeFile(
+      join(wsScreenDir, 'workspace.json'),
+      JSON.stringify({
+        workspaceId: 'ws-read-screen',
+        sessions: [
+          {
+            sessionId: HOST_SESSION,
+            model: 'claude',
+            modelSessionId: null,
+            createdAt: '2026-09-01T00:00:00.000Z',
+            closedAt: null,
+          },
+          {
+            sessionId: 'sub-1',
+            model: 'agy',
+            modelSessionId: null,
+            parentSessionId: HOST_SESSION,
+            agentName: 'golden-gate',
+            createdAt: '2026-09-01T00:00:00.000Z',
+            closedAt: null,
+          },
+        ],
+      }),
+      'utf8',
+    );
+    await fsp.writeFile(
+      join(subSessionDir, 'turns.jsonl'),
+      JSON.stringify({
+        id: 't0',
+        sessionId: 'sub-1',
+        model: 'agy',
+        user: '질문 0',
+        assistantBody: '답 0',
+        completedAt: '2026-09-01T00:01:00.000Z',
+      }) + '\n',
+      'utf8',
+    );
+    await fsp.writeFile(
+      join(subSessionDir, 'replay.log'),
+      'Waiting for its response...\r\nesc to cancel',
+      'utf8',
+    );
+
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      AGENTBRIDGE_WS_DIR: wsScreenDir,
+      AGENTBRIDGE_WS_SESSION: HOST_SESSION,
+    };
+
+    const ok = spawnSync('node', [cliPath, 'agent', 'read', 'golden-gate', '--screen'], {
+      encoding: 'utf8',
+      env,
+    });
+    assert.equal(ok.status, 0);
+    assert.doesNotMatch(ok.stdout, /의 기록/);
+    assert.doesNotMatch(ok.stdout, /질문 0/);
+    assert.match(ok.stdout, /### 지금 화면 \(120×30\)\n\nWaiting for its response\.\.\.\nesc to cancel/);
+
+    const conflict = spawnSync(
+      'node',
+      [cliPath, 'agent', 'read', 'golden-gate', '--screen', '--last', '1'],
+      { encoding: 'utf8', env },
+    );
+    assert.equal(conflict.status, 2);
+    assert.match(conflict.stderr, /--screen은 --last와 함께 쓰지 않는다/);
+
+    const conflictNoVal = spawnSync(
+      'node',
+      [cliPath, 'agent', 'read', 'golden-gate', '--screen', '--last'],
+      { encoding: 'utf8', env },
+    );
+    assert.equal(conflictNoVal.status, 2);
+    assert.match(conflictNoVal.stderr, /--screen은 --last와 함께 쓰지 않는다/);
+  });
 });
 
 // 설치 배관 — 헬퍼와 CLI가 같은 함수를 타되 파일명과 버전 마커만 다르다.

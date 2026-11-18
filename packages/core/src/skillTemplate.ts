@@ -98,7 +98,9 @@ tab; you give it work, it reports back, you read the report.
     agent start --prompt "..." [--harness claude,codex,agy] [--isolate]
     agent list                    the subs you started, and their state
     agent check [--wait] [--for <seconds>]
-    agent read <name> [--last N]  that sub's full conversation
+    agent read <name> [--last N] [--screen]
+                                  that sub's full conversation; --screen for
+                                  what its terminal shows right now
     agent diff <name> [--stat]    what that sub actually changed
     agent send <name> --prompt "..."
     agent merge <name>            put its changes into the real folder
@@ -143,6 +145,14 @@ A sub can also go quiet without finishing: the user interrupted its turn, or it
 is stuck waiting on something. \`check\` and the next-turn line both report those
 separately from finished ones. That state is what we observed, not a verdict —
 read the sub to see how far it got, then send it more instructions or close it.
+
+"Finished" means the sub's harness ended its turn, not that the work you gave
+it is done. A harness can hand the work to its own subagent and end its turn
+while that runs. When a finished sub's reply is empty, \`agent read\` shows its
+screen as well. When the reply says it is waiting, run
+\`agent read <name> --screen\`. Read the screen before deciding the sub failed.
+If it shows the sub still working or waiting, check again later instead of
+closing it.
 
 Every read output item starts with its identifier (\`<category>/<slug>\`) —
 that is what \`memory update\` takes.
