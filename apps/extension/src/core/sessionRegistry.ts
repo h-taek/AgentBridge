@@ -34,6 +34,9 @@ export interface SessionMeta {
   lastOpenedAt?: string;
   // 서브에 발급한 교량 이름. 정리(worktree·브랜치 삭제)가 이 값으로 대상을 찾는다 (0.5.0 B-7).
   agentName?: string;
+  // 서브에 지정된 모델 이름과 effort (0.8.0). 다시 열 때 하니스 인자로 돌려 넣는다.
+  subModel?: string;
+  subEffort?: string;
 }
 
 function toLegacy(workspaceId: string, s: CoreSessionMeta): SessionMeta {
@@ -49,6 +52,8 @@ function toLegacy(workspaceId: string, s: CoreSessionMeta): SessionMeta {
     parentSessionId: s.parentSessionId,
     lastOpenedAt: s.lastOpenedAt,
     agentName: s.agentName,
+    subModel: s.subModel,
+    subEffort: s.subEffort,
   };
 }
 

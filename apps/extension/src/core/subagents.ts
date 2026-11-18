@@ -25,6 +25,7 @@ import {
   HOST_AGENT_STOP,
   HOST_AGENT_CLOSE,
   HOST_AGENT_MERGE,
+  HOST_AGENT_MODELS,
   addWorktree,
   isGitRepo,
   trustWorkspace,
@@ -38,6 +39,10 @@ import {
   mergeSubagent,
   renderMerge,
   planRoundCleanup,
+  buildModelTable,
+  validateModelSelections,
+  formatSubLabel,
+  type HarnessRunner,
   type NameUsage,
   type SpawnExtras,
   type HostRequest,
@@ -51,6 +56,7 @@ import * as workspaceStore from './workspaceStore';
 import { getWorkspaceStore, getCoreEnvProbe, getLogger, resolveRefineDecision } from './coreInstances';
 import * as output from '../log/output';
 import { registerRepo, unregisterRepo } from './scmView';
+import { handleAgentModels, createHarnessRunner } from './modelLookup';
 
 // 서브 이름을 짓는 헤드리스 호출 상한. 메인 세션의 자동 명명과 같은 값이다 — 첫 프롬프트 하나만
 // 보내는 가벼운 호출이라 짧게 잡는다.
@@ -87,12 +93,17 @@ export interface SpawnRequest {
   // 참이면 서브마다 새 worktree를 만들고 거기서 띄운다 (0.5.0 B-7). 기본은 원본이다 —
   // 새 폴더에는 git이 추적하는 것만 들어가므로 그것을 채우는 비용을 매번 치른다.
   isolate?: boolean;
+  // 하니스별 지정 모델 이름과 effort (0.8.0). 지정하지 않은 하니스는 자기 설정대로 뜬다.
+  models?: Partial<Record<CliKind, string>>;
+  efforts?: Partial<Record<CliKind, string>>;
 }
 
 export interface SpawnedSub {
   name: string;
   sessionId: string;
   model: CliKind;
+  subModel?: string;
+  subEffort?: string;
 }
 
 // trees/ 아래에 실제로 있는 폴더. 격리(W6) 전에는 비어 있다.
@@ -228,6 +239,8 @@ export async function spawnSubagents(req: SpawnRequest): Promise<SpawnedSub[]> {
   for (let i = 0; i < req.harnesses.length; i++) {
     const model = req.harnesses[i];
     const name = names[i];
+    const subModel = req.models?.[model];
+    const subEffort = req.efforts?.[model];
 
     // 레코드가 먼저다. 띄우다 실패해도 레코드는 남고, 레코드 없이 뜬 서브는 없다. 격리에서는
     // 이 순서가 고아 판정의 근거가 된다 — 레코드 없이 남은 폴더만 비정상 종료의 흔적이다(B-7).
@@ -235,6 +248,8 @@ export async function spawnSubagents(req: SpawnRequest): Promise<SpawnedSub[]> {
     await store.addSession(req.workspaceId, model, 'cli', sessionId, {
       parentSessionId: req.parentSessionId,
       agentName: name,
+      ...(subModel ? { subModel } : {}),
+      ...(subEffort ? { subEffort } : {}),
     });
 
     // 격리를 골랐으면 여기서 폴더가 생긴다. 실패하면 그 서브만 접고 나머지는 계속 띄운다 —
@@ -264,6 +279,8 @@ export async function spawnSubagents(req: SpawnRequest): Promise<SpawnedSub[]> {
       initialPrompt: preamble ? `${preamble}\n\n${req.prompt}` : req.prompt,
       parentSessionId: req.parentSessionId,
       freshSession: true,
+      ...(subModel ? { subModel } : {}),
+      ...(subEffort ? { subEffort } : {}),
     });
     // 제목을 지금 박는 이유는 둘이다. 트리에 이름 없는 행이 잠깐 뜨는 것을 막고, 세션별 자동
     // 명명이 서브마다 따로 도는 것을 막는다(그쪽은 제목이 비어 있을 때만 돈다).
@@ -273,8 +290,16 @@ export async function spawnSubagents(req: SpawnRequest): Promise<SpawnedSub[]> {
     opts.terminalName = displayTitle(fallbackBase, model);
 
     deps.openPanel(opts, req.workspaceId, true);
-    spawned.push({ name, sessionId, model });
-    output.log(`subagents: ${name} (${model}) 스폰 — 부모 ${req.parentSessionId.slice(0, 8)}`);
+    spawned.push({
+      name,
+      sessionId,
+      model,
+      ...(subModel ? { subModel } : {}),
+      ...(subEffort ? { subEffort } : {}),
+    });
+    output.log(
+      `subagents: ${name} ${formatSubLabel({ model, subModel, subEffort })} 스폰 — 부모 ${req.parentSessionId.slice(0, 8)}`,
+    );
   }
 
   // 새 탭은 메인과 같은 에디터 그룹에 합류하므로, 포커스를 안 뺏어도 화면에 보이는 탭이
@@ -345,36 +370,83 @@ async function findSub(
   return { sessionId: found.sessionId, model: found.model };
 }
 
-async function handleStart(req: HostRequest, sessionDir: string): Promise<string> {
-  const { workspaceId, sessionId } = callerFromSessionDir(sessionDir);
-  const p = payloadOf(req);
-  const prompt = str(p.prompt);
-  if (!prompt) throw new Error('프롬프트가 비어 있다');
-  const raw = Array.isArray(p.harnesses) ? p.harnesses.map(str).filter(Boolean) : [];
-  const known: CliKind[] = ['claude', 'codex', 'agy'];
-  const harnesses = (raw.length ? raw : [str(p.harness) || 'claude']).map((h) => {
-    if (!known.includes(h as CliKind)) throw new Error(`모르는 하니스다: ${h}`);
-    return h as CliKind;
-  });
+const KNOWN_HARNESSES: readonly CliKind[] = ['claude', 'codex', 'agy'];
 
-  const isolate = p.isolate === true;
-  const spawned = await spawnSubagents({
-    workspaceId,
-    parentSessionId: sessionId,
-    prompt,
-    harnesses,
-    isolate,
-  });
-  if (spawned.length === 0) throw new Error('서브를 하나도 띄우지 못했다');
-  const lines = [
-    `서브 ${spawned.length}개를 띄웠다${isolate ? ' (각자 새 worktree에서 돈다)' : ''}.`,
-    '',
-  ];
-  for (const s of spawned) lines.push(`  ${s.name}  (${s.model})`);
-  lines.push('', '보고는 `agent check`로 확인하고 `agent read <이름>`으로 읽는다.');
-  if (isolate) lines.push('끝나면 `agent close <이름>`으로 정리한다 — 폴더와 브랜치가 함께 사라진다.');
-  return lines.join('\n');
+function parseHarnessValueMap(
+  flag: '--model' | '--effort',
+  raw: unknown,
+  harnesses: CliKind[],
+): Partial<Record<CliKind, string>> {
+  if (raw === undefined) return {};
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    throw new Error(`${flag} 형식이 잘못되었다`);
+  }
+  const out: Partial<Record<CliKind, string>> = {};
+  for (const [k, v] of Object.entries(raw)) {
+    if (!KNOWN_HARNESSES.includes(k as CliKind)) {
+      throw new Error(`모르는 하니스다: ${k}`);
+    }
+    if (typeof v !== 'string' || !v.trim()) {
+      throw new Error(`${flag}의 ${k} 값이 비어 있다`);
+    }
+    if (!harnesses.includes(k as CliKind)) {
+      throw new Error(`${flag}의 ${k}는 --harness에 없다`);
+    }
+    out[k as CliKind] = v.trim();
+  }
+  return out;
 }
+
+/** `agent start` 호스트 요청 처리기 팩토리 (테스트에서는 가짜 runner를 주입한다). */
+export function createStartHandler(handlerDeps?: { run?: HarnessRunner; timeoutMs?: number }) {
+  return async function handleStart(req: HostRequest, sessionDir: string): Promise<string> {
+    const { workspaceId, sessionId } = callerFromSessionDir(sessionDir);
+    const p = payloadOf(req);
+    const prompt = str(p.prompt);
+    if (!prompt) throw new Error('프롬프트가 비어 있다');
+    const raw = Array.isArray(p.harnesses) ? p.harnesses.map(str).filter(Boolean) : [];
+    const harnesses = (raw.length ? raw : [str(p.harness) || 'claude']).map((h) => {
+      if (!KNOWN_HARNESSES.includes(h as CliKind)) throw new Error(`모르는 하니스다: ${h}`);
+      return h as CliKind;
+    });
+
+    const models = parseHarnessValueMap('--model', p.models, harnesses);
+    const efforts = parseHarnessValueMap('--effort', p.efforts, harnesses);
+    const modelHarnesses = harnesses.filter(
+      (h, i, arr) => arr.indexOf(h) === i && models[h] !== undefined,
+    );
+    const tables =
+      modelHarnesses.length > 0
+        ? await buildModelTable(modelHarnesses, handlerDeps?.run ?? createHarnessRunner(), {
+            timeoutMs: handlerDeps?.timeoutMs,
+          })
+        : [];
+    const errors = validateModelSelections(models, efforts, tables);
+    if (errors.length > 0) throw new Error(errors.join('\n'));
+
+    const isolate = p.isolate === true;
+    const spawned = await spawnSubagents({
+      workspaceId,
+      parentSessionId: sessionId,
+      prompt,
+      harnesses,
+      isolate,
+      models,
+      efforts,
+    });
+    if (spawned.length === 0) throw new Error('서브를 하나도 띄우지 못했다');
+    const lines = [
+      `서브 ${spawned.length}개를 띄웠다${isolate ? ' (각자 새 worktree에서 돈다)' : ''}.`,
+      '',
+    ];
+    for (const s of spawned) lines.push(`  ${s.name}  ${formatSubLabel(s)}`);
+    lines.push('', '보고는 `agent check`로 확인하고 `agent read <이름>`으로 읽는다.');
+    if (isolate) lines.push('끝나면 `agent close <이름>`으로 정리한다 — 폴더와 브랜치가 함께 사라진다.');
+    return lines.join('\n');
+  };
+}
+
+const handleStart = createStartHandler();
 
 async function handleSend(req: HostRequest, sessionDir: string): Promise<string> {
   const { workspaceId, sessionId } = callerFromSessionDir(sessionDir);
@@ -561,4 +633,5 @@ export const subagentHostHandlers = {
   [HOST_AGENT_STOP]: handleStop,
   [HOST_AGENT_CLOSE]: handleClose,
   [HOST_AGENT_MERGE]: handleMerge,
+  [HOST_AGENT_MODELS]: handleAgentModels,
 };

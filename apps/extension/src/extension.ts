@@ -15,6 +15,8 @@ import {
   getStorageRoot,
   migrateLegacyGlobalIfNeeded,
   renderReceipt,
+  resolveTreePath,
+  worktreeExists,
   type SpawnExtras,
 } from '@agentbridge/core';
 import { initializeCore, getBundledHelperPath, getBundledCliPath, getWorkspaceStore, getLogger } from './core/coreInstances';
@@ -75,6 +77,42 @@ async function buildOpts(
     case 'codex': return codexAdapter.buildSpawnOptions(cwd, workspaceId, resumeSessionId, resumeModelSessionId, extras);
     case 'agy': return agyAdapter.buildSpawnOptions(cwd, workspaceId, resumeSessionId, resumeModelSessionId, extras);
   }
+}
+
+// 세션을 다시 열 때(목록에서 열기·창 리로드 복원) 두 경로가 같은 기동 옵션을 만든다 (0.8.0).
+// 격리 서브의 worktree가 남아 있으면 거기서 열고, 부모 세션 id와 지정된 모델·effort를 되돌려
+// 턴 기록과 하니스 인자가 처음 띄웠을 때와 같아지게 한다. 첫 프롬프트는 넘기지 않는다.
+export async function buildReopenOptions(
+  params: {
+    model: CliKind;
+    workspaceId: string;
+    sessionId: string;
+    defaultCwd: string;
+    modelSessionId?: string;
+    meta?: Pick<SessionMeta, 'agentName' | 'parentSessionId' | 'subModel' | 'subEffort' | 'name'>;
+  },
+  deps: {
+    getWorkspacePath: (workspaceId: string) => string;
+    buildOpts: typeof buildOpts;
+  } = {
+    getWorkspacePath: workspaceStore.getWorkspacePath,
+    buildOpts,
+  },
+): Promise<SpawnOptions> {
+  const { model, workspaceId, sessionId, defaultCwd, modelSessionId, meta } = params;
+  let cwd = defaultCwd;
+  if (meta?.agentName) {
+    const treePath = resolveTreePath(deps.getWorkspacePath(workspaceId), meta.agentName);
+    if (await worktreeExists(treePath)) cwd = treePath;
+  }
+  const extras: SpawnExtras = {
+    ...(meta?.parentSessionId ? { parentSessionId: meta.parentSessionId } : {}),
+    ...(meta?.subModel ? { subModel: meta.subModel } : {}),
+    ...(meta?.subEffort ? { subEffort: meta.subEffort } : {}),
+  };
+  const opts = await deps.buildOpts(model, cwd, workspaceId, sessionId, modelSessionId, extras);
+  if (meta?.name) opts.terminalName = meta.name; // 탭 제목 = 세션 이름(트리와 일치; 이름 없으면 모델명)
+  return opts;
 }
 
 export function activate(context: vscode.ExtensionContext) {
@@ -354,7 +392,6 @@ export function activate(context: vscode.ExtensionContext) {
       vscode.window.showWarningMessage(vscode.l10n.t('AgentBridge: Open a workspace folder first.'));
       return;
     }
-    const cwd = folderUri.fsPath;
 
     const availability = checkAvailability(session.model);
     if (!availability.found) {
@@ -363,8 +400,14 @@ export function activate(context: vscode.ExtensionContext) {
     }
 
     const modelSessionId = await reclaimPendingModelSessionId(session);
-    const opts = await buildOpts(session.model, cwd, session.workspaceId, session.sessionId, modelSessionId);
-    opts.terminalName = session.name; // 탭 제목 = 세션 이름(트리와 일치; 이름 없으면 모델명)
+    const opts = await buildReopenOptions({
+      model: session.model,
+      workspaceId: session.workspaceId,
+      sessionId: session.sessionId,
+      defaultCwd: folderUri.fsPath,
+      modelSessionId,
+      meta: session,
+    });
     await markSessionActive(session.workspaceId, session.sessionId);
     void sessionsView.refresh();
     openChatPanel(opts, session.workspaceId);
@@ -537,8 +580,14 @@ export function activate(context: vscode.ExtensionContext) {
       const restored = meta
         ? await reclaimPendingModelSessionId(meta)
         : undefined;
-      const opts = await buildOpts(s.model, folder.fsPath, s.workspaceId, s.sessionId, restored ?? s.modelSessionId);
-      if (meta?.name) opts.terminalName = meta.name; // 복원 탭 제목 = 세션 이름
+      const opts = await buildReopenOptions({
+        model: s.model,
+        workspaceId: s.workspaceId,
+        sessionId: s.sessionId,
+        defaultCwd: folder.fsPath,
+        modelSessionId: restored ?? s.modelSessionId,
+        meta,
+      });
       // activate의 resetAllSessionsActive(모든 세션 비활성)와 경합 회피 — reset 완료 후 active 표시.
       // 안 기다리면 reset이 이 복구된 세션의 active 플래그를 덮어써 비활성으로 남을 수 있음 (V-21).
       if (pendingResetDone) await pendingResetDone;

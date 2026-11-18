@@ -53,6 +53,7 @@ const {
   agentClose,
   agentCloseRound,
   agentMerge,
+  agentModels,
   DEFAULT_WAIT_SEC
 } = require('../src/agentCli/agent')
 const { uninstallGlobal } = require('../src/agentCli/uninstall')
@@ -139,6 +140,37 @@ function strOption(args, name) {
   const v = args[i + 1]
   if (v === undefined || v.startsWith('--')) fail(name + '에 값이 없다')
   return v
+}
+
+// `--model`·`--effort`를 하니스별 맵으로 바꾼다. 하니스가 하나면 단일 값을 그 하니스에 묶고,
+// 여럿이면 `하니스=값,...` 짝 형식만 받는다.
+function harnessPairOption(flag, raw, harnesses) {
+  if (raw === undefined) return undefined
+  const trimmed = raw.trim()
+  if (!trimmed) fail(flag + '에 값이 없다')
+
+  if (!trimmed.includes('=')) {
+    // 하니스 종류로 센다 — 같은 하니스를 둘 띄우면(claude,claude) 단일 값을 둘 다에 쓴다.
+    if (new Set(harnesses).size > 1) {
+      fail('하니스가 여럿이면 --model과 --effort는 claude=opus처럼 하니스별로 쓴다')
+    }
+    return { [harnesses[0]]: trimmed }
+  }
+
+  const out = {}
+  for (const part of trimmed.split(',')) {
+    const entry = part.trim()
+    if (!entry) fail(flag + '의 짝 형식이 맞지 않는다')
+    const eq = entry.indexOf('=')
+    if (eq === -1) fail(flag + '의 짝 형식이 맞지 않는다: ' + entry)
+    const h = entry.slice(0, eq).trim()
+    const val = entry.slice(eq + 1).trim()
+    if (!h) fail(flag + '에 하니스가 없다: ' + entry)
+    if (!val) fail(flag + '의 ' + h + ' 값이 비어 있다')
+    if (!harnesses.includes(h)) fail(flag + '의 ' + h + '는 --harness에 없다')
+    out[h] = val
+  }
+  return out
 }
 
 function scopeOption(args) {
@@ -257,6 +289,14 @@ async function dispatch(cmd, args, wsDir, storageRoot) {
         return v
       }
       switch (sub) {
+        case 'models': {
+          const raw = strOption(rest, '--harness')
+          const harnesses = raw
+            ? raw.split(',').map((h) => h.trim()).filter(Boolean)
+            : ['claude', 'codex', 'agy']
+          if (raw !== undefined && harnesses.length === 0) fail('--harness에 값이 없다')
+          return agentModels(sessionDir(wsDir), harnesses)
+        }
         case 'list':
           return agentList(wsDir, caller)
         case 'read': {
@@ -276,7 +316,20 @@ async function dispatch(cmd, args, wsDir, storageRoot) {
           if (!prompt) fail('agent start에는 --prompt가 온다')
           const raw = strOption(rest, '--harness')
           const harnesses = raw ? raw.split(',').map((h) => h.trim()).filter(Boolean) : ['claude']
-          return agentStart(sessionDir(wsDir), prompt, harnesses, rest.includes('--isolate'))
+          if (raw !== undefined && harnesses.length === 0) fail('--harness에 값이 없다')
+          const models = harnessPairOption('--model', strOption(rest, '--model'), harnesses)
+          const efforts = harnessPairOption('--effort', strOption(rest, '--effort'), harnesses)
+          if (efforts) {
+            for (const h of Object.keys(efforts)) {
+              if (!models || !models[h]) {
+                fail(h + '에 --effort만 있다. --model과 함께 쓴다')
+              }
+            }
+          }
+          return agentStart(sessionDir(wsDir), prompt, harnesses, rest.includes('--isolate'), {
+            models,
+            efforts,
+          })
         }
         case 'send': {
           const name = nameArg()

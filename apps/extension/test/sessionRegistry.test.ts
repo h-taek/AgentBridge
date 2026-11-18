@@ -3,6 +3,7 @@ import { promises as fs } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import * as workspaceStore from '../src/core/workspaceStore';
+import { getWorkspaceStore } from '../src/core/coreInstances';
 import {
   getSessions,
   registerSession,
@@ -74,6 +75,50 @@ describe('sessionRegistry', () => {
     assert.equal(sessions[0].name, '내 세션');
     assert.equal(sessions[0].active, false);
     assert.equal(sessions[0].lastOpenedAt !== undefined, true);
+  });
+
+  it('addSession init의 subModel·subEffort·parentSessionId·agentName을 저장하고 toLegacy로 되돌린다 (0.8.0)', async () => {
+    const parentSid = '11111111-1111-4111-8111-111111111111';
+    const subSid = '22222222-2222-4222-8222-222222222222';
+    const haikuSid = '33333333-3333-4333-8333-333333333333';
+    const store = getWorkspaceStore();
+
+    await store.addSession(wid, 'claude', 'cli', parentSid);
+    await store.addSession(wid, 'claude', 'cli', subSid, {
+      parentSessionId: parentSid,
+      agentName: 'golden-gate',
+      subModel: 'opus',
+      subEffort: 'high',
+    });
+    // effort가 없는 모델이면 subModel만 남고 subEffort는 기록하지 않는다.
+    await store.addSession(wid, 'claude', 'cli', haikuSid, {
+      parentSessionId: parentSid,
+      agentName: 'tower-bridge',
+      subModel: 'claude-haiku-4-5-20251001',
+    });
+
+    const sessions = await getSessions(wid);
+    const main = sessions.find((s) => s.sessionId === parentSid)!;
+    const sub = sessions.find((s) => s.sessionId === subSid)!;
+    const haiku = sessions.find((s) => s.sessionId === haikuSid)!;
+
+    assert.equal(main.subModel, undefined);
+    assert.equal(main.subEffort, undefined);
+
+    assert.equal(sub.parentSessionId, parentSid);
+    assert.equal(sub.agentName, 'golden-gate');
+    assert.equal(sub.subModel, 'opus');
+    assert.equal(sub.subEffort, 'high');
+
+    assert.equal(haiku.parentSessionId, parentSid);
+    assert.equal(haiku.agentName, 'tower-bridge');
+    assert.equal(haiku.subModel, 'claude-haiku-4-5-20251001');
+    assert.equal(haiku.subEffort, undefined);
+
+    // JSON 원문에서도 없는 선택 칸은 키 자체가 빠진다.
+    const raw = JSON.parse(await fs.readFile(join(workspaceStore.getWorkspacePath(wid), 'workspace.json'), 'utf8'));
+    const rawHaiku = raw.sessions.find((s: { sessionId: string }) => s.sessionId === haikuSid);
+    assert.equal('subEffort' in rawHaiku, false);
   });
 });
 

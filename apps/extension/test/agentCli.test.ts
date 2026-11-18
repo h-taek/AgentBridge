@@ -17,7 +17,11 @@ import {
   applyMemoryWrite,
   parseMemoryWriteRequest,
   HOST_MEMORY_WRITE,
+  HOST_AGENT_MODELS,
+  HOST_AGENT_START,
+  type HostRequestHandlers,
 } from '@agentbridge/core';
+import { createModelsHandler } from '../src/core/modelLookup';
 
 // 에이전트용 CLI (0.5.0 3단계 W1) — 골격, 신원 해소, 설치 배관.
 // 헬퍼와 같은 모양으로 실제 번들을 만들어 자식 프로세스로 돌린다. 신원은 인자가 아니라
@@ -47,11 +51,12 @@ describe('agent CLI — 골격과 신원 해소 (0.5.0 W1)', () => {
   // 지식 쓰기는 호스트를 거친다(0.5.0 6단계 후속). 그래서 쓰기 계열은 호스트를 띄운 채 부른다.
   // spawnSync로는 같은 프로세스의 처리기가 돌 틈이 없어 비동기로 띄운다.
   const HOST_SESSION = 'sess-host';
-  async function runWithHost(args: string[]) {
+  async function runWithHost(args: string[], extraHandlers: HostRequestHandlers = {}) {
     const watcher = startHostRequestHandler({
       storageRoot: root,
       handlers: {
         [HOST_MEMORY_WRITE]: (req) => applyMemoryWrite(root, parseMemoryWriteRequest(req.payload)),
+        ...extraHandlers,
       },
       ownsSession: async () => true,
     });
@@ -565,6 +570,231 @@ describe('agent CLI — 골격과 신원 해소 (0.5.0 W1)', () => {
     const empty = run(['memory', 'pending']);
     assert.equal(empty.status, 0);
     assert.equal(empty.stdout.trim(), '대기 중인 제안이 없다');
+  });
+
+  // ── agent models (0.8.0 spec/06 §2) ────────────────────────────────────
+
+  it('agent models — 기본은 세 하니스를 호스트에 요청하고 표 모양으로 낸다', async () => {
+    let seenKind = '';
+    let seenHarnesses: unknown;
+    const fakeHandler = createModelsHandler({
+      run: async (h) => {
+        if (h === 'claude') {
+          return {
+            type: 'control_response',
+            response: {
+              subtype: 'success',
+              request_id: 'r1',
+              response: {
+                models: [
+                  { value: 'opus', supportsEffort: true, supportedEffortLevels: ['low', 'medium', 'high'] },
+                  { value: 'claude-haiku-4-5-20251001', supportsEffort: false },
+                ],
+              },
+            },
+          };
+        }
+        if (h === 'codex') {
+          return [
+            {
+              result: {
+                data: [
+                  {
+                    model: 'gpt-6.1-sol',
+                    supportedReasoningEfforts: [{ reasoningEffort: 'low' }, { reasoningEffort: 'ultra' }],
+                  },
+                ],
+                nextCursor: null,
+              },
+            },
+          ];
+        }
+        return 'gemini-4-hydrogen-low\tGemini 4\ngemini-pro-orchestrator-g1-pro\tOrchestrator\n';
+      },
+    });
+
+    const r = await runWithHost(['agent', 'models'], {
+      [HOST_AGENT_MODELS]: (req, dir) => {
+        seenKind = req.kind;
+        seenHarnesses = (req.payload as { harnesses?: unknown })?.harnesses;
+        return fakeHandler(req, dir);
+      },
+    });
+    assert.equal(r.status, 0);
+    assert.equal(seenKind, HOST_AGENT_MODELS);
+    assert.deepEqual(seenHarnesses, ['claude', 'codex', 'agy']);
+    assert.match(r.stdout, /## claude\n\n {2}opus\s+low medium high\n {2}claude-haiku-4-5-20251001\s+\(effort 없음\)/);
+    assert.match(r.stdout, /## codex\n\n {2}gpt-6\.1-sol\s+low ultra/);
+    assert.match(r.stdout, /## agy\n\n {2}gemini-4-hydrogen\s+low\n {2}gemini-pro-orchestrator-g1-pro\s+\(effort 없음\)/);
+  });
+
+  it('agent models — --harness로 대상을 좁히고 실패한 하니스는 조회 실패로 낸다', async () => {
+    let seenHarnesses: unknown;
+    const fakeHandler = createModelsHandler({
+      run: async (h) => {
+        if (h === 'agy') throw new Error('15초 시간 초과');
+        return {
+          models: [{ value: 'opus', supportsEffort: true, supportedEffortLevels: ['high'] }],
+        };
+      },
+    });
+
+    const r = await runWithHost(['agent', 'models', '--harness', 'claude,agy'], {
+      [HOST_AGENT_MODELS]: (req, dir) => {
+        seenHarnesses = (req.payload as { harnesses?: unknown })?.harnesses;
+        return fakeHandler(req, dir);
+      },
+    });
+    assert.equal(r.status, 0);
+    assert.deepEqual(seenHarnesses, ['claude', 'agy']);
+    assert.match(r.stdout, /## claude/);
+    assert.doesNotMatch(r.stdout, /## codex/);
+    assert.match(r.stdout, /## agy\n\n {2}조회 실패 \(15초 시간 초과\)/);
+  });
+
+  it('agent models — --harness에 값이 없으면 exit 2로 거절한다', () => {
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      AGENTBRIDGE_WS_DIR: wsDir,
+      AGENTBRIDGE_WS_SESSION: HOST_SESSION,
+    };
+    const r = spawnSync('node', [cliPath, 'agent', 'models', '--harness'], { encoding: 'utf8', env });
+    assert.equal(r.status, 2);
+    assert.match(r.stderr, /--harness에 값이 없다/);
+  });
+
+  // ── agent start --model · --effort (0.8.0 spec/06 §3-1) ─────────────────
+
+  it('agent start — 단일 하니스에 단일 값과 짝 형식을 모두 받아 호스트 payload에 짝지어 보낸다', async () => {
+    const payloads: Array<Record<string, unknown>> = [];
+    const handlers: HostRequestHandlers = {
+      [HOST_AGENT_START]: (req) => {
+        payloads.push(req.payload as Record<string, unknown>);
+        return 'ok';
+      },
+    };
+
+    const single = await runWithHost(
+      ['agent', 'start', '--prompt', '작업', '--model', 'opus', '--effort', 'high'],
+      handlers,
+    );
+    assert.equal(single.status, 0);
+    assert.deepEqual(payloads[0], {
+      prompt: '작업',
+      harnesses: ['claude'],
+      isolate: false,
+      models: { claude: 'opus' },
+      efforts: { claude: 'high' },
+    });
+
+    const pairedSingle = await runWithHost(
+      [
+        'agent',
+        'start',
+        '--prompt',
+        '작업',
+        '--harness',
+        'codex',
+        '--model',
+        'codex=gpt-6-luna',
+        '--effort',
+        'codex=xhigh',
+      ],
+      handlers,
+    );
+    assert.equal(pairedSingle.status, 0);
+    assert.deepEqual(payloads[1], {
+      prompt: '작업',
+      harnesses: ['codex'],
+      isolate: false,
+      models: { codex: 'gpt-6-luna' },
+      efforts: { codex: 'xhigh' },
+    });
+
+    const multiSame = await runWithHost(
+      [
+        'agent',
+        'start',
+        '--prompt',
+        '작업',
+        '--harness',
+        'claude,claude',
+        '--model',
+        'claude=opus',
+        '--effort',
+        'claude=high',
+      ],
+      handlers,
+    );
+    assert.equal(multiSame.status, 0);
+    assert.deepEqual(payloads[2], {
+      prompt: '작업',
+      harnesses: ['claude', 'claude'],
+      isolate: false,
+      models: { claude: 'opus' },
+      efforts: { claude: 'high' },
+    });
+
+    // 같은 하니스 둘은 하니스가 하나인 것이다 — 짝 없이 단일 값을 받는다.
+    const sameSingle = await runWithHost(
+      ['agent', 'start', '--prompt', '작업', '--harness', 'claude,claude', '--model', 'opus', '--effort', 'high'],
+      handlers,
+    );
+    assert.equal(sameSingle.status, 0);
+    assert.deepEqual(payloads[3], payloads[2]);
+  });
+
+  it('agent start — CLI 형식 거절 세 경우를 exit 2로 거절한다', () => {
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      AGENTBRIDGE_WS_DIR: wsDir,
+      AGENTBRIDGE_WS_SESSION: HOST_SESSION,
+    };
+    const runStart = (args: string[]) =>
+      spawnSync('node', [cliPath, 'agent', 'start', '--prompt', '작업', ...args], {
+        encoding: 'utf8',
+        env,
+      });
+
+    // 1) 하니스가 여럿인데 짝 없이 값 하나
+    const multiNoPair = runStart(['--harness', 'claude,codex', '--model', 'opus', '--effort', 'high']);
+    assert.equal(multiNoPair.status, 2);
+    assert.match(
+      multiNoPair.stderr,
+      /하니스가 여럿이면 --model과 --effort는 claude=opus처럼 하니스별로 쓴다/,
+    );
+
+    // 2) 짝에 --harness에 없는 하니스 (--model · --effort 둘 다)
+    const missingModelHarness = runStart(['--harness', 'claude', '--model', 'codex=gpt-6-luna']);
+    assert.equal(missingModelHarness.status, 2);
+    assert.match(missingModelHarness.stderr, /--model의 codex는 --harness에 없다/);
+
+    const missingEffortHarness = runStart([
+      '--harness',
+      'claude',
+      '--model',
+      'opus',
+      '--effort',
+      'codex=high',
+    ]);
+    assert.equal(missingEffortHarness.status, 2);
+    assert.match(missingEffortHarness.stderr, /--effort의 codex는 --harness에 없다/);
+
+    // 3) effort는 있는데 모델이 없다
+    const effortOnlySingle = runStart(['--effort', 'high']);
+    assert.equal(effortOnlySingle.status, 2);
+    assert.match(effortOnlySingle.stderr, /claude에 --effort만 있다\. --model과 함께 쓴다/);
+
+    const effortOnlyMulti = runStart([
+      '--harness',
+      'claude,codex',
+      '--model',
+      'claude=opus',
+      '--effort',
+      'claude=high,codex=xhigh',
+    ]);
+    assert.equal(effortOnlyMulti.status, 2);
+    assert.match(effortOnlyMulti.stderr, /codex에 --effort만 있다\. --model과 함께 쓴다/);
   });
 });
 

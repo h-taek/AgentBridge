@@ -26,6 +26,7 @@ import {
   HOST_AGENT_STOP,
   HOST_AGENT_CLOSE,
   HOST_AGENT_MERGE,
+  HOST_AGENT_MODELS,
   type HostRequest,
 } from '../hostRequest';
 
@@ -48,12 +49,16 @@ interface SessionRecord {
   parentSessionId?: string;
   agentName?: string;
   cleanedAt?: string;
+  subModel?: string;
+  subEffort?: string;
 }
 
 export interface SubRow {
   name: string;
   sessionId: string;
   model: CliKind;
+  subModel?: string;
+  subEffort?: string;
   title: string;
   closed: boolean;
   unread: boolean;
@@ -97,6 +102,8 @@ export async function listSubs(wsDir: string, callerSessionId: string): Promise<
         name: s.agentName as string,
         sessionId: s.sessionId,
         model: s.model,
+        ...(s.subModel ? { subModel: s.subModel } : {}),
+        ...(s.subEffort ? { subEffort: s.subEffort } : {}),
         title: s.title ?? s.model,
         closed,
         unread: await isUnread(wsDir, s.sessionId),
@@ -134,9 +141,26 @@ function stateText(s: SubRow): string {
   }
 }
 
+/**
+ * 서브의 하니스·모델·effort를 괄호 안 목록 문구로 묶는다.
+ * 상태 문구가 오면 같은 괄호 뒤쪽에 붙인다 (`(claude, opus, high, 도는 중)`).
+ */
+export function formatSubLabel(
+  sub: { model: CliKind; subModel?: string; subEffort?: string },
+  state?: string,
+): string {
+  const parts: string[] = [sub.model];
+  if (sub.subModel) {
+    parts.push(sub.subModel);
+    if (sub.subEffort) parts.push(sub.subEffort);
+  }
+  if (state) parts.push(state);
+  return `(${parts.join(', ')})`;
+}
+
 function rowLine(s: SubRow): string {
   const mark = s.unread ? '  · 안 읽은 보고 있음' : '';
-  return `  ${s.name}  (${s.model}, ${stateText(s)})  ${s.title}${mark}`;
+  return `  ${s.name}  ${formatSubLabel(s, stateText(s))}  ${s.title}${mark}`;
 }
 
 export async function agentList(wsDir: string, callerSessionId: string): Promise<string> {
@@ -251,13 +275,13 @@ function renderWoke(done: SubRow[], stuck: SubRow[]): string {
   const lines: string[] = [];
   if (done.length > 0) {
     lines.push(`## 끝난 서브 ${done.length}개`, '');
-    for (const s of done) lines.push(`  ${s.name}  (${s.model})  ${s.title}`);
+    for (const s of done) lines.push(`  ${s.name}  ${formatSubLabel(s)}  ${s.title}`);
     lines.push('', '`agent read <이름>`으로 보고를 읽는다.');
   }
   if (stuck.length > 0) {
     if (lines.length > 0) lines.push('');
     lines.push(`## 상태를 알 수 없는 서브 ${stuck.length}개`, '');
-    for (const s of stuck) lines.push(`  ${s.name}  (${s.model})  ${s.title}`);
+    for (const s of stuck) lines.push(`  ${s.name}  ${formatSubLabel(s)}  ${s.title}`);
     lines.push(
       '',
       '완료 신호 없이 출력이 멈춘 지 오래다. 사용자가 턴을 끊었거나 서브가 막혀 있을 수 있다.',
@@ -274,7 +298,7 @@ async function renderEmpty(wsDir: string, subs: SubRow[], waited: boolean): Prom
   if (subs.length === 0) return '띄운 서브가 없다.';
   const lines = [waited ? '기다리는 동안 끝난 서브가 없다.' : '끝났는데 안 읽은 서브가 없다.', ''];
   for (const s of subs) {
-    lines.push(`  ${s.name}  (${s.model}, ${stateText(s)})`);
+    lines.push(`  ${s.name}  ${formatSubLabel(s, stateText(s))}`);
     if (s.closed) {
       const tail = await replayTail(wsDir, s.sessionId);
       if (tail) {
@@ -344,13 +368,32 @@ async function callHost(sessionDir: string | undefined, kind: string, payload: u
   return result.output;
 }
 
+export interface AgentStartOptions {
+  models?: Partial<Record<CliKind, string>>;
+  efforts?: Partial<Record<CliKind, string>>;
+}
+
 export function agentStart(
   sessionDir: string | undefined,
   prompt: string,
   harnesses: string[],
   isolate: boolean,
+  opts?: AgentStartOptions,
 ): Promise<string> {
-  return callHost(sessionDir, HOST_AGENT_START, { prompt, harnesses, isolate });
+  const payload: {
+    prompt: string;
+    harnesses: string[];
+    isolate: boolean;
+    models?: Partial<Record<CliKind, string>>;
+    efforts?: Partial<Record<CliKind, string>>;
+  } = { prompt, harnesses, isolate };
+  if (opts?.models && Object.keys(opts.models).length > 0) {
+    payload.models = opts.models;
+  }
+  if (opts?.efforts && Object.keys(opts.efforts).length > 0) {
+    payload.efforts = opts.efforts;
+  }
+  return callHost(sessionDir, HOST_AGENT_START, payload);
 }
 
 export function agentSend(
@@ -376,4 +419,15 @@ export function agentCloseRound(sessionDir: string | undefined): Promise<string>
 
 export function agentMerge(sessionDir: string | undefined, name: string): Promise<string> {
   return callHost(sessionDir, HOST_AGENT_MERGE, { name });
+}
+
+export function agentModels(
+  sessionDir: string | undefined,
+  harnesses?: string[],
+): Promise<string> {
+  return callHost(
+    sessionDir,
+    HOST_AGENT_MODELS,
+    harnesses && harnesses.length > 0 ? { harnesses } : {},
+  );
 }
