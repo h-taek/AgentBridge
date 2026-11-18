@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { randomBytes } from 'crypto';
 import { getSessions, type SessionMeta } from '../core/sessionRegistry';
 import * as workspaceStore from '../core/workspaceStore';
+import { whenWorkspaceReady } from '../core/workspaceReady';
 import {
   readSessionActivityInputs,
   computeSessionActivity,
@@ -148,6 +149,7 @@ export class SessionsViewProvider implements vscode.WebviewViewProvider {
       this.rows = [];
       return;
     }
+    await whenWorkspaceReady(); // 이어받기보다 먼저 새 워크스페이스를 만들지 않는다
     const wid = workspaceStore.getOrCreateWorkspaceId(folderUri.fsPath);
     const wsDir = workspaceStore.getWorkspacePath(wid);
     this.sessions = await getSessions(wid);

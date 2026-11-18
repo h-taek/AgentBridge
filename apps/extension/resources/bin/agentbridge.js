@@ -381,7 +381,7 @@ function profileIdForPath(folderFsPath) {
   const name = (canonical.split("/").filter(Boolean).pop() ?? "").replace(/[^a-z0-9._-]+/gi, "-").replace(/^[.\-]+/, "").replace(/[.\-]+$/, "").slice(0, MAX_NAME_LEN);
   return `${name || "project"}-${digest}`;
 }
-async function resolveProjectProfileId(cwd, opts = {}) {
+async function resolveProjectProfileKey(cwd, opts = {}) {
   const log = opts.logger ?? noopLogger;
   const read = opts.readRemote ?? readOriginUrl;
   let url = null;
@@ -391,7 +391,10 @@ async function resolveProjectProfileId(cwd, opts = {}) {
     log.warn(`gitRemote: origin \uC870\uD68C \uC2E4\uD328 \u2014 ${err instanceof Error ? err.message : String(err)}`);
   }
   const normalized = url ? normalizeRemoteUrl(url) : "";
-  return normalized ? profileIdForRemote(normalized) : profileIdForPath(cwd);
+  return normalized ? { id: profileIdForRemote(normalized), keyedBy: "remote" } : { id: profileIdForPath(cwd), keyedBy: "path" };
+}
+async function resolveProjectProfileId(cwd, opts = {}) {
+  return (await resolveProjectProfileKey(cwd, opts)).id;
 }
 var import_node_child_process, import_node_crypto, GIT_TIMEOUT_MS, PROFILE_DIGEST_LEN, MAX_NAME_LEN, readOriginUrl;
 var init_gitRemote = __esm({

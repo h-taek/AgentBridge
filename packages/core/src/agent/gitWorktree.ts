@@ -161,6 +161,12 @@ export async function removeWorktree(repoPath: string, treePath: string): Promis
   await runGit(repoPath, ['worktree', 'remove', '--force', treePath], GIT_WRITE_TIMEOUT_MS);
 }
 
+// 폴더 이름이 바뀌어 워크스페이스나 저장소가 옮겨진 뒤 worktree의 양쪽 연결을 새 경로로 잇는다.
+export async function repairWorktrees(repoPath: string, treePaths: string[]): Promise<void> {
+  if (treePaths.length === 0) return;
+  await runGit(repoPath, ['worktree', 'repair', ...treePaths], GIT_WRITE_TIMEOUT_MS);
+}
+
 // 브랜치를 지운다. `-D`인 이유는 머지 여부가 삭제 여부를 정하지 않기 때문이다.
 //
 // 거절하는 경우는 하나다 — 그 브랜치가 다른 worktree에 체크아웃돼 있을 때. 우회하려면 남의

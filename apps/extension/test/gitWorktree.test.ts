@@ -14,6 +14,7 @@ import {
   commitAll,
   removeWorktree,
   deleteBranch,
+  repairWorktrees,
 } from '@agentbridge/core';
 
 function git(cwd: string, ...args: string[]): string {
@@ -206,5 +207,39 @@ describe('삭제', () => {
     );
     // 막힌 뒤에도 브랜치는 그대로다.
     assert.deepEqual(await listAgentBranches(repo), ['busy']);
+  });
+});
+
+describe('repairWorktrees', () => {
+  it('treePaths가 비어 있으면 아무것도 하지 않는다', async () => {
+    await repairWorktrees(repo, []);
+  });
+
+  it('저장소와 worktree가 둘 다 옮겨진 뒤 양쪽 연결을 새 경로로 복구한다', async () => {
+    const oldTree = join(root, 'ws-old', 'trees', 'sub1');
+    await addWorktree(repo, oldTree, 'sub1');
+    await fs.writeFile(join(oldTree, 'wip.txt'), 'uncommitted\n');
+
+    const movedRepo = join(root, 'repo-renamed');
+    const newTree = join(root, 'ws-new', 'trees', 'sub1');
+    await fs.mkdir(join(root, 'ws-new', 'trees'), { recursive: true });
+    await fs.rename(repo, movedRepo);
+    await fs.rename(oldTree, newTree);
+
+    await repairWorktrees(movedRepo, [newTree]);
+
+    const listOut = git(movedRepo, 'worktree', 'list', '--porcelain');
+    assert.ok(listOut.includes(await fs.realpath(newTree)), `worktree list에 새 경로가 있어야 한다:\n${listOut}`);
+    assert.equal(git(newTree, 'rev-parse', '--abbrev-ref', 'HEAD').trim(), 'agentbridge/sub1');
+    assert.ok(git(newTree, 'status', '--porcelain').includes('wip.txt'));
+
+    // 다시 돌려도 같은 결과다(idempotent).
+    await repairWorktrees(movedRepo, [newTree]);
+  });
+
+  it('git 저장소가 아니면 에러 이유를 담아 거부한다', async () => {
+    const notRepo = join(root, 'not-a-repo');
+    await fs.mkdir(notRepo);
+    await assert.rejects(() => repairWorktrees(notRepo, [join(root, 'trees', 'x')]), /실패/);
   });
 });
