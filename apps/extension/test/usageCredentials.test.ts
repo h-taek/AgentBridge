@@ -169,8 +169,29 @@ describe('usage/credentials', () => {
       assert.equal(c?.expiresAt, null);
     });
 
-    it('Keychain 항목이 없으면 null이다', () => {
+    it('Keychain 항목도 토큰 파일도 없으면 null이다', () => {
       assert.equal(readAgyCredential(io({})), null);
+    });
+
+    // agy 1.5.x는 Keychain에 못 쓰면 토큰 파일에 쓴다. 그때 Keychain 항목은 사라진다.
+    const tokenFile = join(HOME, '.gemini', 'antigravity-cli', 'antigravity-oauth-token');
+
+    it('Keychain 항목이 없으면 토큰 파일을 읽는다', () => {
+      const c = readAgyCredential(io({ files: { [tokenFile]: agyBlob() } }));
+      assert.equal(c?.accessToken, 'ya29.token');
+      assert.equal(c?.expiresAt, Date.parse('2026-09-07T19:14:18.669227+09:00'));
+    });
+
+    it('둘 다 있으면 만료가 더 늦은 쪽을 쓴다', () => {
+      const stale = b64(agyBlob({ access_token: 'ya29.stale', expiry: '2026-09-07T10:00:00Z' }));
+      const fresh = agyBlob({ access_token: 'ya29.fresh', expiry: '2026-09-07T11:00:00Z' });
+      assert.equal(readAgyCredential(io({ keychain: { [slot]: stale }, files: { [tokenFile]: fresh } }))?.accessToken, 'ya29.fresh');
+      assert.equal(readAgyCredential(io({ keychain: { [slot]: fresh }, files: { [tokenFile]: stale } }))?.accessToken, 'ya29.fresh');
+    });
+
+    it('한쪽이 깨졌으면 다른 쪽을 쓴다', () => {
+      const c = readAgyCredential(io({ keychain: { [slot]: b64('not json') }, files: { [tokenFile]: agyBlob() } }));
+      assert.equal(c?.accessToken, 'ya29.token');
     });
 
     it('디코딩 결과가 JSON이 아니면 null이다', () => {
