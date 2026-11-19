@@ -19,7 +19,7 @@
 
 'use strict'
 
-// @agentbridge-cli-version 0.6.0
+// @agentbridge-cli-version 0.6.1
 // (단일 설치 버전 비교용 — 이 파일을 수정하면 반드시 버전을 올릴 것)
 
 const fs = require('fs')
@@ -67,13 +67,16 @@ const COMMANDS = [
   ['memory project [--full]', '이 저장소의 프로젝트 지식'],
   ['memory search <질의>', '두 지식을 질의로 검색'],
   ['memory read <식별자>', '한 건의 전문. 식별자는 <카테고리>/<슬러그> (--scope로 한쪽만)'],
-  ['memory add', '새 사실을 제안 큐에 넣는다 (--scope --category --title --summary --body)'],
+  ['memory add', '새 사실을 제안 큐에 넣는다 (--scope 필수 --category --title --summary --body)'],
   ['memory update <식별자>', '이미 있는 항목을 고치는 제안 (같은 인자, 안 준 것은 그대로)'],
+  ['memory pending', '승인을 기다리는 제안 목록 (--scope로 한쪽만)'],
+  ['memory withdraw <제안 식별자>', '대기 중인 제안을 거둔다'],
   ['status', '어디에 무엇이 깔려 있는지와 배선 자가 진단'],
-  ['agent start', '서브에이전트를 띄운다 (--prompt "..." [--harness claude,codex,agy] [--isolate])'],
+  ['agent models [--harness]', '하니스별로 고를 수 있는 모델과 effort'],
+  ['agent start', '서브에이전트를 띄운다 (--prompt "..." [--harness claude,codex,agy] [--model] [--effort] [--isolate])'],
   ['agent list', '띄운 서브의 목록과 상태'],
   ['agent check', '끝난 서브가 있는지 본다 (--wait면 생길 때까지, --for <초>로 상한 조정)'],
-  ['agent read <이름>', '그 서브의 기록 전문 (--last N으로 자름)'],
+  ['agent read <이름>', '그 서브의 기록 전문 (--last N으로 자름, --screen이면 지금 화면만)'],
   ['agent diff <이름>', '그 서브가 실제로 바꾼 것 (--stat이면 요약만)'],
   ['agent send <이름>', '도는 서브에 지침을 더 보낸다 (--prompt "...")'],
   ['agent merge <이름>', '그 서브의 변경을 원본에 얹는다 (전부 아니면 아무것도)'],
