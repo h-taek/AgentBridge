@@ -11,7 +11,7 @@
 //
 // `uninstall`은 싣지 않는다. 사용자 명령이지 에이전트 명령이 아니다.
 
-export const SKILL_VERSION = '0.6.1';
+export const SKILL_VERSION = '0.6.2';
 export const SKILL_DIR_NAME = 'agentbridge';
 
 // 셸에서 그대로 쓸 수 있게 공백 있는 경로를 감싼다.
@@ -95,7 +95,11 @@ Categories: role, repos, domain, workflows, conventions, infra, verification.
 You can run other coding agents as subagents. Each gets its own session and
 tab; you give it work, it reports back, you read the report.
 
+    agent models [--harness claude,codex,agy]
+                                  models each harness has, and the efforts
+                                  each model takes
     agent start --prompt "..." [--harness claude,codex,agy] [--isolate]
+                [--model <name> --effort <level>]
     agent list                    the subs you started, and their state
     agent check [--wait] [--for <seconds>]
     agent read <name> [--last N] [--screen]
@@ -111,6 +115,13 @@ tab; you give it work, it reports back, you read the report.
 
 \`agent start\` returns the names it issued — that is what the other commands
 take. Default harness is claude; pass several to run the same prompt on each.
+
+\`--model\` and \`--effort\` are for when the user names the model a sub should
+run on. Otherwise leave them out — the sub runs on its harness's own settings.
+When you use them, run \`agent models\` first and take both from its table: they
+go together, efforts differ per model, and \`agent start\` refuses a pair the
+table does not list. With several harnesses, pair each value with its harness
+(\`--model claude=opus,codex=gpt-6-luna --effort claude=high,codex=xhigh\`).
 
 \`--isolate\` gives the sub its own git worktree, so several subs can edit files
 without colliding. Skip it for research or review — a fresh checkout has no
