@@ -80,10 +80,23 @@ export function readCodexCredential(io: CredentialIO): CodexCredential | null {
   return { accessToken, accountId: token(tokens.account_id) };
 }
 
-// agy — go-keyring이 쓴 항목이라 값에 base64 접두사가 붙는다.
+// agy — Keychain과 토큰 파일 두 곳에 둔다. agy 1.5.x는 Keychain에 쓰다 실패하면 파일에 쓰고,
+// 그때 Keychain 항목은 사라지거나 옛 토큰으로 남는다. 그래서 둘 다 읽고 만료가 늦은 쪽을 쓴다.
+// Keychain 값은 go-keyring이 쓴 것이라 base64 접두사가 붙는다.
 export function readAgyCredential(io: CredentialIO): AgyCredential | null {
-  const raw = io.readKeychain('gemini', 'antigravity');
-  if (raw === null) return null;
+  const sources = [
+    io.readKeychain('gemini', 'antigravity'),
+    io.readTextFile(join(io.home, '.gemini', 'antigravity-cli', 'antigravity-oauth-token')),
+  ];
+  let best: AgyCredential | null = null;
+  for (const raw of sources) {
+    const c = raw === null ? null : parseAgy(raw);
+    if (c && (!best || (c.expiresAt ?? 0) > (best.expiresAt ?? 0))) best = c;
+  }
+  return best;
+}
+
+function parseAgy(raw: string): AgyCredential | null {
   const PREFIX = 'go-keyring-base64:';
   const text = raw.startsWith(PREFIX)
     ? Buffer.from(raw.slice(PREFIX.length), 'base64').toString('utf8')
