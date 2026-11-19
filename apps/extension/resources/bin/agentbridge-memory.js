@@ -1488,11 +1488,16 @@ tab; you give it work, it reports back, you read the report.
 \`agent start\` returns the names it issued \u2014 that is what the other commands
 take. Default harness is claude; pass several to run the same prompt on each.
 
-\`--model\` and \`--effort\` are for when the user names the model a sub should
-run on. Otherwise leave them out \u2014 the sub runs on its harness's own settings.
-When you use them, run \`agent models\` first and take both from its table: they
-go together, efforts differ per model, and \`agent start\` refuses a pair the
-table does not list. With several harnesses, pair each value with its harness
+\`--model\` and \`--effort\` pick the model a sub runs on. Use them when the user
+names one, or when a recorded sub evaluation (see below) says which model and
+effort suit this kind of work \u2014 before starting a sub the user named no model
+for, run \`memory search "Sub evaluation"\`. Otherwise leave them out \u2014 the sub
+runs on its harness's own settings. When you use them, run \`agent models\` first
+and take both from its table: they go together, efforts differ per model, and
+\`agent start\` refuses a pair the table does not list. An evaluation of a model
+the table no longer lists is not evidence. When an evaluation picked the model,
+tell the user in one line which entry you went by. With several harnesses, pair
+each value with its harness
 (\`--model claude=opus,codex=gpt-6-luna --effort claude=high,codex=xhigh\`).
 
 \`--isolate\` gives the sub its own git worktree, so several subs can edit files
@@ -1540,6 +1545,29 @@ closing it.
 Every read output item starts with its identifier (\`<category>/<slug>\`) \u2014
 that is what \`memory update\` takes.
 
+### Evaluating the model a sub ran on
+
+After reviewing a sub, ask whether its result says something about the model
+and effort it ran on \u2014 not about your prompt, the environment, or the harness
+(a turn that ended early, a report that did not land). Propose a record only
+when one of these holds:
+
+- you ran the same work on another model or effort and can compare them
+- the same model and effort showed the same tendency a second time
+- the user judged the sub's result in words about the model
+
+One result on its own is not an evaluation. Judge from the diff and the test
+results, not from the sub's report.
+
+Keep one entry per harness and model: \`--scope user --category workflows\`,
+titled \`Sub evaluation \u2014 <harness> <model>\`. If it exists, \`memory update\` it
+with the new case; otherwise \`memory add\`. \`--body\` replaces the whole body,
+so \`memory read\` the entry first and pass its earlier cases with the new one
+added. Each case carries the date, the
+model, the effort, the kind of work (implement, review, research, ...), and what
+the diff and tests showed. The summary is the conclusion so far: which work
+this model and effort suit, and which they do not.
+
 ## Recording something
 
 When something clears the bar in the hook's \`1-4. Recording\`:
@@ -1547,7 +1575,8 @@ When something clears the bar in the hook's \`1-4. Recording\`:
 1. Pick the scope. \`--scope\` is required. It is \`--scope project\` unless the
    user said in so many words that this applies everywhere, across projects.
    A sentence that reads as general is still project scope until the user
-   says so.
+   says so. Sub evaluations are the one exception \u2014 they are user scope; see
+   'Evaluating the model a sub ran on'.
 2. Read that side in full \u2014 \`memory user --full\` or \`memory project --full\`.
    Not a search: you need everything to know whether this is new. Read only the
    side you picked.
