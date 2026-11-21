@@ -152,10 +152,16 @@ touched and you get the list of files that clashed. It does not commit, does not
 move history, and does not end the sub. Partial picks are not supported: read
 both diffs and write the combination yourself.
 
-A sub does not tell you when it is done. Either \`agent check --wait\`, which
-returns as soon as one finishes (up to a minute, \`--for\` raises it), or go do
-something else — the next turn tells you how many finished subs are unread.
-Reading a report with \`agent read\` is what clears that.
+A sub does not tell you when it is done, and once your turn ends nobody reads
+its report until the user writes again. So before ending a turn, ask whether
+this turn's answer needs the sub's result. If it does, first do whatever does
+not depend on it, then run \`agent check --wait\` — it returns as soon as one
+finishes (up to a minute, \`--for\` raises it) — and run it again while the sub
+is still working. Do not end the turn saying you will read the report when it
+lands; you will not see it land. End the turn without the result only when the
+user said not to wait or handed off a long run, and then tell them the result
+is read on their next message. The next turn tells you how many finished subs
+are unread; reading a report with \`agent read\` is what clears that.
 
 A sub can also go quiet without finishing: the user interrupted its turn, or it
 is stuck waiting on something. \`check\` and the next-turn line both report those

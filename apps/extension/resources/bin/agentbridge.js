@@ -96,6 +96,9 @@ var init_interfaces = __esm({
 function turnsPath(workspaceRoot) {
   return (0, import_path2.join)(workspaceRoot, "turns.jsonl");
 }
+function archiveDir(workspaceRoot) {
+  return (0, import_path2.join)(workspaceRoot, "archive");
+}
 function deserialize(line) {
   const trimmed = line.trim();
   if (!trimmed) return null;
@@ -122,6 +125,42 @@ async function readAllTurns(workspaceRoot) {
     if (t) out.push(t);
   }
   return out;
+}
+async function readArchivedTurns(workspaceRoot) {
+  const dir = archiveDir(workspaceRoot);
+  let files;
+  try {
+    files = await import_fs2.promises.readdir(dir);
+  } catch {
+    return [];
+  }
+  const snapshots = files.filter((f) => f.startsWith("compressed_") && f.endsWith(".jsonl")).sort();
+  const out = [];
+  for (const f of snapshots) {
+    let raw;
+    try {
+      raw = await import_fs2.promises.readFile((0, import_path2.join)(dir, f), "utf8");
+    } catch {
+      continue;
+    }
+    for (const line of raw.split("\n")) {
+      const t = line.trim();
+      if (!t) continue;
+      try {
+        const obj = JSON.parse(t);
+        if (obj && obj.type === "ir_snapshot") continue;
+        if (obj && typeof obj.id === "string") out.push(obj);
+      } catch {
+      }
+    }
+  }
+  return out;
+}
+async function readTurnHistory(workspaceRoot) {
+  const merged = [...await readArchivedTurns(workspaceRoot), ...await readAllTurns(workspaceRoot)];
+  const byId = /* @__PURE__ */ new Map();
+  for (const t of merged) if (!byId.has(t.id)) byId.set(t.id, t);
+  return [...byId.values()];
 }
 var import_fs2, import_path2;
 var init_turnsStore = __esm({
@@ -714,12 +753,16 @@ __export(read_exports, {
 async function readContext(wsDir) {
   const ir = await readIR(wsDir);
   if (!ir) return "\uC800\uC7A5\uB41C \uC791\uC5C5 \uC0C1\uD0DC\uAC00 \uC5C6\uB2E4. \uC544\uC9C1 \uC555\uCD95\uB41C \uB9E5\uB77D\uC774 \uC313\uC774\uC9C0 \uC54A\uC558\uB2E4.";
+  const pending = (await readAllTurns(wsDir)).length;
+  const boundary = pending > 0 ? `${ir.meta.updatedAt}\uAE4C\uC9C0\uC758 \uB300\uD654\uB97C \uC555\uCD95\uD55C \uC0C1\uD0DC\uB2E4. \uADF8 \uB4A4 ${pending}\uD134\uC740 \uC544\uC9C1 \uC5EC\uAE30 \uC5C6\uB2E4 \u2014 \`turns --last ${pending}\`\uB85C \uC6D0\uBB38\uC744 \uBCF8\uB2E4.` : `${ir.meta.updatedAt}\uAE4C\uC9C0\uC758 \uB300\uD654\uB97C \uC555\uCD95\uD55C \uC0C1\uD0DC\uB2E4. \uADF8 \uB4A4 \uC313\uC778 \uD134\uC740 \uC5C6\uB2E4.`;
   return `## \uC791\uC5C5 \uC0C1\uD0DC (\uC555\uCD95\uB41C \uB9E5\uB77D)
+
+${boundary}
 
 ${renderIrSections(ir)}`;
 }
 async function readTurns(wsDir, lastN) {
-  const all = await readAllTurns(wsDir);
+  const all = await readTurnHistory(wsDir);
   if (all.length === 0) return "\uAE30\uB85D\uB41C \uD134\uC774 \uC5C6\uB2E4.";
   const turns = all.slice(-lastN);
   const lines = [`## \uCD5C\uADFC \uB300\uD654 \uC6D0\uBB38 (${turns.length}\uD134, \uC624\uB798\uB41C \uAC83\uBD80\uD130)`, ""];
