@@ -14,7 +14,7 @@ import type { SearchDocRecord } from '../globalSearch';
 import { readIR } from '../irStore';
 import { readAllTurns, readTurnHistory } from '../turnsStore';
 import { readProfileDocs, resolveProfile } from '../globalStore';
-import { getGlobalDir, profileDir } from '../globalPaths';
+import { getGlobalDir } from '../globalPaths';
 import { resolveProjectProfileId } from '../gitRemote';
 import { resolveContext } from '../globalSearch';
 import { appendMemoryReadLog } from '../memoryReadLog';
@@ -117,9 +117,8 @@ export async function readMemory(
   const docs = await readProfileDocs(globalDir, profileId, scope).catch(() => []);
   if (docs.length === 0) return `${SCOPE_LABEL[scope]}이 아직 없다.`;
 
-  // 정리 스킬이 파일을 직접 고치려면 이 범위의 폴더를 알아야 한다(0.9.0 spec/04 §2).
   const head = full
-    ? `## ${SCOPE_LABEL[scope]} (${docs.length}건, 전문)\n\n폴더: ${profileDir(globalDir, profileId, scope)}`
+    ? `## ${SCOPE_LABEL[scope]} (${docs.length}건, 전문)`
     : `## ${SCOPE_LABEL[scope]} (${docs.length}건, 요약)\n\n줄 앞의 값이 식별자다. 전문은 --full로 본다.`;
   return `${head}\n\n${renderDocs(docs, full)}`;
 }

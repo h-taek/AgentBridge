@@ -93,9 +93,12 @@ describe('isProfileDocPath', () => {
     assert.equal(isProfileDocPath(docsDir, `${docsDir}/flat.md`), true);
   });
 
-  it('프로필 폴더 바깥, 상위 탈출(..), index.md, 비-md 파일은 거른다', () => {
+  it('docs 안의 .md는 문서 경로다 — index.md라는 이름이어도', () => {
+    assert.equal(isProfileDocPath(docsDir, `${docsDir}/index.md`), true);
+  });
+
+  it('프로필 폴더 바깥(폴더 맨 위 index.md 포함), 상위 탈출(..), 비-md 파일은 거른다', () => {
     assert.equal(isProfileDocPath(docsDir, '/tmp/agentbridge/global/profiles/default/index.md'), false);
-    assert.equal(isProfileDocPath(docsDir, `${docsDir}/index.md`), false);
     assert.equal(isProfileDocPath(docsDir, `${docsDir}/../index.md`), false);
     assert.equal(isProfileDocPath(docsDir, `${docsDir}/../../other.md`), false);
     assert.equal(isProfileDocPath(docsDir, `${docsDir}/conventions/note.txt`), false);
@@ -111,13 +114,17 @@ describe('shouldRefreshOnProfileFileChange', () => {
     assert.equal(shouldRefreshOnProfileFileChange('projects\\repo\\docs\\infra\\build.md'), true);
   });
 
-  it('index.md와 .md가 아닌 파일, 빈 경로는 거른다', () => {
-    assert.equal(shouldRefreshOnProfileFileChange('profiles/default/index.md'), false);
-    assert.equal(shouldRefreshOnProfileFileChange('index.md'), false);
-    assert.equal(shouldRefreshOnProfileFileChange('profiles\\default\\index.md'), false);
-    assert.equal(shouldRefreshOnProfileFileChange('profiles/default/docs/conventions/no-emoji.md.123.tmp'), false);
-    assert.equal(shouldRefreshOnProfileFileChange('profiles/default/proposals/p1.json'), false);
+  it('제안 폴더의 .json 생김·지워짐은 참이다', () => {
+    assert.equal(shouldRefreshOnProfileFileChange('profiles/default/proposals/a__b__c.json'), true);
+    assert.equal(shouldRefreshOnProfileFileChange('projects/x/proposals/a__b__c.json'), true);
+    assert.equal(shouldRefreshOnProfileFileChange('projects\\x\\proposals\\a__b__c.json'), true);
+  });
+
+  it('제안 폴더 밖의 .json, .md가 아닌 파일, 빈 경로는 거른다', () => {
+    assert.equal(shouldRefreshOnProfileFileChange('projects/x/workspaces.json'), false);
     assert.equal(shouldRefreshOnProfileFileChange('profiles/default/profile.json'), false);
+    assert.equal(shouldRefreshOnProfileFileChange('memory-reads.jsonl'), false);
+    assert.equal(shouldRefreshOnProfileFileChange('profiles/default/docs/conventions/no-emoji.md.123.tmp'), false);
     assert.equal(shouldRefreshOnProfileFileChange(''), false);
     assert.equal(shouldRefreshOnProfileFileChange(null), false);
   });

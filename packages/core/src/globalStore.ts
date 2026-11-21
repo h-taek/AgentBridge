@@ -1,12 +1,11 @@
 // 글로벌 컨텍스트 저장소 — gc-tree store.ts 이식 + withFileLock + atomic publish.
 // 락 규율: ensureDefaultProfile / writeProfileDocs는 각자 withFileLock(globalDir)를 잡는다.
-//   writeIndexFromDocs는 락 없음(호출자가 락을 쥔 상태에서만 호출) — 같은 dir 락 중첩은 self-deadlock.
 import { promises as fsp } from 'node:fs';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 
 import { withFileLock } from './fileLock';
-import { DEFAULT_PROFILE_ID, profileDir, profilesRoot, projectsRoot, profileDocsDir, profileIndexPath } from './globalPaths';
-import { renderIndexMarkdown, renderDocMarkdown, extractTitle, extractSummary, extractIndexEntries } from './globalMarkdown';
+import { DEFAULT_PROFILE_ID, profileDir, profilesRoot, projectsRoot, profileDocsDir } from './globalPaths';
+import { renderDocMarkdown, extractTitle, extractSummary, extractIndexEntries } from './globalMarkdown';
 import { validateGlobalUpdateInput } from './globalValidate';
 import type { GlobalUpdateInput, ProposalScope } from './shared/global';
 import type { SearchDocRecord } from './globalSearch';
@@ -44,7 +43,6 @@ export async function ensureProfile(
       JSON.stringify({ version: 1, name: profileId, summary: '', createdAt: now, updatedAt: now }, null, 2) + '\n',
       'utf8',
     );
-    await fsp.writeFile(join(tmp, 'index.md'), renderIndexMarkdown({ profileId, docs: [] }), 'utf8');
     try {
       await fsp.rename(tmp, dir);
     } catch {
@@ -68,30 +66,6 @@ async function listDocRelPaths(dir: string, prefix = ''): Promise<string[]> {
     else if (entry.isFile() && entry.name.endsWith('.md')) files.push(rel);
   }
   return files.sort();
-}
-
-// docs/를 스캔해 index.md 재생성. ⚠️ 락 없음 — 호출자가 withFileLock(globalDir)를 쥔 상태에서만 호출.
-export async function writeIndexFromDocs(
-  globalDir: string,
-  profileId: string,
-  scope: ProposalScope = 'user',
-): Promise<{ indexPath: string; docCount: number }> {
-  const docsDir = profileDocsDir(globalDir, profileId, scope);
-  await fsp.mkdir(docsDir, { recursive: true });
-  const files = (await listDocRelPaths(docsDir)).filter((f) => !/(^|\/)index\.md$/i.test(f));
-  const docs: Array<{ category: string; label: string; path: string }> = [];
-  for (const file of files) {
-    const raw = await fsp.readFile(join(docsDir, file), 'utf8');
-    const title = extractTitle(raw) || file.replace(/\.md$/i, '');
-    const category = file.includes('/') ? file.split('/')[0]! : 'general';
-    const entries = extractIndexEntries(raw);
-    const labels = entries.length > 0 ? entries : [title];
-    for (const label of [...new Set(labels)]) docs.push({ category, label, path: `docs/${file}` });
-  }
-  docs.sort((a, b) => a.label.localeCompare(b.label));
-  const indexPath = profileIndexPath(globalDir, profileId, scope);
-  await fsp.writeFile(indexPath, renderIndexMarkdown({ profileId, docs }), 'utf8');
-  return { indexPath, docCount: files.length };
 }
 
 // `## Details` 앞부분만 봐서 본문 예시 안의 `## Tags`나 `- pinned`가 태그로 섞이지 않게 한다.
@@ -213,7 +187,7 @@ export async function readProfileDocs(
   scope: ProposalScope = 'user',
 ): Promise<SearchDocRecord[]> {
   const docsDir = profileDocsDir(globalDir, profileId, scope);
-  const files = (await listDocRelPaths(docsDir)).filter((f) => !/(^|\/)index\.md$/i.test(f));
+  const files = await listDocRelPaths(docsDir);
   const recs: SearchDocRecord[] = [];
   for (const file of files) {
     const fullPath = resolve(docsDir, file);
@@ -235,14 +209,14 @@ export async function readProfileDocs(
   return recs;
 }
 
-// 검증 → 프로필 보장 → 문서 기록 → 인덱스 재생성. 쓰기/인덱스는 한 락 안에서.
+// 검증 → 프로필 보장 → 문서 기록. 쓰기는 한 락 안에서.
 export async function writeProfileDocs(
   globalDir: string,
   profileId: string,
   input: GlobalUpdateInput,
   scope: ProposalScope = 'user',
   opts?: { preserveTags?: boolean },
-): Promise<{ written: string[]; indexPath: string }> {
+): Promise<{ written: string[] }> {
   validateGlobalUpdateInput(input);                 // 락 밖: 잘못된 입력이면 아무것도 안 만짐
   await ensureProfile(globalDir, profileId, scope); // 자기 락 (해제됨) — 아래 락과 중첩 아님
   return withFileLock(globalDir, async () => {
@@ -265,8 +239,7 @@ export async function writeProfileDocs(
       await fsp.writeFile(full, renderDocMarkdown(docToWrite), 'utf8');
       written.push(full);
     }
-    const { indexPath } = await writeIndexFromDocs(globalDir, profileId, scope); // 락 보유 중 — OK
-    return { written, indexPath };
+    return { written };
   });
 }
 

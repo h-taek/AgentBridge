@@ -42,7 +42,7 @@ export function orderPinnedFirst(rows: readonly ProfileDocRow[]): ProfileDocRow[
 }
 
 // 더블클릭으로 열려는 경로가 프로필 docs 폴더 아래의 .md 파일인지 확인한다.
-// 'index.md'와 상위 경로 탈출(..)을 막는다.
+// 상위 경로 탈출(..)을 막는다.
 export function isProfileDocPath(profileDocsDir: string, docPath: string): boolean {
   if (!profileDocsDir || !docPath) return false;
   const base = resolve(profileDocsDir);
@@ -50,19 +50,16 @@ export function isProfileDocPath(profileDocsDir: string, docPath: string): boole
   const rel = relative(base, target);
   if (!rel || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) return false;
   if (!target.endsWith('.md')) return false;
-  const normalized = rel.replace(/\\/g, '/');
-  if (/(^|\/)index\.md$/i.test(normalized)) return false;
   return true;
 }
 
 // 프로필 감시기가 목록을 다시 보낼 파일 변경인지 판정한다.
-// *.md 변경만 받고 index.md와 빈 경로는 거른다.
+// 문서(*.md)와, 제안 폴더(proposals/) 안 *.json의 생김·지워짐을 받고 나머지와 빈 경로는 거른다.
 export function shouldRefreshOnProfileFileChange(eventPath: string | null | undefined): boolean {
   if (!eventPath) return false;
   const normalized = String(eventPath).replace(/\\/g, '/');
-  if (!normalized.endsWith('.md')) return false;
-  if (/(^|\/)index\.md$/i.test(normalized)) return false;
-  return true;
+  if (normalized.endsWith('.md')) return true;
+  return normalized.endsWith('.json') && normalized.split('/').includes('proposals');
 }
 
 // 명령의 접힌 줄. 공백으로 잘라 앞 두 낱말만 남긴다.

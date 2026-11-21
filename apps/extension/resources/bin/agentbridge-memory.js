@@ -452,7 +452,6 @@ __export(globalPaths_exports, {
   getGlobalDir: () => getGlobalDir,
   profileDir: () => profileDir,
   profileDocsDir: () => profileDocsDir,
-  profileIndexPath: () => profileIndexPath,
   profileMetaPath: () => profileMetaPath,
   profilesRoot: () => profilesRoot,
   projectsRoot: () => projectsRoot,
@@ -483,9 +482,6 @@ function profileDir(globalDir, profileId, scope = "user") {
 function profileMetaPath(globalDir, profileId, scope = "user") {
   return (0, import_node_path.join)(profileDir(globalDir, profileId, scope), "profile.json");
 }
-function profileIndexPath(globalDir, profileId, scope = "user") {
-  return (0, import_node_path.join)(profileDir(globalDir, profileId, scope), "index.md");
-}
 function profileDocsDir(globalDir, profileId, scope = "user") {
   return (0, import_node_path.join)(profileDir(globalDir, profileId, scope), "docs");
 }
@@ -499,36 +495,6 @@ var init_globalPaths = __esm({
     import_node_path = require("node:path");
     init_storageRoot();
     DEFAULT_PROFILE_ID = "default";
-  }
-});
-
-// packages/core/src/shared/global.ts
-var GLOBAL_CATEGORIES, DOC_CAPS, PROPOSAL_CAPS;
-var init_global = __esm({
-  "packages/core/src/shared/global.ts"() {
-    "use strict";
-    GLOBAL_CATEGORIES = [
-      "role",
-      "repos",
-      "domain",
-      "workflows",
-      "conventions",
-      "infra",
-      "verification"
-    ];
-    DOC_CAPS = {
-      title: 200,
-      summary: 2e3,
-      body: 2e4,
-      indexEntries: 50
-    };
-    PROPOSAL_CAPS = {
-      title: DOC_CAPS.title,
-      summary: DOC_CAPS.summary,
-      body: DOC_CAPS.body,
-      maxPerPass: 12
-      // 한 패스가 만들 제안 상한 — 폭주 방지
-    };
   }
 });
 
@@ -574,56 +540,39 @@ function extractIndexEntries(markdown) {
   if (!m?.[1]) return [];
   return m[1].split(/\r?\n/).map((l) => l.trim()).filter((l) => l.startsWith("- ")).map((l) => l.slice(2).trim()).filter(Boolean);
 }
-function renderIndexMarkdown(input) {
-  const lines = ["# gc-tree global context index", "", `- profile: ${input.profileId}`, ""];
-  if (input.docs.length === 0) {
-    lines.push("- No durable docs yet.", "");
-    return lines.join("\n");
-  }
-  const byCategory = /* @__PURE__ */ new Map();
-  for (const doc of input.docs) {
-    const cat = doc.category || "general";
-    if (!byCategory.has(cat)) byCategory.set(cat, /* @__PURE__ */ new Map());
-    const byPath = byCategory.get(cat);
-    if (!byPath.has(doc.path)) byPath.set(doc.path, []);
-    const label = doc.label.trim();
-    if (label && !byPath.get(doc.path).includes(label)) byPath.get(doc.path).push(label);
-  }
-  const cats = [...byCategory.keys()].sort((a, b) => {
-    const ai = CATEGORY_ORDER.indexOf(a);
-    const bi = CATEGORY_ORDER.indexOf(b);
-    if (ai === -1 && bi === -1) return a.localeCompare(b);
-    if (ai === -1) return 1;
-    if (bi === -1) return -1;
-    return ai - bi;
-  });
-  for (const cat of cats) {
-    lines.push(`## ${CATEGORY_LABELS[cat] || cat}`, "");
-    const byPath = byCategory.get(cat);
-    for (const [path2, labels] of [...byPath.entries()].sort(([a], [b]) => a.localeCompare(b))) {
-      lines.push(`- ${path2}`);
-      for (const label of labels) lines.push(`  - ${label}`);
-    }
-    lines.push("");
-  }
-  return lines.join("\n");
-}
-var CATEGORY_LABELS, CATEGORY_ORDER;
 var init_globalMarkdown = __esm({
   "packages/core/src/globalMarkdown.ts"() {
     "use strict";
-    init_global();
-    CATEGORY_LABELS = {
-      role: "Role",
-      repos: "Repos",
-      domain: "Domain",
-      workflows: "Workflows",
-      conventions: "Conventions",
-      infra: "Infra",
-      verification: "Verification",
-      general: "General"
+  }
+});
+
+// packages/core/src/shared/global.ts
+var GLOBAL_CATEGORIES, DOC_CAPS, PROPOSAL_CAPS;
+var init_global = __esm({
+  "packages/core/src/shared/global.ts"() {
+    "use strict";
+    GLOBAL_CATEGORIES = [
+      "role",
+      "repos",
+      "domain",
+      "workflows",
+      "conventions",
+      "infra",
+      "verification"
+    ];
+    DOC_CAPS = {
+      title: 200,
+      summary: 2e3,
+      body: 2e4,
+      indexEntries: 50
     };
-    CATEGORY_ORDER = [...GLOBAL_CATEGORIES, "general"];
+    PROPOSAL_CAPS = {
+      title: DOC_CAPS.title,
+      summary: DOC_CAPS.summary,
+      body: DOC_CAPS.body,
+      maxPerPass: 12
+      // 한 패스가 만들 제안 상한 — 폭주 방지
+    };
   }
 });
 
@@ -717,7 +666,6 @@ __export(globalStore_exports, {
   readProfileDocs: () => readProfileDocs,
   resolveProfile: () => resolveProfile,
   setDocPinned: () => setDocPinned,
-  writeIndexFromDocs: () => writeIndexFromDocs,
   writeProfileDocs: () => writeProfileDocs
 });
 function resolveProfile(_workspaceId) {
@@ -743,7 +691,6 @@ async function ensureProfile(globalDir, profileId, scope = "user") {
       JSON.stringify({ version: 1, name: profileId, summary: "", createdAt: now, updatedAt: now }, null, 2) + "\n",
       "utf8"
     );
-    await import_node_fs.promises.writeFile((0, import_node_path2.join)(tmp, "index.md"), renderIndexMarkdown({ profileId, docs: [] }), "utf8");
     try {
       await import_node_fs.promises.rename(tmp, dir);
     } catch {
@@ -763,24 +710,6 @@ async function listDocRelPaths(dir, prefix = "") {
     else if (entry.isFile() && entry.name.endsWith(".md")) files.push(rel);
   }
   return files.sort();
-}
-async function writeIndexFromDocs(globalDir, profileId, scope = "user") {
-  const docsDir = profileDocsDir(globalDir, profileId, scope);
-  await import_node_fs.promises.mkdir(docsDir, { recursive: true });
-  const files = (await listDocRelPaths(docsDir)).filter((f) => !/(^|\/)index\.md$/i.test(f));
-  const docs = [];
-  for (const file of files) {
-    const raw = await import_node_fs.promises.readFile((0, import_node_path2.join)(docsDir, file), "utf8");
-    const title = extractTitle(raw) || file.replace(/\.md$/i, "");
-    const category = file.includes("/") ? file.split("/")[0] : "general";
-    const entries = extractIndexEntries(raw);
-    const labels = entries.length > 0 ? entries : [title];
-    for (const label of [...new Set(labels)]) docs.push({ category, label, path: `docs/${file}` });
-  }
-  docs.sort((a, b) => a.label.localeCompare(b.label));
-  const indexPath = profileIndexPath(globalDir, profileId, scope);
-  await import_node_fs.promises.writeFile(indexPath, renderIndexMarkdown({ profileId, docs }), "utf8");
-  return { indexPath, docCount: files.length };
 }
 function extractTagsBeforeDetails(markdown) {
   const lines = String(markdown || "").split(/\r?\n/);
@@ -885,7 +814,7 @@ function updatePinnedInMarkdown(markdown, pinned) {
 }
 async function readProfileDocs(globalDir, profileId, scope = "user") {
   const docsDir = profileDocsDir(globalDir, profileId, scope);
-  const files = (await listDocRelPaths(docsDir)).filter((f) => !/(^|\/)index\.md$/i.test(f));
+  const files = await listDocRelPaths(docsDir);
   const recs = [];
   for (const file of files) {
     const fullPath = (0, import_node_path2.resolve)(docsDir, file);
@@ -928,8 +857,7 @@ async function writeProfileDocs(globalDir, profileId, input, scope = "user", opt
       await import_node_fs.promises.writeFile(full, renderDocMarkdown(docToWrite), "utf8");
       written.push(full);
     }
-    const { indexPath } = await writeIndexFromDocs(globalDir, profileId, scope);
-    return { written, indexPath };
+    return { written };
   });
 }
 async function setDocPinned(globalDir, profileId, scope, docPath, pinned) {

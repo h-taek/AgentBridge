@@ -11,6 +11,7 @@ export * from './globalMarkdown';
 export * from './globalValidate';
 export * from './globalStore';
 export * from './gitRemote';
+export * from './projectWorkspaces';
 export * from './proposalStore';
 export * from './proposalParse';
 export * from './proposalPrompt';

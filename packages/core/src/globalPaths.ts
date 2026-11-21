@@ -39,9 +39,6 @@ export function profileDir(globalDir: string, profileId: string, scope: Proposal
 export function profileMetaPath(globalDir: string, profileId: string, scope: ProposalScope = 'user'): string {
   return join(profileDir(globalDir, profileId, scope), 'profile.json');
 }
-export function profileIndexPath(globalDir: string, profileId: string, scope: ProposalScope = 'user'): string {
-  return join(profileDir(globalDir, profileId, scope), 'index.md');
-}
 export function profileDocsDir(globalDir: string, profileId: string, scope: ProposalScope = 'user'): string {
   return join(profileDir(globalDir, profileId, scope), 'docs');
 }
