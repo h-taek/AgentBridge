@@ -818,7 +818,9 @@ async function readMemory(storageRoot, wsDir, scope, full) {
   if (!profileId) return "\uC774 \uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4\uC758 \uD504\uB85C\uC81D\uD2B8 \uC9C0\uC2DD \uC790\uB9AC\uB97C \uCC3E\uC744 \uC218 \uC5C6\uB2E4.";
   const docs = await readProfileDocs(globalDir, profileId, scope).catch(() => []);
   if (docs.length === 0) return `${SCOPE_LABEL[scope]}\uC774 \uC544\uC9C1 \uC5C6\uB2E4.`;
-  const head = full ? `## ${SCOPE_LABEL[scope]} (${docs.length}\uAC74, \uC804\uBB38)` : `## ${SCOPE_LABEL[scope]} (${docs.length}\uAC74, \uC694\uC57D)
+  const head = full ? `## ${SCOPE_LABEL[scope]} (${docs.length}\uAC74, \uC804\uBB38)
+
+\uD3F4\uB354: ${profileDir(globalDir, profileId, scope)}` : `## ${SCOPE_LABEL[scope]} (${docs.length}\uAC74, \uC694\uC57D)
 
 \uC904 \uC55E\uC758 \uAC12\uC774 \uC2DD\uBCC4\uC790\uB2E4. \uC804\uBB38\uC740 --full\uB85C \uBCF8\uB2E4.`;
   return `${head}
@@ -1469,9 +1471,19 @@ var init_skillTemplate = __esm({
   }
 });
 
+// packages/core/src/cleanupSkillTemplate.ts
+var CLEANUP_SKILL_DIR_NAME;
+var init_cleanupSkillTemplate = __esm({
+  "packages/core/src/cleanupSkillTemplate.ts"() {
+    "use strict";
+    init_skillTemplate();
+    CLEANUP_SKILL_DIR_NAME = "agentbridge-memory-cleanup";
+  }
+});
+
 // packages/core/src/skillInstaller.ts
-function skillFilePath(agent, homeDir) {
-  return (0, import_path8.join)(homeDir ?? (0, import_os3.homedir)(), ...SKILL_ROOTS[agent], SKILL_DIR_NAME, "SKILL.md");
+function skillFilePath(agent, homeDir, dirName = SKILL_DIR_NAME) {
+  return (0, import_path8.join)(homeDir ?? (0, import_os3.homedir)(), ...SKILL_ROOTS[agent], dirName, "SKILL.md");
 }
 var import_os3, import_path8, SKILL_ROOTS;
 var init_skillInstaller = __esm({
@@ -1481,6 +1493,7 @@ var init_skillInstaller = __esm({
     import_path8 = require("path");
     init_interfaces();
     init_skillTemplate();
+    init_cleanupSkillTemplate();
     SKILL_ROOTS = {
       claude: [".claude", "skills"],
       codex: [".agents", "skills"],
@@ -6646,16 +6659,18 @@ async function uninstallGlobal(homeDir) {
   const removed = [];
   for (const path2 of await removeGlobalHooks(homeDir)) removed.push(path2);
   for (const agent of AGENTS2) {
-    const path2 = skillFilePath(agent, homeDir);
-    try {
-      await import_fs15.promises.unlink(path2);
-      removed.push(path2);
-    } catch {
-      continue;
-    }
-    try {
-      await import_fs15.promises.rmdir((0, import_path17.dirname)(path2));
-    } catch {
+    for (const dirName of SKILL_DIRS) {
+      const path2 = skillFilePath(agent, homeDir, dirName);
+      try {
+        await import_fs15.promises.unlink(path2);
+        removed.push(path2);
+      } catch {
+        continue;
+      }
+      try {
+        await import_fs15.promises.rmdir((0, import_path17.dirname)(path2));
+      } catch {
+      }
     }
   }
   if (removed.length === 0) {
@@ -6669,7 +6684,7 @@ async function uninstallGlobal(homeDir) {
     "\uC800\uC7A5\uC18C(\uB300\uD654 \uAE30\uB85D\uACFC \uC9C0\uC2DD)\uB294 \uADF8\uB300\uB85C \uB454\uB2E4."
   ].join("\n");
 }
-var import_fs15, import_path17, AGENTS2;
+var import_fs15, import_path17, AGENTS2, SKILL_DIRS;
 var init_uninstall = __esm({
   "packages/core/src/agentCli/uninstall.ts"() {
     "use strict";
@@ -6677,7 +6692,10 @@ var init_uninstall = __esm({
     import_path17 = require("path");
     init_hookInstaller();
     init_skillInstaller();
+    init_skillTemplate();
+    init_cleanupSkillTemplate();
     AGENTS2 = ["claude", "codex", "agy"];
+    SKILL_DIRS = [SKILL_DIR_NAME, CLEANUP_SKILL_DIR_NAME];
   }
 });
 

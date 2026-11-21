@@ -13,8 +13,12 @@ import { dirname } from 'path';
 import type { CliKind } from '../shared/cli';
 import { removeGlobalHooks } from '../hookInstaller';
 import { skillFilePath } from '../skillInstaller';
+import { SKILL_DIR_NAME } from '../skillTemplate';
+import { CLEANUP_SKILL_DIR_NAME } from '../cleanupSkillTemplate';
 
 const AGENTS: CliKind[] = ['claude', 'codex', 'agy'];
+// 깔리는 스킬 둘 — agentbridge 스킬과 장기 기억 정리 스킬.
+const SKILL_DIRS = [SKILL_DIR_NAME, CLEANUP_SKILL_DIR_NAME];
 
 export async function uninstallGlobal(homeDir?: string): Promise<string> {
   const removed: string[] = [];
@@ -22,18 +26,20 @@ export async function uninstallGlobal(homeDir?: string): Promise<string> {
   for (const path of await removeGlobalHooks(homeDir)) removed.push(path);
 
   for (const agent of AGENTS) {
-    const path = skillFilePath(agent, homeDir);
-    try {
-      await fsp.unlink(path);
-      removed.push(path);
-    } catch {
-      continue; // 없으면 지울 것도 없다
-    }
-    // 우리가 만든 폴더만 사라진다. 남의 파일이 있으면 rmdir이 실패하고 그대로 남는다.
-    try {
-      await fsp.rmdir(dirname(path));
-    } catch {
-      /* 비어 있지 않다 */
+    for (const dirName of SKILL_DIRS) {
+      const path = skillFilePath(agent, homeDir, dirName);
+      try {
+        await fsp.unlink(path);
+        removed.push(path);
+      } catch {
+        continue; // 없으면 지울 것도 없다
+      }
+      // 우리가 만든 폴더만 사라진다. 남의 파일이 있으면 rmdir이 실패하고 그대로 남는다.
+      try {
+        await fsp.rmdir(dirname(path));
+      } catch {
+        /* 비어 있지 않다 */
+      }
     }
   }
 

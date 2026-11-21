@@ -19,6 +19,7 @@ import type { CliKind } from './shared/cli';
 import type { Logger } from './interfaces';
 import { noopLogger } from './interfaces';
 import { SKILL_DIR_NAME, renderSkillMarkdown } from './skillTemplate';
+import { CLEANUP_SKILL_DIR_NAME, renderCleanupSkillMarkdown } from './cleanupSkillTemplate';
 
 // 하니스별 스킬 루트 — 실측으로 확정한 자리(research 06 §3).
 const SKILL_ROOTS: Record<CliKind, string[]> = {
@@ -29,8 +30,12 @@ const SKILL_ROOTS: Record<CliKind, string[]> = {
 
 // status와 uninstall(W7)이 같은 지식을 쓴다 — 어디에 무엇이 깔렸는지 아는 자리와 걷어내는
 // 자리가 갈리면 둘 중 하나가 먼저 틀린다.
-export function skillFilePath(agent: CliKind, homeDir?: string): string {
-  return join(homeDir ?? homedir(), ...SKILL_ROOTS[agent], SKILL_DIR_NAME, 'SKILL.md');
+export function skillFilePath(
+  agent: CliKind,
+  homeDir?: string,
+  dirName: string = SKILL_DIR_NAME,
+): string {
+  return join(homeDir ?? homedir(), ...SKILL_ROOTS[agent], dirName, 'SKILL.md');
 }
 
 export type SkillInstallerOptions = {
@@ -50,24 +55,37 @@ export function createSkillInstaller(opts: SkillInstallerOptions): SkillInstalle
   const log = opts.logger ?? noopLogger;
   const home = opts.homeDir ?? homedir();
 
-  return {
-    async install(agent: CliKind): Promise<string> {
-      const file = skillFilePath(agent, home);
-      const content = renderSkillMarkdown({ execPath: opts.execPath, cliPath: opts.cliPath });
-      // 내용이 같으면 안 쓴다. 경로가 바뀌면 내용도 바뀌므로 버전 마커만 보는 것보다 넓게 잡는다.
-      let existing: string | null = null;
-      try {
-        existing = await fsp.readFile(file, 'utf8');
-      } catch {
-        /* 미설치 */
-      }
-      if (existing === content) return file;
+  // 스킬 하나를 쓴다. 내용이 같으면 안 쓴다 — 경로가 바뀌면 내용도 바뀌므로 버전 마커만 보는 것보다
+  // 넓게 잡는다.
+  async function installOne(
+    agent: CliKind,
+    dirName: string,
+    render: (o: { execPath: string; cliPath: string }) => string,
+  ): Promise<string> {
+    const file = skillFilePath(agent, home, dirName);
+    const content = render({ execPath: opts.execPath, cliPath: opts.cliPath });
+    let existing: string | null = null;
+    try {
+      existing = await fsp.readFile(file, 'utf8');
+    } catch {
+      /* 미설치 */
+    }
+    if (existing === content) return file;
 
-      const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
-      await fsp.mkdir(dirname(file), { recursive: true });
-      await fsp.writeFile(tmp, content, 'utf8');
-      await fsp.rename(tmp, file);
-      log.log(`skillInstaller: ${agent} 스킬 → ${file} (${existing ? '갱신' : '설치'})`);
+    const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
+    await fsp.mkdir(dirname(file), { recursive: true });
+    await fsp.writeFile(tmp, content, 'utf8');
+    await fsp.rename(tmp, file);
+    log.log(`skillInstaller: ${agent} 스킬 → ${file} (${existing ? '갱신' : '설치'})`);
+    return file;
+  }
+
+  return {
+    // agentbridge 스킬과 정리 스킬(0.9.0 spec/04 §1)을 같은 하니스 자리에 함께 깐다.
+    // 돌려주는 값은 agentbridge 스킬의 경로다.
+    async install(agent: CliKind): Promise<string> {
+      const file = await installOne(agent, SKILL_DIR_NAME, renderSkillMarkdown);
+      await installOne(agent, CLEANUP_SKILL_DIR_NAME, renderCleanupSkillMarkdown);
       return file;
     },
   };
