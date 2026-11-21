@@ -11,6 +11,8 @@ import {
   hostRequestPath,
   hostResultPath,
   startHostRequestHandler,
+  timeoutForKind,
+  HOST_AGENT_MODELS,
 } from '@agentbridge/core';
 
 // 호스트 핸드셰이크 통로 (0.5.0 3단계 W6, B-5).
@@ -132,4 +134,9 @@ describe('hostRequest — 왕복·시한·경합 (0.5.0 W6)', () => {
       watcher.stop();
     }
   }).timeout(10000);
+
+  it('timeoutForKind — agent-models는 LONG_KINDS에 들어가 30초 시한을 쓴다', () => {
+    assert.equal(timeoutForKind(HOST_AGENT_MODELS), 30_000);
+    assert.equal(timeoutForKind('ping'), 10_000);
+  });
 });

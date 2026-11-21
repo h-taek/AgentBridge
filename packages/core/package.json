@@ -17,5 +17,9 @@
   "devDependencies": {
     "@types/node": "^20.16.10",
     "typescript": "^5.6.3"
+  },
+  "dependencies": {
+    "@xterm/addon-unicode11": "0.10.0-beta.220",
+    "@xterm/headless": "6.1.0-beta.220"
   }
 }

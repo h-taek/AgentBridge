@@ -86,6 +86,49 @@ export async function readAllTurns(workspaceRoot: string): Promise<TurnRecord[]>
   return out;
 }
 
+// archive의 compressed_*.jsonl에서 raw 턴만(ir_snapshot 줄 제외) 모은다. 파일명 정렬 = 시간순.
+async function readArchivedTurns(workspaceRoot: string): Promise<TurnRecord[]> {
+  const dir = archiveDir(workspaceRoot);
+  let files: string[];
+  try {
+    files = await fs.readdir(dir);
+  } catch {
+    return [];
+  }
+  const snapshots = files.filter((f) => f.startsWith('compressed_') && f.endsWith('.jsonl')).sort();
+  const out: TurnRecord[] = [];
+  for (const f of snapshots) {
+    let raw: string;
+    try {
+      raw = await fs.readFile(join(dir, f), 'utf8');
+    } catch {
+      continue;
+    }
+    for (const line of raw.split('\n')) {
+      const t = line.trim();
+      if (!t) continue;
+      try {
+        const obj = JSON.parse(t);
+        if (obj && obj.type === 'ir_snapshot') continue; // 스냅샷 메타 줄 스킵
+        if (obj && typeof obj.id === 'string') out.push(obj as TurnRecord);
+      } catch {
+        /* skip */
+      }
+    }
+  }
+  return out;
+}
+
+// 압축으로 archive에 간 턴 + 아직 안 간 턴을 읽기 순서(archive 시간순 → live)로 잇는다.
+// turns.jsonl에는 마지막 압축 뒤의 몇 턴만 남으므로, 그 앞을 보려면 archive까지 읽어야 한다.
+// 압축 도중 양쪽에 같은 턴이 잠깐 남을 수 있어 id로 거른다.
+export async function readTurnHistory(workspaceRoot: string): Promise<TurnRecord[]> {
+  const merged = [...(await readArchivedTurns(workspaceRoot)), ...(await readAllTurns(workspaceRoot))];
+  const byId = new Map<string, TurnRecord>();
+  for (const t of merged) if (!byId.has(t.id)) byId.set(t.id, t);
+  return [...byId.values()];
+}
+
 async function writeTurnsRaw(workspaceRoot: string, turns: TurnRecord[]): Promise<void> {
   const p = turnsPath(workspaceRoot);
   const tmp = `${p}.${process.pid}.${Date.now()}.tmp`;

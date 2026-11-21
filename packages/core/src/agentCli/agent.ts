@@ -19,6 +19,7 @@ import {
 import { isUnread, markReported } from '../agent/reportState';
 import { resolveTreePath } from '../agent/cleanup';
 import { subagentDiff, truncatePatch, PATCH_LIMIT_BYTES } from '../agent/diffMerge';
+import { renderScreen, type RenderedScreen } from '../screenReplay';
 import {
   sendHostRequest,
   HOST_AGENT_START,
@@ -26,6 +27,7 @@ import {
   HOST_AGENT_STOP,
   HOST_AGENT_CLOSE,
   HOST_AGENT_MERGE,
+  HOST_AGENT_MODELS,
   type HostRequest,
 } from '../hostRequest';
 
@@ -33,10 +35,6 @@ import {
 // 안에서 우리 반환을 받게 하기 위해서다. 긴 서브를 백그라운드로 던진 메인은 `--for`로 늘린다.
 export const DEFAULT_WAIT_SEC = 60;
 const WAIT_POLL_MS = 1000;
-
-// 빈손으로 돌아올 때 함께 내는 화면 기록의 꼬리. 우리는 파싱하지 않고 그대로 넘긴다 —
-// 판단은 메인이 한다(B-6).
-const TAIL_BYTES = 2000;
 
 // ─── 레코드에서 서브를 모은다 ────────────────────────────────────────────
 
@@ -48,12 +46,16 @@ interface SessionRecord {
   parentSessionId?: string;
   agentName?: string;
   cleanedAt?: string;
+  subModel?: string;
+  subEffort?: string;
 }
 
 export interface SubRow {
   name: string;
   sessionId: string;
   model: CliKind;
+  subModel?: string;
+  subEffort?: string;
   title: string;
   closed: boolean;
   unread: boolean;
@@ -97,6 +99,8 @@ export async function listSubs(wsDir: string, callerSessionId: string): Promise<
         name: s.agentName as string,
         sessionId: s.sessionId,
         model: s.model,
+        ...(s.subModel ? { subModel: s.subModel } : {}),
+        ...(s.subEffort ? { subEffort: s.subEffort } : {}),
         title: s.title ?? s.model,
         closed,
         unread: await isUnread(wsDir, s.sessionId),
@@ -134,9 +138,26 @@ function stateText(s: SubRow): string {
   }
 }
 
+/**
+ * 서브의 하니스·모델·effort를 괄호 안 목록 문구로 묶는다.
+ * 상태 문구가 오면 같은 괄호 뒤쪽에 붙인다 (`(claude, opus, high, 도는 중)`).
+ */
+export function formatSubLabel(
+  sub: { model: CliKind; subModel?: string; subEffort?: string },
+  state?: string,
+): string {
+  const parts: string[] = [sub.model];
+  if (sub.subModel) {
+    parts.push(sub.subModel);
+    if (sub.subEffort) parts.push(sub.subEffort);
+  }
+  if (state) parts.push(state);
+  return `(${parts.join(', ')})`;
+}
+
 function rowLine(s: SubRow): string {
   const mark = s.unread ? '  · 안 읽은 보고 있음' : '';
-  return `  ${s.name}  (${s.model}, ${stateText(s)})  ${s.title}${mark}`;
+  return `  ${s.name}  ${formatSubLabel(s, stateText(s))}  ${s.title}${mark}`;
 }
 
 export async function agentList(wsDir: string, callerSessionId: string): Promise<string> {
@@ -147,25 +168,47 @@ export async function agentList(wsDir: string, callerSessionId: string): Promise
 
 // ─── read ───────────────────────────────────────────────────────────────
 
+export interface ReadOptions {
+  lastN?: number;
+  screen?: boolean;
+}
+
+function formatScreenSection(screen: RenderedScreen | null): string {
+  if (!screen || !screen.text) return '화면 기록이 없다';
+  return `### 지금 화면 (${screen.cols}×${screen.rows})\n\n${screen.text}`;
+}
+
 // 서브의 기록은 그 세션 폴더에 쌓인다(B-8). 사용자가 서브에 직접 건 말도 여기 들어 있다.
 export async function agentRead(
   wsDir: string,
   callerSessionId: string,
   name: string,
-  lastN?: number,
+  lastNOrOpts?: number | ReadOptions,
 ): Promise<string> {
+  const opts: ReadOptions =
+    typeof lastNOrOpts === 'number' ? { lastN: lastNOrOpts } : (lastNOrOpts ?? {});
+  if (opts.screen && opts.lastN !== undefined) {
+    throw new Error('--screen은 --last와 함께 쓰지 않는다');
+  }
+
   const sub = await findSub(wsDir, callerSessionId, name);
   const sessionDir = join(wsDir, 'sessions', sub.sessionId);
-  const all = await readAllTurns(sessionDir);
 
   // 읽음 표시를 쓰는 것은 이 명령뿐이다. 대기의 반환이 끄면 그 직후 턴이 중단됐을 때 알림이
   // 어디에도 다시 나타나지 않는다 — 실제로 가져간 시점에 꺼야 읽기 전까지 리마인드가 붙는다.
   await markReported(wsDir, sub.sessionId);
 
-  if (all.length === 0) {
-    return `${name}: 아직 기록된 턴이 없다.${sub.closed ? ' 세션은 이미 끝났다.' : ''}`;
+  if (opts.screen) {
+    return formatScreenSection(await renderScreen(sessionDir));
   }
-  const turns = typeof lastN === 'number' ? all.slice(-lastN) : all;
+
+  const all = await readAllTurns(sessionDir);
+  if (all.length === 0) {
+    const head = `${name}: 아직 기록된 턴이 없다.${sub.closed ? ' 세션은 이미 끝났다.' : ''}`;
+    return `${head}\n\n${formatScreenSection(await renderScreen(sessionDir))}`;
+  }
+
+  const turns = typeof opts.lastN === 'number' ? all.slice(-opts.lastN) : all;
   const lines = [`## ${name} (${sub.model}) 의 기록 — ${turns.length}턴, 오래된 것부터`, ''];
   for (const t of turns) {
     lines.push(`[${t.completedAt || ''}]`);
@@ -173,6 +216,15 @@ export async function agentRead(
     lines.push(`assistant: ${t.assistantBody || ''}`);
     lines.push('');
   }
+
+  // `--last`로 잘랐더라도 빈 답 여부는 기록 전체의 마지막 턴으로 본다.
+  const lastTurn = all[all.length - 1];
+  const emptyReply = (lastTurn.assistantBody ?? '').trim() === '';
+  const activeOrUnknown = sub.activity === 'running' || sub.activity === 'unknown';
+  if (emptyReply || activeOrUnknown) {
+    lines.push(formatScreenSection(await renderScreen(sessionDir)));
+  }
+
   return lines.join('\n');
 }
 
@@ -228,36 +280,17 @@ export interface CheckOptions {
 
 const defaultSleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
-// 화면 기록의 꼬리. 없으면 빈 문자열.
-async function replayTail(wsDir: string, sessionId: string): Promise<string> {
-  const path = join(wsDir, 'sessions', sessionId, 'replay.log');
-  try {
-    const stat = await fsp.stat(path);
-    const start = Math.max(0, stat.size - TAIL_BYTES);
-    const handle = await fsp.open(path, 'r');
-    try {
-      const buf = Buffer.alloc(stat.size - start);
-      await handle.read(buf, 0, buf.length, start);
-      return buf.toString('utf8');
-    } finally {
-      await handle.close();
-    }
-  } catch {
-    return '';
-  }
-}
-
 function renderWoke(done: SubRow[], stuck: SubRow[]): string {
   const lines: string[] = [];
   if (done.length > 0) {
     lines.push(`## 끝난 서브 ${done.length}개`, '');
-    for (const s of done) lines.push(`  ${s.name}  (${s.model})  ${s.title}`);
+    for (const s of done) lines.push(`  ${s.name}  ${formatSubLabel(s)}  ${s.title}`);
     lines.push('', '`agent read <이름>`으로 보고를 읽는다.');
   }
   if (stuck.length > 0) {
     if (lines.length > 0) lines.push('');
     lines.push(`## 상태를 알 수 없는 서브 ${stuck.length}개`, '');
-    for (const s of stuck) lines.push(`  ${s.name}  (${s.model})  ${s.title}`);
+    for (const s of stuck) lines.push(`  ${s.name}  ${formatSubLabel(s)}  ${s.title}`);
     lines.push(
       '',
       '완료 신호 없이 출력이 멈춘 지 오래다. 사용자가 턴을 끊었거나 서브가 막혀 있을 수 있다.',
@@ -274,12 +307,12 @@ async function renderEmpty(wsDir: string, subs: SubRow[], waited: boolean): Prom
   if (subs.length === 0) return '띄운 서브가 없다.';
   const lines = [waited ? '기다리는 동안 끝난 서브가 없다.' : '끝났는데 안 읽은 서브가 없다.', ''];
   for (const s of subs) {
-    lines.push(`  ${s.name}  (${s.model}, ${stateText(s)})`);
+    lines.push(`  ${s.name}  ${formatSubLabel(s, stateText(s))}`);
     if (s.closed) {
-      const tail = await replayTail(wsDir, s.sessionId);
-      if (tail) {
-        lines.push('    — 완료 신호 없이 끝났다. 화면 기록의 꼬리:');
-        for (const l of tail.split('\n').slice(-8)) lines.push(`      ${l.replace(/\s+$/, '')}`);
+      const screen = await renderScreen(join(wsDir, 'sessions', s.sessionId));
+      if (screen && screen.text) {
+        lines.push(`    — 완료 신호 없이 끝났다. 지금 화면 (${screen.cols}×${screen.rows}):`);
+        for (const l of screen.text.split('\n')) lines.push(`      ${l}`);
       } else {
         lines.push('    — 완료 신호 없이 끝났다. 화면 기록이 없다.');
       }
@@ -344,13 +377,32 @@ async function callHost(sessionDir: string | undefined, kind: string, payload: u
   return result.output;
 }
 
+export interface AgentStartOptions {
+  models?: Partial<Record<CliKind, string>>;
+  efforts?: Partial<Record<CliKind, string>>;
+}
+
 export function agentStart(
   sessionDir: string | undefined,
   prompt: string,
   harnesses: string[],
   isolate: boolean,
+  opts?: AgentStartOptions,
 ): Promise<string> {
-  return callHost(sessionDir, HOST_AGENT_START, { prompt, harnesses, isolate });
+  const payload: {
+    prompt: string;
+    harnesses: string[];
+    isolate: boolean;
+    models?: Partial<Record<CliKind, string>>;
+    efforts?: Partial<Record<CliKind, string>>;
+  } = { prompt, harnesses, isolate };
+  if (opts?.models && Object.keys(opts.models).length > 0) {
+    payload.models = opts.models;
+  }
+  if (opts?.efforts && Object.keys(opts.efforts).length > 0) {
+    payload.efforts = opts.efforts;
+  }
+  return callHost(sessionDir, HOST_AGENT_START, payload);
 }
 
 export function agentSend(
@@ -376,4 +428,15 @@ export function agentCloseRound(sessionDir: string | undefined): Promise<string>
 
 export function agentMerge(sessionDir: string | undefined, name: string): Promise<string> {
   return callHost(sessionDir, HOST_AGENT_MERGE, { name });
+}
+
+export function agentModels(
+  sessionDir: string | undefined,
+  harnesses?: string[],
+): Promise<string> {
+  return callHost(
+    sessionDir,
+    HOST_AGENT_MODELS,
+    harnesses && harnesses.length > 0 ? { harnesses } : {},
+  );
 }

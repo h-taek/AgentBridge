@@ -11,7 +11,7 @@
 //
 // `uninstall`은 싣지 않는다. 사용자 명령이지 에이전트 명령이 아니다.
 
-export const SKILL_VERSION = '0.6.1';
+export const SKILL_VERSION = '0.6.2';
 export const SKILL_DIR_NAME = 'agentbridge';
 
 // 셸에서 그대로 쓸 수 있게 공백 있는 경로를 감싼다.
@@ -82,9 +82,11 @@ Each line is the part after the run command.
     memory user                   the user's durable preferences (summaries)
     memory user --full            ... with full bodies
     memory project                what is durable about this repository
-    memory add --scope user|project --category <c> \\
+    memory add --scope project|user --category <c> \\
         --title "..." --summary "..." --body "..."
     memory update <id> [same flags]
+    memory pending                proposals waiting for approval
+    memory withdraw <proposal-id> take one back
 
 Categories: role, repos, domain, workflows, conventions, infra, verification.
 
@@ -93,10 +95,16 @@ Categories: role, repos, domain, workflows, conventions, infra, verification.
 You can run other coding agents as subagents. Each gets its own session and
 tab; you give it work, it reports back, you read the report.
 
+    agent models [--harness claude,codex,agy]
+                                  models each harness has, and the efforts
+                                  each model takes
     agent start --prompt "..." [--harness claude,codex,agy] [--isolate]
+                [--model <name> --effort <level>]
     agent list                    the subs you started, and their state
     agent check [--wait] [--for <seconds>]
-    agent read <name> [--last N]  that sub's full conversation
+    agent read <name> [--last N] [--screen]
+                                  that sub's full conversation; --screen for
+                                  what its terminal shows right now
     agent diff <name> [--stat]    what that sub actually changed
     agent send <name> --prompt "..."
     agent merge <name>            put its changes into the real folder
@@ -107,6 +115,18 @@ tab; you give it work, it reports back, you read the report.
 
 \`agent start\` returns the names it issued — that is what the other commands
 take. Default harness is claude; pass several to run the same prompt on each.
+
+\`--model\` and \`--effort\` pick the model a sub runs on. Use them when the user
+names one, or when a recorded sub evaluation (see below) says which model and
+effort suit this kind of work — before starting a sub the user named no model
+for, run \`memory search "Sub evaluation"\`. Otherwise leave them out — the sub
+runs on its harness's own settings. When you use them, run \`agent models\` first
+and take both from its table: they go together, efforts differ per model, and
+\`agent start\` refuses a pair the table does not list. An evaluation of a model
+the table no longer lists is not evidence. When an evaluation picked the model,
+tell the user in one line which entry you went by. With several harnesses, pair
+each value with its harness
+(\`--model claude=opus,codex=gpt-6-luna --effort claude=high,codex=xhigh\`).
 
 \`--isolate\` gives the sub its own git worktree, so several subs can edit files
 without colliding. Skip it for research or review — a fresh checkout has no
@@ -132,30 +152,65 @@ touched and you get the list of files that clashed. It does not commit, does not
 move history, and does not end the sub. Partial picks are not supported: read
 both diffs and write the combination yourself.
 
-A sub does not tell you when it is done. Either \`agent check --wait\`, which
-returns as soon as one finishes (up to a minute, \`--for\` raises it), or go do
-something else — the next turn tells you how many finished subs are unread.
-Reading a report with \`agent read\` is what clears that.
+A sub does not tell you when it is done, and once your turn ends nobody reads
+its report until the user writes again. So before ending a turn, ask whether
+this turn's answer needs the sub's result. If it does, first do whatever does
+not depend on it, then run \`agent check --wait\` — it returns as soon as one
+finishes (up to a minute, \`--for\` raises it) — and run it again while the sub
+is still working. Do not end the turn saying you will read the report when it
+lands; you will not see it land. End the turn without the result only when the
+user said not to wait or handed off a long run, and then tell them the result
+is read on their next message. The next turn tells you how many finished subs
+are unread; reading a report with \`agent read\` is what clears that.
 
 A sub can also go quiet without finishing: the user interrupted its turn, or it
 is stuck waiting on something. \`check\` and the next-turn line both report those
 separately from finished ones. That state is what we observed, not a verdict —
 read the sub to see how far it got, then send it more instructions or close it.
 
+"Finished" means the sub's harness ended its turn, not that the work you gave
+it is done. A harness can hand the work to its own subagent and end its turn
+while that runs. When a finished sub's reply is empty, \`agent read\` shows its
+screen as well. When the reply says it is waiting, run
+\`agent read <name> --screen\`. Read the screen before deciding the sub failed.
+If it shows the sub still working or waiting, check again later instead of
+closing it.
+
 Every read output item starts with its identifier (\`<category>/<slug>\`) —
 that is what \`memory update\` takes.
+
+### Evaluating the model a sub ran on
+
+After reviewing a sub, ask whether its result says something about the model
+and effort it ran on — not about your prompt, the environment, or the harness
+(a turn that ended early, a report that did not land). Propose a record only
+when one of these holds:
+
+- you ran the same work on another model or effort and can compare them
+- the same model and effort showed the same tendency a second time
+- the user judged the sub's result in words about the model
+
+One result on its own is not an evaluation. Judge from the diff and the test
+results, not from the sub's report.
+
+Keep one entry per harness and model: \`--scope user --category workflows\`,
+titled \`Sub evaluation — <harness> <model>\`. If it exists, \`memory update\` it
+with the new case; otherwise \`memory add\`. \`--body\` replaces the whole body,
+so \`memory read\` the entry first and pass its earlier cases with the new one
+added. Each case carries the date, the
+model, the effort, the kind of work (implement, review, research, ...), and what
+the diff and tests showed. The summary is the conclusion so far: which work
+this model and effort suit, and which they do not.
 
 ## Recording something
 
 When something clears the bar in the hook's \`1-4. Recording\`:
 
-1. Pick the scope. Strip every name that belongs to this project — files,
-   screens, commands, tools, people, numbers, incidents. If what is left
-   no longer stands as a rule, it is \`--scope project\`. A habit of the
-   user shown through this project's case is project scope too, recorded
-   with the case. Use \`--scope user\` only when the sentence stands with no
-   project names in it, and it has come up in another project as well or
-   the user said it applies everywhere.
+1. Pick the scope. \`--scope\` is required. It is \`--scope project\` unless the
+   user said in so many words that this applies everywhere, across projects.
+   A sentence that reads as general is still project scope until the user
+   says so. Sub evaluations are the one exception — they are user scope; see
+   'Evaluating the model a sub ran on'.
 2. Read that side in full — \`memory user --full\` or \`memory project --full\`.
    Not a search: you need everything to know whether this is new. Read only the
    side you picked.
@@ -187,6 +242,14 @@ of a lesson already recorded — that is \`memory update <id>\`, not a second
 entry.
 
 Record what would change how someone works next time.
+
+### Taking a proposal back
+
+When a proposal in the queue should not be there — wrong scope, below the
+bar, a duplicate, or the user said not to keep it — run \`memory pending\`,
+then \`memory withdraw <proposal-id>\`. To change a pending proposal, withdraw
+it and add it again. Approved entries are not withdrawn; they change through
+\`memory update <id>\`.
 
 ## Outside AgentBridge
 

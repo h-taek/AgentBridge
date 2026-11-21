@@ -4,7 +4,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import {
   writeProposals, readProposals, approveProposal, discardProposal,
-  readProfileDocs, getGlobalDir, DEFAULT_PROFILE_ID, type ProposalInput,
+  readProfileDocs, setDocPinned, getGlobalDir, DEFAULT_PROFILE_ID, type ProposalInput,
 } from '@agentbridge/core';
 
 async function seed(): Promise<{ globalDir: string; id: string }> {
@@ -66,5 +66,68 @@ describe('approveProposal / discardProposal', () => {
     await approveProposal(globalDir, DEFAULT_PROFILE_ID, id);
     const docs = await readProfileDocs(globalDir, DEFAULT_PROFILE_ID);
     assert.deepEqual(docs[0].indexEntries, ['Use release branch']);
+  });
+
+  it('승인 뒤 기존 문서의 pinned 태그를 유지한다', async () => {
+    const { globalDir, id } = await seed();
+    await approveProposal(globalDir, DEFAULT_PROFILE_ID, id);
+    const first = (await readProfileDocs(globalDir, DEFAULT_PROFILE_ID))[0];
+    await setDocPinned(globalDir, DEFAULT_PROFILE_ID, 'user', first.path, true);
+
+    // 같은 문서를 고치는(targetSlug) 제안을 다시 승인해도 pinned가 남는다.
+    const upd = await writeProposals(globalDir, DEFAULT_PROFILE_ID, [{
+      category: 'conventions',
+      targetSlug: first.slug,
+      title: 'Use release branch (updated)',
+      summary: 'updated summary',
+      body: 'updated details',
+      confidence: 0.95,
+    }], { existingDocTitles: [{ category: first.category, title: first.title }] });
+    await approveProposal(globalDir, DEFAULT_PROFILE_ID, upd.written[0].id);
+
+    const after = await readProfileDocs(globalDir, DEFAULT_PROFILE_ID);
+    assert.equal(after.length, 1);
+    assert.equal(after[0].title, 'Use release branch (updated)');
+    assert.ok(after[0].tags.includes('pinned'));
+  });
+
+  it('승인과 핀 변경을 번갈아·동시에 돌려도 핀이 남는다', async () => {
+    const { globalDir, id } = await seed();
+    await approveProposal(globalDir, DEFAULT_PROFILE_ID, id);
+    const first = (await readProfileDocs(globalDir, DEFAULT_PROFILE_ID))[0];
+
+    const upd = await writeProposals(globalDir, DEFAULT_PROFILE_ID, [{
+      category: 'conventions',
+      targetSlug: first.slug,
+      title: 'Use release branch v2',
+      summary: 'v2 summary',
+      body: 'v2 details',
+      confidence: 0.9,
+    }], { existingDocTitles: [{ category: first.category, title: first.title }] });
+
+    // 동시에 돌려도 같은 파일 잠금으로 직렬화되어 핀과 새 내용이 모두 보존된다.
+    await Promise.all([
+      setDocPinned(globalDir, DEFAULT_PROFILE_ID, 'user', first.path, true),
+      approveProposal(globalDir, DEFAULT_PROFILE_ID, upd.written[0].id),
+    ]);
+
+    const mid = await readProfileDocs(globalDir, DEFAULT_PROFILE_ID);
+    assert.equal(mid[0].title, 'Use release branch v2');
+    assert.ok(mid[0].tags.includes('pinned'));
+
+    // 한 번 더 고침 승인을 거쳐도 pinned 유지
+    const upd2 = await writeProposals(globalDir, DEFAULT_PROFILE_ID, [{
+      category: 'conventions',
+      targetSlug: first.slug,
+      title: 'Use release branch v3',
+      summary: 'v3 summary',
+      body: 'v3 details',
+      confidence: 0.9,
+    }], { existingDocTitles: [{ category: mid[0].category, title: mid[0].title }] });
+    await approveProposal(globalDir, DEFAULT_PROFILE_ID, upd2.written[0].id);
+
+    const end = await readProfileDocs(globalDir, DEFAULT_PROFILE_ID);
+    assert.equal(end[0].title, 'Use release branch v3');
+    assert.ok(end[0].tags.includes('pinned'));
   });
 });

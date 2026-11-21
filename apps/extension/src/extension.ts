@@ -4,6 +4,7 @@ import * as claudeAdapter from './core/cliAdapter/claudeAdapter';
 import * as codexAdapter from './core/cliAdapter/codexAdapter';
 import * as agyAdapter from './core/cliAdapter/agyAdapter';
 import * as workspaceStore from './core/workspaceStore';
+import { setWorkspaceReady } from './core/workspaceReady';
 import {
   installBinToCanonicalPath,
   createSessionFileWatcher,
@@ -15,6 +16,15 @@ import {
   getStorageRoot,
   migrateLegacyGlobalIfNeeded,
   renderReceipt,
+  resolveTreePath,
+  worktreeExists,
+  takeOverRenamedWorkspace,
+  readFolderMark,
+  backfillFolderMarks,
+  syncFolderMark,
+  repairWorktrees,
+  resolveProjectProfileKey,
+  sweepOldReplayLogs,
   type SpawnExtras,
 } from '@agentbridge/core';
 import { initializeCore, getBundledHelperPath, getBundledCliPath, getWorkspaceStore, getLogger } from './core/coreInstances';
@@ -77,6 +87,42 @@ async function buildOpts(
   }
 }
 
+// 세션을 다시 열 때(목록에서 열기·창 리로드 복원) 두 경로가 같은 기동 옵션을 만든다 (0.8.0).
+// 격리 서브의 worktree가 남아 있으면 거기서 열고, 부모 세션 id와 지정된 모델·effort를 되돌려
+// 턴 기록과 하니스 인자가 처음 띄웠을 때와 같아지게 한다. 첫 프롬프트는 넘기지 않는다.
+export async function buildReopenOptions(
+  params: {
+    model: CliKind;
+    workspaceId: string;
+    sessionId: string;
+    defaultCwd: string;
+    modelSessionId?: string;
+    meta?: Pick<SessionMeta, 'agentName' | 'parentSessionId' | 'subModel' | 'subEffort' | 'name'>;
+  },
+  deps: {
+    getWorkspacePath: (workspaceId: string) => string;
+    buildOpts: typeof buildOpts;
+  } = {
+    getWorkspacePath: workspaceStore.getWorkspacePath,
+    buildOpts,
+  },
+): Promise<SpawnOptions> {
+  const { model, workspaceId, sessionId, defaultCwd, modelSessionId, meta } = params;
+  let cwd = defaultCwd;
+  if (meta?.agentName) {
+    const treePath = resolveTreePath(deps.getWorkspacePath(workspaceId), meta.agentName);
+    if (await worktreeExists(treePath)) cwd = treePath;
+  }
+  const extras: SpawnExtras = {
+    ...(meta?.parentSessionId ? { parentSessionId: meta.parentSessionId } : {}),
+    ...(meta?.subModel ? { subModel: meta.subModel } : {}),
+    ...(meta?.subEffort ? { subEffort: meta.subEffort } : {}),
+  };
+  const opts = await deps.buildOpts(model, cwd, workspaceId, sessionId, modelSessionId, extras);
+  if (meta?.name) opts.terminalName = meta.name; // 탭 제목 = 세션 이름(트리와 일치; 이름 없으면 모델명)
+  return opts;
+}
+
 export function activate(context: vscode.ExtensionContext) {
   output.log('AgentBridge activating');
 
@@ -110,15 +156,68 @@ export function activate(context: vscode.ExtensionContext) {
 
   workspaceStore.init(context.globalStorageUri.fsPath);
 
+  const folderUri = vscode.workspace.workspaceFolders?.[0]?.uri;
+
+  // 이름이 바뀐 폴더 이어받기 → 누락된 폴더 표지 채우기 → 현재 폴더 표지 덮기.
+  // 첫 getOrCreateWorkspaceId 전에 끝나야 빈 새 워크스페이스가 생기거나 충돌이 나지 않는다.
+  // 이어받기가 실패해도 익스텐션 기동은 막지 않고 출력 로그에만 남긴다.
+  const workspaceReady: Promise<void> = (async () => {
+    const store = getWorkspaceStore();
+    const storageRoot = store.getGlobalStoragePath();
+    if (folderUri) {
+      try {
+        const res = await takeOverRenamedWorkspace(storageRoot, folderUri.fsPath, {
+          listWorkspaces: () => store.listWorkspaces(),
+          readFolderMark,
+          repairWorktrees,
+          resolveProjectProfileId: (cwd) => resolveProjectProfileKey(cwd, { logger: getLogger() }),
+          log: (line) => output.log(line),
+        });
+        if (res.kind === 'failed') {
+          output.warn(`워크스페이스 이어받기 실패 (${res.step}): ${res.error}`);
+        }
+      } catch (err) {
+        output.warn(`워크스페이스 이어받기 오류: ${String(err)}`);
+      }
+    }
+
+    try {
+      await backfillFolderMarks(store);
+    } catch (err) {
+      output.warn(`폴더 표지 채우기 실패: ${String(err)}`);
+    }
+
+    if (folderUri) {
+      try {
+        const wid = workspaceStore.getOrCreateWorkspaceId(folderUri.fsPath);
+        await syncFolderMark(store, wid, folderUri.fsPath);
+      } catch (err) {
+        output.warn(`워크스페이스 표지 갱신 실패: ${String(err)}`);
+      }
+    }
+  })();
+  setWorkspaceReady(workspaceReady);
+
+  // 7일 넘은 화면 기록 정리 (0.8.0 spec/09). 이어받기 뒤, 열린 폴더와 상관없이 한 번 돈다.
+  // 기다리지 않고 결과는 출력 로그에만 남긴다.
+  void workspaceReady
+    .then(() => sweepOldReplayLogs(getWorkspaceStore().getGlobalStoragePath(), Date.now()))
+    .then(({ removed, bytes, failed }) => {
+      if (removed > 0) output.log(`화면 기록 정리: ${removed}개, ${(bytes / 1024 / 1024).toFixed(1)}MB`);
+      for (const p of failed) output.warn(`화면 기록 정리 실패: ${p}`);
+    })
+    .catch((err) => output.warn(`화면 기록 정리 오류: ${String(err)}`));
+
   // activate 시점엔 어떤 panel도 안 열려있음 — 모든 세션 active 플래그 초기화.
   // 이후 ChatPanel.create가 markSessionActive로 갱신.
   // (세션 목록 뷰는 아래에서 생성되므로, reset 완료 후 closure 통해 refresh.)
   let pendingResetDone: Promise<void> | null = null;
-  const folderUri = vscode.workspace.workspaceFolders?.[0]?.uri;
   if (folderUri) {
-    const wid = workspaceStore.getOrCreateWorkspaceId(folderUri.fsPath);
-    pendingResetDone = import('./core/sessionRegistry')
-      .then(m => m.resetAllSessionsActive(wid))
+    pendingResetDone = workspaceReady
+      .then(() => {
+        const wid = workspaceStore.getOrCreateWorkspaceId(folderUri.fsPath);
+        return import('./core/sessionRegistry').then((m) => m.resetAllSessionsActive(wid));
+      })
       .catch(() => { /* noop */ });
   }
 
@@ -199,6 +298,7 @@ export function activate(context: vscode.ExtensionContext) {
       webviewOptions: { retainContextWhenHidden: true },
     }),
     vscode.commands.registerCommand('agentbridge.refresh', async () => {
+      await workspaceReady;
       await Promise.all([usageStore.refresh({ force: true }), sessionsView.refresh()]);
     }),
     new vscode.Disposable(() => usageStore.dispose()),
@@ -212,6 +312,7 @@ export function activate(context: vscode.ExtensionContext) {
   // 채팅 탭이 활성화되면 사이드 패널 선택 동기화. 단, AgentBridge 사이드바가 이미 보이는
   // 상태일 때만 — 다른 사이드바(Explorer 등)를 쓰는 사용자의 화면을 뺏지 않기 위함이다.
   chatPanelEvents.event(async ({ sessionId }) => {
+    await workspaceReady;
     // 완료 표시는 여기서 끈다 — 탭을 열어봤다는 사실이 곧 "확인했다"는 사실이다(B-2).
     // 사이드바가 안 보이는 상태에서도 열람 시각은 남겨야 다음에 볼 때 정정돼 있다.
     const folderUri = vscode.workspace.workspaceFolders?.[0]?.uri;
@@ -225,8 +326,11 @@ export function activate(context: vscode.ExtensionContext) {
     sessionsView.select(sessionId);
   });
 
-  // 활성화 시 대기 제안 수로 뱃지 1회 초기화 (이후엔 패널을 다시 볼 때와 승인·버림이 갱신한다).
-  void profileProvider.notifyProposalsUpdated();
+  // 이어받기(프로젝트 기억 이전 포함) 뒤에 대기 제안 수 뱃지 초기화와 감시를 시작한다.
+  void workspaceReady.then(() => {
+    profileProvider.notifyProposalsUpdated();
+    profileProvider.startWatching();
+  });
 
   // 공유 저장소 실시간 동기화 — 다른 앱(데스크탑/다른 호스트)이 workspace.json(세션 목록) 또는
   // owner.json(소유)을 바꾸면 세션 트리를 다시 그린다. 데스크탑과 같은 core 워처를 끌어 쓴다.
@@ -261,6 +365,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push({
     dispose: () => {
+      profileProvider.dispose();
       storageWatcher.stop();
       hostRequests.stop();
       clearInterval(storagePoll);
@@ -281,7 +386,9 @@ export function activate(context: vscode.ExtensionContext) {
   // 프로젝트를 열 때 고아 worktree를 훑는다 (0.5.0 B-7 정리 시점 셋째). 레코드가 아예 없는
   // 폴더만 지운다 — 앱이 비정상 종료해 레코드를 못 쓴 흔적이다. 알릴 상대가 없던 시점의 일이라
   // 지금 알린다. 훑는 것은 이 프로젝트의 trees/ 하나뿐이고 다른 프로젝트는 훑지 않는다.
+  // 이어받기·worktree repair가 끝난 뒤에 돌아야 끊긴 worktree를 고아로 오인하지 않는다.
   void (async () => {
+    await workspaceReady;
     const folderUri = vscode.workspace.workspaceFolders?.[0]?.uri;
     if (!folderUri) return;
     try {
@@ -325,6 +432,7 @@ export function activate(context: vscode.ExtensionContext) {
       vscode.window.showWarningMessage(vscode.l10n.t('AgentBridge: Open a workspace folder first.'));
       return;
     }
+    await workspaceReady;
     const cwd = folderUri.fsPath;
     const workspaceId = workspaceStore.getOrCreateWorkspaceId(cwd);
 
@@ -351,7 +459,6 @@ export function activate(context: vscode.ExtensionContext) {
       vscode.window.showWarningMessage(vscode.l10n.t('AgentBridge: Open a workspace folder first.'));
       return;
     }
-    const cwd = folderUri.fsPath;
 
     const availability = checkAvailability(session.model);
     if (!availability.found) {
@@ -359,9 +466,16 @@ export function activate(context: vscode.ExtensionContext) {
       return;
     }
 
+    await workspaceReady;
     const modelSessionId = await reclaimPendingModelSessionId(session);
-    const opts = await buildOpts(session.model, cwd, session.workspaceId, session.sessionId, modelSessionId);
-    opts.terminalName = session.name; // 탭 제목 = 세션 이름(트리와 일치; 이름 없으면 모델명)
+    const opts = await buildReopenOptions({
+      model: session.model,
+      workspaceId: session.workspaceId,
+      sessionId: session.sessionId,
+      defaultCwd: folderUri.fsPath,
+      modelSessionId,
+      meta: session,
+    });
     await markSessionActive(session.workspaceId, session.sessionId);
     void sessionsView.refresh();
     openChatPanel(opts, session.workspaceId);
@@ -373,6 +487,7 @@ export function activate(context: vscode.ExtensionContext) {
       vscode.window.showWarningMessage(vscode.l10n.t('AgentBridge: Open a workspace folder first.'));
       return;
     }
+    await workspaceReady;
     const cwd = folderUri.fsPath;
     const wid = workspaceStore.getOrCreateWorkspaceId(cwd);
     const sessions = await getSessions(wid);
@@ -490,6 +605,7 @@ export function activate(context: vscode.ExtensionContext) {
       vscode.window.showWarningMessage(vscode.l10n.t('AgentBridge: Open a workspace folder first.'));
       return;
     }
+    await workspaceReady;
     const cwd = folderUri.fsPath;
     const workspaceId = workspaceStore.getOrCreateWorkspaceId(cwd);
 
@@ -529,13 +645,20 @@ export function activate(context: vscode.ExtensionContext) {
       // 영속되고, webview state에는 생성 시점 값(codex/agy는 보통 null)이 박힌 채 갱신되지 않는다.
       // 그래서 복원 때 state의 modelSessionId를 그대로 믿으면 resume 인자가 비어 새 세션으로 fallback된다
       // (openSession이 정상인 이유는 레지스트리를 읽기 때문). 복원도 레지스트리를 SSOT로 삼아 최신 값을 읽는다.
+      await workspaceReady;
       const sessions = await getSessions(s.workspaceId);
       const meta = sessions.find((m) => m.sessionId === s.sessionId);
       const restored = meta
         ? await reclaimPendingModelSessionId(meta)
         : undefined;
-      const opts = await buildOpts(s.model, folder.fsPath, s.workspaceId, s.sessionId, restored ?? s.modelSessionId);
-      if (meta?.name) opts.terminalName = meta.name; // 복원 탭 제목 = 세션 이름
+      const opts = await buildReopenOptions({
+        model: s.model,
+        workspaceId: s.workspaceId,
+        sessionId: s.sessionId,
+        defaultCwd: folder.fsPath,
+        modelSessionId: restored ?? s.modelSessionId,
+        meta,
+      });
       // activate의 resetAllSessionsActive(모든 세션 비활성)와 경합 회피 — reset 완료 후 active 표시.
       // 안 기다리면 reset이 이 복구된 세션의 active 플래그를 덮어써 비활성으로 남을 수 있음 (V-21).
       if (pendingResetDone) await pendingResetDone;

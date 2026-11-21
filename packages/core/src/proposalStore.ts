@@ -63,7 +63,8 @@ export async function readProposals(
   return out;
 }
 
-export type WriteProposalsResult = { written: StoredProposal[]; skipped: ProposalInput[] };
+export type SkippedProposal = { input: ProposalInput; reason: 'doc' | 'pending' | 'cap'; pendingId?: string };
+export type WriteProposalsResult = { written: StoredProposal[]; skipped: SkippedProposal[] };
 
 // 입력 제안들을 중복 제거 후 저장. existingDocTitles = 이미 프로필 문서로 존재하는 (category,title).
 export async function writeProposals(
@@ -76,22 +77,28 @@ export async function writeProposals(
   const dir = proposalsDir(globalDir, profileId, scope);
   await fsp.mkdir(dir, { recursive: true });
 
-  const seen = new Set<string>();
+  const pendingIds = new Map<string, string>();
+  const docKeys = new Set<string>();
   // 같은 scope의 대기 제안만 본다. 자리가 갈려 있는데 남의 큐와 비교하면 프로젝트 지식이
   // 사용자 지식의 같은 제목에 막힌다.
-  for (const p of await readProposals(globalDir, profileId, scope)) seen.add(dedupKey(p.category, p.title));
-  for (const d of opts.existingDocTitles) seen.add(dedupKey(d.category, d.title));
+  for (const p of await readProposals(globalDir, profileId, scope)) {
+    pendingIds.set(dedupKey(p.category, p.title), p.id);
+  }
+  for (const d of opts.existingDocTitles) docKeys.add(dedupKey(d.category, d.title));
 
   const written: StoredProposal[] = [];
-  const skipped: ProposalInput[] = [];
+  const skipped: SkippedProposal[] = [];
   let n = 0;
   for (const inp of inputs) {
-    if (n >= PROPOSAL_CAPS.maxPerPass) { skipped.push(inp); continue; }
+    if (n >= PROPOSAL_CAPS.maxPerPass) { skipped.push({ input: inp, reason: 'cap' }); continue; }
     const key = dedupKey(inp.category, inp.title);
     // 대상을 지목한 제안은 이미 있는 문서를 고치는 것이므로 중복이 아니다. 대기 큐의 같은
     // 제목과는 여전히 겹치면 안 되는데, 그때는 id가 같아 최신 제안이 앞의 것을 덮는다.
-    if (seen.has(key) && !inp.targetSlug) { skipped.push(inp); continue; }
-    seen.add(key);
+    if (!inp.targetSlug) {
+      if (docKeys.has(key)) { skipped.push({ input: inp, reason: 'doc' }); continue; }
+      const pendingId = pendingIds.get(key);
+      if (pendingId !== undefined) { skipped.push({ input: inp, reason: 'pending', pendingId }); continue; }
+    }
     const rec: StoredProposal = {
       id: proposalId(inp.category, inp.title),
       createdAt: new Date().toISOString(),
@@ -107,6 +114,7 @@ export async function writeProposals(
       ...(inp.targetSlug ? { targetSlug: inp.targetSlug } : {}),
     };
     await fsp.writeFile(join(dir, `${rec.id}.json`), JSON.stringify(rec, null, 2) + '\n', 'utf8');
+    pendingIds.set(key, rec.id);
     written.push(rec);
     n++;
   }
@@ -137,7 +145,7 @@ export async function approveProposal(
       body: p.body,
       indexEntries: p.indexEntries?.length ? p.indexEntries : [p.title],
     }],
-  }, scope);
+  }, scope, { preserveTags: true });
   await discardProposal(globalDir, profileId, proposalId, scope);
   return { written: res.written };
 }

@@ -19,7 +19,7 @@
 
 'use strict'
 
-// @agentbridge-cli-version 0.6.0
+// @agentbridge-cli-version 0.6.1
 // (단일 설치 버전 비교용 — 이 파일을 수정하면 반드시 버전을 올릴 것)
 
 const fs = require('fs')
@@ -34,7 +34,13 @@ const {
   searchMemory,
   resolveProfileIdForScope
 } = require('../src/agentCli/read')
-const { requestMemoryWrite, WriteError } = require('../src/agentCli/write')
+const {
+  requestMemoryWrite,
+  resolveUpdateTarget,
+  listPendingProposals,
+  resolveWithdrawTarget,
+  WriteError
+} = require('../src/agentCli/write')
 const { readStatus } = require('../src/agentCli/status')
 const {
   agentList,
@@ -47,6 +53,7 @@ const {
   agentClose,
   agentCloseRound,
   agentMerge,
+  agentModels,
   DEFAULT_WAIT_SEC
 } = require('../src/agentCli/agent')
 const { uninstallGlobal } = require('../src/agentCli/uninstall')
@@ -60,13 +67,16 @@ const COMMANDS = [
   ['memory project [--full]', '이 저장소의 프로젝트 지식'],
   ['memory search <질의>', '두 지식을 질의로 검색'],
   ['memory read <식별자>', '한 건의 전문. 식별자는 <카테고리>/<슬러그> (--scope로 한쪽만)'],
-  ['memory add', '새 사실을 제안 큐에 넣는다 (--scope --category --title --summary --body)'],
+  ['memory add', '새 사실을 제안 큐에 넣는다 (--scope 필수 --category --title --summary --body)'],
   ['memory update <식별자>', '이미 있는 항목을 고치는 제안 (같은 인자, 안 준 것은 그대로)'],
+  ['memory pending', '승인을 기다리는 제안 목록 (--scope로 한쪽만)'],
+  ['memory withdraw <제안 식별자>', '대기 중인 제안을 거둔다'],
   ['status', '어디에 무엇이 깔려 있는지와 배선 자가 진단'],
-  ['agent start', '서브에이전트를 띄운다 (--prompt "..." [--harness claude,codex,agy] [--isolate])'],
+  ['agent models [--harness]', '하니스별로 고를 수 있는 모델과 effort'],
+  ['agent start', '서브에이전트를 띄운다 (--prompt "..." [--harness claude,codex,agy] [--model] [--effort] [--isolate])'],
   ['agent list', '띄운 서브의 목록과 상태'],
   ['agent check', '끝난 서브가 있는지 본다 (--wait면 생길 때까지, --for <초>로 상한 조정)'],
-  ['agent read <이름>', '그 서브의 기록 전문 (--last N으로 자름)'],
+  ['agent read <이름>', '그 서브의 기록 전문 (--last N으로 자름, --screen이면 지금 화면만)'],
   ['agent diff <이름>', '그 서브가 실제로 바꾼 것 (--stat이면 요약만)'],
   ['agent send <이름>', '도는 서브에 지침을 더 보낸다 (--prompt "...")'],
   ['agent merge <이름>', '그 서브의 변경을 원본에 얹는다 (전부 아니면 아무것도)'],
@@ -135,8 +145,42 @@ function strOption(args, name) {
   return v
 }
 
+// `--model`·`--effort`를 하니스별 맵으로 바꾼다. 하니스가 하나면 단일 값을 그 하니스에 묶고,
+// 여럿이면 `하니스=값,...` 짝 형식만 받는다.
+function harnessPairOption(flag, raw, harnesses) {
+  if (raw === undefined) return undefined
+  const trimmed = raw.trim()
+  if (!trimmed) fail(flag + '에 값이 없다')
+
+  if (!trimmed.includes('=')) {
+    // 하니스 종류로 센다 — 같은 하니스를 둘 띄우면(claude,claude) 단일 값을 둘 다에 쓴다.
+    if (new Set(harnesses).size > 1) {
+      fail('하니스가 여럿이면 --model과 --effort는 claude=opus처럼 하니스별로 쓴다')
+    }
+    return { [harnesses[0]]: trimmed }
+  }
+
+  const out = {}
+  for (const part of trimmed.split(',')) {
+    const entry = part.trim()
+    if (!entry) fail(flag + '의 짝 형식이 맞지 않는다')
+    const eq = entry.indexOf('=')
+    if (eq === -1) fail(flag + '의 짝 형식이 맞지 않는다: ' + entry)
+    const h = entry.slice(0, eq).trim()
+    const val = entry.slice(eq + 1).trim()
+    if (!h) fail(flag + '에 하니스가 없다: ' + entry)
+    if (!val) fail(flag + '의 ' + h + ' 값이 비어 있다')
+    if (!harnesses.includes(h)) fail(flag + '의 ' + h + '는 --harness에 없다')
+    out[h] = val
+  }
+  return out
+}
+
 function scopeOption(args) {
-  const v = strOption(args, '--scope') || 'user'
+  const v = strOption(args, '--scope')
+  if (v === undefined) {
+    fail('--scope가 없다. 사용자가 모든 프로젝트에 적용된다고 직접 말한 것만 user, 나머지는 project다')
+  }
   if (v !== 'user' && v !== 'project') fail('--scope는 user 또는 project다')
   return v
 }
@@ -187,20 +231,43 @@ async function dispatch(cmd, args, wsDir, storageRoot) {
         if (!query) fail('memory search에는 질의가 온다')
         return searchMemory(storageRoot, wsDir, query)
       }
-      if (sub === 'add' || sub === 'update') {
+      if (sub === 'pending') {
+        return listPendingProposals(storageRoot, wsDir, optionalScopeOption(args))
+      }
+      if (sub === 'withdraw') {
+        const id = args[1]
+        if (!id || id.startsWith('--')) fail('memory withdraw에는 제안 식별자가 온다')
+        const target = await resolveWithdrawTarget(storageRoot, wsDir, id, optionalScopeOption(args))
+        // 지우기도 호스트가 한다. 그래야 패널의 대기 목록과 뱃지가 그 자리에서 갱신된다.
+        return requestMemoryWrite(sessionDir(wsDir), {
+          op: 'withdraw',
+          scope: target.scope,
+          profileId: target.profileId,
+          id
+        })
+      }
+      if (sub === 'add') {
         const scope = scopeOption(args)
         const profileId = await resolveProfileIdForScope(wsDir, scope)
         if (!profileId) fail('이 워크스페이스의 프로젝트 지식 자리를 찾을 수 없다')
-        let id
-        if (sub === 'update') {
-          id = args[1]
-          if (!id || id.startsWith('--')) fail('memory update에는 식별자가 온다')
-        }
         // 쓰기는 호스트가 한다. 그래야 쓴 것이 그 자리에서 화면에 뜬다.
         return requestMemoryWrite(sessionDir(wsDir), {
-          op: sub,
+          op: 'add',
           scope,
           profileId,
+          category: strOption(args, '--category'),
+          fields: writeFields(args)
+        })
+      }
+      if (sub === 'update') {
+        const id = args[1]
+        if (!id || id.startsWith('--')) fail('memory update에는 식별자가 온다')
+        const target = await resolveUpdateTarget(storageRoot, wsDir, id, optionalScopeOption(args))
+        // 쓰기는 호스트가 한다. 그래야 쓴 것이 그 자리에서 화면에 뜬다.
+        return requestMemoryWrite(sessionDir(wsDir), {
+          op: 'update',
+          scope: target.scope,
+          profileId: target.profileId,
           category: strOption(args, '--category'),
           id,
           fields: writeFields(args)
@@ -225,12 +292,25 @@ async function dispatch(cmd, args, wsDir, storageRoot) {
         return v
       }
       switch (sub) {
+        case 'models': {
+          const raw = strOption(rest, '--harness')
+          const harnesses = raw
+            ? raw.split(',').map((h) => h.trim()).filter(Boolean)
+            : ['claude', 'codex', 'agy']
+          if (raw !== undefined && harnesses.length === 0) fail('--harness에 값이 없다')
+          return agentModels(sessionDir(wsDir), harnesses)
+        }
         case 'list':
           return agentList(wsDir, caller)
         case 'read': {
           const name = nameArg()
-          const i = rest.indexOf('--last')
-          return agentRead(wsDir, caller, name, i === -1 ? undefined : intOption(rest, '--last', 0))
+          const screen = rest.includes('--screen')
+          const hasLast = rest.includes('--last')
+          if (screen && hasLast) fail('--screen은 --last와 함께 쓰지 않는다')
+          return agentRead(wsDir, caller, name, {
+            lastN: hasLast ? intOption(rest, '--last', 0) : undefined,
+            screen,
+          })
         }
         case 'diff':
           return agentDiff(wsDir, caller, nameArg(), { statOnly: rest.includes('--stat') })
@@ -244,7 +324,20 @@ async function dispatch(cmd, args, wsDir, storageRoot) {
           if (!prompt) fail('agent start에는 --prompt가 온다')
           const raw = strOption(rest, '--harness')
           const harnesses = raw ? raw.split(',').map((h) => h.trim()).filter(Boolean) : ['claude']
-          return agentStart(sessionDir(wsDir), prompt, harnesses, rest.includes('--isolate'))
+          if (raw !== undefined && harnesses.length === 0) fail('--harness에 값이 없다')
+          const models = harnessPairOption('--model', strOption(rest, '--model'), harnesses)
+          const efforts = harnessPairOption('--effort', strOption(rest, '--effort'), harnesses)
+          if (efforts) {
+            for (const h of Object.keys(efforts)) {
+              if (!models || !models[h]) {
+                fail(h + '에 --effort만 있다. --model과 함께 쓴다')
+              }
+            }
+          }
+          return agentStart(sessionDir(wsDir), prompt, harnesses, rest.includes('--isolate'), {
+            models,
+            efforts,
+          })
         }
         case 'send': {
           const name = nameArg()

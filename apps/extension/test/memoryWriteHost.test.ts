@@ -12,6 +12,7 @@ import {
   applyMemoryWrite,
   WriteError,
   readProposals,
+  writeProfileDocs,
   getGlobalDir,
 } from '@agentbridge/core';
 
@@ -35,6 +36,28 @@ describe('memory write — 봉투 확인', () => {
     const req = parseMemoryWriteRequest({ ...addPayload, op: 'update', id: 'workflows/foo' });
     assert.equal(req.op, 'update');
     assert.equal(req.id, 'workflows/foo');
+  });
+
+  it('정상 withdraw 봉투를 통과시킨다', () => {
+    const req = parseMemoryWriteRequest({
+      op: 'withdraw',
+      scope: 'user',
+      profileId: 'default',
+      id: 'workflows__foo__abc1234',
+    });
+    assert.equal(req.op, 'withdraw');
+    assert.equal(req.id, 'workflows__foo__abc1234');
+  });
+
+  it('withdraw에 식별자가 없거나 경로 구분자가 있으면 거절한다', () => {
+    assert.throws(
+      () => parseMemoryWriteRequest({ op: 'withdraw', scope: 'user', profileId: 'default' }),
+      WriteError,
+    );
+    assert.throws(
+      () => parseMemoryWriteRequest({ op: 'withdraw', scope: 'user', profileId: 'default', id: '../evil' }),
+      WriteError,
+    );
   });
 
   it('모르는 종류는 거절한다', () => {
@@ -82,5 +105,57 @@ describe('memory write — 호스트가 실제로 쓴다', () => {
     );
     const queued = await readProposals(getGlobalDir(storageRoot), 'default', 'user');
     assert.equal(queued.length, 0);
+  });
+
+  it('withdraw가 대기 제안 파일을 지우고 결과 문구를 낸다', async () => {
+    await applyMemoryWrite(storageRoot, parseMemoryWriteRequest(addPayload));
+    const [proposal] = await readProposals(getGlobalDir(storageRoot), 'default', 'user');
+    assert.ok(proposal);
+
+    const out = await applyMemoryWrite(
+      storageRoot,
+      parseMemoryWriteRequest({ op: 'withdraw', scope: 'user', profileId: 'default', id: proposal.id }),
+    );
+    assert.match(out, /대기 제안을 내렸다/);
+    assert.ok(out.includes(proposal.id));
+
+    const remaining = await readProposals(getGlobalDir(storageRoot), 'default', 'user');
+    assert.equal(remaining.length, 0);
+  });
+
+  it('없는 제안을 withdraw하려 하면 거절한다', async () => {
+    await assert.rejects(
+      () => applyMemoryWrite(
+        storageRoot,
+        parseMemoryWriteRequest({ op: 'withdraw', scope: 'user', profileId: 'default', id: 'workflows__none__0000000' }),
+      ),
+      WriteError,
+    );
+  });
+
+  it('대기 제안과 제목이 겹치면 withdraw 안내 문구를 낸다', async () => {
+    await applyMemoryWrite(storageRoot, parseMemoryWriteRequest(addPayload));
+    const [proposal] = await readProposals(getGlobalDir(storageRoot), 'default', 'user');
+    assert.ok(proposal);
+
+    const out = await applyMemoryWrite(storageRoot, parseMemoryWriteRequest(addPayload));
+    assert.match(out, /대기열에 같은 제목의 제안이 있다/);
+    assert.ok(out.includes(`memory withdraw ${proposal.id}`));
+  });
+
+  it('승인된 문서와 제목이 겹치면 update 안내 문구를 낸다', async () => {
+    await writeProfileDocs(getGlobalDir(storageRoot), 'default', {
+      docs: [{
+        category: 'workflows',
+        slug: 'existing-doc',
+        title: '제목',
+        summary: '요약',
+        body: '본문',
+        indexEntries: ['제목'],
+      }],
+    });
+
+    const out = await applyMemoryWrite(storageRoot, parseMemoryWriteRequest(addPayload));
+    assert.match(out, /memory update/);
   });
 });
