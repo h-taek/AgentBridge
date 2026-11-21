@@ -6,7 +6,6 @@ import {
   createSkillInstaller,
   skillFilePath,
   renderSkillMarkdown,
-  renderRunPrefix,
   CLEANUP_SKILL_DIR_NAME,
   renderCleanupSkillMarkdown,
 } from '@agentbridge/core';
@@ -110,10 +109,22 @@ describe('skillInstaller — 전역 스킬 3종 (0.5.0 W4)', () => {
       assert.ok(front.includes('clean up memory'));
     });
 
-    it('실행 줄이 agentbridge 스킬과 같다', () => {
-      const run = renderRunPrefix({ execPath, cliPath });
-      assert.ok(renderSkillMarkdown({ execPath, cliPath }).includes(run));
-      assert.ok(renderCleanupSkillMarkdown({ execPath, cliPath }).includes(run));
+    it('기억 폴더 경로를 박는다', () => {
+      const body = renderCleanupSkillMarkdown({ execPath, cliPath });
+      assert.ok(body.includes('The memory folder is `/Users/x/agentbridge/global`.'));
+    });
+
+    it('공백 든 경로도 그대로 넣는다', () => {
+      const body = renderCleanupSkillMarkdown({ execPath, cliPath: '/Users/x y/agentbridge/bin/agentbridge.js' });
+      assert.ok(body.includes('The memory folder is `/Users/x y/agentbridge/global`.'));
+    });
+
+    it('새 절차의 표지', () => {
+      const body = renderCleanupSkillMarkdown({ execPath, cliPath });
+      assert.ok(body.includes('### 2. Settle every proposal'));
+      assert.ok(body.includes('workspaces.json'));
+      assert.ok(body.includes('## Restore'));
+      assert.ok(body.includes('기억 최신화해'));
     });
 
     it('기존 agentbridge 스킬은 내용이 같으면 다시 쓰지 않는다', async () => {

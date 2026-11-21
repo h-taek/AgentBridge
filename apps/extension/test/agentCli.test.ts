@@ -8,7 +8,6 @@ import {
   getCanonicalBinPath,
   installBinToCanonicalPath,
   getGlobalDir,
-  profileDir,
   writeProfileDocs,
   readProfileDocs,
   profileIdForPath,
@@ -289,54 +288,22 @@ describe('agent CLI — 골격과 신원 해소 (0.5.0 W1)', () => {
     assert.match(r.stdout, /발행 절차/);
   });
 
-  // 정리 스킬(0.9.0 spec/04 §2)이 파일을 직접 고치려면 기억 폴더 위치를 알아야 한다 —
-  // --full 출력 머리가 그 한 줄을 싣는다.
-  describe('memory --full의 폴더 줄 (0.9.0 spec/04)', () => {
-    const userDoc = {
-      category: 'workflows' as const,
-      slug: 'folder-line',
-      title: '폴더 줄 확인',
-      summary: '폴더 줄이 머리에 실린다.',
-      body: '본문',
-      indexEntries: ['폴더 줄'],
-    };
-
-    it('memory user --full은 둘째 줄에 폴더를 싣는다', async () => {
-      await writeProfileDocs(getGlobalDir(root), 'default', { docs: [userDoc] });
+  // 정리 스킬은 기억 폴더 경로를 본문에 박아 쓰므로 --full 출력은 폴더 줄을 싣지 않는다.
+  describe('memory --full (0.9.0 spec/04)', () => {
+    it('memory user --full 출력에 폴더 줄이 없다', async () => {
+      await writeProfileDocs(getGlobalDir(root), 'default', {
+        docs: [{
+          category: 'workflows' as const,
+          slug: 'folder-line',
+          title: '폴더 줄 확인',
+          summary: '폴더 줄이 머리에 실리지 않는다.',
+          body: '본문',
+          indexEntries: ['폴더 줄'],
+        }],
+      });
       const r = run(['memory', 'user', '--full']);
       assert.equal(r.status, 0);
-      const lines = r.stdout.split('\n');
-      assert.ok(lines[0].startsWith('## 사용자 지식 ('), lines[0]);
-      assert.equal(lines[1], '');
-      // CLI는 저장소 루트를 realpath로 푼다(macOS의 /var → /private/var).
-      const realRoot = await fsp.realpath(root);
-      assert.equal(lines[2], '폴더: ' + profileDir(getGlobalDir(realRoot), 'default', 'user'));
-    });
-
-    it('memory project --full도 같다', async () => {
-      const projectFolder = join(tmp, 'project-folder-line');
-      await fsp.mkdir(projectFolder, { recursive: true });
-      const ws = join(root, 'workspaces', 'ws-folder-line');
-      await fsp.mkdir(ws, { recursive: true });
-      await fsp.writeFile(
-        join(ws, 'workspace.json'),
-        JSON.stringify({ workspaceId: 'ws-folder-line', workspacePath: projectFolder, sessions: [] }),
-      );
-      const projectId = profileIdForPath(projectFolder);
-      await writeProfileDocs(getGlobalDir(root), projectId, { docs: [userDoc] }, 'project');
-
-      const r = run(['memory', 'project', '--full'], ws);
-      assert.equal(r.status, 0);
-      const lines = r.stdout.split('\n');
-      assert.ok(lines[0].startsWith('## 프로젝트 지식 ('), lines[0]);
-      const realRoot = await fsp.realpath(root);
-      assert.equal(lines[2], '폴더: ' + profileDir(getGlobalDir(realRoot), projectId, 'project'));
-    });
-
-    it('요약 출력에는 폴더 줄이 없다', async () => {
-      await writeProfileDocs(getGlobalDir(root), 'default', { docs: [userDoc] });
-      const r = run(['memory', 'user']);
-      assert.equal(r.status, 0);
+      assert.ok(r.stdout.startsWith('## 사용자 지식 ('), r.stdout.split('\n')[0]);
       assert.doesNotMatch(r.stdout, /폴더: /);
     });
 

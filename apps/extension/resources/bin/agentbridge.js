@@ -240,6 +240,28 @@ var init_globalPaths = __esm({
   }
 });
 
+// packages/core/src/globalMarkdown.ts
+function slugify(value) {
+  const s = String(value || "").trim().toLowerCase().replace(/[^a-z0-9가-힣]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
+  return s || "doc";
+}
+function extractTitle(markdown) {
+  return String(markdown || "").match(/^#\s+(.+)$/m)?.[1]?.trim() || "";
+}
+function extractSummary(markdown) {
+  return String(markdown || "").match(/## Summary\s+([\s\S]*?)(?:\n## |$)/)?.[1]?.trim() || "";
+}
+function extractIndexEntries(markdown) {
+  const m = String(markdown || "").match(/## Index Entries\s+([\s\S]*?)(?:\n## |$)/);
+  if (!m?.[1]) return [];
+  return m[1].split(/\r?\n/).map((l) => l.trim()).filter((l) => l.startsWith("- ")).map((l) => l.slice(2).trim()).filter(Boolean);
+}
+var init_globalMarkdown = __esm({
+  "packages/core/src/globalMarkdown.ts"() {
+    "use strict";
+  }
+});
+
 // packages/core/src/shared/global.ts
 var GLOBAL_CATEGORIES, DOC_CAPS, PROPOSAL_CAPS;
 var init_global = __esm({
@@ -267,31 +289,6 @@ var init_global = __esm({
       maxPerPass: 12
       // 한 패스가 만들 제안 상한 — 폭주 방지
     };
-  }
-});
-
-// packages/core/src/globalMarkdown.ts
-function slugify(value) {
-  const s = String(value || "").trim().toLowerCase().replace(/[^a-z0-9가-힣]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
-  return s || "doc";
-}
-function extractTitle(markdown) {
-  return String(markdown || "").match(/^#\s+(.+)$/m)?.[1]?.trim() || "";
-}
-function extractSummary(markdown) {
-  return String(markdown || "").match(/## Summary\s+([\s\S]*?)(?:\n## |$)/)?.[1]?.trim() || "";
-}
-function extractIndexEntries(markdown) {
-  const m = String(markdown || "").match(/## Index Entries\s+([\s\S]*?)(?:\n## |$)/);
-  if (!m?.[1]) return [];
-  return m[1].split(/\r?\n/).map((l) => l.trim()).filter((l) => l.startsWith("- ")).map((l) => l.slice(2).trim()).filter(Boolean);
-}
-var CATEGORY_ORDER;
-var init_globalMarkdown = __esm({
-  "packages/core/src/globalMarkdown.ts"() {
-    "use strict";
-    init_global();
-    CATEGORY_ORDER = [...GLOBAL_CATEGORIES, "general"];
   }
 });
 
@@ -341,7 +338,7 @@ function extractTagsBeforeDetails(markdown) {
 }
 async function readProfileDocs(globalDir, profileId, scope = "user") {
   const docsDir = profileDocsDir(globalDir, profileId, scope);
-  const files = (await listDocRelPaths(docsDir)).filter((f) => !/(^|\/)index\.md$/i.test(f));
+  const files = await listDocRelPaths(docsDir);
   const recs = [];
   for (const file of files) {
     const fullPath = (0, import_node_path2.resolve)(docsDir, file);
@@ -818,9 +815,7 @@ async function readMemory(storageRoot, wsDir, scope, full) {
   if (!profileId) return "\uC774 \uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4\uC758 \uD504\uB85C\uC81D\uD2B8 \uC9C0\uC2DD \uC790\uB9AC\uB97C \uCC3E\uC744 \uC218 \uC5C6\uB2E4.";
   const docs = await readProfileDocs(globalDir, profileId, scope).catch(() => []);
   if (docs.length === 0) return `${SCOPE_LABEL[scope]}\uC774 \uC544\uC9C1 \uC5C6\uB2E4.`;
-  const head = full ? `## ${SCOPE_LABEL[scope]} (${docs.length}\uAC74, \uC804\uBB38)
-
-\uD3F4\uB354: ${profileDir(globalDir, profileId, scope)}` : `## ${SCOPE_LABEL[scope]} (${docs.length}\uAC74, \uC694\uC57D)
+  const head = full ? `## ${SCOPE_LABEL[scope]} (${docs.length}\uAC74, \uC804\uBB38)` : `## ${SCOPE_LABEL[scope]} (${docs.length}\uAC74, \uC694\uC57D)
 
 \uC904 \uC55E\uC758 \uAC12\uC774 \uC2DD\uBCC4\uC790\uB2E4. \uC804\uBB38\uC740 --full\uB85C \uBCF8\uB2E4.`;
   return `${head}
@@ -1478,7 +1473,6 @@ var CLEANUP_SKILL_DIR_NAME;
 var init_cleanupSkillTemplate = __esm({
   "packages/core/src/cleanupSkillTemplate.ts"() {
     "use strict";
-    init_skillTemplate();
     CLEANUP_SKILL_DIR_NAME = "agentbridge-memory-cleanup";
   }
 });

@@ -44,8 +44,8 @@ export class ProfileSection {
     this.view = view;
   }
 
-  // 프로필 폴더(~/agentbridge/global) 아래 .md 변경을 감시해 목록을 다시 보낸다.
-  // createSessionFileWatcher와 같은 방식(재귀 fs.watch + 150ms debounce)을 따르되 index.md는 거른다.
+  // 프로필 폴더(~/agentbridge/global) 아래 .md 변경과 proposals/*.json의 생김·지워짐을 감시해
+  // 목록과 대기 수를 다시 보낸다. createSessionFileWatcher와 같은 방식(재귀 fs.watch + 150ms debounce)을 따른다.
   startWatching(): void {
     if (this.docWatcher || this.disposed) return;
     const globalDir = getGlobalDir();

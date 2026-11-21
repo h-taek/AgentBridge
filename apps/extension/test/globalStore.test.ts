@@ -5,7 +5,7 @@ import { join } from 'path';
 import {
   resolveProfile, ensureDefaultProfile, getGlobalDir, profileDir, profilesRoot,
 } from '@agentbridge/core';
-import { writeProfileDocs, readProfileDocs, setDocPinned, profileDocsDir, profileIndexPath } from '@agentbridge/core';
+import { writeProfileDocs, readProfileDocs, setDocPinned, profileDocsDir } from '@agentbridge/core';
 
 async function tmpGlobal(): Promise<string> {
   const root = join(tmpdir(), `gctree-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -19,12 +19,12 @@ describe('globalStore.ensure', () => {
   it('resolveProfile은 v1에서 항상 default', () => {
     assert.equal(resolveProfile('any-workspace-uuid'), 'default');
   });
-  it('ensureDefaultProfile: profiles/default 골격 생성 (profile.json/index.md/docs/proposals)', async () => {
+  it('ensureDefaultProfile: profiles/default 골격 생성 (profile.json/docs/proposals, index.md는 만들지 않음)', async () => {
     const g = await tmpGlobal();
     await ensureDefaultProfile(g);
     const d = profileDir(g, 'default');
     assert.ok(await exists(join(d, 'profile.json')));
-    assert.ok(await exists(join(d, 'index.md')));
+    assert.equal(await exists(join(d, 'index.md')), false);
     assert.ok(await exists(join(d, 'docs')));
     assert.ok(await exists(join(d, 'proposals')));
   });
@@ -44,7 +44,7 @@ describe('globalStore.ensure', () => {
 });
 
 describe('globalStore.write', () => {
-  it('writeProfileDocs: docs/<category>/<slug>.md 기록 + 인덱스 갱신', async () => {
+  it('writeProfileDocs: docs/<category>/<slug>.md 기록 (index.md는 만들지 않음)', async () => {
     const g = await tmpGlobal();
     const res = await writeProfileDocs(g, 'default', {
       docs: [
@@ -57,9 +57,16 @@ describe('globalStore.write', () => {
     const raw = await fsp.readFile(docPath, 'utf8');
     assert.match(raw, /^# git-flow/);
     assert.match(raw, /## Index Entries\n\n- git-flow\n- 배포\n- release/);
-    const idx = await fsp.readFile(profileIndexPath(g, 'default'), 'utf8');
-    assert.ok(idx.indexOf('## Role') < idx.indexOf('## Workflows')); // 카테고리 순서
-    assert.match(idx, /- docs\/workflows\/git-flow\.md\n {2}- git-flow/);
+    assert.equal(await exists(join(profileDir(g, 'default'), 'index.md')), false);
+  });
+  it('readProfileDocs: 폴더 맨 위의 옛 index.md는 항목으로 읽지 않는다', async () => {
+    const g = await tmpGlobal();
+    await writeProfileDocs(g, 'default', {
+      docs: [{ category: 'role', slug: 'solo', title: '1인 개발', summary: '혼자 만든다', body: '', indexEntries: ['solo'] }],
+    });
+    await fsp.writeFile(join(profileDir(g, 'default'), 'index.md'), '# old index\n', 'utf8');
+    const recs = await readProfileDocs(g, 'default');
+    assert.deepEqual(recs.map((r) => `${r.category}/${r.slug}`), ['role/solo']);
   });
   it('잘못된 입력은 쓰기 전에 throw (파일 안 생김)', async () => {
     const g = await tmpGlobal();
