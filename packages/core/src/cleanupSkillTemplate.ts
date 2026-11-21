@@ -136,6 +136,10 @@ back at its old path: a deleted entry returns, a moved one exists twice.
 5. Confirm no \`.json\` is left in any \`proposals/\`. Do not go on until that
    holds.
 
+These accept and discard decisions are approved changes of their own. They
+stay even if cleanup is dropped or restored later; restoring covers only the
+run log of step 6.
+
 ### 3. Read and check against the present
 
 1. Read every scope's \`docs/\` the way the app does. Note separately any file
@@ -210,8 +214,9 @@ in the plan.
 ### 6. Apply
 
 1. Right before the first write, compare the memory folder with the backup
-   again. If anything changed while the user was reading the plan, redo the
-   plan for the affected items and get approval again.
+   plus the proposal decisions of step 2. If anything else changed while the
+   user was reading the plan, redo the plan for the affected items and get
+   approval again.
 2. Before each change, write down the path, its state before and its expected
    state after. This run log is what you restore from if something fails.
 3. Apply only what was approved.
@@ -238,8 +243,9 @@ in the plan.
 
 ### 7. Verify
 
-Build the expected final state from the backup and the approved items, and
-compare the live memory folder with it.
+Build the expected final state from the backup, the proposal decisions of
+step 2 and the approved plan items, and compare the live memory folder with
+it.
 
 1. File set: added, removed and changed paths, compared both ways, match the
    expected state exactly — no unplanned new file, no unplanned change.
@@ -285,7 +291,8 @@ outside the plan is a change the user never approved.
   only copy of the original memory. Report the paths you could not restore and
   where the backup is.
 - If the user drops cleanup at any point — says to stop, or moves on to
-  something else — before any write, delete the backup, confirm it is gone,
-  and say so. After a write, restore first as above.
+  something else — delete the backup, confirm it is gone, and say so. If step
+  6 has already written something, restore its run log first as above.
+  Proposal decisions from step 2 stay either way.
 `;
 }
