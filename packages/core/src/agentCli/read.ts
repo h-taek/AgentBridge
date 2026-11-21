@@ -12,7 +12,7 @@ import { join } from 'path';
 import type { ProposalScope } from '../shared/global';
 import type { SearchDocRecord } from '../globalSearch';
 import { readIR } from '../irStore';
-import { readAllTurns } from '../turnsStore';
+import { readAllTurns, readTurnHistory } from '../turnsStore';
 import { readProfileDocs, resolveProfile } from '../globalStore';
 import { getGlobalDir } from '../globalPaths';
 import { resolveProjectProfileId } from '../gitRemote';
@@ -22,16 +22,24 @@ import { renderIrSections } from './irRender';
 
 // ─── context ────────────────────────────────────────────────────────────
 
+// IR은 턴이 몇 개 쌓일 때마다 오래된 쪽을 흡수하므로 늘 최근 몇 턴이 빠져 있다. 그 턴들은
+// 아직 turns.jsonl에 있다. 경계를 적지 않으면 모델이 IR을 낡은 것으로 오해하고 엉뚱한 범위를
+// 읽으러 가므로, 빠진 턴 수와 그걸 읽는 명령을 머리에 싣는다.
 export async function readContext(wsDir: string): Promise<string> {
   const ir = await readIR(wsDir);
   if (!ir) return '저장된 작업 상태가 없다. 아직 압축된 맥락이 쌓이지 않았다.';
-  return `## 작업 상태 (압축된 맥락)\n\n${renderIrSections(ir)}`;
+  const pending = (await readAllTurns(wsDir)).length;
+  const boundary =
+    pending > 0
+      ? `${ir.meta.updatedAt}까지의 대화를 압축한 상태다. 그 뒤 ${pending}턴은 아직 여기 없다 — \`turns --last ${pending}\`로 원문을 본다.`
+      : `${ir.meta.updatedAt}까지의 대화를 압축한 상태다. 그 뒤 쌓인 턴은 없다.`;
+  return `## 작업 상태 (압축된 맥락)\n\n${boundary}\n\n${renderIrSections(ir)}`;
 }
 
 // ─── turns ──────────────────────────────────────────────────────────────
 
 export async function readTurns(wsDir: string, lastN: number): Promise<string> {
-  const all = await readAllTurns(wsDir);
+  const all = await readTurnHistory(wsDir);
   if (all.length === 0) return '기록된 턴이 없다.';
   const turns = all.slice(-lastN);
   const lines = [`## 최근 대화 원문 (${turns.length}턴, 오래된 것부터)`, ''];

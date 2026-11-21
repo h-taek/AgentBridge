@@ -1524,10 +1524,16 @@ touched and you get the list of files that clashed. It does not commit, does not
 move history, and does not end the sub. Partial picks are not supported: read
 both diffs and write the combination yourself.
 
-A sub does not tell you when it is done. Either \`agent check --wait\`, which
-returns as soon as one finishes (up to a minute, \`--for\` raises it), or go do
-something else \u2014 the next turn tells you how many finished subs are unread.
-Reading a report with \`agent read\` is what clears that.
+A sub does not tell you when it is done, and once your turn ends nobody reads
+its report until the user writes again. So before ending a turn, ask whether
+this turn's answer needs the sub's result. If it does, first do whatever does
+not depend on it, then run \`agent check --wait\` \u2014 it returns as soon as one
+finishes (up to a minute, \`--for\` raises it) \u2014 and run it again while the sub
+is still working. Do not end the turn saying you will read the report when it
+lands; you will not see it land. End the turn without the result only when the
+user said not to wait or handed off a long run, and then tell them the result
+is read on their next message. The next turn tells you how many finished subs
+are unread; reading a report with \`agent read\` is what clears that.
 
 A sub can also go quiet without finishing: the user interrupted its turn, or it
 is stuck waiting on something. \`check\` and the next-turn line both report those
@@ -1911,6 +1917,9 @@ function buildInstructions(storageRoot, blocks) {
     "record, in time order. `turns` is that raw record; `context` is the compacted working",
     "state (the IR) built from it.",
     "",
+    "The IR is compacted in batches, so it never holds the last few turns. That is not",
+    "staleness. `context` says how many turns came after it; read those with `turns`.",
+    "",
     "So `turns` is not you re-reading your own context. Conversations you have never seen are",
     "in there. Each turn is labeled with the CLI it came from.",
     "",
@@ -1958,8 +1967,10 @@ function buildInstructions(storageRoot, blocks) {
     'This is what the user means by: "\uC11C\uBE0C\uC5D0\uC774\uC804\uD2B8 \uB744\uC6CC", run it in another harness, a second',
     "opinion, run several in parallel, ask another model too.",
     "",
-    "A subagent does not tell you when it is done. Ask with `agent check`, or the next turn's",
-    "2-1 says how many are unread. Reading one with `agent read` is what clears it.",
+    "A subagent does not tell you when it is done. If this turn's answer needs its result,",
+    "run `agent check --wait` before you end the turn, and again while it is still working \u2014",
+    "once your turn ends, nobody reads the report until the user writes again. Otherwise the",
+    "next turn's 2-1 says how many are unread. Reading one with `agent read` is what clears it.",
     "",
     "### 2-3. After a report",
     "",

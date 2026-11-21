@@ -140,6 +140,25 @@ describe('agent CLI — 골격과 신원 해소 (0.5.0 W1)', () => {
     assert.match(r.stdout, /환경변수로 받는다/);
   });
 
+  // IR은 압축 단위로 갱신돼 늘 최근 몇 턴이 빠져 있다. 그 사실을 적지 않으면 모델이 IR을
+  // 낡은 것으로 오해한다 — 빠진 턴 수와 그걸 읽는 명령을 머리에 싣는다.
+  it('context — 압축 뒤에 쌓인 턴 수와 그걸 읽는 명령을 머리에 싣는다', async () => {
+    const line = (n: number) => JSON.stringify({
+      id: `c${n}`, model: 'claude', completedAt: '', user: `u${n}`, userBytes: 2,
+      assistantBody: 'a', assistantBodyBytes: 1, toolCalls: [],
+    });
+    await fsp.writeFile(join(wsDir, 'turns.jsonl'), [1, 2].map(line).join('\n') + '\n');
+    try {
+      const r = run(['context']);
+      assert.equal(r.status, 0);
+      assert.match(r.stdout, /2026-08-31T00:10:00\.000Z/);
+      assert.match(r.stdout, /2턴/);
+      assert.match(r.stdout, /turns --last 2/);
+    } finally {
+      await fsp.rm(join(wsDir, 'turns.jsonl'), { force: true });
+    }
+  });
+
   it('turns — 기록이 없으면 그 사실을 말한다', () => {
     const r = run(['turns']);
     assert.equal(r.status, 0);
@@ -171,6 +190,45 @@ describe('agent CLI — 골격과 신원 해소 (0.5.0 W1)', () => {
     const one = run(['turns', '--last', '1']);
     assert.match(one.stdout, /질문 5/);
     assert.doesNotMatch(one.stdout, /질문 4/);
+  });
+
+  it('turns — 압축돼 archive로 간 턴까지 시간순으로 이어 읽는다', async () => {
+    const turn = (n: number) => JSON.stringify({
+      id: `t${n}`,
+      workspaceId: 'ws-1',
+      sessionId: 's1',
+      model: 'claude',
+      startedAt: `2026-08-31T00:0${n}:00.000Z`,
+      completedAt: `2026-08-31T00:0${n}:30.000Z`,
+      user: `질문 ${n}`,
+      userBytes: 5,
+      assistantBody: `답 ${n}`,
+      assistantBodyBytes: 3,
+      toolCalls: [],
+    });
+    const snapshot = JSON.stringify({ type: 'ir_snapshot', archivedAt: '', ir: {} });
+    const archive = join(wsDir, 'archive');
+    await fsp.mkdir(archive, { recursive: true });
+    await fsp.writeFile(
+      join(archive, 'compressed_2026-08-31T00-01-00-000Z.jsonl'),
+      [snapshot, turn(1), turn(2)].join('\n') + '\n',
+    );
+    await fsp.writeFile(
+      join(archive, 'compressed_2026-08-31T00-04-00-000Z.jsonl'),
+      [snapshot, turn(3), turn(4)].join('\n') + '\n',
+    );
+    await fsp.writeFile(join(wsDir, 'turns.jsonl'), [5, 6].map(turn).join('\n') + '\n');
+
+    try {
+      const r = run(['turns', '--last', '5']);
+      assert.equal(r.status, 0);
+      assert.match(r.stdout, /\(5턴, 오래된 것부터\)/);
+      assert.doesNotMatch(r.stdout, /질문 1/);
+      const order = [2, 3, 4, 5, 6].map((n) => r.stdout.indexOf(`질문 ${n}`));
+      assert.ok(order.every((pos, i) => pos >= 0 && (i === 0 || pos > order[i - 1])), r.stdout);
+    } finally {
+      await fsp.rm(archive, { recursive: true, force: true });
+    }
   });
 
   it('turns — --last에 숫자가 아닌 값이 오면 거절한다', () => {
