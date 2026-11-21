@@ -28,6 +28,7 @@ import {
   HOST_AGENT_CLOSE,
   HOST_AGENT_MERGE,
   HOST_AGENT_MODELS,
+  HOST_SESSION_NEW,
   type HostRequest,
 } from '../hostRequest';
 
@@ -428,6 +429,11 @@ export function agentCloseRound(sessionDir: string | undefined): Promise<string>
 
 export function agentMerge(sessionDir: string | undefined, name: string): Promise<string> {
   return callHost(sessionDir, HOST_AGENT_MERGE, { name });
+}
+
+// 부모 없는 새 메인 세션 탭. 하니스를 안 주면 호스트가 부른 세션의 하니스로 정한다.
+export function sessionNew(sessionDir: string | undefined, harness?: string): Promise<string> {
+  return callHost(sessionDir, HOST_SESSION_NEW, harness ? { harness } : {});
 }
 
 export function agentModels(
