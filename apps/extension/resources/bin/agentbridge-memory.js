@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// @agentbridge-helper-version 0.6.4
+// @agentbridge-helper-version 0.6.5
 "use strict";
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -1459,10 +1459,16 @@ Each line is the part after the run command.
     memory update <id> [same flags]
     memory pending                proposals waiting for approval
     memory withdraw <proposal-id> take one back
+    session new [--harness claude|codex|agy]
+                                  open a new main session tab \u2014 only when the
+                                  user asks for a new main session
 
 Categories: role, repos, domain, workflows, conventions, infra, verification.
 
 ## Subagents
+
+If the hook says you are a subagent, skip this section \u2014 a subagent does not
+start sessions.
 
 You can run other coding agents as subagents. Each gets its own session and
 tab; you give it work, it reports back, you read the report.
@@ -1551,6 +1557,11 @@ closing it.
 Every read output item starts with its identifier (\`<category>/<slug>\`) \u2014
 that is what \`memory update\` takes.
 
+\`session new\` is not a subagent. It opens a separate main session with no tie to
+this one \u2014 no report, no round cleanup. Use it only when the user asks for a new
+main session (for example, a fresh seat to drive over remote control). For work
+you hand off and review, use \`agent start\`.
+
 ### Evaluating the model a sub ran on
 
 After reviewing a sub, ask whether its result says something about the model
@@ -1635,7 +1646,7 @@ var SKILL_VERSION, SKILL_DIR_NAME;
 var init_skillTemplate = __esm({
   "packages/core/src/skillTemplate.ts"() {
     "use strict";
-    SKILL_VERSION = "0.6.2";
+    SKILL_VERSION = "0.6.3";
     SKILL_DIR_NAME = "agentbridge";
   }
 });
@@ -1802,6 +1813,16 @@ async function buildSubagentBlocks(wsDir, sessionToken) {
     stuck: stuck.length === 0 ? "" : 'Check the stalled subagents with `agent read <name>`, then send more instructions (`agent send <name> --prompt "..."`) or close them (`agent close <name>`). ' + stuck.length + " went quiet without finishing (" + stuck.join(", ") + "). The user may have interrupted them, or they may be stuck."
   };
 }
+function isSubSession(wsDir, sessionToken) {
+  if (!sessionToken || sessionToken !== path.basename(sessionToken)) return false;
+  try {
+    const sessions = JSON.parse(fs4.readFileSync(path.join(wsDir, "workspace.json"), "utf8")).sessions || [];
+    const mine = sessions.find((s) => s.sessionId === sessionToken);
+    return !!(mine && mine.parentSessionId);
+  } catch {
+    return false;
+  }
+}
 function slugCarriesTitle(slug, title) {
   const norm = (v) => String(v || "").toLowerCase().replace(/[^a-z0-9가-힣]/g, "");
   const withoutHash = String(slug || "").replace(/-[a-z0-9]{5,10}$/, "");
@@ -1951,34 +1972,51 @@ function buildInstructions(storageRoot, blocks) {
     "## 2. Other agent sessions",
     ""
   );
-  const subTurn = [b.subUnread, b.subStuck].filter(Boolean);
-  if (subTurn.length > 0) {
-    push("### 2-1. Do this turn", "");
-    push(subTurn.join("\n\n"), "");
+  if (b.isSub) {
+    push(
+      "### 2-2. You are a subagent",
+      "",
+      "Another agent session started this one as its subagent. Do not start subagents",
+      "or new sessions from here \u2014 `agent start` and `session new` refuse in a",
+      "subagent. If the work needs another agent, say so in your report; the main",
+      "session decides.",
+      "",
+      "Do not use your own built-in subagent tool for that either.",
+      "",
+      ""
+    );
+  } else {
+    const subTurn = [b.subUnread, b.subStuck].filter(Boolean);
+    if (subTurn.length > 0) {
+      push("### 2-1. Do this turn", "");
+      push(subTurn.join("\n\n"), "");
+    }
+    push(
+      "### 2-2. What they are",
+      "",
+      "You can run other coding agents as subagents. Each gets its own session and tab, takes",
+      "the work you give it, and leaves a report. You pick the harness \u2014 claude, codex, agy.",
+      "",
+      "**These are not your own built-in subagent tool. Do not use that tool.**",
+      "",
+      'This is what the user means by: "\uC11C\uBE0C\uC5D0\uC774\uC804\uD2B8 \uB744\uC6CC", run it in another harness, a second',
+      "opinion, run several in parallel, ask another model too.",
+      "",
+      "A subagent does not tell you when it is done. If this turn's answer needs its result,",
+      "run `agent check --wait` before you end the turn, and again while it is still working \u2014",
+      "once your turn ends, nobody reads the report until the user writes again. Otherwise the",
+      "next turn's 2-1 says how many are unread. Reading one with `agent read` is what clears it.",
+      "",
+      "### 2-3. After a report",
+      "",
+      "A review is the report and the actual changes side by side. One without the other is not",
+      "a review. How to see the changes, how to take them, how to run several in isolation, and",
+      "how to clean up a round are in the `agentbridge` skill.",
+      "",
+      ""
+    );
   }
   push(
-    "### 2-2. What they are",
-    "",
-    "You can run other coding agents as subagents. Each gets its own session and tab, takes",
-    "the work you give it, and leaves a report. You pick the harness \u2014 claude, codex, agy.",
-    "",
-    "**These are not your own built-in subagent tool. Do not use that tool.**",
-    "",
-    'This is what the user means by: "\uC11C\uBE0C\uC5D0\uC774\uC804\uD2B8 \uB744\uC6CC", run it in another harness, a second',
-    "opinion, run several in parallel, ask another model too.",
-    "",
-    "A subagent does not tell you when it is done. If this turn's answer needs its result,",
-    "run `agent check --wait` before you end the turn, and again while it is still working \u2014",
-    "once your turn ends, nobody reads the report until the user writes again. Otherwise the",
-    "next turn's 2-1 says how many are unread. Reading one with `agent read` is what clears it.",
-    "",
-    "### 2-3. After a report",
-    "",
-    "A review is the report and the actual changes side by side. One without the other is not",
-    "a review. How to see the changes, how to take them, how to run several in isolation, and",
-    "how to clean up a round are in the `agentbridge` skill.",
-    "",
-    "",
     "## 3. Commands",
     "",
     "Reading and recording.",
@@ -1995,22 +2033,28 @@ function buildInstructions(storageRoot, blocks) {
     "    status                     whether the wiring is alive, when a command fails",
     "",
     "`memory add` and `memory update` go to a queue the user approves.",
-    "",
-    "Subagents.",
-    "",
-    '    agent start --prompt "..." [--harness claude,codex,agy]',
-    "    agent check                how they are doing",
-    "    agent read <name>          that subagent's conversation",
-    '    agent send <name> --prompt "..."',
-    "    agent close <name>         end it and clean up what it left",
-    "",
-    "`turns` and `agent read` are not the same. `turns` is every conversation in this project;",
-    "`agent read <name>` is one subagent you started. When the user says to check the session",
-    "conversation, that is `turns`.",
-    "",
+    ""
+  );
+  if (!b.isSub) {
+    push(
+      "Subagents.",
+      "",
+      '    agent start --prompt "..." [--harness claude,codex,agy]',
+      "    agent check                how they are doing",
+      "    agent read <name>          that subagent's conversation",
+      '    agent send <name> --prompt "..."',
+      "    agent close <name>         end it and clean up what it left",
+      "",
+      "`turns` and `agent read` are not the same. `turns` is every conversation in this project;",
+      "`agent read <name>` is one subagent you started. When the user says to check the session",
+      "conversation, that is `turns`.",
+      ""
+    );
+  }
+  push(
     "This is not the whole list. Arguments and procedures are in the `agentbridge` skill. Open",
-    "it when you pick a scope to record into, when you check for duplicates, and for anything",
-    "in 2-3.",
+    b.isSub ? "it when you pick a scope to record into and when you check for duplicates." : "it when you pick a scope to record into, when you check for duplicates, and for anything",
+    ...b.isSub ? [] : ["in 2-3."],
     "",
     "",
     "## 4. When you answer",
@@ -2261,6 +2305,7 @@ async function main() {
     if (isProposalTurn2(await readTurnCount2(sessionDir))) proposalBlock = buildProposalBlock();
   } catch {
   }
+  const isSub = isSubSession(wsDir, process.env.AGENTBRIDGE_WS_SESSION || "");
   let subs = { unread: "", stuck: "" };
   try {
     subs = await buildSubagentBlocks(wsDir, process.env.AGENTBRIDGE_WS_SESSION || "");
@@ -2277,7 +2322,8 @@ async function main() {
             matchBlock,
             proposalBlock,
             subUnread: subs.unread,
-            subStuck: subs.stuck
+            subStuck: subs.stuck,
+            isSub
           })
         )
       )

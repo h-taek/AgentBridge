@@ -24,7 +24,7 @@
 
 'use strict'
 
-// @agentbridge-helper-version 0.6.4
+// @agentbridge-helper-version 0.6.5
 // (단일 설치 버전 비교용 — 이 파일을 수정하면 반드시 버전을 올릴 것)
 
 const fs = require('fs')
@@ -264,6 +264,19 @@ async function buildSubagentBlocks(wsDir, sessionToken) {
   }
 }
 
+// 이 세션이 서브인지 (0.9.0 spec/03 §2). 판정은 세션 기록의 parentSessionId다 — 작업 폴더로 가르지
+// 않는다. 기록을 못 읽거나 자기 세션이 없으면 메인으로 본다. 그래야 지금 동작이 안 깨진다.
+function isSubSession(wsDir, sessionToken) {
+  if (!sessionToken || sessionToken !== path.basename(sessionToken)) return false
+  try {
+    const sessions = JSON.parse(fs.readFileSync(path.join(wsDir, 'workspace.json'), 'utf8')).sessions || []
+    const mine = sessions.find((s) => s.sessionId === sessionToken)
+    return !!(mine && mine.parentSessionId)
+  } catch {
+    return false
+  }
+}
+
 // 이번 턴 프롬프트에 걸린 장기 기억 (spec §1). 식별자와 제목만 싣는다.
 //
 // 제목을 덧붙이지 않는 자리가 있다. `memory add`로 들어온 항목은 슬러그가 제목을 slugify한
@@ -437,35 +450,55 @@ function buildInstructions(storageRoot, blocks) {
     ''
   )
 
-  const subTurn = [b.subUnread, b.subStuck].filter(Boolean)
-  if (subTurn.length > 0) {
-    push('### 2-1. Do this turn', '')
-    push(subTurn.join('\n\n'), '')
+  // 서브 차례는 2-1(자식이 없어 붙을 것이 없다)과 2-2·2-3을 들어내고 소절 하나를 싣는다 (0.9.0
+  // spec/03 §2). 매 턴 바꿔 싣는다 — 첫 턴에만 넣으면 하니스가 맥락을 압축할 때 사라진다.
+  if (b.isSub) {
+    push(
+      '### 2-2. You are a subagent',
+      '',
+      'Another agent session started this one as its subagent. Do not start subagents',
+      'or new sessions from here — `agent start` and `session new` refuse in a',
+      'subagent. If the work needs another agent, say so in your report; the main',
+      'session decides.',
+      '',
+      'Do not use your own built-in subagent tool for that either.',
+      '',
+      ''
+    )
+  } else {
+    const subTurn = [b.subUnread, b.subStuck].filter(Boolean)
+    if (subTurn.length > 0) {
+      push('### 2-1. Do this turn', '')
+      push(subTurn.join('\n\n'), '')
+    }
+
+    push(
+      '### 2-2. What they are',
+      '',
+      'You can run other coding agents as subagents. Each gets its own session and tab, takes',
+      'the work you give it, and leaves a report. You pick the harness — claude, codex, agy.',
+      '',
+      '**These are not your own built-in subagent tool. Do not use that tool.**',
+      '',
+      'This is what the user means by: "서브에이전트 띄워", run it in another harness, a second',
+      'opinion, run several in parallel, ask another model too.',
+      '',
+      'A subagent does not tell you when it is done. If this turn\'s answer needs its result,',
+      'run `agent check --wait` before you end the turn, and again while it is still working —',
+      'once your turn ends, nobody reads the report until the user writes again. Otherwise the',
+      'next turn\'s 2-1 says how many are unread. Reading one with `agent read` is what clears it.',
+      '',
+      '### 2-3. After a report',
+      '',
+      'A review is the report and the actual changes side by side. One without the other is not',
+      'a review. How to see the changes, how to take them, how to run several in isolation, and',
+      'how to clean up a round are in the `agentbridge` skill.',
+      '',
+      ''
+    )
   }
 
   push(
-    '### 2-2. What they are',
-    '',
-    'You can run other coding agents as subagents. Each gets its own session and tab, takes',
-    'the work you give it, and leaves a report. You pick the harness — claude, codex, agy.',
-    '',
-    '**These are not your own built-in subagent tool. Do not use that tool.**',
-    '',
-    'This is what the user means by: "서브에이전트 띄워", run it in another harness, a second',
-    'opinion, run several in parallel, ask another model too.',
-    '',
-    'A subagent does not tell you when it is done. If this turn\'s answer needs its result,',
-    'run `agent check --wait` before you end the turn, and again while it is still working —',
-    'once your turn ends, nobody reads the report until the user writes again. Otherwise the',
-    'next turn\'s 2-1 says how many are unread. Reading one with `agent read` is what clears it.',
-    '',
-    '### 2-3. After a report',
-    '',
-    'A review is the report and the actual changes side by side. One without the other is not',
-    'a review. How to see the changes, how to take them, how to run several in isolation, and',
-    'how to clean up a round are in the `agentbridge` skill.',
-    '',
-    '',
     '## 3. Commands',
     '',
     'Reading and recording.',
@@ -482,22 +515,32 @@ function buildInstructions(storageRoot, blocks) {
     '    status                     whether the wiring is alive, when a command fails',
     '',
     '`memory add` and `memory update` go to a queue the user approves.',
-    '',
-    'Subagents.',
-    '',
-    '    agent start --prompt "..." [--harness claude,codex,agy]',
-    '    agent check                how they are doing',
-    '    agent read <name>          that subagent\'s conversation',
-    '    agent send <name> --prompt "..."',
-    '    agent close <name>         end it and clean up what it left',
-    '',
-    '`turns` and `agent read` are not the same. `turns` is every conversation in this project;',
-    '`agent read <name>` is one subagent you started. When the user says to check the session',
-    'conversation, that is `turns`.',
-    '',
+    ''
+  )
+
+  if (!b.isSub) {
+    push(
+      'Subagents.',
+      '',
+      '    agent start --prompt "..." [--harness claude,codex,agy]',
+      '    agent check                how they are doing',
+      '    agent read <name>          that subagent\'s conversation',
+      '    agent send <name> --prompt "..."',
+      '    agent close <name>         end it and clean up what it left',
+      '',
+      '`turns` and `agent read` are not the same. `turns` is every conversation in this project;',
+      '`agent read <name>` is one subagent you started. When the user says to check the session',
+      'conversation, that is `turns`.',
+      ''
+    )
+  }
+
+  push(
     'This is not the whole list. Arguments and procedures are in the `agentbridge` skill. Open',
-    'it when you pick a scope to record into, when you check for duplicates, and for anything',
-    'in 2-3.',
+    b.isSub
+      ? 'it when you pick a scope to record into and when you check for duplicates.'
+      : 'it when you pick a scope to record into, when you check for duplicates, and for anything',
+    ...(b.isSub ? [] : ['in 2-3.']),
     '',
     '',
     '## 4. When you answer',
@@ -797,6 +840,7 @@ async function main() {
     /* 카운터를 못 읽으면 제안 블록만 빠진다 */
   }
 
+  const isSub = isSubSession(wsDir, process.env.AGENTBRIDGE_WS_SESSION || '')
   let subs = { unread: '', stuck: '' }
   try {
     subs = await buildSubagentBlocks(wsDir, process.env.AGENTBRIDGE_WS_SESSION || '')
@@ -815,7 +859,8 @@ async function main() {
             matchBlock,
             proposalBlock,
             subUnread: subs.unread,
-            subStuck: subs.stuck
+            subStuck: subs.stuck,
+            isSub
           })
         )
       )

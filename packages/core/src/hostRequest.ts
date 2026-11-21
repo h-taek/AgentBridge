@@ -50,12 +50,16 @@ export const HOST_AGENT_MODELS = 'agent-models';
 // 것이다 — 뱃지와 목록을 쥔 쪽이 곧 쓰는 쪽이 되면 통지가 따로 필요 없다.
 export const HOST_MEMORY_WRITE = 'memory-write';
 
+// 모델이 부르는 새 메인 세션 (0.9.0 spec/02). PTY를 만들고 탭을 여는 일이라 CLI가 혼자 못 한다.
+export const HOST_SESSION_NEW = 'session-new';
+
 // 종류별 시한. PTY를 만들거나 git을 부르거나 하니스 모델 목록을 조회하는 것은 다른 것보다 오래 걸린다.
 const LONG_KINDS = new Set<string>([
   HOST_AGENT_START,
   HOST_AGENT_CLOSE,
   HOST_AGENT_MERGE,
   HOST_AGENT_MODELS,
+  HOST_SESSION_NEW,
 ]);
 const LONG_TIMEOUT_MS = 30_000;
 

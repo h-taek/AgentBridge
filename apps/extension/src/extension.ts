@@ -410,6 +410,7 @@ export function activate(context: vscode.ExtensionContext) {
     buildOpts,
     openPanel: (opts, workspaceId, preserveFocus) => openChatPanel(opts, workspaceId, preserveFocus),
     refreshTree: () => { void sessionsView.refresh(); },
+    isAvailable: (model) => checkAvailability(model).found,
   });
 
   // --- Commands ---

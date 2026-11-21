@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// @agentbridge-cli-version 0.6.1
+// @agentbridge-cli-version 0.6.2
 "use strict";
 var __create = Object.create;
 var __defProp = Object.defineProperty;
@@ -962,7 +962,7 @@ async function sendHostRequest(sessionDir2, request, opts = {}) {
     at: now()
   };
 }
-var import_fs5, import_path6, HOST_REQUEST_FILENAME, HOST_RESULT_FILENAME, HOST_REQUEST_TIMEOUT_MS, POLL_MS, HOST_PING, HOST_AGENT_START, HOST_AGENT_SEND, HOST_AGENT_STOP, HOST_AGENT_CLOSE, HOST_AGENT_MERGE, HOST_AGENT_MODELS, HOST_MEMORY_WRITE, LONG_KINDS, LONG_TIMEOUT_MS, defaultSleep;
+var import_fs5, import_path6, HOST_REQUEST_FILENAME, HOST_RESULT_FILENAME, HOST_REQUEST_TIMEOUT_MS, POLL_MS, HOST_PING, HOST_AGENT_START, HOST_AGENT_SEND, HOST_AGENT_STOP, HOST_AGENT_CLOSE, HOST_AGENT_MERGE, HOST_AGENT_MODELS, HOST_MEMORY_WRITE, HOST_SESSION_NEW, LONG_KINDS, LONG_TIMEOUT_MS, defaultSleep;
 var init_hostRequest = __esm({
   "packages/core/src/hostRequest.ts"() {
     "use strict";
@@ -980,11 +980,13 @@ var init_hostRequest = __esm({
     HOST_AGENT_MERGE = "agent-merge";
     HOST_AGENT_MODELS = "agent-models";
     HOST_MEMORY_WRITE = "memory-write";
+    HOST_SESSION_NEW = "session-new";
     LONG_KINDS = /* @__PURE__ */ new Set([
       HOST_AGENT_START,
       HOST_AGENT_CLOSE,
       HOST_AGENT_MERGE,
-      HOST_AGENT_MODELS
+      HOST_AGENT_MODELS,
+      HOST_SESSION_NEW
     ]);
     LONG_TIMEOUT_MS = 3e4;
     defaultSleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -6388,7 +6390,8 @@ __export(agent_exports, {
   agentStart: () => agentStart,
   agentStop: () => agentStop,
   formatSubLabel: () => formatSubLabel,
-  listSubs: () => listSubs
+  listSubs: () => listSubs,
+  sessionNew: () => sessionNew
 });
 async function readSessions(wsDir) {
   try {
@@ -6623,6 +6626,9 @@ function agentCloseRound(sessionDir2) {
 function agentMerge(sessionDir2, name) {
   return callHost(sessionDir2, HOST_AGENT_MERGE, { name });
 }
+function sessionNew(sessionDir2, harness) {
+  return callHost(sessionDir2, HOST_SESSION_NEW, harness ? { harness } : {});
+}
 function agentModels(sessionDir2, harnesses) {
   return callHost(
     sessionDir2,
@@ -6730,6 +6736,7 @@ var {
   agentCloseRound: agentCloseRound2,
   agentMerge: agentMerge2,
   agentModels: agentModels2,
+  sessionNew: sessionNew2,
   DEFAULT_WAIT_SEC: DEFAULT_WAIT_SEC2
 } = (init_agent(), __toCommonJS(agent_exports));
 var { uninstallGlobal: uninstallGlobal2 } = (init_uninstall(), __toCommonJS(uninstall_exports));
@@ -6756,7 +6763,8 @@ var COMMANDS = [
   ["agent merge <\uC774\uB984>", "\uADF8 \uC11C\uBE0C\uC758 \uBCC0\uACBD\uC744 \uC6D0\uBCF8\uC5D0 \uC5B9\uB294\uB2E4 (\uC804\uBD80 \uC544\uB2C8\uBA74 \uC544\uBB34\uAC83\uB3C4)"],
   ["agent stop <\uC774\uB984>", "\uC11C\uBE0C\uB97C \uB05D\uB0B8\uB2E4"],
   ["agent close <\uC774\uB984>", "\uC11C\uBE0C\uB97C \uC815\uB9AC\uD55C\uB2E4 (\uACA9\uB9AC\uC600\uC73C\uBA74 \uD3F4\uB354\uC640 \uBE0C\uB79C\uCE58\uB3C4 \uC9C0\uC6B4\uB2E4)"],
-  ["agent close --round", "\uB77C\uC6B4\uB4DC\uB97C \uC815\uB9AC\uD55C\uB2E4 (\uBA38\uC9C0\uB41C \uD558\uB098\uB9CC \uB0A8\uAE30\uACE0 \uC804\uBD80)"]
+  ["agent close --round", "\uB77C\uC6B4\uB4DC\uB97C \uC815\uB9AC\uD55C\uB2E4 (\uBA38\uC9C0\uB41C \uD558\uB098\uB9CC \uB0A8\uAE30\uACE0 \uC804\uBD80)"],
+  ["session new [--harness h]", "\uC0C8 \uBA54\uC778 \uC138\uC158 \uD0ED\uC744 \uC5F0\uB2E4"]
 ];
 var USAGE = [
   "agentbridge \u2014 AgentBridge \uB9E5\uB77D \uC77D\uAE30",
@@ -6992,6 +7000,15 @@ async function dispatch(cmd, args, wsDir, storageRoot) {
         default:
           return usageAndExit();
       }
+    }
+    case "session": {
+      if (args[0] !== "new") return usageAndExit();
+      const rest = args.slice(1);
+      const caller = process.env.AGENTBRIDGE_WS_SESSION || "";
+      if (!caller || caller !== path.basename(caller)) fail("\uC774 \uC138\uC158\uC758 \uC2E0\uC6D0\uC744 \uC54C \uC218 \uC5C6\uB2E4");
+      const harness = strOption(rest, "--harness");
+      if (harness !== void 0 && harness.includes(",")) fail("session new\uB294 \uD558\uB2C8\uC2A4\uB97C \uD558\uB098\uB9CC \uBC1B\uB294\uB2E4");
+      return sessionNew2(sessionDir(wsDir), harness);
     }
     case "status":
       return readStatus2(storageRoot, wsDir, { sessionDir: sessionDir(wsDir) });

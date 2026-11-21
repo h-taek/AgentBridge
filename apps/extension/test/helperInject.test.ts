@@ -702,3 +702,108 @@ describe('helper inject — 첫 턴 핀 주입 (0.8.0 spec/05 §2-2)', () => {
     assert.doesNotMatch(nextTurn.injectSteps[0].ephemeralMessage, /The user pinned these\./);
   });
 });
+
+// 서브 차례의 2절 (0.9.0 spec/03 §2). 서브는 서브를 못 띄우므로 서브 소절로 바꿔 싣고,
+// 판정은 워크스페이스의 세션 기록에서 자기 세션의 parentSessionId를 보는 것으로 한다.
+describe('helper inject — 서브 차례 (0.9.0 spec/03 §2)', () => {
+  let tmp: string;
+  let bundlePath: string;
+  let userData: string;
+  let wsDir: string;
+
+  before(async function () {
+    this.timeout(30000);
+    tmp = await fsp.mkdtemp(join(tmpdir(), 'ab-helper-sub-'));
+    userData = join(tmp, 'userdata');
+    await fsp.mkdir(join(userData, 'bin'), { recursive: true });
+    bundlePath = join(userData, 'bin', 'agentbridge-memory.js');
+    const bundlerScript = join(process.cwd(), '..', '..', 'scripts', 'bundle-helper.mjs');
+    execFileSync('node', [bundlerScript, bundlePath], { encoding: 'utf8' });
+
+    wsDir = join(userData, 'workspaces', 'ws-1');
+    await fsp.mkdir(wsDir, { recursive: true });
+    await fsp.writeFile(
+      join(wsDir, 'workspace.json'),
+      JSON.stringify({
+        workspaceId: 'ws-1',
+        sessions: [
+          { sessionId: 'sub-1', parentSessionId: 'main-1', agentName: 'a' },
+          { sessionId: 'main-1' },
+        ],
+      }),
+      'utf8',
+    );
+  });
+
+  after(async () => {
+    if (tmp) await fsp.rm(tmp, { recursive: true, force: true });
+  });
+
+  function ctxFor(session: string): string {
+    const out = execFileSync(
+      'node',
+      [bundlePath, 'inject', '--agent', 'claude', '--event', 'UserPromptSubmit'],
+      {
+        input: JSON.stringify({ prompt: 'hello' }),
+        encoding: 'utf8',
+        env: { ...process.env, AGENTBRIDGE_WS_DIR: wsDir, AGENTBRIDGE_WS_SESSION: session },
+      },
+    );
+    return JSON.parse(out).hookSpecificOutput.additionalContext as string;
+  }
+
+  it('서브 차례는 서브 소절을 싣는다', () => {
+    const ctx = ctxFor('sub-1');
+    assert.match(ctx, /### 2-2\. You are a subagent/);
+    assert.match(ctx, /Do not use your own built-in subagent tool for that either\./);
+    assert.doesNotMatch(ctx, /### 2-2\. What they are/);
+    assert.doesNotMatch(ctx, /### 2-3\. After a report/);
+    assert.doesNotMatch(ctx, /and for anything/);
+    // 3절의 서브 명령 묶음이 통째로 빠진다. 소절 안의 `agent start`는 "거절된다"는 설명이라 남는다.
+    assert.doesNotMatch(ctx, /Subagents\./);
+    assert.doesNotMatch(ctx, /agent start --prompt/);
+    assert.doesNotMatch(ctx, /agent check/);
+    assert.doesNotMatch(ctx, /agent read/);
+    assert.doesNotMatch(ctx, /agent close/);
+    assert.equal(ctx.split('agent start').length - 1, 1);
+    // 3절 끝 단락은 2-3을 가리키지 않는 두 줄로 바뀐다.
+    assert.match(ctx, /it when you pick a scope to record into and when you check for duplicates\./);
+    // 나머지 절은 메인과 같다.
+    assert.match(ctx, /## 1\. Context/);
+    assert.match(ctx, /## 4\. When you answer/);
+  });
+
+  it('메인 차례는 지금과 같다', () => {
+    const ctx = ctxFor('main-1');
+    assert.match(ctx, /### 2-2\. What they are/);
+    assert.match(ctx, /### 2-3\. After a report/);
+    assert.match(ctx, /agent start --prompt/);
+    assert.match(ctx, /and for anything/);
+    assert.doesNotMatch(ctx, /You are a subagent/);
+  });
+
+  it('기록이 없으면 메인 문구다', () => {
+    const ctx = ctxFor('nobody');
+    assert.match(ctx, /### 2-2\. What they are/);
+    assert.doesNotMatch(ctx, /You are a subagent/);
+  });
+
+  it('workspace.json을 못 읽으면 메인 문구다', async () => {
+    const other = join(userData, 'workspaces', 'ws-none');
+    await fsp.mkdir(other, { recursive: true });
+    const out = execFileSync(
+      'node',
+      [bundlePath, 'inject', '--agent', 'claude', '--event', 'UserPromptSubmit'],
+      {
+        input: JSON.stringify({ prompt: 'hello' }),
+        encoding: 'utf8',
+        env: { ...process.env, AGENTBRIDGE_WS_DIR: other, AGENTBRIDGE_WS_SESSION: 'sub-1' },
+      },
+    );
+    assert.match(JSON.parse(out).hookSpecificOutput.additionalContext, /### 2-2\. What they are/);
+  });
+
+  it('서브 주입문도 9KB 안이다', () => {
+    assert.ok(Buffer.byteLength(ctxFor('sub-1'), 'utf8') <= 9 * 1024);
+  });
+});
