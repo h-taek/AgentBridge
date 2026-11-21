@@ -90,5 +90,6 @@
   "Reload": "새로고침",
   "Zoom out": "축소",
   "Zoom in": "확대",
-  "Zoom: click to enter": "배율: 눌러서 입력"
+  "Zoom: click to enter": "배율: 눌러서 입력",
+  "AgentBridge: {0} launch args {1} are set by AgentBridge, so they were left out.": "AgentBridge: {0} 실행 인자 중 {1}는 AgentBridge가 정하는 값이라 빼고 띄웠다."
 }

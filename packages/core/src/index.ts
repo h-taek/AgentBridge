@@ -110,6 +110,7 @@ export * from './cliAdapter/agyResume';
 export * from './cliAdapter/hookSessionCapture';
 export * from './cliAdapter/turnSignal';
 export * from './cliAdapter/codexSandbox';
+export * from './cliAdapter/launchArgs';
 export * from './sessionStatus';
 
 // 서브에이전트 (0.5.0 4단계)

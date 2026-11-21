@@ -241,6 +241,30 @@
           "type": "boolean",
           "default": true,
           "description": "%agentbridge.session.confirmClose.description%"
+        },
+        "agentbridge.launchArgs.claude": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "%agentbridge.launchArgs.claude.description%"
+        },
+        "agentbridge.launchArgs.codex": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "%agentbridge.launchArgs.codex.description%"
+        },
+        "agentbridge.launchArgs.agy": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "%agentbridge.launchArgs.agy.description%"
         }
       }
     },
