@@ -87,6 +87,7 @@ export * from './hostRequestHandler';
 // 전역 스킬 (0.5.0 B-5)
 export * from './skillInstaller';
 export * from './skillTemplate';
+export * from './cleanupSkillTemplate';
 
 // refine
 export * from './refineHeadless';
