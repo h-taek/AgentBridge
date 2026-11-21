@@ -29,7 +29,7 @@ import {
 } from '@agentbridge/core';
 import type { CliKind } from '../shared/types';
 import * as output from '../log/output';
-import { getConfig } from '../settings/config';
+import { getConfig, readLaunchArgs } from '../settings/config';
 import * as notifications from './notifications';
 import { setAttachmentLogger } from './attachmentStore';
 import { createQuotaStore } from './quotaStore';
@@ -162,6 +162,8 @@ export function initializeCore(
     storageRoot,
     homeDir: testOverrides?.homeDirForTesting,
     logger,
+    launchArgs: readLaunchArgs,
+    onLaunchArgsDropped: notifications.notifyLaunchArgsDropped,
   });
 
   const compactionNotifications: CompactionNotifications = {

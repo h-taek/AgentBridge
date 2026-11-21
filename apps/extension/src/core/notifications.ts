@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import * as output from '../log/output';
+import type { CliKind } from '../shared/types';
 
 type NotifyCategory =
   | 'cli-not-found'
@@ -107,4 +108,22 @@ export function notifyFirstRun(): void {
       }
       if (choice === vscode.l10n.t('Don\'t show again')) mutePerma('first-run');
     });
+}
+
+const notifiedLaunchArgs = new Set<string>();
+
+export function notifyLaunchArgsDropped(kind: CliKind, dropped: string[]): void {
+  if (dropped.length === 0) return;
+  const joined = dropped.join(' ');
+  // 출력 로그는 어댑터가 띄울 때마다 남긴다. 여기서는 창마다 한 번 알림만 띄운다.
+  const key = `${kind}:${joined}`;
+  if (notifiedLaunchArgs.has(key)) return;
+  notifiedLaunchArgs.add(key);
+  vscode.window.showWarningMessage(
+    vscode.l10n.t(
+      'AgentBridge: {0} launch args {1} are set by AgentBridge, so they were left out.',
+      kind,
+      joined,
+    ),
+  );
 }

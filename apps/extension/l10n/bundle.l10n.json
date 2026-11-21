@@ -90,5 +90,6 @@
   "Reload": "Reload",
   "Zoom out": "Zoom out",
   "Zoom in": "Zoom in",
-  "Zoom: click to enter": "Zoom: click to enter"
+  "Zoom: click to enter": "Zoom: click to enter",
+  "AgentBridge: {0} launch args {1} are set by AgentBridge, so they were left out.": "AgentBridge: {0} launch args {1} are set by AgentBridge, so they were left out."
 }

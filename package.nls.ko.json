@@ -24,5 +24,8 @@
   "agentbridge.refresh.title": "AgentBridge: 세션·사용량 새로고침",
   "agentbridge.htmlViewer.displayName": "AgentBridge HTML 뷰어",
   "agentbridge.openHtmlViewer.title": "AgentBridge: HTML 뷰어로 보기",
-  "agentbridge.closeHtmlViewer.title": "AgentBridge: 소스로 돌아가기"
+  "agentbridge.closeHtmlViewer.title": "AgentBridge: 소스로 돌아가기",
+  "agentbridge.launchArgs.claude.description": "이 하니스를 띄울 때 붙일 인자. 원소 하나가 인자 하나다(예: [\"--remote-control\"]). 세션·작업 폴더·모델·effort를 정하는 인자와 혼자 있는 낱말(프롬프트·하위 명령)은 빼고 띄운다.",
+  "agentbridge.launchArgs.codex.description": "이 하니스를 띄울 때 붙일 인자. 원소 하나가 인자 하나다(예: [\"--remote-control\"]). 세션·작업 폴더·모델·effort를 정하는 인자와 혼자 있는 낱말(프롬프트·하위 명령)은 빼고 띄운다.",
+  "agentbridge.launchArgs.agy.description": "이 하니스를 띄울 때 붙일 인자. 원소 하나가 인자 하나다(예: [\"--remote-control\"]). 세션·작업 폴더·모델·effort를 정하는 인자와 혼자 있는 낱말(프롬프트·하위 명령)은 빼고 띄운다."
 }
