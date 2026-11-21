@@ -7,7 +7,7 @@
 import { promises as fsp } from 'node:fs';
 import { join } from 'node:path';
 
-import { readAllTurns } from './turnsStore';
+import { readTurnHistory } from './turnsStore';
 import type { TurnRecord } from './shared/turns';
 
 const CONTEXT_TURNS = 2; // 새 턴 직전 읽기전용 맥락 턴 수
@@ -57,48 +57,12 @@ export async function shouldRunProposalPass(workspaceRoot: string, everyN: numbe
   return compactionCount > 0 && compactionCount % everyN === 0;
 }
 
-// archive의 compressed_*.jsonl에서 raw 턴만(ir_snapshot 줄 제외) 모은다. 파일명 정렬 = 시간순.
-async function readArchivedTurns(workspaceRoot: string): Promise<TurnRecord[]> {
-  const dir = join(workspaceRoot, 'archive');
-  let files: string[];
-  try {
-    files = await fsp.readdir(dir);
-  } catch {
-    return [];
-  }
-  const snapshots = files.filter((f) => f.startsWith('compressed_') && f.endsWith('.jsonl')).sort();
-  const out: TurnRecord[] = [];
-  for (const f of snapshots) {
-    let raw: string;
-    try {
-      raw = await fsp.readFile(join(dir, f), 'utf8');
-    } catch {
-      continue;
-    }
-    for (const line of raw.split('\n')) {
-      const t = line.trim();
-      if (!t) continue;
-      try {
-        const obj = JSON.parse(t);
-        if (obj && obj.type === 'ir_snapshot') continue;       // 스냅샷 메타 줄 스킵
-        if (obj && typeof obj.id === 'string') out.push(obj as TurnRecord);
-      } catch {
-        /* skip */
-      }
-    }
-  }
-  return out;
-}
-
 export type CollectResult = { turns: TurnRecord[]; newCount: number; newCursor: string | null };
 
 // 읽기 순서(archive 시간순 → live append) 기준. 커서(turn id) 이후 새 턴 + 직전 CONTEXT_TURNS개 맥락.
 export async function collectProposalTurns(workspaceRoot: string): Promise<CollectResult> {
   const { lastProcessedId } = await readProposalState(workspaceRoot);
-  const merged = [...(await readArchivedTurns(workspaceRoot)), ...(await readAllTurns(workspaceRoot))];
-  const byId = new Map<string, TurnRecord>();
-  for (const t of merged) if (!byId.has(t.id)) byId.set(t.id, t); // 읽기 순서 보존, id dedup
-  const all = [...byId.values()];
+  const all = await readTurnHistory(workspaceRoot);
 
   let firstNewIdx: number;
   if (lastProcessedId == null) {
