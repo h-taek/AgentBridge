@@ -4,6 +4,30 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 <p align="center"><a href="https://github.com/h-taek/AgentBridge/blob/main/CHANGELOG.ko.md">한국어</a></p>
 
+## [0.9.0] — 2026-11-21
+
+### Added
+
+- **Subagent model and effort.** You can set the model and effort a subagent runs on. The available values come from what each CLI currently offers, and a model or pairing it does not support is refused before the subagent starts.
+- **Model choice from past results.** After reviewing a subagent's work, the agent can propose a long-term memory entry evaluating how that model and effort performed. When a subagent is started without a model, the agent picks one from those entries if any apply.
+- **Subagent's current terminal screen.** When a subagent stops without replying or is still working, the main agent reads that subagent's current terminal screen directly instead of relying on the record.
+- **Pinned memory.** Pin an entry in the Long-term Memory panel, and it is included in the first turn of every new session. Pinned entries appear at the top of the panel.
+- **Editing memory.** Double-click an entry to open its file. Changes made outside the panel are picked up right away.
+- **Withdrawing long-term memory proposals.** An agent can withdraw a memory proposal it made by mistake, and the pending count updates with it.
+- **Moved and renamed project folders.** Rename a project folder or move it within the same disk, and its sessions, records, and project memory are kept when you open it again.
+
+### Changed
+
+- **Memory scope.** The default that saved a proposal to user scope when no scope was given is gone. The agent now states user or repository scope for every memory proposal.
+- **Waiting for subagents.** When an answer depends on a subagent's result, the agent checks the result before ending its turn. The exception is when you have told it not to wait.
+- **Reading earlier turns.** Agents can read further back into the conversation record. The working summary states how many recent turns it does not include yet, so agents can tell how current it is.
+- **Terminal replay cleanup.** Terminal replay records unchanged for seven days or more are removed at startup.
+
+### Fixed
+
+- **Reopened subagents losing their folder and record.** Reopening a subagent detached it from its parent, ran it in the main project folder, and saved its turns to the main record. It now restores its parent, model, effort, and worktree.
+- **Antigravity quota missing with agy 1.5.** When agy stored its login in a file instead of the keychain, the Antigravity quota icon did not appear. Both locations are checked now.
+
 ## [0.8.3] — 2026-11-01
 
 ### Added

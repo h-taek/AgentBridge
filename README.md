@@ -8,7 +8,7 @@
 <h1 align="center">AgentBridge</h1>
 
 <p align="center">
-  <img alt="version 0.8.3" src="https://img.shields.io/badge/version-0.8.3-orange">
+  <img alt="version 0.9.0" src="https://img.shields.io/badge/version-0.9.0-orange">
   <a href="https://github.com/h-taek/AgentBridge/blob/main/LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-green.svg"></a>
   <img alt="macOS Apple Silicon" src="https://img.shields.io/badge/macOS-Apple%20Silicon-4493F8">
 </p>
@@ -60,7 +60,7 @@ That record is never pushed into the prompt. The hook adds a single short instru
 <tr>
 <td width="50%">
 <h3>Agents that launch agents</h3>
-<p>Ask the agent you are talking to for a helper. The helper opens in its own tab, nested under the parent session, and the parent sends follow-up instructions and reads what the helper recorded.</p>
+<p>Ask the agent you are talking to for a helper. The helper opens in its own tab, nested under the parent session, and the parent sends follow-up instructions and reads what the helper recorded. You can name the model and effort the helper runs on.</p>
 </td>
 <td width="50%"><img src="packages/assets/readme/feature-subagents.gif" alt="Launching a subagent and collecting its result" /></td>
 </tr>
@@ -74,7 +74,7 @@ That record is never pushed into the prompt. The hook adds a single short instru
 <tr>
 <td width="50%">
 <h3>Memory that needs your approval</h3>
-<p>Only durable things are kept — your role, how you work, the conventions of the repository. The agent proposes as it works, and nothing becomes memory until you approve it.</p>
+<p>Only durable things are kept — your role, how you work, the conventions of the repository. The agent proposes as it works, and nothing becomes memory until you approve it. Pin an entry, and every new session starts with it.</p>
 </td>
 <td width="50%"><img src="packages/assets/readme/feature-memory.gif" alt="Long-term memory panel with a pending proposal" /></td>
 </tr>
@@ -159,7 +159,7 @@ Everything is stored under `~/agentbridge/`, split per project folder.
 │   ├── ir.json             ← the running summary
 │   ├── turns.jsonl         ← raw turns
 │   ├── archive/            ← previous snapshots
-│   ├── sessions/<id>/      ← per-tab replay buffer, hook signals
+│   ├── sessions/<id>/      ← per-tab replay buffer (kept 7 days), hook signals
 │   └── trees/<name>/       ← isolated subagent worktrees
 ├── attachments/            ← files dropped into the chat
 └── global/
