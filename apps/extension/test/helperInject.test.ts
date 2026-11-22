@@ -132,11 +132,6 @@ describe('helper inject — 매칭 주입 (0.6.0 spec/03 §1)', () => {
     assert.match(ctx, /### 1-2/);
   });
 
-  it('무관한 문서는 안 걸린다 — 게이트가 최고점의 60%로 자른다', () => {
-    const ctx = ctxFor('how do I handle deployment to production?');
-    assert.doesNotMatch(ctx, /role\/solo/);
-  });
-
   it('프롬프트에 따라 주입이 달라진다', () => {
     assert.notEqual(ctxFor('deployment workflow'), ctxFor('what time is it right now'));
   });

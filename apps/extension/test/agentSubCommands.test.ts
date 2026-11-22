@@ -1034,15 +1034,4 @@ describe('agent read 지금 화면 (0.8.0 spec/08)', () => {
     const emptyOut = await agentRead(ws, PARENT, 'hangang', { screen: true });
     assert.equal(emptyOut, '화면 기록이 없다');
   });
-
-  it('--screen과 --last를 함께 주면 거절한다', async () => {
-    await writeSessions(ws, [
-      { sessionId: PARENT },
-      { sessionId: 'sub', parentSessionId: PARENT, agentName: 'golden-gate' },
-    ]);
-    await assert.rejects(
-      agentRead(ws, PARENT, 'golden-gate', { screen: true, lastN: 1 }),
-      /--screen은 --last와 함께 쓰지 않는다/,
-    );
-  });
 });

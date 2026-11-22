@@ -17,22 +17,22 @@ function git(cwd: string, ...args: string[]): string {
 let root = '';
 let repo = '';
 
-beforeEach(async () => {
-  root = await fs.mkdtemp(join(tmpdir(), 'ab-subenv-'));
-  repo = join(root, 'repo');
-  await fs.mkdir(repo);
-  git(repo, 'init', '-q', '-b', 'main');
-  git(repo, 'config', 'user.email', 'test@agentbridge.local');
-  git(repo, 'config', 'user.name', 'AgentBridge Test');
-  git(repo, 'config', 'commit.gpgsign', 'false');
-});
-
-afterEach(async () => {
-  if (root) await fs.rm(root, { recursive: true, force: true });
-  root = '';
-});
-
 describe('listMissingPaths', () => {
+  beforeEach(async () => {
+    root = await fs.mkdtemp(join(tmpdir(), 'ab-subenv-'));
+    repo = join(root, 'repo');
+    await fs.mkdir(repo);
+    git(repo, 'init', '-q', '-b', 'main');
+    git(repo, 'config', 'user.email', 'test@agentbridge.local');
+    git(repo, 'config', 'user.name', 'AgentBridge Test');
+    git(repo, 'config', 'commit.gpgsign', 'false');
+  });
+
+  afterEach(async () => {
+    if (root) await fs.rm(root, { recursive: true, force: true });
+    root = '';
+  });
+
   it('.gitignore에 든 폴더/파일이 결손 목록에 뜨고, 추적 중인 파일은 안 뜬다', async () => {
     await fs.writeFile(join(repo, '.gitignore'), 'node_modules/\nCLAUDE.md\n.env\n');
     await fs.writeFile(join(repo, 'a.txt'), 'hello\n');
