@@ -118,6 +118,7 @@ export * from './sessionStatus';
 // 서브에이전트 (0.5.0 4단계)
 export * from './modelTable';
 export * from './agent/reportState';
+export * from './agent/commandAfterTurnStart';
 export * from './agent/gitWorktree';
 export * from './agent/bridgeNames';
 export * from './agent/cleanup';

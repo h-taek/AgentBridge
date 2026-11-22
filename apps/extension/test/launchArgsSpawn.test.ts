@@ -81,6 +81,26 @@ describe('어댑터 사용자 실행 인자 (0.10.0 spec/01 §3·§4)', () => {
     assert.ok(opts.args.includes('--dangerously-skip-permissions'));
   });
 
+  it('agy 원격 컨트롤 + 첫 프롬프트 — 원격 컨트롤은 첫 턴이 시작된 뒤 입력으로 켠다', async () => {
+    const opts = await adapters({ agy: ['--remote-control', '--sandbox'] }).agy.buildSpawnOptions(
+      '/tmp/proj',
+      'ws',
+      undefined,
+      undefined,
+      { initialPrompt: 'hi', freshSession: true },
+    );
+    assert.ok(!opts.args.includes('--remote-control'));
+    assert.equal(opts.args[0], '--sandbox');
+    assert.deepEqual(opts.args.slice(-2), ['-i', 'hi']);
+    assert.equal(opts.commandAfterTurnStart, '/remote-control');
+  });
+
+  it('agy 원격 컨트롤만 — 첫 프롬프트가 없으면 기동 인자로 둔다', async () => {
+    const opts = await adapters({ agy: ['--remote-control'] }).agy.buildSpawnOptions('/tmp/proj', 'ws');
+    assert.equal(opts.args[0], '--remote-control');
+    assert.equal(opts.commandAfterTurnStart, undefined);
+  });
+
   it('금지 인자는 빼고 알린다', async () => {
     const droppedCalls: Array<[CliKind, string[]]> = [];
     const opts = await adapters(

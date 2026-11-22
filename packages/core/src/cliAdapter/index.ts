@@ -340,11 +340,15 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
           }
         }
 
-        const prefixArgs = userArgs('agy');
+        const userPrefix = userArgs('agy');
         const cwdArgs = cwd ? ['--add-dir', cwd] : [];
         const modelArgs = buildModelArgs('agy', extras);
         // agy의 첫 프롬프트는 위치 인자가 아니라 -i다. --print와 달리 답한 뒤에도 대화형으로 남는다.
         const promptArgs = !resuming && extras?.initialPrompt ? ['-i', extras.initialPrompt] : [];
+        // --remote-control을 켠 채 -i로 띄우면 agy가 첫 턴을 실행은 하되 화면에 그리지 않는다
+        // (agy 1.5.14 실측). 그때는 원격 컨트롤을 빼고 띄워 호스트가 첫 턴 시작 뒤 입력으로 켠다.
+        const lateRemoteControl = promptArgs.length > 0 && userPrefix.includes('--remote-control');
+        const prefixArgs = lateRemoteControl ? userPrefix.filter((a) => a !== '--remote-control') : userPrefix;
 
         let args: string[];
         let modelSessionId: string | undefined = resumeModelSessionId;
@@ -383,6 +387,7 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
           parentSessionId: extras?.parentSessionId,
           hookCaptureFilePath,
           turnSignalFilePath,
+          ...(lateRemoteControl ? { commandAfterTurnStart: '/remote-control' } : {}),
         };
       },
     },

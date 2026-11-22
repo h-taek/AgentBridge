@@ -7,7 +7,7 @@ import * as output from '../log/output';
 import { registerCapture, unregisterCapture } from '../core/turnRecorder';
 import { setHookDisabled } from '../core/hookStatusStore';
 import { getSessions, renameSession, deleteSession, setModelSessionId, type SessionMeta } from '../core/sessionRegistry';
-import { captureSessionIdFromHook, watchHookErrors, resolveHookErrorFile } from '@agentbridge/core';
+import { captureSessionIdFromHook, watchHookErrors, resolveHookErrorFile, sendAfterTurnStart } from '@agentbridge/core';
 import * as workspaceStore from '../core/workspaceStore';
 import {
   computeSessionActivity,
@@ -81,6 +81,7 @@ export class ChatPanel {
   private deletedExternally = false;
   private modelSessionWatchAbort: AbortController | null = null;
   private hookErrorWatchAbort: AbortController | null = null;
+  private afterStartAbort: AbortController | null = null;
   private readonly opts: SpawnOptions;
   private readonly extensionUri: vscode.Uri;
   private onDisposeCallback: (() => void) | null = null;
@@ -506,6 +507,21 @@ export class ChatPanel {
     return true;
   }
 
+  // 슬래시 명령을 넣는다. sendPrompt와 달리 괄호 붙여넣기로 감싸지 않는다 — 붙여넣은 글은
+  // 명령이 아니라 모델에게 보낼 글로 받힐 수 있다.
+  sendCommand(text: string): void {
+    const pty = this.ptyProcess;
+    if (!pty || !text) return;
+    pty.write(text);
+    setTimeout(() => {
+      try {
+        pty.write('\r');
+      } catch {
+        /* 그 사이 죽었다 */
+      }
+    }, SUBMIT_DELAY_MS);
+  }
+
   // preserveFocus를 켜면 이 탭이 자기 그룹에서 앞으로 나오되 키보드 포커스는 있던 자리에
   // 남는다. 서브가 뜬 뒤 메인을 다시 앞으로 보낼 때 쓴다 (0.5.0 B-6).
   reveal(preserveFocus = false): void {
@@ -616,11 +632,13 @@ export class ChatPanel {
 
       this.startModelSessionIdWatcher();
       this.startHookErrorWatcher();
+      this.startCommandAfterTurnStart();
 
       this.ptyProcess.onExit(({ exitCode, signal }) => {
         output.log(`ChatPanel PTY exited: code=${exitCode} signal=${signal ?? 'none'}`);
         this.modelSessionWatchAbort?.abort();
         this.hookErrorWatchAbort?.abort();
+        this.afterStartAbort?.abort();
         if (this.replayStream && !this.replayStream.destroyed) {
           this.replayStream.end();
           this.replayStream = null;
@@ -685,6 +703,24 @@ export class ChatPanel {
       onError: (err) => setHookDisabled(workspaceId, model, err.message, 'runtime'),
     });
     ctrl.signal.addEventListener('abort', () => watcher.stop(), { once: true });
+  }
+
+  // 첫 턴이 시작된 뒤 명령 하나를 넣는다 (SpawnOptions.commandAfterTurnStart). 한 번만 쓴다 —
+  // PTY를 다시 띄워도 같은 명령을 또 넣지 않는다.
+  private startCommandAfterTurnStart(): void {
+    const { workspaceId, sessionId, commandAfterTurnStart } = this.opts;
+    if (!workspaceId || !sessionId || !commandAfterTurnStart) return;
+    this.opts.commandAfterTurnStart = undefined;
+    const ctrl = new AbortController();
+    this.afterStartAbort = ctrl;
+    void sendAfterTurnStart({
+      workspaceDir: workspaceStore.getWorkspacePath(workspaceId),
+      sessionId,
+      text: commandAfterTurnStart,
+      send: (text) => this.sendCommand(text),
+      signal: ctrl.signal,
+      logger: { log: (m) => output.log(m), warn: (m) => output.warn(m) },
+    });
   }
 
   private startModelSessionIdWatcher(): void {
@@ -811,6 +847,7 @@ export class ChatPanel {
 
     this.modelSessionWatchAbort?.abort();
     this.hookErrorWatchAbort?.abort();
+    this.afterStartAbort?.abort();
     void this.flushCapture(); // fire-and-forget finalize (마지막 턴 flush 보장은 disposeAndFlush).
 
     if (this.replayStream && !this.replayStream.destroyed) {
