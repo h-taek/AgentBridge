@@ -28,25 +28,25 @@ const api = {
     repositories.find((r) => r.rootUri.fsPath === uri.fsPath) ?? null,
 };
 
-beforeEach(() => {
-  opened = [];
-  closed = [];
-  repositories = [];
-  openThrows = false;
-  (vscode.extensions as { getExtension: (id: string) => unknown }).getExtension = () => ({
-    isActive: true,
-    exports: { getAPI: () => api },
-    activate: async () => ({ getAPI: () => api }),
-  });
-  (
-    vscode.commands as unknown as { executeCommand: (...a: unknown[]) => Promise<unknown> }
-  ).executeCommand = async (...args: unknown[]) => {
-    if (args[0] === 'git.close') closed.push(args[1]);
-    return undefined;
-  };
-});
-
 describe('scmView', () => {
+  beforeEach(() => {
+    opened = [];
+    closed = [];
+    repositories = [];
+    openThrows = false;
+    (vscode.extensions as { getExtension: (id: string) => unknown }).getExtension = () => ({
+      isActive: true,
+      exports: { getAPI: () => api },
+      activate: async () => ({ getAPI: () => api }),
+    });
+    (
+      vscode.commands as unknown as { executeCommand: (...a: unknown[]) => Promise<unknown> }
+    ).executeCommand = async (...args: unknown[]) => {
+      if (args[0] === 'git.close') closed.push(args[1]);
+      return undefined;
+    };
+  });
+
   it('worktree 경로를 저장소로 연다', async () => {
     await registerRepo(TREE);
     assert.deepEqual(opened, [TREE]);
