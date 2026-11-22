@@ -264,6 +264,9 @@ describe('helper inject — 다섯 턴 제안 (0.6.0 spec/03 §2)', () => {
     assert.match(first, /### 1-4\. Recording/);
     assert.match(first, /Do not write there/);
     assert.match(first, /Recording nothing is the default/);
+    // 0.9.0 spec/05 §1 — 모델이 원래 하는 일반 원칙은 적지 않는다.
+    assert.match(first, /- what a capable model already does unprompted — general good practice/);
+    assert.match(first, /What is worth recording is what a model would not know on its own/);
     for (let i = 0; i < 5; i++) fire('Stop', JSON.stringify({ session_id: 'x' }), s);
     const fifth = injectCtx(s);
     assert.match(fifth, /### 1-4\. Recording/);

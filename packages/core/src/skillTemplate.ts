@@ -122,6 +122,12 @@ tab; you give it work, it reports back, you read the report.
 \`agent start\` returns the names it issued — that is what the other commands
 take. Default harness is claude; pass several to run the same prompt on each.
 
+Put the whole instruction in \`--prompt\` (\`agent send\` too). Do not write it
+to a file and hand the sub the path. Some models' safety classifiers rank what
+arrives as the prompt above what a file says, and refuse an instruction that
+came through a path. Material the work needs — a plan, a spec, the code under
+review — can still be named by path; the instruction itself goes in the prompt.
+
 \`--model\` and \`--effort\` pick the model a sub runs on. Use them when the user
 names one, or when a recorded sub evaluation (see below) says which model and
 effort suit this kind of work — before starting a sub the user named no model

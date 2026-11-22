@@ -1422,6 +1422,12 @@ tab; you give it work, it reports back, you read the report.
 \`agent start\` returns the names it issued \u2014 that is what the other commands
 take. Default harness is claude; pass several to run the same prompt on each.
 
+Put the whole instruction in \`--prompt\` (\`agent send\` too). Do not write it
+to a file and hand the sub the path. Some models' safety classifiers rank what
+arrives as the prompt above what a file says, and refuse an instruction that
+came through a path. Material the work needs \u2014 a plan, a spec, the code under
+review \u2014 can still be named by path; the instruction itself goes in the prompt.
+
 \`--model\` and \`--effort\` pick the model a sub runs on. Use them when the user
 names one, or when a recorded sub evaluation (see below) says which model and
 effort suit this kind of work \u2014 before starting a sub the user named no model
@@ -1888,6 +1894,14 @@ function buildInstructions(storageRoot, blocks) {
     "- a correction the user made to this turn's output, once it is fixed",
     "- a single incident. One correction is not a rule yet. Record it when it",
     "  comes up a second time, or when the user says it applies from now on.",
+    "- what a capable model already does unprompted \u2014 general good practice",
+    "  such as following design patterns, or not editing a file another",
+    "  session is still verifying. A slip against it is not a rule.",
+    "",
+    "What is worth recording is what a model would not know on its own: this",
+    "user's own rules and way of working, knowledge newer than or outside a",
+    "model's training (say, the latest benchmarks of a newly released",
+    "harness), and this project's own settings.",
     "",
     "Most turns have nothing worth recording. Recording nothing is the default.",
     "",
