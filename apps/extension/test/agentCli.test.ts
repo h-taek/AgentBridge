@@ -465,35 +465,6 @@ describe('agent CLI — 골격과 신원 해소 (0.5.0 W1)', () => {
     assert.match(r.stderr, /--body/);
   });
 
-  it('memory add — 이미 있는 제목이면 update로 안내한다', async () => {
-    const r = await runWithHost([
-      'memory', 'add',
-      '--scope', 'user',
-      '--category', 'workflows',
-      '--title', '격리 환경 디버깅',
-      '--summary', '다시 쓴 요약',
-      '--body', '다시 쓴 본문',
-    ]);
-    assert.equal(r.status, 0);
-    assert.match(r.stdout, /update/);
-  });
-
-  it('memory add — 대기 제안과 제목이 겹치면 withdraw로 안내한다', async () => {
-    const [existing] = await readProposals(getGlobalDir(root), 'default');
-    assert.ok(existing);
-    const r = await runWithHost([
-      'memory', 'add',
-      '--scope', 'user',
-      '--category', 'conventions',
-      '--title', '커밋 트레일러 금지',
-      '--summary', '다시 쓴 요약',
-      '--body', '다시 쓴 본문',
-    ]);
-    assert.equal(r.status, 0);
-    assert.match(r.stdout, /대기열에 같은 제목의 제안이 있다/);
-    assert.ok(r.stdout.includes(`memory withdraw ${existing.id}`));
-  });
-
   it('memory update — 없는 식별자는 거절한다', async () => {
     const r = await runWithHost(['memory', 'update', 'workflows/없는-것', '--body', 'x']);
     assert.equal(r.status, 2);

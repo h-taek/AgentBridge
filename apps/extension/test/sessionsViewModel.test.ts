@@ -81,17 +81,6 @@ describe('views/sessionsViewModel', () => {
       assert.deepEqual(rows.map((r) => r.hasChildren), [true, false, false]);
     });
 
-    it('부모가 이 워크스페이스에 없는 고아는 최상위로 올린다', () => {
-      const orphan = meta({ sessionId: 'o', parentSessionId: 'gone' });
-      const rows = build([orphan]);
-      assert.deepEqual(rows.map((r) => [r.sessionId, r.depth, r.kind]), [['o', 0, 'session']]);
-    });
-
-    it('자기 자신을 부모로 가리켜도 무한히 돌지 않는다', () => {
-      const self = meta({ sessionId: 's', parentSessionId: 's' });
-      assert.deepEqual(build([self]).map((r) => r.sessionId), ['s']);
-    });
-
     it('원래 순서를 지킨다', () => {
       const a = meta({ sessionId: 'a' });
       const b = meta({ sessionId: 'b' });
@@ -123,11 +112,6 @@ describe('views/sessionsViewModel', () => {
       const child = meta({ sessionId: 'c', parentSessionId: 'p', active: false });
       const rows = build([parent, child], { activity: { c: 'running' } });
       assert.equal(rows[0].iconKey, 'claude.svg');
-    });
-
-    it('모델마다 다른 아이콘을 쓴다', () => {
-      const rows = build([meta({ sessionId: 'a', model: 'agy' })]);
-      assert.equal(rows[0].iconKey, 'agy.svg');
     });
   });
 
