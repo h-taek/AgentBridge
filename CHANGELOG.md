@@ -4,6 +4,25 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 <p align="center"><a href="https://github.com/h-taek/AgentBridge/blob/main/CHANGELOG.ko.md">한국어</a></p>
 
+## [0.10.0] — 2026-11-23
+
+### Added
+
+- **Harness launch arguments.** Set the arguments each harness gets when its tab opens with `agentbridge.launchArgs.<harness>` (for example remote control, `--remote-control`). Arguments AgentBridge decides itself are left out, and you are notified.
+- **Opening a new main session.** On request, the agent opens a new main session tab that is not tied to the current conversation.
+- **Long-term memory cleanup skill.** Call `agentbridge-memory-cleanup` and the agent shows a plan to clean up duplicate or outdated memories, and applies only what you approve.
+
+### Changed
+
+- **No subagents from subagents.** A subagent does not start another subagent or a new session.
+- **Subagent instruction delivery.** Instructions reach a subagent directly in the prompt rather than as a file path. Some models refused instructions less often as a result.
+- **Long-term memory proposal criteria.** The agent no longer proposes general principles a model already knows, and focuses on your own rules and ways of working and on information specific to the project. The cleanup skill cleans up by the same criteria.
+- **Repository paths in project knowledge folders.** Each project knowledge folder records the repository paths that use it (`workspaces.json`).
+
+### Removed
+
+- **`index.md` in the memory folder.** It is no longer created. An existing file is left in place.
+
 ## [0.9.0] — 2026-11-21
 
 ### Added
