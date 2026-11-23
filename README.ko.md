@@ -8,7 +8,7 @@
 <h1 align="center">AgentBridge</h1>
 
 <p align="center">
-  <img alt="version 0.9.0" src="https://img.shields.io/badge/version-0.9.0-orange">
+  <img alt="version 0.10.0" src="https://img.shields.io/badge/version-0.10.0-orange">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-green.svg"></a>
   <img alt="macOS Apple Silicon" src="https://img.shields.io/badge/macOS-Apple%20Silicon-4493F8">
 </p>
@@ -60,7 +60,7 @@ Claude Code, Codex, Antigravity를 번갈아 쓰면 모델을 바꿀 때마다 �
 <tr>
 <td width="50%">
 <h3>에이전트가 띄우는 에이전트</h3>
-<p>지금 대화 중인 에이전트에게 서브에이전트를 띄우라고 하면 된다. 서브는 자기 탭으로 열려 부모 세션 아래에 묶이고, 부모는 후속 지시를 보내고 서브가 남긴 기록을 읽는다. 서브가 돌 모델과 effort도 정할 수 있다.</p>
+<p>지금 대화 중인 에이전트에게 서브에이전트를 띄우라고 하면 된다. 서브는 자기 탭으로 열려 부모 세션 아래에 묶이고, 부모는 후속 지시를 보내고 서브가 남긴 기록을 읽는다. 에이전트에게 지금 대화와 묶이지 않은 새 메인 세션 탭을 열게 할 수 있다.</p>
 </td>
 <td width="50%"><img src="packages/assets/readme/feature-subagents.gif" alt="서브에이전트 생성과 결과 회수" /></td>
 </tr>
@@ -74,7 +74,7 @@ Claude Code, Codex, Antigravity를 번갈아 쓰면 모델을 바꿀 때마다 �
 <tr>
 <td width="50%">
 <h3>승인해야 남는 기억</h3>
-<p>역할이나 일하는 방식, 저장소의 관례처럼 오래 가는 것만 남긴다. 에이전트가 일하다 제안하고, 승인한 것만 기억이 된다. 항목을 고정하면 새 세션이 그 기억을 안고 시작한다.</p>
+<p>역할이나 일하는 방식, 저장소의 관례처럼 오래 가는 것만 남긴다. 에이전트가 일하다 제안하고, 승인한 것만 기억이 된다. 항목을 고정하면 새 세션이 그 기억을 안고 시작한다. "기억 정리해"라고 하면 에이전트가 중복과 낡은 항목을 정리하는 계획을 보이고, 승인한 것만 반영한다.</p>
 </td>
 <td width="50%"><img src="packages/assets/readme/feature-memory.gif" alt="장기 기억 패널과 승인 대기 제안" /></td>
 </tr>
@@ -147,6 +147,7 @@ VS Code 설정(`settings.json` 또는 설정 화면):
 | `agentbridge.turns.assistantDetail` | `compact` | 턴 기록에 저장할 답변 양 |
 | `agentbridge.memory.maxArchiveSnapshots` | `15` | 보관할 이전 스냅샷 수 |
 | `agentbridge.session.confirmClose` | `true` | 작업 중인 세션 탭을 닫을 때 확인 |
+| `agentbridge.launchArgs.claude` · `.codex` · `.agy` | `[]` | 탭을 띄울 때 해당 CLI에 붙일 인자 목록 (예: `["--remote-control"]`) |
 
 ## 데이터 위치
 
@@ -170,9 +171,9 @@ VS Code 설정(`settings.json` 또는 설정 화면):
 각 에이전트의 전역 설정 파일에는 훅과 스킬 등록을 위한 전용 블록만 추가되며, 기존 설정은 건드리지 않는다.
 
 ```
-~/.claude/settings.json          ~/.claude/skills/agentbridge/
-~/.codex/hooks.json              ~/.agents/skills/agentbridge/
-~/.gemini/config/hooks.json      ~/.gemini/config/skills/agentbridge/
+~/.claude/settings.json          ~/.claude/skills/agentbridge, agentbridge-memory-cleanup/
+~/.codex/hooks.json              ~/.agents/skills/agentbridge, agentbridge-memory-cleanup/
+~/.gemini/config/hooks.json      ~/.gemini/config/skills/agentbridge, agentbridge-memory-cleanup/
 ```
 
 ## 프라이버시
