@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// @agentbridge-helper-version 0.6.4
+// @agentbridge-helper-version 0.6.5
 "use strict";
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -452,7 +452,6 @@ __export(globalPaths_exports, {
   getGlobalDir: () => getGlobalDir,
   profileDir: () => profileDir,
   profileDocsDir: () => profileDocsDir,
-  profileIndexPath: () => profileIndexPath,
   profileMetaPath: () => profileMetaPath,
   profilesRoot: () => profilesRoot,
   projectsRoot: () => projectsRoot,
@@ -483,9 +482,6 @@ function profileDir(globalDir, profileId, scope = "user") {
 function profileMetaPath(globalDir, profileId, scope = "user") {
   return (0, import_node_path.join)(profileDir(globalDir, profileId, scope), "profile.json");
 }
-function profileIndexPath(globalDir, profileId, scope = "user") {
-  return (0, import_node_path.join)(profileDir(globalDir, profileId, scope), "index.md");
-}
 function profileDocsDir(globalDir, profileId, scope = "user") {
   return (0, import_node_path.join)(profileDir(globalDir, profileId, scope), "docs");
 }
@@ -499,36 +495,6 @@ var init_globalPaths = __esm({
     import_node_path = require("node:path");
     init_storageRoot();
     DEFAULT_PROFILE_ID = "default";
-  }
-});
-
-// packages/core/src/shared/global.ts
-var GLOBAL_CATEGORIES, DOC_CAPS, PROPOSAL_CAPS;
-var init_global = __esm({
-  "packages/core/src/shared/global.ts"() {
-    "use strict";
-    GLOBAL_CATEGORIES = [
-      "role",
-      "repos",
-      "domain",
-      "workflows",
-      "conventions",
-      "infra",
-      "verification"
-    ];
-    DOC_CAPS = {
-      title: 200,
-      summary: 2e3,
-      body: 2e4,
-      indexEntries: 50
-    };
-    PROPOSAL_CAPS = {
-      title: DOC_CAPS.title,
-      summary: DOC_CAPS.summary,
-      body: DOC_CAPS.body,
-      maxPerPass: 12
-      // 한 패스가 만들 제안 상한 — 폭주 방지
-    };
   }
 });
 
@@ -574,56 +540,39 @@ function extractIndexEntries(markdown) {
   if (!m?.[1]) return [];
   return m[1].split(/\r?\n/).map((l) => l.trim()).filter((l) => l.startsWith("- ")).map((l) => l.slice(2).trim()).filter(Boolean);
 }
-function renderIndexMarkdown(input) {
-  const lines = ["# gc-tree global context index", "", `- profile: ${input.profileId}`, ""];
-  if (input.docs.length === 0) {
-    lines.push("- No durable docs yet.", "");
-    return lines.join("\n");
-  }
-  const byCategory = /* @__PURE__ */ new Map();
-  for (const doc of input.docs) {
-    const cat = doc.category || "general";
-    if (!byCategory.has(cat)) byCategory.set(cat, /* @__PURE__ */ new Map());
-    const byPath = byCategory.get(cat);
-    if (!byPath.has(doc.path)) byPath.set(doc.path, []);
-    const label = doc.label.trim();
-    if (label && !byPath.get(doc.path).includes(label)) byPath.get(doc.path).push(label);
-  }
-  const cats = [...byCategory.keys()].sort((a, b) => {
-    const ai = CATEGORY_ORDER.indexOf(a);
-    const bi = CATEGORY_ORDER.indexOf(b);
-    if (ai === -1 && bi === -1) return a.localeCompare(b);
-    if (ai === -1) return 1;
-    if (bi === -1) return -1;
-    return ai - bi;
-  });
-  for (const cat of cats) {
-    lines.push(`## ${CATEGORY_LABELS[cat] || cat}`, "");
-    const byPath = byCategory.get(cat);
-    for (const [path2, labels] of [...byPath.entries()].sort(([a], [b]) => a.localeCompare(b))) {
-      lines.push(`- ${path2}`);
-      for (const label of labels) lines.push(`  - ${label}`);
-    }
-    lines.push("");
-  }
-  return lines.join("\n");
-}
-var CATEGORY_LABELS, CATEGORY_ORDER;
 var init_globalMarkdown = __esm({
   "packages/core/src/globalMarkdown.ts"() {
     "use strict";
-    init_global();
-    CATEGORY_LABELS = {
-      role: "Role",
-      repos: "Repos",
-      domain: "Domain",
-      workflows: "Workflows",
-      conventions: "Conventions",
-      infra: "Infra",
-      verification: "Verification",
-      general: "General"
+  }
+});
+
+// packages/core/src/shared/global.ts
+var GLOBAL_CATEGORIES, DOC_CAPS, PROPOSAL_CAPS;
+var init_global = __esm({
+  "packages/core/src/shared/global.ts"() {
+    "use strict";
+    GLOBAL_CATEGORIES = [
+      "role",
+      "repos",
+      "domain",
+      "workflows",
+      "conventions",
+      "infra",
+      "verification"
+    ];
+    DOC_CAPS = {
+      title: 200,
+      summary: 2e3,
+      body: 2e4,
+      indexEntries: 50
     };
-    CATEGORY_ORDER = [...GLOBAL_CATEGORIES, "general"];
+    PROPOSAL_CAPS = {
+      title: DOC_CAPS.title,
+      summary: DOC_CAPS.summary,
+      body: DOC_CAPS.body,
+      maxPerPass: 12
+      // 한 패스가 만들 제안 상한 — 폭주 방지
+    };
   }
 });
 
@@ -717,7 +666,6 @@ __export(globalStore_exports, {
   readProfileDocs: () => readProfileDocs,
   resolveProfile: () => resolveProfile,
   setDocPinned: () => setDocPinned,
-  writeIndexFromDocs: () => writeIndexFromDocs,
   writeProfileDocs: () => writeProfileDocs
 });
 function resolveProfile(_workspaceId) {
@@ -743,7 +691,6 @@ async function ensureProfile(globalDir, profileId, scope = "user") {
       JSON.stringify({ version: 1, name: profileId, summary: "", createdAt: now, updatedAt: now }, null, 2) + "\n",
       "utf8"
     );
-    await import_node_fs.promises.writeFile((0, import_node_path2.join)(tmp, "index.md"), renderIndexMarkdown({ profileId, docs: [] }), "utf8");
     try {
       await import_node_fs.promises.rename(tmp, dir);
     } catch {
@@ -763,24 +710,6 @@ async function listDocRelPaths(dir, prefix = "") {
     else if (entry.isFile() && entry.name.endsWith(".md")) files.push(rel);
   }
   return files.sort();
-}
-async function writeIndexFromDocs(globalDir, profileId, scope = "user") {
-  const docsDir = profileDocsDir(globalDir, profileId, scope);
-  await import_node_fs.promises.mkdir(docsDir, { recursive: true });
-  const files = (await listDocRelPaths(docsDir)).filter((f) => !/(^|\/)index\.md$/i.test(f));
-  const docs = [];
-  for (const file of files) {
-    const raw = await import_node_fs.promises.readFile((0, import_node_path2.join)(docsDir, file), "utf8");
-    const title = extractTitle(raw) || file.replace(/\.md$/i, "");
-    const category = file.includes("/") ? file.split("/")[0] : "general";
-    const entries = extractIndexEntries(raw);
-    const labels = entries.length > 0 ? entries : [title];
-    for (const label of [...new Set(labels)]) docs.push({ category, label, path: `docs/${file}` });
-  }
-  docs.sort((a, b) => a.label.localeCompare(b.label));
-  const indexPath = profileIndexPath(globalDir, profileId, scope);
-  await import_node_fs.promises.writeFile(indexPath, renderIndexMarkdown({ profileId, docs }), "utf8");
-  return { indexPath, docCount: files.length };
 }
 function extractTagsBeforeDetails(markdown) {
   const lines = String(markdown || "").split(/\r?\n/);
@@ -885,7 +814,7 @@ function updatePinnedInMarkdown(markdown, pinned) {
 }
 async function readProfileDocs(globalDir, profileId, scope = "user") {
   const docsDir = profileDocsDir(globalDir, profileId, scope);
-  const files = (await listDocRelPaths(docsDir)).filter((f) => !/(^|\/)index\.md$/i.test(f));
+  const files = await listDocRelPaths(docsDir);
   const recs = [];
   for (const file of files) {
     const fullPath = (0, import_node_path2.resolve)(docsDir, file);
@@ -928,8 +857,7 @@ async function writeProfileDocs(globalDir, profileId, input, scope = "user", opt
       await import_node_fs.promises.writeFile(full, renderDocMarkdown(docToWrite), "utf8");
       written.push(full);
     }
-    const { indexPath } = await writeIndexFromDocs(globalDir, profileId, scope);
-    return { written, indexPath };
+    return { written };
   });
 }
 async function setDocPinned(globalDir, profileId, scope, docPath, pinned) {
@@ -1459,10 +1387,16 @@ Each line is the part after the run command.
     memory update <id> [same flags]
     memory pending                proposals waiting for approval
     memory withdraw <proposal-id> take one back
+    session new [--harness claude|codex|agy]
+                                  open a new main session tab \u2014 only when the
+                                  user asks for a new main session
 
 Categories: role, repos, domain, workflows, conventions, infra, verification.
 
 ## Subagents
+
+If the hook says you are a subagent, skip this section \u2014 a subagent does not
+start sessions.
 
 You can run other coding agents as subagents. Each gets its own session and
 tab; you give it work, it reports back, you read the report.
@@ -1487,6 +1421,12 @@ tab; you give it work, it reports back, you read the report.
 
 \`agent start\` returns the names it issued \u2014 that is what the other commands
 take. Default harness is claude; pass several to run the same prompt on each.
+
+Put the whole instruction in \`--prompt\` (\`agent send\` too). Do not write it
+to a file and hand the sub the path. Some models' safety classifiers rank what
+arrives as the prompt above what a file says, and refuse an instruction that
+came through a path. Material the work needs \u2014 a plan, a spec, the code under
+review \u2014 can still be named by path; the instruction itself goes in the prompt.
 
 \`--model\` and \`--effort\` pick the model a sub runs on. Use them when the user
 names one, or when a recorded sub evaluation (see below) says which model and
@@ -1550,6 +1490,11 @@ closing it.
 
 Every read output item starts with its identifier (\`<category>/<slug>\`) \u2014
 that is what \`memory update\` takes.
+
+\`session new\` is not a subagent. It opens a separate main session with no tie to
+this one \u2014 no report, no round cleanup. Use it only when the user asks for a new
+main session (for example, a fresh seat to drive over remote control). For work
+you hand off and review, use \`agent start\`.
 
 ### Evaluating the model a sub ran on
 
@@ -1635,7 +1580,7 @@ var SKILL_VERSION, SKILL_DIR_NAME;
 var init_skillTemplate = __esm({
   "packages/core/src/skillTemplate.ts"() {
     "use strict";
-    SKILL_VERSION = "0.6.2";
+    SKILL_VERSION = "0.6.3";
     SKILL_DIR_NAME = "agentbridge";
   }
 });
@@ -1802,6 +1747,16 @@ async function buildSubagentBlocks(wsDir, sessionToken) {
     stuck: stuck.length === 0 ? "" : 'Check the stalled subagents with `agent read <name>`, then send more instructions (`agent send <name> --prompt "..."`) or close them (`agent close <name>`). ' + stuck.length + " went quiet without finishing (" + stuck.join(", ") + "). The user may have interrupted them, or they may be stuck."
   };
 }
+function isSubSession(wsDir, sessionToken) {
+  if (!sessionToken || sessionToken !== path.basename(sessionToken)) return false;
+  try {
+    const sessions = JSON.parse(fs4.readFileSync(path.join(wsDir, "workspace.json"), "utf8")).sessions || [];
+    const mine = sessions.find((s) => s.sessionId === sessionToken);
+    return !!(mine && mine.parentSessionId);
+  } catch {
+    return false;
+  }
+}
 function slugCarriesTitle(slug, title) {
   const norm = (v) => String(v || "").toLowerCase().replace(/[^a-z0-9가-힣]/g, "");
   const withoutHash = String(slug || "").replace(/-[a-z0-9]{5,10}$/, "");
@@ -1939,6 +1894,14 @@ function buildInstructions(storageRoot, blocks) {
     "- a correction the user made to this turn's output, once it is fixed",
     "- a single incident. One correction is not a rule yet. Record it when it",
     "  comes up a second time, or when the user says it applies from now on.",
+    "- what a capable model already does unprompted \u2014 general good practice",
+    "  such as following design patterns, or not editing a file another",
+    "  session is still verifying. A slip against it is not a rule.",
+    "",
+    "What is worth recording is what a model would not know on its own: this",
+    "user's own rules and way of working, knowledge newer than or outside a",
+    "model's training (say, the latest benchmarks of a newly released",
+    "harness), and this project's own settings.",
     "",
     "Most turns have nothing worth recording. Recording nothing is the default.",
     "",
@@ -1951,34 +1914,51 @@ function buildInstructions(storageRoot, blocks) {
     "## 2. Other agent sessions",
     ""
   );
-  const subTurn = [b.subUnread, b.subStuck].filter(Boolean);
-  if (subTurn.length > 0) {
-    push("### 2-1. Do this turn", "");
-    push(subTurn.join("\n\n"), "");
+  if (b.isSub) {
+    push(
+      "### 2-2. You are a subagent",
+      "",
+      "Another agent session started this one as its subagent. Do not start subagents",
+      "or new sessions from here \u2014 `agent start` and `session new` refuse in a",
+      "subagent. If the work needs another agent, say so in your report; the main",
+      "session decides.",
+      "",
+      "Do not use your own built-in subagent tool for that either.",
+      "",
+      ""
+    );
+  } else {
+    const subTurn = [b.subUnread, b.subStuck].filter(Boolean);
+    if (subTurn.length > 0) {
+      push("### 2-1. Do this turn", "");
+      push(subTurn.join("\n\n"), "");
+    }
+    push(
+      "### 2-2. What they are",
+      "",
+      "You can run other coding agents as subagents. Each gets its own session and tab, takes",
+      "the work you give it, and leaves a report. You pick the harness \u2014 claude, codex, agy.",
+      "",
+      "**These are not your own built-in subagent tool. Do not use that tool.**",
+      "",
+      'This is what the user means by: "\uC11C\uBE0C\uC5D0\uC774\uC804\uD2B8 \uB744\uC6CC", run it in another harness, a second',
+      "opinion, run several in parallel, ask another model too.",
+      "",
+      "A subagent does not tell you when it is done. If this turn's answer needs its result,",
+      "run `agent check --wait` before you end the turn, and again while it is still working \u2014",
+      "once your turn ends, nobody reads the report until the user writes again. Otherwise the",
+      "next turn's 2-1 says how many are unread. Reading one with `agent read` is what clears it.",
+      "",
+      "### 2-3. After a report",
+      "",
+      "A review is the report and the actual changes side by side. One without the other is not",
+      "a review. How to see the changes, how to take them, how to run several in isolation, and",
+      "how to clean up a round are in the `agentbridge` skill.",
+      "",
+      ""
+    );
   }
   push(
-    "### 2-2. What they are",
-    "",
-    "You can run other coding agents as subagents. Each gets its own session and tab, takes",
-    "the work you give it, and leaves a report. You pick the harness \u2014 claude, codex, agy.",
-    "",
-    "**These are not your own built-in subagent tool. Do not use that tool.**",
-    "",
-    'This is what the user means by: "\uC11C\uBE0C\uC5D0\uC774\uC804\uD2B8 \uB744\uC6CC", run it in another harness, a second',
-    "opinion, run several in parallel, ask another model too.",
-    "",
-    "A subagent does not tell you when it is done. If this turn's answer needs its result,",
-    "run `agent check --wait` before you end the turn, and again while it is still working \u2014",
-    "once your turn ends, nobody reads the report until the user writes again. Otherwise the",
-    "next turn's 2-1 says how many are unread. Reading one with `agent read` is what clears it.",
-    "",
-    "### 2-3. After a report",
-    "",
-    "A review is the report and the actual changes side by side. One without the other is not",
-    "a review. How to see the changes, how to take them, how to run several in isolation, and",
-    "how to clean up a round are in the `agentbridge` skill.",
-    "",
-    "",
     "## 3. Commands",
     "",
     "Reading and recording.",
@@ -1995,22 +1975,28 @@ function buildInstructions(storageRoot, blocks) {
     "    status                     whether the wiring is alive, when a command fails",
     "",
     "`memory add` and `memory update` go to a queue the user approves.",
-    "",
-    "Subagents.",
-    "",
-    '    agent start --prompt "..." [--harness claude,codex,agy]',
-    "    agent check                how they are doing",
-    "    agent read <name>          that subagent's conversation",
-    '    agent send <name> --prompt "..."',
-    "    agent close <name>         end it and clean up what it left",
-    "",
-    "`turns` and `agent read` are not the same. `turns` is every conversation in this project;",
-    "`agent read <name>` is one subagent you started. When the user says to check the session",
-    "conversation, that is `turns`.",
-    "",
+    ""
+  );
+  if (!b.isSub) {
+    push(
+      "Subagents.",
+      "",
+      '    agent start --prompt "..." [--harness claude,codex,agy]',
+      "    agent check                how they are doing",
+      "    agent read <name>          that subagent's conversation",
+      '    agent send <name> --prompt "..."',
+      "    agent close <name>         end it and clean up what it left",
+      "",
+      "`turns` and `agent read` are not the same. `turns` is every conversation in this project;",
+      "`agent read <name>` is one subagent you started. When the user says to check the session",
+      "conversation, that is `turns`.",
+      ""
+    );
+  }
+  push(
     "This is not the whole list. Arguments and procedures are in the `agentbridge` skill. Open",
-    "it when you pick a scope to record into, when you check for duplicates, and for anything",
-    "in 2-3.",
+    b.isSub ? "it when you pick a scope to record into and when you check for duplicates." : "it when you pick a scope to record into, when you check for duplicates, and for anything",
+    ...b.isSub ? [] : ["in 2-3."],
     "",
     "",
     "## 4. When you answer",
@@ -2261,6 +2247,7 @@ async function main() {
     if (isProposalTurn2(await readTurnCount2(sessionDir))) proposalBlock = buildProposalBlock();
   } catch {
   }
+  const isSub = isSubSession(wsDir, process.env.AGENTBRIDGE_WS_SESSION || "");
   let subs = { unread: "", stuck: "" };
   try {
     subs = await buildSubagentBlocks(wsDir, process.env.AGENTBRIDGE_WS_SESSION || "");
@@ -2277,7 +2264,8 @@ async function main() {
             matchBlock,
             proposalBlock,
             subUnread: subs.unread,
-            subStuck: subs.stuck
+            subStuck: subs.stuck,
+            isSub
           })
         )
       )

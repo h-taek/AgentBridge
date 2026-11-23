@@ -24,5 +24,8 @@
   "agentbridge.refresh.title": "AgentBridge: Refresh Sessions and Usage",
   "agentbridge.htmlViewer.displayName": "AgentBridge HTML Viewer",
   "agentbridge.openHtmlViewer.title": "AgentBridge: Open HTML Viewer",
-  "agentbridge.closeHtmlViewer.title": "AgentBridge: Back to Source"
+  "agentbridge.closeHtmlViewer.title": "AgentBridge: Back to Source",
+  "agentbridge.launchArgs.claude.description": "Arguments to pass when launching this harness. Each element is one argument (e.g., [\"--remote-control\"]). Arguments that set the session, working directory, model, or effort, as well as standalone words (prompts or subcommands), are omitted.",
+  "agentbridge.launchArgs.codex.description": "Arguments to pass when launching this harness. Each element is one argument (e.g., [\"--remote-control\"]). Arguments that set the session, working directory, model, or effort, as well as standalone words (prompts or subcommands), are omitted.",
+  "agentbridge.launchArgs.agy.description": "Arguments to pass when launching this harness. Each element is one argument (e.g., [\"--remote-control\"]). Arguments that set the session, working directory, model, or effort, as well as standalone words (prompts or subcommands), are omitted."
 }

@@ -19,4 +19,7 @@ export interface SpawnOptions {
   turnSignalFilePath?: string;
   // 이 세션이 서브라면 부모의 세션 id (0.5.0 B-6). 호스트가 레코드와 기록의 뿌리를 정할 때 쓴다.
   parentSessionId?: string;
+  // 첫 턴이 시작된 뒤 호스트가 입력으로 넣을 명령. agy는 --remote-control을 켠 채 -i로 띄우면
+  // 첫 턴을 화면에 그리지 않아서, 그때는 원격 컨트롤을 기동 인자 대신 이것으로 켠다.
+  commandAfterTurnStart?: string;
 }

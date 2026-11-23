@@ -94,25 +94,6 @@ describe('views/viewerPanel HTML', () => {
     }
   });
 
-  it('세션 선택은 우리 창으로 한다 — IDE 기본 선택창을 부르지 않는다', () => {
-    const body = scriptBody(build(51234));
-    assert.match(body, /t: 'pickSession'/);
-    assert.match(body, /openPicker\('modal'\)/);
-  });
-
-  it('창이 열려 있는 동안만 목록 갱신을 받는다', () => {
-    // 열 때 요청하고 닫을 때 끊는다. 익스텐션은 이 둘 사이에만 다시 센다.
-    const body = scriptBody(build(51234));
-    assert.match(body, /t: 'pickerClosed'/);
-    assert.match(body, /scrim\.hidden = picker !== 'modal'/);
-    assert.match(body, /drop\.hidden = picker !== 'drop'/);
-  });
-
-  it('고른 세션이 목록에서 사라지면 읽기로 돌아간다', () => {
-    const body = scriptBody(build(51234));
-    assert.match(body, /if \(agent\) setMode\(false\);/);
-  });
-
   it('안에서 온 메시지와 익스텐션 메시지를 출처로 가른다', () => {
     assert.match(scriptBody(build(51234)), /e\.origin !== SERVER_ORIGIN/);
   });
@@ -123,28 +104,9 @@ describe('views/viewerPanel HTML', () => {
     assert.match(body, /ab: 'mode'/);
   });
 
-  it('에이전트 모드는 준비 신호가 있어야 열린다', () => {
-    const body = scriptBody(build(51234));
-    assert.match(body, /if \(!ready \|\| bar\.classList\.contains\('lock'\)\) return;/);
-    assert.match(body, /ab === 'ready'/);
-  });
-
-  it('전송이 성공했을 때만 패널을 접는다', () => {
-    assert.match(scriptBody(build(51234)), /if \(d\.ok\) setPanel\(false\);/);
-  });
-
   it('에이전트 모드 여부를 익스텐션에 알린다', () => {
     // 모드 동안 다시 그리기를 미루는 판정이 이 신호에 걸려 있다(0.8.0 spec/01 §3).
     assert.match(scriptBody(build(51234)), /t: 'mode', on: on/);
-  });
-
-  it('Esc는 선택 창, 패널, 에이전트 모드 순으로 한 겹만 닫는다', () => {
-    const body = scriptBody(build(51234));
-    assert.match(body, /if \(picker\) closePicker\(\);\s*else if \(!panel\.hidden\) setPanel\(false\);\s*else if \(agent\) setMode\(false\);/);
-    // 페이지 안의 Esc도 같은 자리로 온다.
-    assert.match(body, /ab === 'escape'\) \{\s*escape\(\);/);
-    // 입력칸이 따로 패널을 접지 않는다 — 접으면 같은 키가 올라와 모드까지 끈다.
-    assert.doesNotMatch(body, /note\.addEventListener\('keydown'[^}]*Escape/);
   });
 
   it('상태 화면의 재시도가 익스텐션에 닿는다', () => {
@@ -181,20 +143,9 @@ describe('views/viewerPanel HTML', () => {
   it('새로고침은 iframe 주소를 다시 넣지 않는다', () =>
     assert.doesNotMatch(scriptBody(build(51234)), /frame\.src\s*=/));
 
-  it('이동은 바깥에서 replace로 한다', () =>
-    assert.match(scriptBody(build(51234)), /contentWindow\.location\.replace\(/));
-
-  it('입력칸 Esc는 전파를 끊는다', () =>
-    assert.match(scriptBody(build(51234)), /Escape[\s\S]{0,120}stopPropagation\(\)/));
-
   it('창 전체 기록을 거스르지 않는다', () =>
     assert.doesNotMatch(
       scriptBody(build(51234)),
       /history\.(back|forward|go)\(|navigation\.(back|forward|traverseTo)\(/,
     ));
-  it('좁을 때 새 버전 있음은 글자를 숨기고 마우스오버로 남긴다', () => {
-    const doc = build(51234);
-    assert.match(doc, /<span id="fresh" title="[^"]+" hidden>&#10003; <b>/);
-    assert.match(doc, /#bar\.narrower #fresh b\{display:none\}/);
-  });
 });

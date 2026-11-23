@@ -24,27 +24,32 @@ let root = '';
 let repo = '';
 let tree = '';
 
-beforeEach(async () => {
-  root = await fs.mkdtemp(join(tmpdir(), 'ab-diff-'));
-  repo = join(root, 'repo');
-  await fs.mkdir(repo);
-  git(repo, 'init', '-q', '-b', 'main');
-  git(repo, 'config', 'user.email', 'test@agentbridge.local');
-  git(repo, 'config', 'user.name', 'AgentBridge Test');
-  git(repo, 'config', 'commit.gpgsign', 'false');
-  await fs.writeFile(join(repo, 'a.txt'), 'hello\n');
-  await fs.writeFile(join(repo, '.gitignore'), 'ignored.txt\n');
-  git(repo, 'add', '-A');
-  git(repo, 'commit', '-qm', 'init');
-  tree = join(root, 'trees', 'golden-gate');
-});
+// describe 안에서 부른다. 파일 맨 위에 두면 mocha가 전체 테스트마다 저장소를 만든다.
+function useRepo(): void {
+  beforeEach(async () => {
+    root = await fs.mkdtemp(join(tmpdir(), 'ab-diff-'));
+    repo = join(root, 'repo');
+    await fs.mkdir(repo);
+    git(repo, 'init', '-q', '-b', 'main');
+    git(repo, 'config', 'user.email', 'test@agentbridge.local');
+    git(repo, 'config', 'user.name', 'AgentBridge Test');
+    git(repo, 'config', 'commit.gpgsign', 'false');
+    await fs.writeFile(join(repo, 'a.txt'), 'hello\n');
+    await fs.writeFile(join(repo, '.gitignore'), 'ignored.txt\n');
+    git(repo, 'add', '-A');
+    git(repo, 'commit', '-qm', 'init');
+    tree = join(root, 'trees', 'golden-gate');
+  });
 
-afterEach(async () => {
-  if (root) await fs.rm(root, { recursive: true, force: true });
-  root = '';
-});
+  afterEach(async () => {
+    if (root) await fs.rm(root, { recursive: true, force: true });
+    root = '';
+  });
+}
 
 describe('snapshotAgainst', () => {
+  useRepo();
+
   it('커밋된 변경·미커밋 변경·미추적 파일이 한 패치에 담긴다', async () => {
     await addWorktree(repo, tree, 'golden-gate');
     const base = git(tree, 'rev-parse', 'HEAD').trim();
@@ -111,6 +116,8 @@ describe('snapshotAgainst', () => {
 });
 
 describe('forkPoint', () => {
+  useRepo();
+
   it('원본이 앞으로 나가도 갈라진 커밋을 낸다', async () => {
     await addWorktree(repo, tree, 'golden-gate');
     const forked = git(tree, 'rev-parse', 'HEAD').trim();
@@ -137,6 +144,8 @@ describe('forkPoint', () => {
 });
 
 describe('subagentDiff', () => {
+  useRepo();
+
   it('worktree가 없으면 원본 폴더의 HEAD 대비 변경을 낸다', async () => {
     await fs.writeFile(join(repo, 'a.txt'), 'hello\nmain edit\n');
     await fs.writeFile(join(repo, 'fresh.txt'), 'fresh\n');
@@ -198,6 +207,8 @@ describe('truncatePatch', () => {
 // ─── 머지 (5단계 W2) ─────────────────────────────────────────────────────
 
 describe('mergeSubagent', () => {
+  useRepo();
+
   async function snapshotFiles(dir: string): Promise<Record<string, string>> {
     const out: Record<string, string> = {};
     for (const name of await fs.readdir(dir)) {

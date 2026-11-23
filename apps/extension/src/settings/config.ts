@@ -31,6 +31,13 @@ export function getConfig(): AgentBridgeConfig {
   return cached;
 }
 
+// 띄우는 순간마다 읽으므로 캐시하지 않는다 (0.10.0 spec/01 §2).
+export function readLaunchArgs(kind: CliKind): string[] {
+  const raw = vscode.workspace.getConfiguration(SECTION).get<unknown>(`launchArgs.${kind}`);
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((item): item is string => typeof item === 'string');
+}
+
 export function registerConfigWatcher(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration((e) => {

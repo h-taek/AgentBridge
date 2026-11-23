@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// @agentbridge-cli-version 0.6.1
+// @agentbridge-cli-version 0.6.2
 "use strict";
 var __create = Object.create;
 var __defProp = Object.defineProperty;
@@ -240,6 +240,28 @@ var init_globalPaths = __esm({
   }
 });
 
+// packages/core/src/globalMarkdown.ts
+function slugify(value) {
+  const s = String(value || "").trim().toLowerCase().replace(/[^a-z0-9가-힣]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
+  return s || "doc";
+}
+function extractTitle(markdown) {
+  return String(markdown || "").match(/^#\s+(.+)$/m)?.[1]?.trim() || "";
+}
+function extractSummary(markdown) {
+  return String(markdown || "").match(/## Summary\s+([\s\S]*?)(?:\n## |$)/)?.[1]?.trim() || "";
+}
+function extractIndexEntries(markdown) {
+  const m = String(markdown || "").match(/## Index Entries\s+([\s\S]*?)(?:\n## |$)/);
+  if (!m?.[1]) return [];
+  return m[1].split(/\r?\n/).map((l) => l.trim()).filter((l) => l.startsWith("- ")).map((l) => l.slice(2).trim()).filter(Boolean);
+}
+var init_globalMarkdown = __esm({
+  "packages/core/src/globalMarkdown.ts"() {
+    "use strict";
+  }
+});
+
 // packages/core/src/shared/global.ts
 var GLOBAL_CATEGORIES, DOC_CAPS, PROPOSAL_CAPS;
 var init_global = __esm({
@@ -267,31 +289,6 @@ var init_global = __esm({
       maxPerPass: 12
       // 한 패스가 만들 제안 상한 — 폭주 방지
     };
-  }
-});
-
-// packages/core/src/globalMarkdown.ts
-function slugify(value) {
-  const s = String(value || "").trim().toLowerCase().replace(/[^a-z0-9가-힣]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
-  return s || "doc";
-}
-function extractTitle(markdown) {
-  return String(markdown || "").match(/^#\s+(.+)$/m)?.[1]?.trim() || "";
-}
-function extractSummary(markdown) {
-  return String(markdown || "").match(/## Summary\s+([\s\S]*?)(?:\n## |$)/)?.[1]?.trim() || "";
-}
-function extractIndexEntries(markdown) {
-  const m = String(markdown || "").match(/## Index Entries\s+([\s\S]*?)(?:\n## |$)/);
-  if (!m?.[1]) return [];
-  return m[1].split(/\r?\n/).map((l) => l.trim()).filter((l) => l.startsWith("- ")).map((l) => l.slice(2).trim()).filter(Boolean);
-}
-var CATEGORY_ORDER;
-var init_globalMarkdown = __esm({
-  "packages/core/src/globalMarkdown.ts"() {
-    "use strict";
-    init_global();
-    CATEGORY_ORDER = [...GLOBAL_CATEGORIES, "general"];
   }
 });
 
@@ -341,7 +338,7 @@ function extractTagsBeforeDetails(markdown) {
 }
 async function readProfileDocs(globalDir, profileId, scope = "user") {
   const docsDir = profileDocsDir(globalDir, profileId, scope);
-  const files = (await listDocRelPaths(docsDir)).filter((f) => !/(^|\/)index\.md$/i.test(f));
+  const files = await listDocRelPaths(docsDir);
   const recs = [];
   for (const file of files) {
     const fullPath = (0, import_node_path2.resolve)(docsDir, file);
@@ -960,7 +957,7 @@ async function sendHostRequest(sessionDir2, request, opts = {}) {
     at: now()
   };
 }
-var import_fs5, import_path6, HOST_REQUEST_FILENAME, HOST_RESULT_FILENAME, HOST_REQUEST_TIMEOUT_MS, POLL_MS, HOST_PING, HOST_AGENT_START, HOST_AGENT_SEND, HOST_AGENT_STOP, HOST_AGENT_CLOSE, HOST_AGENT_MERGE, HOST_AGENT_MODELS, HOST_MEMORY_WRITE, LONG_KINDS, LONG_TIMEOUT_MS, defaultSleep;
+var import_fs5, import_path6, HOST_REQUEST_FILENAME, HOST_RESULT_FILENAME, HOST_REQUEST_TIMEOUT_MS, POLL_MS, HOST_PING, HOST_AGENT_START, HOST_AGENT_SEND, HOST_AGENT_STOP, HOST_AGENT_CLOSE, HOST_AGENT_MERGE, HOST_AGENT_MODELS, HOST_MEMORY_WRITE, HOST_SESSION_NEW, LONG_KINDS, LONG_TIMEOUT_MS, defaultSleep;
 var init_hostRequest = __esm({
   "packages/core/src/hostRequest.ts"() {
     "use strict";
@@ -978,11 +975,13 @@ var init_hostRequest = __esm({
     HOST_AGENT_MERGE = "agent-merge";
     HOST_AGENT_MODELS = "agent-models";
     HOST_MEMORY_WRITE = "memory-write";
+    HOST_SESSION_NEW = "session-new";
     LONG_KINDS = /* @__PURE__ */ new Set([
       HOST_AGENT_START,
       HOST_AGENT_CLOSE,
       HOST_AGENT_MERGE,
-      HOST_AGENT_MODELS
+      HOST_AGENT_MODELS,
+      HOST_SESSION_NEW
     ]);
     LONG_TIMEOUT_MS = 3e4;
     defaultSleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -1469,9 +1468,18 @@ var init_skillTemplate = __esm({
   }
 });
 
+// packages/core/src/cleanupSkillTemplate.ts
+var CLEANUP_SKILL_DIR_NAME;
+var init_cleanupSkillTemplate = __esm({
+  "packages/core/src/cleanupSkillTemplate.ts"() {
+    "use strict";
+    CLEANUP_SKILL_DIR_NAME = "agentbridge-memory-cleanup";
+  }
+});
+
 // packages/core/src/skillInstaller.ts
-function skillFilePath(agent, homeDir) {
-  return (0, import_path8.join)(homeDir ?? (0, import_os3.homedir)(), ...SKILL_ROOTS[agent], SKILL_DIR_NAME, "SKILL.md");
+function skillFilePath(agent, homeDir, dirName = SKILL_DIR_NAME) {
+  return (0, import_path8.join)(homeDir ?? (0, import_os3.homedir)(), ...SKILL_ROOTS[agent], dirName, "SKILL.md");
 }
 var import_os3, import_path8, SKILL_ROOTS;
 var init_skillInstaller = __esm({
@@ -1481,6 +1489,7 @@ var init_skillInstaller = __esm({
     import_path8 = require("path");
     init_interfaces();
     init_skillTemplate();
+    init_cleanupSkillTemplate();
     SKILL_ROOTS = {
       claude: [".claude", "skills"],
       codex: [".agents", "skills"],
@@ -6375,7 +6384,8 @@ __export(agent_exports, {
   agentStart: () => agentStart,
   agentStop: () => agentStop,
   formatSubLabel: () => formatSubLabel,
-  listSubs: () => listSubs
+  listSubs: () => listSubs,
+  sessionNew: () => sessionNew
 });
 async function readSessions(wsDir) {
   try {
@@ -6610,6 +6620,9 @@ function agentCloseRound(sessionDir2) {
 function agentMerge(sessionDir2, name) {
   return callHost(sessionDir2, HOST_AGENT_MERGE, { name });
 }
+function sessionNew(sessionDir2, harness) {
+  return callHost(sessionDir2, HOST_SESSION_NEW, harness ? { harness } : {});
+}
 function agentModels(sessionDir2, harnesses) {
   return callHost(
     sessionDir2,
@@ -6646,16 +6659,18 @@ async function uninstallGlobal(homeDir) {
   const removed = [];
   for (const path2 of await removeGlobalHooks(homeDir)) removed.push(path2);
   for (const agent of AGENTS2) {
-    const path2 = skillFilePath(agent, homeDir);
-    try {
-      await import_fs15.promises.unlink(path2);
-      removed.push(path2);
-    } catch {
-      continue;
-    }
-    try {
-      await import_fs15.promises.rmdir((0, import_path17.dirname)(path2));
-    } catch {
+    for (const dirName of SKILL_DIRS) {
+      const path2 = skillFilePath(agent, homeDir, dirName);
+      try {
+        await import_fs15.promises.unlink(path2);
+        removed.push(path2);
+      } catch {
+        continue;
+      }
+      try {
+        await import_fs15.promises.rmdir((0, import_path17.dirname)(path2));
+      } catch {
+      }
     }
   }
   if (removed.length === 0) {
@@ -6669,7 +6684,7 @@ async function uninstallGlobal(homeDir) {
     "\uC800\uC7A5\uC18C(\uB300\uD654 \uAE30\uB85D\uACFC \uC9C0\uC2DD)\uB294 \uADF8\uB300\uB85C \uB454\uB2E4."
   ].join("\n");
 }
-var import_fs15, import_path17, AGENTS2;
+var import_fs15, import_path17, AGENTS2, SKILL_DIRS;
 var init_uninstall = __esm({
   "packages/core/src/agentCli/uninstall.ts"() {
     "use strict";
@@ -6677,7 +6692,10 @@ var init_uninstall = __esm({
     import_path17 = require("path");
     init_hookInstaller();
     init_skillInstaller();
+    init_skillTemplate();
+    init_cleanupSkillTemplate();
     AGENTS2 = ["claude", "codex", "agy"];
+    SKILL_DIRS = [SKILL_DIR_NAME, CLEANUP_SKILL_DIR_NAME];
   }
 });
 
@@ -6712,6 +6730,7 @@ var {
   agentCloseRound: agentCloseRound2,
   agentMerge: agentMerge2,
   agentModels: agentModels2,
+  sessionNew: sessionNew2,
   DEFAULT_WAIT_SEC: DEFAULT_WAIT_SEC2
 } = (init_agent(), __toCommonJS(agent_exports));
 var { uninstallGlobal: uninstallGlobal2 } = (init_uninstall(), __toCommonJS(uninstall_exports));
@@ -6738,7 +6757,8 @@ var COMMANDS = [
   ["agent merge <\uC774\uB984>", "\uADF8 \uC11C\uBE0C\uC758 \uBCC0\uACBD\uC744 \uC6D0\uBCF8\uC5D0 \uC5B9\uB294\uB2E4 (\uC804\uBD80 \uC544\uB2C8\uBA74 \uC544\uBB34\uAC83\uB3C4)"],
   ["agent stop <\uC774\uB984>", "\uC11C\uBE0C\uB97C \uB05D\uB0B8\uB2E4"],
   ["agent close <\uC774\uB984>", "\uC11C\uBE0C\uB97C \uC815\uB9AC\uD55C\uB2E4 (\uACA9\uB9AC\uC600\uC73C\uBA74 \uD3F4\uB354\uC640 \uBE0C\uB79C\uCE58\uB3C4 \uC9C0\uC6B4\uB2E4)"],
-  ["agent close --round", "\uB77C\uC6B4\uB4DC\uB97C \uC815\uB9AC\uD55C\uB2E4 (\uBA38\uC9C0\uB41C \uD558\uB098\uB9CC \uB0A8\uAE30\uACE0 \uC804\uBD80)"]
+  ["agent close --round", "\uB77C\uC6B4\uB4DC\uB97C \uC815\uB9AC\uD55C\uB2E4 (\uBA38\uC9C0\uB41C \uD558\uB098\uB9CC \uB0A8\uAE30\uACE0 \uC804\uBD80)"],
+  ["session new [--harness h]", "\uC0C8 \uBA54\uC778 \uC138\uC158 \uD0ED\uC744 \uC5F0\uB2E4"]
 ];
 var USAGE = [
   "agentbridge \u2014 AgentBridge \uB9E5\uB77D \uC77D\uAE30",
@@ -6974,6 +6994,15 @@ async function dispatch(cmd, args, wsDir, storageRoot) {
         default:
           return usageAndExit();
       }
+    }
+    case "session": {
+      if (args[0] !== "new") return usageAndExit();
+      const rest = args.slice(1);
+      const caller = process.env.AGENTBRIDGE_WS_SESSION || "";
+      if (!caller || caller !== path.basename(caller)) fail("\uC774 \uC138\uC158\uC758 \uC2E0\uC6D0\uC744 \uC54C \uC218 \uC5C6\uB2E4");
+      const harness = strOption(rest, "--harness");
+      if (harness !== void 0 && harness.includes(",")) fail("session new\uB294 \uD558\uB2C8\uC2A4\uB97C \uD558\uB098\uB9CC \uBC1B\uB294\uB2E4");
+      return sessionNew2(sessionDir(wsDir), harness);
     }
     case "status":
       return readStatus2(storageRoot, wsDir, { sessionDir: sessionDir(wsDir) });

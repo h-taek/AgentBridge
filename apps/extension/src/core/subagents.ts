@@ -26,6 +26,7 @@ import {
   HOST_AGENT_CLOSE,
   HOST_AGENT_MERGE,
   HOST_AGENT_MODELS,
+  HOST_SESSION_NEW,
   addWorktree,
   isGitRepo,
   trustWorkspace,
@@ -74,6 +75,9 @@ export interface SubagentDeps {
   // 메인 세션과 같은 배선으로 탭을 연다. preserveFocus는 서브에서 참이다.
   openPanel: (opts: SpawnOptions, workspaceId: string, preserveFocus: boolean) => void;
   refreshTree: () => void;
+  // 하니스 CLI가 깔려 있는지. `session new`가 못 여는 하니스를 먼저 거절하는 데 쓴다.
+  // 없으면 깔린 것으로 본다.
+  isAvailable?: (model: CliKind) => boolean;
 }
 
 let deps: SubagentDeps | null = null;
@@ -372,6 +376,17 @@ async function findSub(
 
 const KNOWN_HARNESSES: readonly CliKind[] = ['claude', 'codex', 'agy'];
 
+const NESTED_REFUSAL =
+  '서브 세션에서는 새 세션을 띄우지 않는다. 다른 에이전트가 필요한 일은 보고에 적어 메인에게 넘긴다.';
+
+// 서브 세션 = 세션 기록에 parentSessionId가 있는 세션 (0.9.0 spec/03). 작업 폴더로 가르지 않는다 —
+// 격리 서브는 worktree 안에서 돌지만 그렇지 않은 서브도 있다. 기록을 못 찾으면 메인으로 본다.
+export async function isSubSession(workspaceId: string, sessionId: string): Promise<boolean> {
+  const meta = await getWorkspaceStore().loadWorkspace(workspaceId);
+  const found = meta.sessions.find((s) => s.sessionId === sessionId);
+  return !!found?.parentSessionId;
+}
+
 function parseHarnessValueMap(
   flag: '--model' | '--effort',
   raw: unknown,
@@ -401,6 +416,8 @@ function parseHarnessValueMap(
 export function createStartHandler(handlerDeps?: { run?: HarnessRunner; timeoutMs?: number }) {
   return async function handleStart(req: HostRequest, sessionDir: string): Promise<string> {
     const { workspaceId, sessionId } = callerFromSessionDir(sessionDir);
+    // 프롬프트 검사보다 앞이다 — 서브는 입력이 맞아도 틀려도 아무것도 못 띄운다.
+    if (await isSubSession(workspaceId, sessionId)) throw new Error(NESTED_REFUSAL);
     const p = payloadOf(req);
     const prompt = str(p.prompt);
     if (!prompt) throw new Error('프롬프트가 비어 있다');
@@ -447,6 +464,36 @@ export function createStartHandler(handlerDeps?: { run?: HarnessRunner; timeoutM
 }
 
 const handleStart = createStartHandler();
+
+// 부모 없는 새 메인 세션 탭 (0.9.0 spec/02). 서브와 달리 보고도 정리 대상도 없다 — 레코드에
+// parentSessionId·agentName이 붙지 않으므로 사용자가 직접 연 메인과 같다.
+export function createSessionNewHandler() {
+  return async function handleSessionNew(req: HostRequest, sessionDir: string): Promise<string> {
+    if (!deps) throw new Error('subagents: 초기화되지 않았다');
+    const { workspaceId, sessionId } = callerFromSessionDir(sessionDir);
+    if (await isSubSession(workspaceId, sessionId)) throw new Error(NESTED_REFUSAL);
+
+    const store = getWorkspaceStore();
+    const meta = await store.loadWorkspace(workspaceId);
+    const caller = meta.sessions.find((s) => s.sessionId === sessionId);
+    // 하니스를 안 주면 부른 세션의 것으로 연다. 기록이 없으면 claude다.
+    const harness = str(payloadOf(req).harness) || caller?.model || 'claude';
+    if (!KNOWN_HARNESSES.includes(harness as CliKind)) throw new Error(`모르는 하니스다: ${harness}`);
+    const model = harness as CliKind;
+    if (deps.isAvailable && !deps.isAvailable(model)) throw new Error(`${model} CLI를 찾을 수 없다`);
+
+    const opts = await deps.buildOpts(model, meta.workspacePath, workspaceId);
+    if (!opts.sessionId) throw new Error('새 세션의 id를 만들지 못했다');
+    await store.addSession(workspaceId, model, 'cli', opts.sessionId);
+    // 서브처럼 포커스를 안 뺏고 연 뒤, 같은 그룹에 합류한 새 탭 대신 부른 탭을 앞으로 되돌린다.
+    deps.openPanel(opts, workspaceId, true);
+    getActivePanel(sessionId)?.reveal(true);
+    deps.refreshTree();
+    return `새 메인 세션을 열었다 (${model}).`;
+  };
+}
+
+const handleSessionNew = createSessionNewHandler();
 
 async function handleSend(req: HostRequest, sessionDir: string): Promise<string> {
   const { workspaceId, sessionId } = callerFromSessionDir(sessionDir);
@@ -634,4 +681,5 @@ export const subagentHostHandlers = {
   [HOST_AGENT_CLOSE]: handleClose,
   [HOST_AGENT_MERGE]: handleMerge,
   [HOST_AGENT_MODELS]: handleAgentModels,
+  [HOST_SESSION_NEW]: handleSessionNew,
 };

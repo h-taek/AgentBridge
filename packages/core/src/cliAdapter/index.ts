@@ -17,6 +17,7 @@ import { resolveResumeArgs } from './agyResume';
 import { resolveHookCaptureFile } from './hookSessionCapture';
 import { resolveTurnSignalFile } from './turnSignal';
 import { parseWritableRoots, buildWritableRootsArgs } from './codexSandbox';
+import { filterLaunchArgs } from './launchArgs';
 
 export type CliAdapterOptions = {
   envProbe: EnvProbe;
@@ -34,6 +35,10 @@ export type CliAdapterOptions = {
   // 테스트만 오버라이드 — codex 설정을 읽을 홈.
   homeDir?: string;
   logger?: Logger;
+  // 띄울 때마다 부르는 사용자 실행 인자(0.10.0 spec/01). 없으면 빈 목록.
+  launchArgs?: (kind: CliKind) => readonly string[];
+  // 금지 인자가 빠져서 나갔을 때만 부른다.
+  onLaunchArgsDropped?: (kind: CliKind, dropped: string[]) => void;
 };
 
 // 서브에이전트를 띄울 때 함께 넘기는 값 (0.5.0 B-6·B-8).
@@ -130,8 +135,18 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
     }
   }
 
+  function userArgs(kind: CliKind): string[] {
+    const raw = opts.launchArgs?.(kind) ?? [];
+    const { kept, dropped } = filterLaunchArgs(kind, raw);
+    if (dropped.length > 0) {
+      log.log(`launchArgs: ${kind} 뺌 — ${dropped.join(' ')}`);
+      opts.onLaunchArgsDropped?.(kind, dropped);
+    }
+    return kept;
+  }
+
   async function claudeSessionFileExists(uuid: string): Promise<boolean> {
-    const root = join(homedir(), '.claude', 'projects');
+    const root = join(home, '.claude', 'projects');
     let projects: string[];
     try {
       projects = await fs.readdir(root);
@@ -202,9 +217,10 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
         // 옵션이라, 구분자 없이 뒤에 붙이면 프롬프트가 그 옵션의 값으로 먹힌다(라이브에서 확인:
         // "Input must be provided ... when using --print"). resume에는 붙이지 않는다 — 이어서
         // 여는 세션은 이미 그 말을 들었다.
+        const prefixArgs = userArgs('claude');
         const modelArgs = buildModelArgs('claude', extras);
         const promptArgs = !resuming && extras?.initialPrompt ? ['--', extras.initialPrompt] : [];
-        const args = [...sessionArgs, ...accessArgs, ...modelArgs, ...promptArgs];
+        const args = [...prefixArgs, ...sessionArgs, ...accessArgs, ...modelArgs, ...promptArgs];
 
         return {
           command,
@@ -257,6 +273,7 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
           ? buildWritableRootsArgs(opts.storageRoot, await readCodexWritableRoots())
           : [];
 
+        const prefixArgs = userArgs('codex');
         const modelArgs = buildModelArgs('codex', extras);
         let args: string[];
         let modelSessionId: string | undefined = resumeModelSessionId;
@@ -265,14 +282,14 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
         const promptArgs = !resuming && extras?.initialPrompt ? [extras.initialPrompt] : [];
 
         if (!resuming) {
-          args = [...sandboxArgs, ...modelArgs, ...promptArgs];
+          args = [...prefixArgs, ...sandboxArgs, ...modelArgs, ...promptArgs];
         } else if (resumeModelSessionId) {
-          args = [...sandboxArgs, ...modelArgs, 'resume', resumeModelSessionId];
+          args = [...prefixArgs, ...sandboxArgs, ...modelArgs, 'resume', resumeModelSessionId];
         } else {
           log.warn(
             `codexAdapter: resume 요청이지만 thread_id 없음 — 새 세션으로 fallback (sessionId=${sessionId.slice(0, 8)})`,
           );
-          args = [...sandboxArgs, ...modelArgs];
+          args = [...prefixArgs, ...sandboxArgs, ...modelArgs];
           modelSessionId = undefined;
         }
 
@@ -323,33 +340,38 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
           }
         }
 
+        const userPrefix = userArgs('agy');
         const cwdArgs = cwd ? ['--add-dir', cwd] : [];
         const modelArgs = buildModelArgs('agy', extras);
         // agy의 첫 프롬프트는 위치 인자가 아니라 -i다. --print와 달리 답한 뒤에도 대화형으로 남는다.
         const promptArgs = !resuming && extras?.initialPrompt ? ['-i', extras.initialPrompt] : [];
+        // --remote-control을 켠 채 -i로 띄우면 agy가 첫 턴을 실행은 하되 화면에 그리지 않는다
+        // (agy 1.5.14 실측). 그때는 원격 컨트롤을 빼고 띄워 호스트가 첫 턴 시작 뒤 입력으로 켠다.
+        const lateRemoteControl = promptArgs.length > 0 && userPrefix.includes('--remote-control');
+        const prefixArgs = lateRemoteControl ? userPrefix.filter((a) => a !== '--remote-control') : userPrefix;
 
         let args: string[];
         let modelSessionId: string | undefined = resumeModelSessionId;
 
         if (!resuming) {
-          args = [...cwdArgs, ...modelArgs, '--dangerously-skip-permissions', ...promptArgs];
+          args = [...prefixArgs, ...cwdArgs, ...modelArgs, '--dangerously-skip-permissions', ...promptArgs];
         } else if (resumeModelSessionId) {
           try {
             const resumeArgs = await resolveResumeArgs({
               sessionId: resumeModelSessionId,
               logger: log,
             });
-            args = [...cwdArgs, ...modelArgs, ...resumeArgs, '--dangerously-skip-permissions'];
+            args = [...prefixArgs, ...cwdArgs, ...modelArgs, ...resumeArgs, '--dangerously-skip-permissions'];
           } catch (err) {
             log.warn(`agyAdapter: resume 불가 — 새 세션으로 fallback (${String(err)})`);
-            args = [...cwdArgs, ...modelArgs, '--dangerously-skip-permissions'];
+            args = [...prefixArgs, ...cwdArgs, ...modelArgs, '--dangerously-skip-permissions'];
             modelSessionId = undefined;
           }
         } else {
           log.warn(
             `agyAdapter: resume 요청이지만 conversation UUID 없음 — 새 세션으로 fallback (sessionId=${sessionId.slice(0, 8)})`,
           );
-          args = [...cwdArgs, ...modelArgs, '--dangerously-skip-permissions'];
+          args = [...prefixArgs, ...cwdArgs, ...modelArgs, '--dangerously-skip-permissions'];
         }
 
         return {
@@ -365,6 +387,7 @@ export function createCliAdapters(opts: CliAdapterOptions): CliAdapterSet {
           parentSessionId: extras?.parentSessionId,
           hookCaptureFilePath,
           turnSignalFilePath,
+          ...(lateRemoteControl ? { commandAfterTurnStart: '/remote-control' } : {}),
         };
       },
     },

@@ -9,6 +9,7 @@ import {
   removeGlobalHooks,
   createSkillInstaller,
   skillFilePath,
+  CLEANUP_SKILL_DIR_NAME,
 } from '@agentbridge/core';
 
 // status와 uninstall (0.5.0 3단계 W7, B-5).
@@ -126,6 +127,34 @@ describe('status·uninstall — 전역 설치 조회와 제거 (0.5.0 W7)', () =
     for (const agent of ['claude', 'codex', 'agy'] as const) {
       await assert.rejects(fsp.access(skillFilePath(agent, home)));
     }
+  });
+
+  it('uninstall이 정리 스킬도 걷어낸다', async () => {
+    await seedSkills();
+    for (const agent of ['claude', 'codex', 'agy'] as const) {
+      await fsp.access(skillFilePath(agent, home, CLEANUP_SKILL_DIR_NAME));
+    }
+
+    await uninstallGlobal(home);
+
+    for (const agent of ['claude', 'codex', 'agy'] as const) {
+      const file = skillFilePath(agent, home, CLEANUP_SKILL_DIR_NAME);
+      await assert.rejects(fsp.access(file));
+      await assert.rejects(fsp.access(join(file, '..')), '비게 된 폴더도 없다');
+    }
+  });
+
+  it('남의 파일이 든 정리 스킬 폴더는 남긴다', async () => {
+    await seedSkills();
+    const claudeDir = join(skillFilePath('claude', home, CLEANUP_SKILL_DIR_NAME), '..');
+    await fsp.writeFile(join(claudeDir, 'other.txt'), '남의 것');
+
+    await uninstallGlobal(home);
+
+    await assert.rejects(fsp.access(skillFilePath('claude', home, CLEANUP_SKILL_DIR_NAME)));
+    await fsp.access(join(claudeDir, 'other.txt'));
+    // 남의 파일이 없는 하니스는 폴더까지 사라진다.
+    await assert.rejects(fsp.access(join(skillFilePath('codex', home, CLEANUP_SKILL_DIR_NAME), '..')));
   });
 
   it('uninstall — 두 번 불러도 같은 결과다', async () => {

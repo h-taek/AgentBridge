@@ -19,7 +19,7 @@
 
 'use strict'
 
-// @agentbridge-cli-version 0.6.1
+// @agentbridge-cli-version 0.6.2
 // (단일 설치 버전 비교용 — 이 파일을 수정하면 반드시 버전을 올릴 것)
 
 const fs = require('fs')
@@ -54,6 +54,7 @@ const {
   agentCloseRound,
   agentMerge,
   agentModels,
+  sessionNew,
   DEFAULT_WAIT_SEC
 } = require('../src/agentCli/agent')
 const { uninstallGlobal } = require('../src/agentCli/uninstall')
@@ -82,7 +83,8 @@ const COMMANDS = [
   ['agent merge <이름>', '그 서브의 변경을 원본에 얹는다 (전부 아니면 아무것도)'],
   ['agent stop <이름>', '서브를 끝낸다'],
   ['agent close <이름>', '서브를 정리한다 (격리였으면 폴더와 브랜치도 지운다)'],
-  ['agent close --round', '라운드를 정리한다 (머지된 하나만 남기고 전부)']
+  ['agent close --round', '라운드를 정리한다 (머지된 하나만 남기고 전부)'],
+  ['session new [--harness h]', '새 메인 세션 탭을 연다']
 ]
 
 const USAGE = [
@@ -356,6 +358,16 @@ async function dispatch(cmd, args, wsDir, storageRoot) {
         default:
           return usageAndExit()
       }
+    }
+    case 'session': {
+      if (args[0] !== 'new') return usageAndExit()
+      const rest = args.slice(1)
+      // agent 명령처럼 부르는 세션의 신원이 있어야 호스트가 하니스 기본값과 서브 여부를 안다.
+      const caller = process.env.AGENTBRIDGE_WS_SESSION || ''
+      if (!caller || caller !== path.basename(caller)) fail('이 세션의 신원을 알 수 없다')
+      const harness = strOption(rest, '--harness')
+      if (harness !== undefined && harness.includes(',')) fail('session new는 하니스를 하나만 받는다')
+      return sessionNew(sessionDir(wsDir), harness)
     }
     case 'status':
       return readStatus(storageRoot, wsDir, { sessionDir: sessionDir(wsDir) })

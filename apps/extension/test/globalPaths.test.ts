@@ -3,7 +3,7 @@ import { homedir } from 'os';
 import { join } from 'path';
 import {
   getGlobalDir, profilesRoot, profileDir, profileDocsDir,
-  profileIndexPath, profileMetaPath, proposalsDir, DEFAULT_PROFILE_ID,
+  profileMetaPath, proposalsDir, DEFAULT_PROFILE_ID,
 } from '@agentbridge/core';
 
 describe('globalPaths', () => {
@@ -19,7 +19,6 @@ describe('globalPaths', () => {
     assert.equal(profilesRoot(g), '/tmp/x/global/profiles');
     assert.equal(profileDir(g, 'default'), '/tmp/x/global/profiles/default');
     assert.equal(profileDocsDir(g, 'default'), '/tmp/x/global/profiles/default/docs');
-    assert.equal(profileIndexPath(g, 'default'), '/tmp/x/global/profiles/default/index.md');
     assert.equal(profileMetaPath(g, 'default'), '/tmp/x/global/profiles/default/profile.json');
     assert.equal(proposalsDir(g, 'default'), '/tmp/x/global/profiles/default/proposals');
   });

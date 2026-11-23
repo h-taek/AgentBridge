@@ -15,10 +15,15 @@ class EventEmitterStub<T> {
 
 export const EventEmitter = EventEmitterStub;
 
+export const configValues: Record<string, unknown> = {};
+
 export const workspace = {
   workspaceFolders: undefined as undefined | Array<{ uri: { fsPath: string } }>,
-  getConfiguration: (_section?: string) => ({
-    get: (_key: string, def?: unknown) => def,
+  getConfiguration: (section?: string) => ({
+    get: (key: string, def?: unknown) => {
+      const fullKey = section ? `${section}.${key}` : key;
+      return configValues[fullKey] ?? def;
+    },
   }),
   fs: {},
 };

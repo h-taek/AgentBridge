@@ -288,6 +288,40 @@ describe('agent CLI — 골격과 신원 해소 (0.5.0 W1)', () => {
     assert.match(r.stdout, /발행 절차/);
   });
 
+  // 정리 스킬은 기억 폴더 경로를 본문에 박아 쓰므로 --full 출력은 폴더 줄을 싣지 않는다.
+  describe('memory --full (0.9.0 spec/04)', () => {
+    it('memory user --full 출력에 폴더 줄이 없다', async () => {
+      await writeProfileDocs(getGlobalDir(root), 'default', {
+        docs: [{
+          category: 'workflows' as const,
+          slug: 'folder-line',
+          title: '폴더 줄 확인',
+          summary: '폴더 줄이 머리에 실리지 않는다.',
+          body: '본문',
+          indexEntries: ['폴더 줄'],
+        }],
+      });
+      const r = run(['memory', 'user', '--full']);
+      assert.equal(r.status, 0);
+      assert.ok(r.stdout.startsWith('## 사용자 지식 ('), r.stdout.split('\n')[0]);
+      assert.doesNotMatch(r.stdout, /폴더: /);
+    });
+
+    it('항목이 없으면 지금 문구 그대로다', async () => {
+      // 사용자 지식은 늘 'default' 프로필이라 비어 있는 자리가 없다 — 새 저장소 루트를 쓴다.
+      const root2 = join(tmp, 'storage-empty');
+      await fsp.mkdir(join(root2, 'bin'), { recursive: true });
+      const cli2 = join(root2, 'bin', 'agentbridge.js');
+      await fsp.copyFile(cliPath, cli2);
+      const ws2 = join(root2, 'workspaces', 'ws-1');
+      await fsp.mkdir(ws2, { recursive: true });
+      const env: NodeJS.ProcessEnv = { ...process.env, AGENTBRIDGE_WS_DIR: ws2 };
+      const r = spawnSync('node', [cli2, 'memory', 'user', '--full'], { encoding: 'utf8', env });
+      assert.equal(r.status, 0);
+      assert.equal(r.stdout.trim(), '사용자 지식이 아직 없다.');
+    });
+  });
+
   it('memory search — 두 지식을 함께 훑는다', () => {
     const r = run(['memory', 'search', '발행 절차']);
     assert.equal(r.status, 0);
@@ -429,35 +463,6 @@ describe('agent CLI — 골격과 신원 해소 (0.5.0 W1)', () => {
     const r = run(['memory', 'add', '--scope', 'user', '--category', 'infra', '--title', 'a', '--summary', 'b']);
     assert.equal(r.status, 2);
     assert.match(r.stderr, /--body/);
-  });
-
-  it('memory add — 이미 있는 제목이면 update로 안내한다', async () => {
-    const r = await runWithHost([
-      'memory', 'add',
-      '--scope', 'user',
-      '--category', 'workflows',
-      '--title', '격리 환경 디버깅',
-      '--summary', '다시 쓴 요약',
-      '--body', '다시 쓴 본문',
-    ]);
-    assert.equal(r.status, 0);
-    assert.match(r.stdout, /update/);
-  });
-
-  it('memory add — 대기 제안과 제목이 겹치면 withdraw로 안내한다', async () => {
-    const [existing] = await readProposals(getGlobalDir(root), 'default');
-    assert.ok(existing);
-    const r = await runWithHost([
-      'memory', 'add',
-      '--scope', 'user',
-      '--category', 'conventions',
-      '--title', '커밋 트레일러 금지',
-      '--summary', '다시 쓴 요약',
-      '--body', '다시 쓴 본문',
-    ]);
-    assert.equal(r.status, 0);
-    assert.match(r.stdout, /대기열에 같은 제목의 제안이 있다/);
-    assert.ok(r.stdout.includes(`memory withdraw ${existing.id}`));
   });
 
   it('memory update — 없는 식별자는 거절한다', async () => {

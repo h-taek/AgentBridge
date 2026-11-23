@@ -11,7 +11,7 @@
 //
 // `uninstall`은 싣지 않는다. 사용자 명령이지 에이전트 명령이 아니다.
 
-export const SKILL_VERSION = '0.6.2';
+export const SKILL_VERSION = '0.6.3';
 export const SKILL_DIR_NAME = 'agentbridge';
 
 // 셸에서 그대로 쓸 수 있게 공백 있는 경로를 감싼다.
@@ -87,10 +87,16 @@ Each line is the part after the run command.
     memory update <id> [same flags]
     memory pending                proposals waiting for approval
     memory withdraw <proposal-id> take one back
+    session new [--harness claude|codex|agy]
+                                  open a new main session tab — only when the
+                                  user asks for a new main session
 
 Categories: role, repos, domain, workflows, conventions, infra, verification.
 
 ## Subagents
+
+If the hook says you are a subagent, skip this section — a subagent does not
+start sessions.
 
 You can run other coding agents as subagents. Each gets its own session and
 tab; you give it work, it reports back, you read the report.
@@ -115,6 +121,12 @@ tab; you give it work, it reports back, you read the report.
 
 \`agent start\` returns the names it issued — that is what the other commands
 take. Default harness is claude; pass several to run the same prompt on each.
+
+Put the whole instruction in \`--prompt\` (\`agent send\` too). Do not write it
+to a file and hand the sub the path. Some models' safety classifiers rank what
+arrives as the prompt above what a file says, and refuse an instruction that
+came through a path. Material the work needs — a plan, a spec, the code under
+review — can still be named by path; the instruction itself goes in the prompt.
 
 \`--model\` and \`--effort\` pick the model a sub runs on. Use them when the user
 names one, or when a recorded sub evaluation (see below) says which model and
@@ -178,6 +190,11 @@ closing it.
 
 Every read output item starts with its identifier (\`<category>/<slug>\`) —
 that is what \`memory update\` takes.
+
+\`session new\` is not a subagent. It opens a separate main session with no tie to
+this one — no report, no round cleanup. Use it only when the user asks for a new
+main session (for example, a fresh seat to drive over remote control). For work
+you hand off and review, use \`agent start\`.
 
 ### Evaluating the model a sub ran on
 

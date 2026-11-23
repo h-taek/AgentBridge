@@ -25,25 +25,30 @@ let root = '';
 let repo = '';
 
 // 저장소마다 새 임시 폴더를 쓴다. 브랜치 삭제가 강제라 상태가 새는 것을 아예 막는다.
-beforeEach(async () => {
-  root = await fs.mkdtemp(join(tmpdir(), 'ab-worktree-'));
-  repo = join(root, 'repo');
-  await fs.mkdir(repo);
-  git(repo, 'init', '-q', '-b', 'main');
-  git(repo, 'config', 'user.email', 'test@agentbridge.local');
-  git(repo, 'config', 'user.name', 'AgentBridge Test');
-  git(repo, 'config', 'commit.gpgsign', 'false');
-  await fs.writeFile(join(repo, 'a.txt'), 'hello\n');
-  git(repo, 'add', '-A');
-  git(repo, 'commit', '-qm', 'init');
-});
+// describe 안에서 부른다. 파일 맨 위에 두면 mocha가 전체 테스트마다 저장소를 만든다.
+function useRepo(): void {
+  beforeEach(async () => {
+    root = await fs.mkdtemp(join(tmpdir(), 'ab-worktree-'));
+    repo = join(root, 'repo');
+    await fs.mkdir(repo);
+    git(repo, 'init', '-q', '-b', 'main');
+    git(repo, 'config', 'user.email', 'test@agentbridge.local');
+    git(repo, 'config', 'user.name', 'AgentBridge Test');
+    git(repo, 'config', 'commit.gpgsign', 'false');
+    await fs.writeFile(join(repo, 'a.txt'), 'hello\n');
+    git(repo, 'add', '-A');
+    git(repo, 'commit', '-qm', 'init');
+  });
 
-afterEach(async () => {
-  if (root) await fs.rm(root, { recursive: true, force: true });
-  root = '';
-});
+  afterEach(async () => {
+    if (root) await fs.rm(root, { recursive: true, force: true });
+    root = '';
+  });
+}
 
 describe('worktree 생성', () => {
+  useRepo();
+
   it('폴더가 생기고 브랜치 이름에 접두사가 붙는다', async () => {
     const tree = join(root, 'trees', 'golden-gate');
     await addWorktree(repo, tree, 'golden-gate');
@@ -55,6 +60,8 @@ describe('worktree 생성', () => {
 });
 
 describe('listAgentBranches', () => {
+  useRepo();
+
   it('접두사를 벗겨 내고, 접두사 없는 사용자 브랜치는 안 낸다', async () => {
     await addWorktree(repo, join(root, 'trees', 'hangang'), 'hangang');
     await addWorktree(repo, join(root, 'trees', 'ponte-vecchio'), 'ponte-vecchio');
@@ -70,6 +77,8 @@ describe('listAgentBranches', () => {
 });
 
 describe('summarizeWorktree', () => {
+  useRepo();
+
   it('깨끗한 트리는 dirty가 아니고 head가 HEAD SHA다', async () => {
     const tree = join(root, 'trees', 'clean');
     await addWorktree(repo, tree, 'clean');
@@ -111,6 +120,8 @@ describe('summarizeWorktree', () => {
 });
 
 describe('commitAll', () => {
+  useRepo();
+
   it('깨끗하면 null이고 새 커밋이 안 생긴다', async () => {
     const tree = join(root, 'trees', 'clean');
     await addWorktree(repo, tree, 'clean');
@@ -149,6 +160,8 @@ describe('commitAll', () => {
 });
 
 describe('삭제', () => {
+  useRepo();
+
   it('폴더와 브랜치가 함께 사라진다', async () => {
     const tree = join(root, 'trees', 'gone');
     await addWorktree(repo, tree, 'gone');
@@ -211,6 +224,8 @@ describe('삭제', () => {
 });
 
 describe('repairWorktrees', () => {
+  useRepo();
+
   it('treePaths가 비어 있으면 아무것도 하지 않는다', async () => {
     await repairWorktrees(repo, []);
   });

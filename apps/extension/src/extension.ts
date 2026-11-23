@@ -24,6 +24,11 @@ import {
   syncFolderMark,
   repairWorktrees,
   resolveProjectProfileKey,
+  resolveProjectProfileId,
+  adoptPathKeyedProject,
+  recordProjectWorkspace,
+  getGlobalDir,
+  projectsRoot,
   sweepOldReplayLogs,
   type SpawnExtras,
 } from '@agentbridge/core';
@@ -193,6 +198,18 @@ export function activate(context: vscode.ExtensionContext) {
         await syncFolderMark(store, wid, folderUri.fsPath);
       } catch (err) {
         output.warn(`워크스페이스 표지 갱신 실패: ${String(err)}`);
+      }
+
+      // 프로젝트 지식 폴더에 이 저장소 경로를 적는다(정리 스킬이 저장소와 대조하는 길).
+      // 경로 키 폴더 이전이 먼저여야 한다 — 거꾸로면 remote 키 폴더가 먼저 생겨 이전이 막힌다.
+      try {
+        const logger = getLogger();
+        const globalDir = getGlobalDir();
+        const projectId = await resolveProjectProfileId(folderUri.fsPath, { logger });
+        adoptPathKeyedProject(projectsRoot(globalDir), folderUri.fsPath, projectId, logger);
+        await recordProjectWorkspace(globalDir, projectId, folderUri.fsPath);
+      } catch (err) {
+        output.warn(`프로젝트 지식 폴더에 저장소 경로 기록 실패: ${String(err)}`);
       }
     }
   })();
@@ -410,6 +427,7 @@ export function activate(context: vscode.ExtensionContext) {
     buildOpts,
     openPanel: (opts, workspaceId, preserveFocus) => openChatPanel(opts, workspaceId, preserveFocus),
     refreshTree: () => { void sessionsView.refresh(); },
+    isAvailable: (model) => checkAvailability(model).found,
   });
 
   // --- Commands ---

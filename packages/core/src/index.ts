@@ -11,6 +11,7 @@ export * from './globalMarkdown';
 export * from './globalValidate';
 export * from './globalStore';
 export * from './gitRemote';
+export * from './projectWorkspaces';
 export * from './proposalStore';
 export * from './proposalParse';
 export * from './proposalPrompt';
@@ -87,6 +88,7 @@ export * from './hostRequestHandler';
 // 전역 스킬 (0.5.0 B-5)
 export * from './skillInstaller';
 export * from './skillTemplate';
+export * from './cleanupSkillTemplate';
 
 // refine
 export * from './refineHeadless';
@@ -110,11 +112,13 @@ export * from './cliAdapter/agyResume';
 export * from './cliAdapter/hookSessionCapture';
 export * from './cliAdapter/turnSignal';
 export * from './cliAdapter/codexSandbox';
+export * from './cliAdapter/launchArgs';
 export * from './sessionStatus';
 
 // 서브에이전트 (0.5.0 4단계)
 export * from './modelTable';
 export * from './agent/reportState';
+export * from './agent/commandAfterTurnStart';
 export * from './agent/gitWorktree';
 export * from './agent/bridgeNames';
 export * from './agent/cleanup';
