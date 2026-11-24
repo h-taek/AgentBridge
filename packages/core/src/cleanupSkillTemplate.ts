@@ -161,16 +161,23 @@ to reach it belongs to that disposition.
 - **Refresh** — a fact changed but the rule it supports still holds. Write the
   current fact; keep the old one in Details, dated, only when it is needed as
   grounds.
-- **Delete** — the entry only records a past state ("we are at stage X", "the
-  latest version is Y"); or a source you checked — the repository's code or
-  docs — already states the whole rule in every scope where it applies; or it
-  is how one task was done, or a single incident; or it is general good
-  practice a capable model follows without being told — following design
-  patterns, not editing a file another session is still verifying. What stays
-  is what a model would not know on its own: this user's own rules and way of
-  working, knowledge newer than or outside a model's training, this project's
-  settings. An instruction the user gave for the future stays, even if it came
-  from one incident.
+- **Delete** — first, the entry is general knowledge: a capable model would
+  know or do it without being told — widely known facts about languages,
+  libraries, tools and standards, or good practice such as following design
+  patterns, or not editing a file another session is still verifying. The test:
+  if the entry were deleted, would a capable model work any differently? This
+  holds even when a correction from the user is where it came from. When a
+  general practice comes with a choice of the user's attached, Refresh the
+  entry down to that choice instead. Delete also when the entry only records a
+  past state ("we are at stage X", "the latest version is Y"); or a source you
+  checked — the repository's code or docs — already states the whole rule in
+  every scope where it applies; or it is how one task was done, or a single
+  incident. What stays is what a model would not know on its own: a choice this
+  user made where several reasonable options exist, knowledge newer than or
+  outside a model's training, this project's settings. What the user set for
+  the future stays, even if it came from one incident — a request to remember
+  it, or a rule they would have stated even if nothing had gone wrong. A
+  correction of a slip is not that.
 - **Merge** — two or more entries give the same instruction under the same
   conditions. When several match one question they crowd the three injection
   slots and each says it a little differently. Entries titled

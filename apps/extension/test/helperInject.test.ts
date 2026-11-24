@@ -8,6 +8,7 @@ import {
   setDocPinned,
   resolveProjectProfileId,
   getGlobalDir,
+  TURN_SIGNAL_FILENAME,
 } from '@agentbridge/core';
 
 // 훅 주입 (0.6.0 spec/03 §1·§2).
@@ -138,14 +139,16 @@ describe('helper inject — 매칭 주입 (0.6.0 spec/03 §1)', () => {
 
   it('부를 명령과 조건을 싣는다', () => {
     const ctx = ctxFor('x');
+    // 0.10.0 spec/02 §1 — 할지 말지를 정하는 조건마다 쓸 명령만 싣는다.
     for (const cmd of [
       'context',
       'turns --last',
       'memory search',
-      'memory read',
+      'memory project',
       'memory add',
-      'memory pending',
-      'memory withdraw',
+      'memory update',
+      'agent start',
+      'agent check --wait',
       'status',
     ]) {
       assert.ok(ctx.includes(cmd), `지시문에 ${cmd}가 있어야 한다`);
@@ -154,14 +157,15 @@ describe('helper inject — 매칭 주입 (0.6.0 spec/03 §1)', () => {
     assert.doesNotMatch(ctx, /uninstall/);
   });
 
-  it('1-4 끝과 3. Commands에 대기 제안 조회·회수 안내를 싣는다', () => {
+  // 0.10.0 spec/02 §2 — 명령 전체 목록과 제안 회수 절차는 스킬로 옮겼다. 훅은 스킬을 가리킨다.
+  it('3. Commands는 전체 목록이 스킬에 있다고 가리키고, 옮긴 절은 싣지 않는다', () => {
     const ctx = ctxFor('x');
-    assert.match(
-      ctx,
-      /If you queued something that should not have been — wrong scope, below the\nbar, a duplicate — `memory pending` lists the queue and `memory withdraw <id>`\ntakes it back\. Any pending proposal can be withdrawn, whichever session\nqueued it\./,
-    );
-    assert.match(ctx, /    memory pending             proposals waiting for the user's approval/);
-    assert.match(ctx, /    memory withdraw <id>       take a pending proposal back/);
+    assert.match(ctx, /When to run which is below\. Arguments and procedures are in the `agentbridge` skill\./);
+    assert.match(ctx, /The full list, with arguments, is\nin the `agentbridge` skill\. If a command fails, run `status`/);
+    assert.doesNotMatch(ctx, /memory withdraw/);
+    assert.doesNotMatch(ctx, /What you are looking at/);
+    assert.doesNotMatch(ctx, /### 2-3/);
+    assert.doesNotMatch(ctx, /Reading and recording\./);
   });
 
   it('실행 경로가 박히고, 가장 빡빡한 한도(codex 10,000바이트) 아래다', () => {
@@ -253,19 +257,28 @@ describe('helper inject — 다섯 턴 제안 (0.6.0 spec/03 §2)', () => {
   });
 
   // 0.8.0 spec/03 §1 — 기록의 자리와 문턱은 다섯 턴 블록이 아니라 매 턴 붙는다.
-  it('기록 문턱(1-4)은 다섯 턴과 상관없이 매 턴 붙는다', async () => {
+  it('기록 문턱(1-3)은 다섯 턴과 상관없이 매 턴 붙는다', async () => {
     const s = 'sess-bar';
     const first = injectCtx(s);
-    assert.match(first, /### 1-4\. Recording/);
+    assert.match(first, /### 1-3\. Recording/);
     assert.match(first, /Do not write there/);
     assert.match(first, /Recording nothing is the default/);
-    // 0.9.0 spec/05 §1 — 모델이 원래 하는 일반 원칙은 적지 않는다.
-    assert.match(first, /- what a capable model already does unprompted — general good practice/);
-    assert.match(first, /What is worth recording is what a model would not know on its own/);
+    // 0.10.0 spec/02 §3 — 판단 순서의 두 질문만 싣고, 전문은 스킬을 읽게 한다.
+    const set = first.indexOf('1. The user set it for the future');
+    const general = first.indexOf('2. Otherwise: if this entry were deleted, would a capable model work');
+    assert.ok(set > 0 && general > set);
+    assert.match(first, /would they have said it even if you had done\n   the work right\? Pointing out your slip is not this, "from now on"\n   included\./);
+    assert.match(first, /it is general knowledge — do not record it,\n   not even the second time\./);
+    assert.match(first, /Before `memory add` or `memory update`, read the skill's\n`Recording something` — the rest of the bar is there\./);
+    // 지적에 붙은 "앞으로"가 예외로 다시 읽히지 않게, 옛 문턱의 두 문장은 빠진다.
+    assert.doesNotMatch(first, /or when the user says it applies from now on/);
+    assert.doesNotMatch(first, /- what a capable model already does unprompted/);
     for (let i = 0; i < 5; i++) fire('Stop', JSON.stringify({ session_id: 'x' }), s);
     const fifth = injectCtx(s);
-    assert.match(fifth, /### 1-4\. Recording/);
-    assert.match(fifth, /against the bar in 1-4/);
+    assert.match(fifth, /### 1-3\. Recording/);
+    assert.match(fifth, /against the bar in 1-3/);
+    // 근거 판단과 search·add·update 절차는 스킬 몫이다.
+    assert.doesNotMatch(fifth, /it has to come from the user/);
   });
 });
 
@@ -764,8 +777,8 @@ describe('helper inject — 서브 차례 (0.9.0 spec/03 §2)', () => {
     assert.doesNotMatch(ctx, /agent read/);
     assert.doesNotMatch(ctx, /agent close/);
     assert.equal(ctx.split('agent start').length - 1, 1);
-    // 3절 끝 단락은 2-3을 가리키지 않는 두 줄로 바뀐다.
-    assert.match(ctx, /it when you pick a scope to record into and when you check for duplicates\./);
+    // 3절은 메인과 같은 스킬 안내다.
+    assert.match(ctx, /The full list, with arguments, is\nin the `agentbridge` skill\./);
     // 나머지 절은 메인과 같다.
     assert.match(ctx, /## 1\. Context/);
     assert.match(ctx, /## 4\. When you answer/);
@@ -774,9 +787,8 @@ describe('helper inject — 서브 차례 (0.9.0 spec/03 §2)', () => {
   it('메인 차례는 지금과 같다', () => {
     const ctx = ctxFor('main-1');
     assert.match(ctx, /### 2-2\. What they are/);
-    assert.match(ctx, /### 2-3\. After a report/);
-    assert.match(ctx, /agent start --prompt/);
-    assert.match(ctx, /and for anything/);
+    assert.match(ctx, /Open the `agentbridge` skill\nbefore `agent start`, and again to review a report/);
+    assert.match(ctx, /run `agent check --wait` before you end the turn/);
     assert.doesNotMatch(ctx, /You are a subagent/);
   });
 
@@ -803,5 +815,103 @@ describe('helper inject — 서브 차례 (0.9.0 spec/03 §2)', () => {
 
   it('서브 주입문도 9KB 안이다', () => {
     assert.ok(Buffer.byteLength(ctxFor('sub-1'), 'utf8') <= 9 * 1024);
+  });
+});
+
+// 0.10.0 spec/02 §4 — 붙을 수 있는 블록이 한꺼번에 붙어도 가장 빡빡한 한도(codex 10,000바이트)
+// 아래 9,000바이트 안에 든다. 고정 기억·걸린 기억 셋·다섯 턴 블록·안 읽은 서브 보고를 한 주입에 겹친다.
+describe('helper inject — 가장 무거운 주입의 크기 (0.10.0 spec/02 §4)', () => {
+  let tmp: string;
+  let bundlePath: string;
+  let userData: string;
+  let wsDir: string;
+  const longTitle = (lead: string) =>
+    `${lead} — a deliberately long title that stands in for the longest real entry titles`;
+
+  before(async function () {
+    this.timeout(30000);
+    tmp = await fsp.mkdtemp(join(tmpdir(), 'ab-helper-heavy-'));
+    userData = join(tmp, 'userdata');
+    await fsp.mkdir(join(userData, 'bin'), { recursive: true });
+    bundlePath = join(userData, 'bin', 'agentbridge-memory.js');
+    const bundlerScript = join(process.cwd(), '..', '..', 'scripts', 'bundle-helper.mjs');
+    execFileSync('node', [bundlerScript, bundlePath], { encoding: 'utf8' });
+
+    const docs = [];
+    for (let i = 0; i < 3; i++) {
+      docs.push({
+        category: 'workflows',
+        slug: `pin-${i}`,
+        title: longTitle(`Pinned rule ${i}`),
+        summary: 'Pinned.',
+        body: 'Pinned body.',
+        indexEntries: [`pinned-only-${i}`],
+        tags: ['pinned'],
+      });
+      docs.push({
+        category: 'conventions',
+        slug: `match-${i}`,
+        title: longTitle(`Deployment rule ${i}`),
+        summary: 'Matched.',
+        body: 'Matched body.',
+        indexEntries: ['deployment workflow', 'release tagging', 'production rollout'],
+      });
+    }
+    await writeProfileDocs(getGlobalDir(userData), 'default', { docs });
+
+    wsDir = join(userData, 'workspaces', 'ws-1');
+    const children = ['sub-alpha-reviewer', 'sub-beta-implementer', 'sub-gamma-measurer'];
+    await fsp.mkdir(wsDir, { recursive: true });
+    await fsp.writeFile(
+      join(wsDir, 'workspace.json'),
+      JSON.stringify({
+        workspaceId: 'ws-1',
+        sessions: [
+          { sessionId: 'main-1' },
+          ...children.map((name) => ({
+            sessionId: name,
+            parentSessionId: 'main-1',
+            agentName: name,
+            closedAt: null,
+          })),
+        ],
+      }),
+      'utf8',
+    );
+    for (const name of children) {
+      const dir = join(wsDir, 'sessions', name);
+      await fsp.mkdir(dir, { recursive: true });
+      await fsp.writeFile(
+        join(dir, TURN_SIGNAL_FILENAME),
+        JSON.stringify({ agent: 'claude', event: 'Stop', complete: true, at: Date.now() }),
+        'utf8',
+      );
+    }
+  });
+
+  after(async () => {
+    if (tmp) await fsp.rm(tmp, { recursive: true, force: true });
+  });
+
+  function fire(event: string, stdin: string): string {
+    return execFileSync('node', [bundlePath, 'inject', '--agent', 'codex', '--event', event], {
+      input: stdin,
+      encoding: 'utf8',
+      env: { ...process.env, AGENTBRIDGE_WS_DIR: wsDir, AGENTBRIDGE_WS_SESSION: 'main-1' },
+    });
+  }
+
+  it('모든 블록이 붙은 주입이 9,000바이트 아래다', () => {
+    for (let i = 0; i < 5; i++) fire('Stop', JSON.stringify({ session_id: 'x' }));
+    const out = JSON.parse(
+      fire('UserPromptSubmit', JSON.stringify({ prompt: 'deployment workflow and release tagging and production rollout' })),
+    );
+    const ctx = out.hookSpecificOutput.additionalContext as string;
+    assert.match(ctx, /The user pinned these\./);
+    assert.match(ctx, /3 pieces of long-term memory overlap/);
+    assert.match(ctx, /last five turns/);
+    assert.match(ctx, /3 finished and are unread/);
+    const bytes = Buffer.byteLength(ctx, 'utf8');
+    assert.ok(bytes < 9000, `주입이 너무 크다: ${bytes}`);
   });
 });
