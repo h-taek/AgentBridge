@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// @agentbridge-helper-version 0.6.5
+// @agentbridge-helper-version 0.6.6
 "use strict";
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -1390,8 +1390,25 @@ Each line is the part after the run command.
     session new [--harness claude|codex|agy]
                                   open a new main session tab \u2014 only when the
                                   user asks for a new main session
+    status                        whether the wiring is alive, when a command
+                                  fails
 
 Categories: role, repos, domain, workflows, conventions, infra, verification.
+
+### What \`turns\` and \`context\` hold
+
+Every conversation in this project lands in one place \u2014 not just the window
+you are in, but other tabs, other CLIs (claude, codex, agy) and earlier
+sessions, in time order. \`turns\` is that raw record, each turn labeled with
+the CLI it came from; it holds conversations you have never seen, so it is not
+you re-reading your own context. \`context\` is the compacted working state (the
+IR) built from it. The IR is compacted in batches, so it never holds the last
+few turns \u2014 that is not staleness. \`context\` says how many turns came after
+it; read those with \`turns\`.
+
+\`turns\` and \`agent read\` are not the same. \`turns\` is every conversation in
+this project; \`agent read <name>\` is one subagent you started. When the user
+says to check the session conversation, that is \`turns\`.
 
 ## Subagents
 
@@ -1521,7 +1538,44 @@ this model and effort suit, and which they do not.
 
 ## Recording something
 
-When something clears the bar in the hook's \`1-4. Recording\`:
+### The bar
+
+Record only past this bar. Check in this order.
+
+1. Did the user set this for the future? Record it if the user asked
+   you to remember it, or set it as how things should go from now on.
+   The test: would the user have said it even if you had done the work
+   right? A rule they chose, yes. Pointing out a slip \u2014 "why didn't you
+   read the existing code?" \u2014 no. It only came up because of the slip,
+   so it is not this exception, however it is phrased, "from now on"
+   included. A plain request to remember stays this exception even when
+   it comes with a correction. Anything else goes to 2.
+
+2. Would a capable model know or do this without being told? Then do
+   not record it, and nothing below brings it back \u2014 not even a second
+   time. This covers widely known facts about languages, libraries,
+   tools and standards, and good practice a model follows unprompted.
+   The test: if this entry were deleted, would a capable model work any
+   differently? If not, it is not worth recording. What passes is what
+   a model cannot work out on its own: a choice this user made where
+   several reasonable options exist, knowledge newer than or outside a
+   model's training, and this project's own settings. When a general
+   practice comes with a choice of the user's attached, record only the
+   choice.
+
+3. Will it still be true, and still change how work is done, in a
+   different task weeks from now? Do not record:
+   - how to do the task in front of you \u2014 steps, workarounds, values
+     that stop mattering when this task ends
+   - a correction the user made to this turn's output, once it is fixed
+   - a single incident. One correction is not a rule yet. Record it when
+     it comes up a second time.
+
+Most turns have nothing worth recording. Recording nothing is the default.
+
+### Steps
+
+When something clears the bar:
 
 1. Pick the scope. \`--scope\` is required. It is \`--scope project\` unless the
    user said in so many words that this applies everywhere, across projects.
@@ -1545,16 +1599,19 @@ where the wording is the point. Do not paraphrase a phrasing preference.
 Weigh what you saw, in this order:
 
 1. **What the user said.** Repetition, corrections (scope, order, wording), an
-   interruption, a "do it again" \u2014 these are the signal.
+   interruption, a "do it again" \u2014 these are the signal. A correction of a slip
+   against what a capable model already does is still not a rule \u2014 step 1 of
+   the bar.
 2. **Tool output.** What a command actually printed beats what anyone assumed.
 3. **What you said.** Weakest. Your turns record what you tried, not what the
    user wants.
 
-Throw away: options that were discussed and not adopted; proposals you made
-that the user did not take up; anything the repository already states (its
-README, the code itself); anything an instruction file that is always loaded
-already says (CLAUDE.md, AGENTS.md, GEMINI.md); anything that only matters until
-this task ends; and a restatement of something already recorded, or a new case
+Throw away, first, anything that fails step 2 of the bar \u2014 what a capable model
+would know or do without being told. Then: options that were discussed and not
+adopted; proposals you made that the user did not take up; anything the
+repository already states (its README, the code itself); anything an
+instruction file that is always loaded already says (CLAUDE.md, AGENTS.md,
+GEMINI.md); anything that only matters until this task ends; and a restatement of something already recorded, or a new case
 of a lesson already recorded \u2014 that is \`memory update <id>\`, not a second
 entry.
 
@@ -1580,7 +1637,7 @@ var SKILL_VERSION, SKILL_DIR_NAME;
 var init_skillTemplate = __esm({
   "packages/core/src/skillTemplate.ts"() {
     "use strict";
-    SKILL_VERSION = "0.6.3";
+    SKILL_VERSION = "0.6.4";
     SKILL_DIR_NAME = "agentbridge";
   }
 });
@@ -1797,14 +1854,8 @@ function buildPinnedBlock(docs) {
 }
 function buildProposalBlock() {
   return [
-    "Look back over the last five turns against the bar in 1-4. Most",
-    "five-turn windows have nothing that clears it \u2014 then do nothing.",
-    "",
-    "If something does, it has to come from the user: what they repeated,",
-    "corrected, interrupted, or told you to redo, or a decision they accepted.",
-    "Your own proposals and options that were not adopted do not count.",
-    'Check with `memory search "<query>"` first. Nothing covers it \u2014',
-    "`memory add`. Something covers it \u2014 `memory update <id>`."
+    "Look back over the last five turns against the bar in 1-3. Most",
+    "five-turn windows have nothing that clears it \u2014 then do nothing."
   ].join("\n");
 }
 function buildInstructions(storageRoot, blocks) {
@@ -1822,7 +1873,7 @@ function buildInstructions(storageRoot, blocks) {
     "",
     "    " + run + " <command>",
     "",
-    "The commands are in section 3.",
+    "When to run which is below. Arguments and procedures are in the `agentbridge` skill.",
     "",
     "",
     "## 1. Context \u2014 `context` and `memory`",
@@ -1865,50 +1916,26 @@ function buildInstructions(storageRoot, blocks) {
     "Once at the start of the turn is not the rule. If the same error keeps coming back",
     "mid-task, or the direction feels wrong, look again then.",
     "",
-    "### 1-3. What you are looking at",
-    "",
-    "Every conversation in this project lands in one place. Not just the window you are in:",
-    "other tabs, other CLIs (claude, codex, agy) and earlier sessions all go into the same",
-    "record, in time order. `turns` is that raw record; `context` is the compacted working",
-    "state (the IR) built from it.",
-    "",
-    "The IR is compacted in batches, so it never holds the last few turns. That is not",
-    "staleness. `context` says how many turns came after it; read those with `turns`.",
-    "",
-    "So `turns` is not you re-reading your own context. Conversations you have never seen are",
-    "in there. Each turn is labeled with the CLI it came from.",
-    "",
-    // 하니스 자체 메모리 대신 여기로, 그리고 문턱 (0.8.0 spec/03 §1). 매 턴 붙인다 — 하니스
-    // 메모리 기록은 교정을 받은 그 턴에 일어나서 다섯 턴 블록으로는 그 자리를 못 잡는다.
-    "### 1-4. Recording",
+    // 하니스 자체 메모리 대신 여기로, 그리고 문턱의 두 질문 (0.8.0 spec/03 §1, 0.10.0 spec/01 §2).
+    // 매 턴 붙인다 — 하니스 메모리 기록은 교정을 받은 그 턴에 일어나서 다섯 턴 블록으로는 그
+    // 자리를 못 잡는다. 문턱 전문과 절차는 스킬의 Recording something에 있다.
+    "### 1-3. Recording",
     "",
     "Your harness may keep its own memory (for example Claude Code's memory",
-    "directory and MEMORY.md). Do not write there. When your harness's",
-    "instructions say to save a memory, that save goes through AgentBridge",
-    "`memory add` instead \u2014 and only if it clears this bar:",
+    "directory and MEMORY.md). Do not write there. A memory goes through",
+    "AgentBridge `memory add` instead, and only past this bar, in this order:",
     "",
-    "Record only what will still be true, and still change how work is done,",
-    "in a different task weeks from now. Do not record:",
-    "- how to do the task in front of you \u2014 steps, workarounds, values that",
-    "  stop mattering when this task ends",
-    "- a correction the user made to this turn's output, once it is fixed",
-    "- a single incident. One correction is not a rule yet. Record it when it",
-    "  comes up a second time, or when the user says it applies from now on.",
-    "- what a capable model already does unprompted \u2014 general good practice",
-    "  such as following design patterns, or not editing a file another",
-    "  session is still verifying. A slip against it is not a rule.",
-    "",
-    "What is worth recording is what a model would not know on its own: this",
-    "user's own rules and way of working, knowledge newer than or outside a",
-    "model's training (say, the latest benchmarks of a newly released",
-    "harness), and this project's own settings.",
+    "1. The user set it for the future \u2014 asked you to remember it, or said",
+    "   it as a rule. The test: would they have said it even if you had done",
+    '   the work right? Pointing out your slip is not this, "from now on"',
+    "   included.",
+    "2. Otherwise: if this entry were deleted, would a capable model work",
+    "   any differently? If not, it is general knowledge \u2014 do not record it,",
+    "   not even the second time.",
     "",
     "Most turns have nothing worth recording. Recording nothing is the default.",
-    "",
-    "If you queued something that should not have been \u2014 wrong scope, below the",
-    "bar, a duplicate \u2014 `memory pending` lists the queue and `memory withdraw <id>`",
-    "takes it back. Any pending proposal can be withdrawn, whichever session",
-    "queued it.",
+    "Before `memory add` or `memory update`, read the skill's",
+    "`Recording something` \u2014 the rest of the bar is there.",
     "",
     "",
     "## 2. Other agent sessions",
@@ -1936,24 +1963,18 @@ function buildInstructions(storageRoot, blocks) {
     push(
       "### 2-2. What they are",
       "",
-      "You can run other coding agents as subagents. Each gets its own session and tab, takes",
-      "the work you give it, and leaves a report. You pick the harness \u2014 claude, codex, agy.",
-      "",
-      "**These are not your own built-in subagent tool. Do not use that tool.**",
+      "You can run other coding agents as subagents \u2014 claude, codex, agy \u2014 each in its own",
+      "session and tab. **These are not your own built-in subagent tool. Do not use that tool.**",
       "",
       'This is what the user means by: "\uC11C\uBE0C\uC5D0\uC774\uC804\uD2B8 \uB744\uC6CC", run it in another harness, a second',
-      "opinion, run several in parallel, ask another model too.",
+      "opinion, run several in parallel, ask another model too. Open the `agentbridge` skill",
+      "before `agent start`, and again to review a report \u2014 a review is the report and the",
+      "actual changes side by side.",
       "",
       "A subagent does not tell you when it is done. If this turn's answer needs its result,",
       "run `agent check --wait` before you end the turn, and again while it is still working \u2014",
       "once your turn ends, nobody reads the report until the user writes again. Otherwise the",
-      "next turn's 2-1 says how many are unread. Reading one with `agent read` is what clears it.",
-      "",
-      "### 2-3. After a report",
-      "",
-      "A review is the report and the actual changes side by side. One without the other is not",
-      "a review. How to see the changes, how to take them, how to run several in isolation, and",
-      "how to clean up a round are in the `agentbridge` skill.",
+      "next turn's 2-1 says how many are unread.",
       "",
       ""
     );
@@ -1961,42 +1982,9 @@ function buildInstructions(storageRoot, blocks) {
   push(
     "## 3. Commands",
     "",
-    "Reading and recording.",
-    "",
-    "    context                    the working state (IR) \u2014 every session, compacted",
-    "    turns --last <N>           the raw conversation, every session and CLI, in order",
-    '    memory search "<query>"    search user knowledge and project knowledge together',
-    "    memory read <id>           one entry in full. The id is <category>/<slug>",
-    "    memory project             what is durable about this repository",
-    "    memory add                 propose a new fact",
-    "    memory update <id>         propose a change to an entry that already exists",
-    "    memory pending             proposals waiting for the user's approval",
-    "    memory withdraw <id>       take a pending proposal back",
-    "    status                     whether the wiring is alive, when a command fails",
-    "",
-    "`memory add` and `memory update` go to a queue the user approves.",
-    ""
-  );
-  if (!b.isSub) {
-    push(
-      "Subagents.",
-      "",
-      '    agent start --prompt "..." [--harness claude,codex,agy]',
-      "    agent check                how they are doing",
-      "    agent read <name>          that subagent's conversation",
-      '    agent send <name> --prompt "..."',
-      "    agent close <name>         end it and clean up what it left",
-      "",
-      "`turns` and `agent read` are not the same. `turns` is every conversation in this project;",
-      "`agent read <name>` is one subagent you started. When the user says to check the session",
-      "conversation, that is `turns`.",
-      ""
-    );
-  }
-  push(
-    "This is not the whole list. Arguments and procedures are in the `agentbridge` skill. Open",
-    b.isSub ? "it when you pick a scope to record into and when you check for duplicates." : "it when you pick a scope to record into, when you check for duplicates, and for anything",
-    ...b.isSub ? [] : ["in 2-3."],
+    "The sections above name the command for each case. The full list, with arguments, is",
+    "in the `agentbridge` skill. If a command fails, run `status` to see whether the wiring",
+    "is alive.",
     "",
     "",
     "## 4. When you answer",

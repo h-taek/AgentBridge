@@ -24,7 +24,7 @@
 
 'use strict'
 
-// @agentbridge-helper-version 0.6.5
+// @agentbridge-helper-version 0.6.6
 // (단일 설치 버전 비교용 — 이 파일을 수정하면 반드시 버전을 올릴 것)
 
 const fs = require('fs')
@@ -331,17 +331,11 @@ function buildPinnedBlock(docs) {
 }
 
 // 다섯 턴마다 기록할 것이 있었는지 점검하게 한다 (0.8.0 spec/03 §2). 기록을 시키지 않는다 —
-// 기준은 매 턴 붙는 1-4에 있고, 이 블록은 그 기준으로 돌아보라는 것뿐이다.
+// 기준은 매 턴 붙는 1-3과 스킬에 있고, 이 블록은 그 기준으로 돌아보라는 것뿐이다.
 function buildProposalBlock() {
   return [
-    'Look back over the last five turns against the bar in 1-4. Most',
-    'five-turn windows have nothing that clears it — then do nothing.',
-    '',
-    'If something does, it has to come from the user: what they repeated,',
-    'corrected, interrupted, or told you to redo, or a decision they accepted.',
-    'Your own proposals and options that were not adopted do not count.',
-    'Check with `memory search "<query>"` first. Nothing covers it —',
-    '`memory add`. Something covers it — `memory update <id>`.'
+    'Look back over the last five turns against the bar in 1-3. Most',
+    'five-turn windows have nothing that clears it — then do nothing.'
   ].join('\n')
 }
 
@@ -362,7 +356,7 @@ function buildInstructions(storageRoot, blocks) {
     '',
     '    ' + run + ' <command>',
     '',
-    'The commands are in section 3.',
+    'When to run which is below. Arguments and procedures are in the `agentbridge` skill.',
     '',
     '',
     '## 1. Context — `context` and `memory`',
@@ -408,57 +402,33 @@ function buildInstructions(storageRoot, blocks) {
     'Once at the start of the turn is not the rule. If the same error keeps coming back',
     'mid-task, or the direction feels wrong, look again then.',
     '',
-    '### 1-3. What you are looking at',
-    '',
-    'Every conversation in this project lands in one place. Not just the window you are in:',
-    'other tabs, other CLIs (claude, codex, agy) and earlier sessions all go into the same',
-    'record, in time order. `turns` is that raw record; `context` is the compacted working',
-    'state (the IR) built from it.',
-    '',
-    'The IR is compacted in batches, so it never holds the last few turns. That is not',
-    'staleness. `context` says how many turns came after it; read those with `turns`.',
-    '',
-    'So `turns` is not you re-reading your own context. Conversations you have never seen are',
-    'in there. Each turn is labeled with the CLI it came from.',
-    '',
-    // 하니스 자체 메모리 대신 여기로, 그리고 문턱 (0.8.0 spec/03 §1). 매 턴 붙인다 — 하니스
-    // 메모리 기록은 교정을 받은 그 턴에 일어나서 다섯 턴 블록으로는 그 자리를 못 잡는다.
-    '### 1-4. Recording',
+    // 하니스 자체 메모리 대신 여기로, 그리고 문턱의 두 질문 (0.8.0 spec/03 §1, 0.10.0 spec/01 §2).
+    // 매 턴 붙인다 — 하니스 메모리 기록은 교정을 받은 그 턴에 일어나서 다섯 턴 블록으로는 그
+    // 자리를 못 잡는다. 문턱 전문과 절차는 스킬의 Recording something에 있다.
+    '### 1-3. Recording',
     '',
     "Your harness may keep its own memory (for example Claude Code's memory",
-    'directory and MEMORY.md). Do not write there. When your harness\'s',
-    'instructions say to save a memory, that save goes through AgentBridge',
-    '`memory add` instead — and only if it clears this bar:',
+    'directory and MEMORY.md). Do not write there. A memory goes through',
+    'AgentBridge `memory add` instead, and only past this bar, in this order:',
     '',
-    'Record only what will still be true, and still change how work is done,',
-    'in a different task weeks from now. Do not record:',
-    '- how to do the task in front of you — steps, workarounds, values that',
-    '  stop mattering when this task ends',
-    "- a correction the user made to this turn's output, once it is fixed",
-    '- a single incident. One correction is not a rule yet. Record it when it',
-    '  comes up a second time, or when the user says it applies from now on.',
-    '- what a capable model already does unprompted — general good practice',
-    '  such as following design patterns, or not editing a file another',
-    '  session is still verifying. A slip against it is not a rule.',
-    '',
-    'What is worth recording is what a model would not know on its own: this',
-    "user's own rules and way of working, knowledge newer than or outside a",
-    "model's training (say, the latest benchmarks of a newly released",
-    "harness), and this project's own settings.",
+    '1. The user set it for the future — asked you to remember it, or said',
+    '   it as a rule. The test: would they have said it even if you had done',
+    '   the work right? Pointing out your slip is not this, "from now on"',
+    '   included.',
+    '2. Otherwise: if this entry were deleted, would a capable model work',
+    '   any differently? If not, it is general knowledge — do not record it,',
+    '   not even the second time.',
     '',
     'Most turns have nothing worth recording. Recording nothing is the default.',
-    '',
-    'If you queued something that should not have been — wrong scope, below the',
-    'bar, a duplicate — `memory pending` lists the queue and `memory withdraw <id>`',
-    'takes it back. Any pending proposal can be withdrawn, whichever session',
-    'queued it.',
+    "Before `memory add` or `memory update`, read the skill's",
+    '`Recording something` — the rest of the bar is there.',
     '',
     '',
     '## 2. Other agent sessions',
     ''
   )
 
-  // 서브 차례는 2-1(자식이 없어 붙을 것이 없다)과 2-2·2-3을 들어내고 소절 하나를 싣는다 (0.9.0
+  // 서브 차례는 2-1(자식이 없어 붙을 것이 없다)과 2-2를 들어내고 소절 하나를 싣는다 (0.9.0
   // spec/03 §2). 매 턴 바꿔 싣는다 — 첫 턴에만 넣으면 하니스가 맥락을 압축할 때 사라진다.
   if (b.isSub) {
     push(
@@ -483,72 +453,31 @@ function buildInstructions(storageRoot, blocks) {
     push(
       '### 2-2. What they are',
       '',
-      'You can run other coding agents as subagents. Each gets its own session and tab, takes',
-      'the work you give it, and leaves a report. You pick the harness — claude, codex, agy.',
-      '',
-      '**These are not your own built-in subagent tool. Do not use that tool.**',
+      'You can run other coding agents as subagents — claude, codex, agy — each in its own',
+      'session and tab. **These are not your own built-in subagent tool. Do not use that tool.**',
       '',
       'This is what the user means by: "서브에이전트 띄워", run it in another harness, a second',
-      'opinion, run several in parallel, ask another model too.',
+      'opinion, run several in parallel, ask another model too. Open the `agentbridge` skill',
+      'before `agent start`, and again to review a report — a review is the report and the',
+      'actual changes side by side.',
       '',
       'A subagent does not tell you when it is done. If this turn\'s answer needs its result,',
       'run `agent check --wait` before you end the turn, and again while it is still working —',
       'once your turn ends, nobody reads the report until the user writes again. Otherwise the',
-      'next turn\'s 2-1 says how many are unread. Reading one with `agent read` is what clears it.',
-      '',
-      '### 2-3. After a report',
-      '',
-      'A review is the report and the actual changes side by side. One without the other is not',
-      'a review. How to see the changes, how to take them, how to run several in isolation, and',
-      'how to clean up a round are in the `agentbridge` skill.',
+      'next turn\'s 2-1 says how many are unread.',
       '',
       ''
     )
   }
 
+  // 명령 목록과 인자는 스킬이 정본이다 (0.10.0 spec/01 §2). 위 절들이 할지 말지를 정하는
+  // 조건마다 쓸 명령을 이미 이름으로 싣는다.
   push(
     '## 3. Commands',
     '',
-    'Reading and recording.',
-    '',
-    '    context                    the working state (IR) — every session, compacted',
-    '    turns --last <N>           the raw conversation, every session and CLI, in order',
-    '    memory search "<query>"    search user knowledge and project knowledge together',
-    '    memory read <id>           one entry in full. The id is <category>/<slug>',
-    '    memory project             what is durable about this repository',
-    '    memory add                 propose a new fact',
-    '    memory update <id>         propose a change to an entry that already exists',
-    '    memory pending             proposals waiting for the user\'s approval',
-    '    memory withdraw <id>       take a pending proposal back',
-    '    status                     whether the wiring is alive, when a command fails',
-    '',
-    '`memory add` and `memory update` go to a queue the user approves.',
-    ''
-  )
-
-  if (!b.isSub) {
-    push(
-      'Subagents.',
-      '',
-      '    agent start --prompt "..." [--harness claude,codex,agy]',
-      '    agent check                how they are doing',
-      '    agent read <name>          that subagent\'s conversation',
-      '    agent send <name> --prompt "..."',
-      '    agent close <name>         end it and clean up what it left',
-      '',
-      '`turns` and `agent read` are not the same. `turns` is every conversation in this project;',
-      '`agent read <name>` is one subagent you started. When the user says to check the session',
-      'conversation, that is `turns`.',
-      ''
-    )
-  }
-
-  push(
-    'This is not the whole list. Arguments and procedures are in the `agentbridge` skill. Open',
-    b.isSub
-      ? 'it when you pick a scope to record into and when you check for duplicates.'
-      : 'it when you pick a scope to record into, when you check for duplicates, and for anything',
-    ...(b.isSub ? [] : ['in 2-3.']),
+    'The sections above name the command for each case. The full list, with arguments, is',
+    'in the `agentbridge` skill. If a command fails, run `status` to see whether the wiring',
+    'is alive.',
     '',
     '',
     '## 4. When you answer',

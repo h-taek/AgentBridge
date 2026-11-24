@@ -11,7 +11,7 @@
 //
 // `uninstall`은 싣지 않는다. 사용자 명령이지 에이전트 명령이 아니다.
 
-export const SKILL_VERSION = '0.6.3';
+export const SKILL_VERSION = '0.6.4';
 export const SKILL_DIR_NAME = 'agentbridge';
 
 // 셸에서 그대로 쓸 수 있게 공백 있는 경로를 감싼다.
@@ -90,8 +90,25 @@ Each line is the part after the run command.
     session new [--harness claude|codex|agy]
                                   open a new main session tab — only when the
                                   user asks for a new main session
+    status                        whether the wiring is alive, when a command
+                                  fails
 
 Categories: role, repos, domain, workflows, conventions, infra, verification.
+
+### What \`turns\` and \`context\` hold
+
+Every conversation in this project lands in one place — not just the window
+you are in, but other tabs, other CLIs (claude, codex, agy) and earlier
+sessions, in time order. \`turns\` is that raw record, each turn labeled with
+the CLI it came from; it holds conversations you have never seen, so it is not
+you re-reading your own context. \`context\` is the compacted working state (the
+IR) built from it. The IR is compacted in batches, so it never holds the last
+few turns — that is not staleness. \`context\` says how many turns came after
+it; read those with \`turns\`.
+
+\`turns\` and \`agent read\` are not the same. \`turns\` is every conversation in
+this project; \`agent read <name>\` is one subagent you started. When the user
+says to check the session conversation, that is \`turns\`.
 
 ## Subagents
 
@@ -221,7 +238,44 @@ this model and effort suit, and which they do not.
 
 ## Recording something
 
-When something clears the bar in the hook's \`1-4. Recording\`:
+### The bar
+
+Record only past this bar. Check in this order.
+
+1. Did the user set this for the future? Record it if the user asked
+   you to remember it, or set it as how things should go from now on.
+   The test: would the user have said it even if you had done the work
+   right? A rule they chose, yes. Pointing out a slip — "why didn't you
+   read the existing code?" — no. It only came up because of the slip,
+   so it is not this exception, however it is phrased, "from now on"
+   included. A plain request to remember stays this exception even when
+   it comes with a correction. Anything else goes to 2.
+
+2. Would a capable model know or do this without being told? Then do
+   not record it, and nothing below brings it back — not even a second
+   time. This covers widely known facts about languages, libraries,
+   tools and standards, and good practice a model follows unprompted.
+   The test: if this entry were deleted, would a capable model work any
+   differently? If not, it is not worth recording. What passes is what
+   a model cannot work out on its own: a choice this user made where
+   several reasonable options exist, knowledge newer than or outside a
+   model's training, and this project's own settings. When a general
+   practice comes with a choice of the user's attached, record only the
+   choice.
+
+3. Will it still be true, and still change how work is done, in a
+   different task weeks from now? Do not record:
+   - how to do the task in front of you — steps, workarounds, values
+     that stop mattering when this task ends
+   - a correction the user made to this turn's output, once it is fixed
+   - a single incident. One correction is not a rule yet. Record it when
+     it comes up a second time.
+
+Most turns have nothing worth recording. Recording nothing is the default.
+
+### Steps
+
+When something clears the bar:
 
 1. Pick the scope. \`--scope\` is required. It is \`--scope project\` unless the
    user said in so many words that this applies everywhere, across projects.
@@ -245,16 +299,19 @@ where the wording is the point. Do not paraphrase a phrasing preference.
 Weigh what you saw, in this order:
 
 1. **What the user said.** Repetition, corrections (scope, order, wording), an
-   interruption, a "do it again" — these are the signal.
+   interruption, a "do it again" — these are the signal. A correction of a slip
+   against what a capable model already does is still not a rule — step 1 of
+   the bar.
 2. **Tool output.** What a command actually printed beats what anyone assumed.
 3. **What you said.** Weakest. Your turns record what you tried, not what the
    user wants.
 
-Throw away: options that were discussed and not adopted; proposals you made
-that the user did not take up; anything the repository already states (its
-README, the code itself); anything an instruction file that is always loaded
-already says (CLAUDE.md, AGENTS.md, GEMINI.md); anything that only matters until
-this task ends; and a restatement of something already recorded, or a new case
+Throw away, first, anything that fails step 2 of the bar — what a capable model
+would know or do without being told. Then: options that were discussed and not
+adopted; proposals you made that the user did not take up; anything the
+repository already states (its README, the code itself); anything an
+instruction file that is always loaded already says (CLAUDE.md, AGENTS.md,
+GEMINI.md); anything that only matters until this task ends; and a restatement of something already recorded, or a new case
 of a lesson already recorded — that is \`memory update <id>\`, not a second
 entry.
 

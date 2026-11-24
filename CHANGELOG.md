@@ -4,6 +4,13 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 <p align="center"><a href="https://github.com/h-taek/AgentBridge/blob/main/CHANGELOG.ko.md">한국어</a></p>
 
+## [0.10.1] — 2026-11-24
+
+### Changed
+
+- **Stricter long-term memory recording criteria.** General knowledge a model already has is not recorded, even when it comes up repeatedly. The only exception is what you asked the agent to remember or set as a rule.
+- **Shorter per-turn instructions.** The hook injected every turn keeps only the decision criteria. Procedures and the full command list live in the `agentbridge` skill, which the agent reads when it needs them.
+
 ## [0.10.0] — 2026-11-23
 
 ### Added

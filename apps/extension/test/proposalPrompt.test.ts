@@ -40,4 +40,18 @@ describe('buildProposalPrompt', () => {
     const p = buildProposalPrompt({ turns: [turn()], existingIndex: [] });
     assert.match(p, /indexEntries/);
   });
+
+  // 0.10.0 spec/01 §3 — 사용자가 정한 것 → 일반 지식 → 시점 → 범위 순서로 판단한다.
+  it('판단 순서가 사용자가 정한 것, 일반 지식, 시점, 범위 순이다', () => {
+    const p = buildProposalPrompt({ turns: [turn()], existingIndex: [] });
+    const set = p.indexOf('1. User-set: "Did the user set this for the future?"');
+    const general = p.indexOf('2. General knowledge: "Would a capable model know or do this without being told?"');
+    const time = p.indexOf('3. Time:');
+    const scope = p.indexOf('4. User vs project:');
+    assert.ok(set > 0 && general > set && time > general && scope > time);
+    assert.match(p, /does not pass here however it is phrased,\n   "from now on" included/);
+    assert.match(p, /if this entry were deleted, would a capable model work any differently\?/);
+    assert.match(p, /When in doubt about Test 1, treat it as not set by the user\./);
+    assert.match(p, /- domain — domain knowledge and vocabulary a model would not know on its own/);
+  });
 });
