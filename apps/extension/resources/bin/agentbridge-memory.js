@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// @agentbridge-helper-version 0.6.5
+// @agentbridge-helper-version 0.6.6
 "use strict";
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -1637,7 +1637,7 @@ var SKILL_VERSION, SKILL_DIR_NAME;
 var init_skillTemplate = __esm({
   "packages/core/src/skillTemplate.ts"() {
     "use strict";
-    SKILL_VERSION = "0.6.3";
+    SKILL_VERSION = "0.6.4";
     SKILL_DIR_NAME = "agentbridge";
   }
 });

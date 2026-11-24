@@ -11,7 +11,7 @@
 //
 // `uninstall`은 싣지 않는다. 사용자 명령이지 에이전트 명령이 아니다.
 
-export const SKILL_VERSION = '0.6.3';
+export const SKILL_VERSION = '0.6.4';
 export const SKILL_DIR_NAME = 'agentbridge';
 
 // 셸에서 그대로 쓸 수 있게 공백 있는 경로를 감싼다.

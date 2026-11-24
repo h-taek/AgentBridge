@@ -26,9 +26,9 @@ describe('skill template — session new와 서브의 서브 금지 (0.9.0)', ()
     assert.ok(at > md.indexOf('## Subagents'));
   });
 
-  it('버전 표지가 0.6.3이다', () => {
-    assert.equal(SKILL_VERSION, '0.6.3');
-    assert.ok(md.includes('<!-- @agentbridge-skill-version 0.6.3 -->'));
+  it('버전 표지가 0.6.4이다', () => {
+    assert.equal(SKILL_VERSION, '0.6.4');
+    assert.ok(md.includes('<!-- @agentbridge-skill-version 0.6.4 -->'));
   });
 });
 
