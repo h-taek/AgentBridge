@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// @agentbridge-helper-version 0.6.6
+// @agentbridge-helper-version 0.6.7
 "use strict";
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
