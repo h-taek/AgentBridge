@@ -4,6 +4,12 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 <p align="center"><a href="https://github.com/h-taek/AgentBridge/blob/main/CHANGELOG.ko.md">한국어</a></p>
 
+## [0.10.2] — 2026-11-26
+
+### Fixed
+
+- **Built-in subagent tools blocked.** A subagent's instructions were interpreted as banning the harness's built-in subagent tools entirely. The intent was only to keep a subagent from calling AgentBridge's subagent tool.
+
 ## [0.10.1] — 2026-11-24
 
 ### Changed
