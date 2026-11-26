@@ -2,6 +2,12 @@
 
 이 프로젝트는 [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/) 1.1.0 형식을 따르며 [Semantic Versioning](https://semver.org/spec/v2.0.0.html)을 사용한다.
 
+## [0.10.2] — 2026-11-26
+
+### Fixed
+
+- **내장 서브에이전트 도구가 차단되던 문제.** 서브에이전트의 지시문이 하니스의 내장 서브에이전트 도구를 전면 금지하는 것으로 해석되던 문제를 고쳤다. 의도는 서브에이전트의 AgentBridge 서브에이전트 도구 호출 금지다.
+
 ## [0.10.1] — 2026-11-24
 
 ### Changed

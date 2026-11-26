@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// @agentbridge-helper-version 0.6.6
+// @agentbridge-helper-version 0.6.7
 "use strict";
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -1950,7 +1950,8 @@ function buildInstructions(storageRoot, blocks) {
       "subagent. If the work needs another agent, say so in your report; the main",
       "session decides.",
       "",
-      "Do not use your own built-in subagent tool for that either.",
+      "This is about AgentBridge sessions only. Your own built-in subagent tool is a",
+      "different thing \u2014 use it as you normally would.",
       "",
       ""
     );
@@ -1964,7 +1965,8 @@ function buildInstructions(storageRoot, blocks) {
       "### 2-2. What they are",
       "",
       "You can run other coding agents as subagents \u2014 claude, codex, agy \u2014 each in its own",
-      "session and tab. **These are not your own built-in subagent tool. Do not use that tool.**",
+      "session and tab. **When the user asks for a subagent, use these, not your own built-in",
+      "subagent tool.** For your own work otherwise, that tool stays open.",
       "",
       'This is what the user means by: "\uC11C\uBE0C\uC5D0\uC774\uC804\uD2B8 \uB744\uC6CC", run it in another harness, a second',
       "opinion, run several in parallel, ask another model too. Open the `agentbridge` skill",

@@ -24,7 +24,7 @@
 
 'use strict'
 
-// @agentbridge-helper-version 0.6.6
+// @agentbridge-helper-version 0.6.7
 // (단일 설치 버전 비교용 — 이 파일을 수정하면 반드시 버전을 올릴 것)
 
 const fs = require('fs')
@@ -439,7 +439,8 @@ function buildInstructions(storageRoot, blocks) {
       'subagent. If the work needs another agent, say so in your report; the main',
       'session decides.',
       '',
-      'Do not use your own built-in subagent tool for that either.',
+      'This is about AgentBridge sessions only. Your own built-in subagent tool is a',
+      'different thing — use it as you normally would.',
       '',
       ''
     )
@@ -454,7 +455,8 @@ function buildInstructions(storageRoot, blocks) {
       '### 2-2. What they are',
       '',
       'You can run other coding agents as subagents — claude, codex, agy — each in its own',
-      'session and tab. **These are not your own built-in subagent tool. Do not use that tool.**',
+      'session and tab. **When the user asks for a subagent, use these, not your own built-in',
+      'subagent tool.** For your own work otherwise, that tool stays open.',
       '',
       'This is what the user means by: "서브에이전트 띄워", run it in another harness, a second',
       'opinion, run several in parallel, ask another model too. Open the `agentbridge` skill',

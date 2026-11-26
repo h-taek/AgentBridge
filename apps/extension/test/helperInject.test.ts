@@ -766,7 +766,8 @@ describe('helper inject — 서브 차례 (0.9.0 spec/03 §2)', () => {
   it('서브 차례는 서브 소절을 싣는다', () => {
     const ctx = ctxFor('sub-1');
     assert.match(ctx, /### 2-2\. You are a subagent/);
-    assert.match(ctx, /Do not use your own built-in subagent tool for that either\./);
+    assert.match(ctx, /Your own built-in subagent tool is a\ndifferent thing — use it as you normally would\./);
+    assert.doesNotMatch(ctx, /Do not use your own built-in subagent tool/);
     assert.doesNotMatch(ctx, /### 2-2\. What they are/);
     assert.doesNotMatch(ctx, /### 2-3\. After a report/);
     assert.doesNotMatch(ctx, /and for anything/);
@@ -787,6 +788,8 @@ describe('helper inject — 서브 차례 (0.9.0 spec/03 §2)', () => {
   it('메인 차례는 지금과 같다', () => {
     const ctx = ctxFor('main-1');
     assert.match(ctx, /### 2-2\. What they are/);
+    assert.match(ctx, /\*\*When the user asks for a subagent, use these, not your own built-in\nsubagent tool\.\*\* For your own work otherwise, that tool stays open\./);
+    assert.doesNotMatch(ctx, /Do not use that tool/);
     assert.match(ctx, /Open the `agentbridge` skill\nbefore `agent start`, and again to review a report/);
     assert.match(ctx, /run `agent check --wait` before you end the turn/);
     assert.doesNotMatch(ctx, /You are a subagent/);
