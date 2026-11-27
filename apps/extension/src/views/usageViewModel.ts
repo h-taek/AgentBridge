@@ -17,7 +17,7 @@ export interface UsageTooltip {
   cliLabel: string;
   sessionRemaining: number | null;
   weeklyRemaining: number | null;
-  /** 5시간 창 회복까지 남은 ms. 이미 지났으면 0, 벤더가 안 주면 null. */
+  /** 알약이 보이는 창의 회복까지 남은 ms. 이미 지났으면 0, 벤더가 안 주면 null. */
   resetsInMs: number | null;
 }
 
@@ -50,19 +50,22 @@ function meter(cli: CliKind, snapshot: UsageSnapshot, now: number): UsageMeterVi
   const session = snapshot.status === 'ok' ? windowOf(snapshot, 'session') : undefined;
   const weekly = snapshot.status === 'ok' ? windowOf(snapshot, 'weekly') : undefined;
 
-  const sessionRemaining = session ? remainingOf(session.usedPercent) : null;
-  const resetsAt = session?.resetsAt ?? null;
+  // 알약은 5시간 창을 보인다. 5시간 한도가 없는 구독(Claude Ultra)은 응답에 그 창이 없으므로
+  // 주간 창을 대신 보인다.
+  const shown = session ?? weekly;
+  const shownRemaining = shown ? remainingOf(shown.usedPercent) : null;
+  const resetsAt = shown?.resetsAt ?? null;
 
   return {
     cli,
     color: COLORS[cli],
-    fillRatio: sessionRemaining === null ? 0 : sessionRemaining / 100,
-    label: sessionRemaining === null ? '—' : `${Math.round(sessionRemaining)}%`,
-    warn: sessionRemaining !== null && sessionRemaining < WARN_BELOW_PERCENT,
-    dim: sessionRemaining === null,
+    fillRatio: shownRemaining === null ? 0 : shownRemaining / 100,
+    label: shownRemaining === null ? '—' : `${Math.round(shownRemaining)}%`,
+    warn: shownRemaining !== null && shownRemaining < WARN_BELOW_PERCENT,
+    dim: shownRemaining === null,
     tooltip: {
       cliLabel: CLI_DISPLAY_NAME[cli],
-      sessionRemaining,
+      sessionRemaining: session ? remainingOf(session.usedPercent) : null,
       weeklyRemaining: weekly ? remainingOf(weekly.usedPercent) : null,
       resetsInMs: resetsAt === null ? null : Math.max(0, resetsAt - now),
     },

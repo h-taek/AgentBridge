@@ -36,14 +36,35 @@ function readClaude(raw: Obj): UsageWindow[] {
 }
 
 // codex — rate_limit의 primary/secondary. reset_at은 epoch 초라 1000을 곱한다.
+//
+// 어느 칸이 5시간이고 어느 칸이 주간인지는 칸 순서가 아니라 limit_window_seconds로 가른다.
+// 5시간 한도가 없는 Pro는 첫째 칸에 주간 창이 올 수 있다. codex CLI도 길이로 이름을 붙이고
+// 5% 오차를 같은 창으로 본다(codex-rs tui `get_limits_duration`). 길이가 없으면 칸 순서를 따르고,
+// 5시간도 주간도 아닌 길이의 창은 뺀다.
+const SESSION_SECONDS = 5 * 60 * 60;
+const WEEKLY_SECONDS = 7 * 24 * 60 * 60;
+
+const near = (seconds: number, expected: number): boolean =>
+  seconds >= expected * 0.95 && seconds <= expected * 1.05;
+
+function codexWindowId(src: Obj, byPosition: UsageWindowId): UsageWindowId | null {
+  const seconds = finiteNum(src.limit_window_seconds);
+  if (seconds === undefined || seconds <= 0) return byPosition;
+  if (near(seconds, SESSION_SECONDS)) return 'session';
+  if (near(seconds, WEEKLY_SECONDS)) return 'weekly';
+  return null;
+}
+
 function readCodex(raw: Obj): UsageWindow[] {
   const limit = raw.rate_limit;
   if (!isObj(limit)) return [];
   const out: UsageWindow[] = [];
-  const put = (id: UsageWindowId, src: unknown): void => {
+  const put = (byPosition: UsageWindowId, src: unknown): void => {
     if (!isObj(src)) return;
     const used = finiteNum(src.used_percent);
     if (used === undefined) return;
+    const id = codexWindowId(src, byPosition);
+    if (id === null || out.some((w) => w.id === id)) return;
     const seconds = finiteNum(src.reset_at);
     out.push({
       id,
