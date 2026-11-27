@@ -59,6 +59,49 @@ describe('usage/normalize', () => {
       const s = normalizeUsage('codex', load('codex'), FETCHED_AT);
       assert.equal(s.windows.length, 2);
     });
+
+    // codex CLI도 칸 순서가 아니라 창 길이로 5h·weekly를 붙인다(codex-rs tui rate_limits.rs
+    // get_limits_duration). 5시간 한도가 없는 Pro는 첫째 칸에 주간 창이 올 수 있다.
+    const codexWith = (primary: unknown, secondary: unknown) => ({
+      plan_type: 'pro',
+      rate_limit: { primary_window: primary, secondary_window: secondary },
+    });
+    const w = (used: number, seconds?: number) =>
+      seconds === undefined
+        ? { used_percent: used, reset_at: 1_788_781_052 }
+        : { used_percent: used, limit_window_seconds: seconds, reset_at: 1_788_781_052 };
+
+    it('첫째 칸에 주간 창이 오면 weekly로 옮긴다', () => {
+      const s = normalizeUsage('codex', codexWith(w(28, 604_800), null), FETCHED_AT);
+      assert.equal(s.status, 'ok');
+      assert.equal(win(s, 'session'), undefined);
+      assert.equal(win(s, 'weekly')!.usedPercent, 28);
+    });
+
+    it('창 길이가 순서와 반대여도 길이를 따른다', () => {
+      const s = normalizeUsage('codex', codexWith(w(28, 604_800), w(5, 18_000)), FETCHED_AT);
+      assert.equal(win(s, 'session')!.usedPercent, 5);
+      assert.equal(win(s, 'weekly')!.usedPercent, 28);
+    });
+
+    it('창 길이는 5% 안쪽 오차를 같은 창으로 본다', () => {
+      const s = normalizeUsage('codex', codexWith(w(5, 18_600), w(28, 590_000)), FETCHED_AT);
+      assert.equal(win(s, 'session')!.usedPercent, 5);
+      assert.equal(win(s, 'weekly')!.usedPercent, 28);
+    });
+
+    it('5시간도 주간도 아닌 길이의 창은 뺀다', () => {
+      const s = normalizeUsage('codex', codexWith(w(35, 2_592_000), w(28, 604_800)), FETCHED_AT);
+      assert.equal(win(s, 'session'), undefined);
+      assert.equal(win(s, 'weekly')!.usedPercent, 28);
+      assert.equal(s.windows.length, 1);
+    });
+
+    it('창 길이가 없으면 칸 순서를 따른다', () => {
+      const s = normalizeUsage('codex', codexWith(w(5), w(28)), FETCHED_AT);
+      assert.equal(win(s, 'session')!.usedPercent, 5);
+      assert.equal(win(s, 'weekly')!.usedPercent, 28);
+    });
   });
 
   describe('agy', () => {
