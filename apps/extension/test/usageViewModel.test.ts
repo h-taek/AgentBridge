@@ -67,9 +67,21 @@ describe('views/usageViewModel', () => {
       assert.equal(m.fillRatio, 0.963);
     });
 
-    it('5시간 창만 본다 — 주간은 알약에 안 쓴다', () => {
+    it('5시간 창이 있으면 그것을 쓴다 — 주간은 알약에 안 쓴다', () => {
       const m = meterOf({ claude: ok('claude', [win('session', 19), win('weekly', 90)]) }, 'claude')!;
       assert.equal(m.label, '81%');
+    });
+
+    it('5시간 창이 없으면 주간 창을 쓴다', () => {
+      const m = meterOf({ claude: ok('claude', [win('weekly', 3)]) }, 'claude')!;
+      assert.equal(m.label, '97%');
+      assert.equal(m.fillRatio, 0.97);
+      assert.equal(m.dim, false);
+    });
+
+    it('주간 창으로 대신 보일 때도 임계를 적용한다', () => {
+      const m = meterOf({ claude: ok('claude', [win('weekly', 90)]) }, 'claude')!;
+      assert.equal(m.warn, true);
     });
   });
 
@@ -102,8 +114,8 @@ describe('views/usageViewModel', () => {
       });
     }
 
-    it('ok인데 5시간 창이 없으면 같은 취급이다', () => {
-      const m = meterOf({ claude: ok('claude', [win('weekly', 10)]) }, 'claude')!;
+    it('ok인데 창이 하나도 없으면 같은 취급이다', () => {
+      const m = meterOf({ claude: ok('claude', []) }, 'claude')!;
       assert.equal(m.dim, true);
       assert.equal(m.label, '—');
     });
@@ -138,6 +150,14 @@ describe('views/usageViewModel', () => {
     it('회복 시각이 이미 지났으면 0으로 깎는다', () => {
       const map = { claude: ok('claude', [win('session', 19, NOW - 5_000)]) };
       assert.equal(meterOf(map, 'claude')!.tooltip.resetsInMs, 0);
+    });
+
+    it('주간 창으로 대신 보일 때는 5시간 잔량이 null이고 주간 회복까지를 준다', () => {
+      const map = { claude: ok('claude', [win('weekly', 3, NOW + 86_400_000)]) };
+      const t = meterOf(map, 'claude')!.tooltip;
+      assert.equal(t.sessionRemaining, null);
+      assert.equal(t.weeklyRemaining, 97);
+      assert.equal(t.resetsInMs, 86_400_000);
     });
 
     it('회복 시각이 없으면 null이다', () => {

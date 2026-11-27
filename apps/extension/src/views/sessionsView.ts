@@ -527,7 +527,9 @@ function usageTooltips(strip: UsageStripView): Record<string, string[]> {
     const t = meter.tooltip;
     // 첫 줄은 CLI 이름, 둘째 줄에 창 둘, 셋째 줄에 회복 시각.
     const lines: string[] = [t.cliLabel];
-    if (t.sessionRemaining === null) {
+    if (t.sessionRemaining === null && t.weeklyRemaining !== null) {
+      lines.push(vscode.l10n.t('1w - {0}%', Math.round(t.weeklyRemaining)));
+    } else if (t.sessionRemaining === null) {
       lines.push(vscode.l10n.t('Usage unavailable'));
     } else if (t.weeklyRemaining !== null) {
       lines.push(

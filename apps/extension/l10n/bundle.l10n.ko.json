@@ -62,6 +62,7 @@
   "Delete Session": "삭제",
   "Usage unavailable": "사용량 조회 불가",
   "5h - {0}%": "5h - {0}%",
+  "1w - {0}%": "1w - {0}%",
   "5h - {0}% | 1w - {1}%": "5h - {0}% | 1w - {1}%",
   "Could not read the webview origin.": "웹뷰 출처를 읽지 못했다.",
   "The viewer serves files inside the workspace folder only.": "뷰어는 워크스페이스 폴더 안의 파일만 연다.",
