@@ -8,7 +8,7 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ### Fixed
 
-- **Usage tokens shown incorrectly.** Fixed token usage not appearing depending on each provider's plan.
+- **Usage tokens shown incorrectly.** Fixed usage not appearing depending on each provider's plan.
 
 ## [0.10.2] — 2026-11-26
 
