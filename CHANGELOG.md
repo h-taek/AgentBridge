@@ -4,6 +4,12 @@ This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 <p align="center"><a href="https://github.com/h-taek/AgentBridge/blob/main/CHANGELOG.ko.md">한국어</a></p>
 
+## [0.10.3] — 2026-11-27
+
+### Fixed
+
+- **Usage tokens shown incorrectly.** Fixed token usage not appearing depending on each provider's plan.
+
 ## [0.10.2] — 2026-11-26
 
 ### Fixed

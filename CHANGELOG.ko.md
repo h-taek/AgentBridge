@@ -2,6 +2,12 @@
 
 이 프로젝트는 [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/) 1.1.0 형식을 따르며 [Semantic Versioning](https://semver.org/spec/v2.0.0.html)을 사용한다.
 
+## [0.10.3] — 2026-11-27
+
+### Fixed
+
+- **사용량 토큰이 잘못 표시되던 문제.** 각 제공자의 요금제에 따라 토큰 조회가 보이지 않던 문제를 수정했다.
+
 ## [0.10.2] — 2026-11-26
 
 ### Fixed
